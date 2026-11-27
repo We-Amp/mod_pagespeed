@@ -1,0 +1,169 @@
+{
+  "generated_at": "2026-05-29T15:16:23.048445+00:00",
+  "sites": [
+    {
+      "id": "ecommerce",
+      "name": "E-Commerce Store",
+      "description": "Product catalog with image grid, filters, and cart",
+      "src": "/demos/ecommerce/index.html",
+      "resources": {
+        "html": {
+          "before": 5736,
+          "label": "HTML"
+        },
+        "css": {
+          "before": 6898,
+          "minified": 4587,
+          "label": "CSS"
+        },
+        "js": {
+          "before": 2479,
+          "minified": 1502,
+          "label": "JavaScript"
+        },
+        "images": {
+          "count": 6,
+          "totalJpeg": 99670,
+          "totalWebp": 27790,
+          "totalAvif": 23673,
+          "label": "Images (6x JPEG)"
+        }
+      },
+      "lighthouse": {
+        "before": 56,
+        "after": 90
+      },
+      "loadTime": {
+        "before": 1.8,
+        "after": 0.8
+      },
+      "cssSnippet": {
+        "before": "/* ===== ShopGrid E-Commerce - Verbose CSS for PageSpeed 2.0 Demo ===== */\n\n/* Reset: remove default browser margins and use border-box */\n* {\n  margin: 0;\n  padding: 0;\n  box-sizing: border-box;\n}\n\n/* Color palette: warm amber accent on clean neutrals */\n:root {\n  --primary: #e67e22;\n  --primary-dark: #d35400;\n  --text-dark: #2c3e50;\n  --text-muted: #7f8c8d;\n  --text-light: #bdc3c7;\n  --bg-white: #ffffff;\n  --bg-light: #f8f9fa;\n  --bg-dark: #2c3e50;\n  --border: #ecf0f1;\n  --shadow: 0 2px 8px rgba(0, 0, 0, 0.08);\n  --shadow-hover: 0 4px 16px rgba(0, 0, 0, 0.12);\n}\n\n/* Base: system font stack for performance */\nbody {\n  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;",
+        "after": "*{margin:0;padding:0;box-sizing:border-box} :root{--primary:#e67e22;--primary-dark:#d35400;--text-dark:#2c3e50;--text-muted:#7f8c8d;--text-light:#bdc3c7;--bg-white:#ffffff;--bg-light:#f8f9fa;--bg-dark:#2c3e50;--border:#ecf0f1;--shadow:0 2px 8px rgba(0,0,0,.08);--shadow-hover:0 4px 16px rgba(0,0,0,.12)}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:16px;lin"
+      }
+    },
+    {
+      "id": "blog",
+      "name": "Tech Blog",
+      "description": "Article-heavy layout with code blocks and sidebar",
+      "src": "/demos/blog/index.html",
+      "resources": {
+        "html": {
+          "before": 5871,
+          "label": "HTML"
+        },
+        "css": {
+          "before": 6565,
+          "minified": 4234,
+          "label": "CSS"
+        },
+        "js": {
+          "before": 2198,
+          "minified": 1321,
+          "label": "JavaScript"
+        },
+        "images": {
+          "count": 5,
+          "totalJpeg": 100055,
+          "totalWebp": 41844,
+          "totalAvif": 48047,
+          "label": "Images (5x JPEG)"
+        }
+      },
+      "lighthouse": {
+        "before": 60,
+        "after": 84
+      },
+      "loadTime": {
+        "before": 1.8,
+        "after": 0.9
+      },
+      "cssSnippet": {
+        "before": "/* ===== ByteWise Tech Blog - Verbose CSS for PageSpeed 2.0 Demo ===== */\n\n/* Reset: border-box sizing and zero margins */\n* {\n  margin: 0;\n  padding: 0;\n  box-sizing: border-box;\n}\n\n/* Palette: cool indigo accent with slate neutrals */\n:root {\n  --primary: #6366f1;\n  --primary-dark: #4f46e5;\n  --primary-light: #818cf8;\n  --text-dark: #1e293b;\n  --text-muted: #64748b;\n  --text-light: #94a3b8;\n  --bg-white: #ffffff;\n  --bg-light: #f1f5f9;\n  --bg-dark: #0f172a;\n  --border: #e2e8f0;\n  --shadow: 0 1px 3px rgba(0, 0, 0, 0.06);\n  --shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.08);\n}\n\n/* Base: system font with comfortable reading line-height */",
+        "after": "*{margin:0;padding:0;box-sizing:border-box} :root{--primary:#6366f1;--primary-dark:#4f46e5;--primary-light:#818cf8;--text-dark:#1e293b;--text-muted:#64748b;--text-light:#94a3b8;--bg-white:#ffffff;--bg-light:#f1f5f9;--bg-dark:#0f172a;--border:#e2e8f0;--shadow:0 1px 3px rgba(0,0,0,.06);--shadow-hover:0 4px 12px rgba(0,0,0,.08)}body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Robo"
+      }
+    },
+    {
+      "id": "news",
+      "name": "News Portal",
+      "description": "Breaking news homepage with hero, grid, and sidebar",
+      "src": "/demos/news/index.html",
+      "resources": {
+        "html": {
+          "before": 10254,
+          "label": "HTML"
+        },
+        "css": {
+          "before": 8600,
+          "minified": 5996,
+          "label": "CSS"
+        },
+        "js": {
+          "before": 3563,
+          "minified": 2321,
+          "label": "JavaScript"
+        },
+        "images": {
+          "count": 10,
+          "totalJpeg": 187238,
+          "totalWebp": 61466,
+          "totalAvif": 73696,
+          "label": "Images (7x JPEG + 3x PNG)"
+        }
+      },
+      "lighthouse": {
+        "before": 58,
+        "after": 85
+      },
+      "loadTime": {
+        "before": 2.2,
+        "after": 1.1
+      },
+      "cssSnippet": {
+        "before": "/* ===== The Dispatch News Portal - Verbose CSS for PageSpeed 2.0 Demo ===== */\n\n/* Reset: uniform box model across browsers */\n* {\n  margin: 0;\n  padding: 0;\n  box-sizing: border-box;\n}\n\n/* Palette: bold red accent for urgency, dark backgrounds for contrast */\n:root {\n  --primary: #dc2626;\n  --primary-dark: #b91c1c;\n  --text-dark: #111827;\n  --text-muted: #6b7280;\n  --text-light: #9ca3af;\n  --bg-white: #ffffff;\n  --bg-light: #f3f4f6;\n  --bg-dark: #111827;\n  --border: #e5e7eb;\n  --shadow: 0 1px 2px rgba(0, 0, 0, 0.05);\n  --shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.1);\n}\n\n/* Base typography: sans-serif with serif headlines */",
+        "after": "*{margin:0;padding:0;box-sizing:border-box} :root{--primary:#dc2626;--primary-dark:#b91c1c;--text-dark:#111827;--text-muted:#6b7280;--text-light:#9ca3af;--bg-white:#ffffff;--bg-light:#f3f4f6;--bg-dark:#111827;--border:#e5e7eb;--shadow:0 1px 2px rgba(0,0,0,.05);--shadow-hover:0 4px 12px rgba(0,0,0,.1)}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:15px;line"
+      }
+    },
+    {
+      "id": "portfolio",
+      "name": "Portfolio",
+      "description": "Photographer's portfolio with large hero images",
+      "src": "/demos/portfolio/index.html",
+      "resources": {
+        "html": {
+          "before": 5918,
+          "label": "HTML"
+        },
+        "css": {
+          "before": 8447,
+          "minified": 5925,
+          "label": "CSS"
+        },
+        "js": {
+          "before": 2479,
+          "minified": 1492,
+          "label": "JavaScript"
+        },
+        "images": {
+          "count": 6,
+          "totalJpeg": 766221,
+          "totalWebp": 374570,
+          "totalAvif": 329569,
+          "label": "Images (6x JPEG)"
+        }
+      },
+      "lighthouse": {
+        "before": 58,
+        "after": 86
+      },
+      "loadTime": {
+        "before": 5.1,
+        "after": 2.3
+      },
+      "cssSnippet": {
+        "before": "/* ===== Lena Voss Photography - Verbose CSS for PageSpeed 2.0 Demo ===== */\n\n/* Reset: border-box and zero default spacing */\n* {\n  margin: 0;\n  padding: 0;\n  box-sizing: border-box;\n}\n\n/* Palette: dark gallery aesthetic with warm gold accents */\n:root {\n  --gold: #b8860b;\n  --gold-light: #daa520;\n  --gold-dark: #8b6914;\n  --text-white: #ffffff;\n  --text-off: #e5e5e5;\n  --text-dark: #1a1a1a;\n  --text-muted: #666666;\n  --text-light: #999999;\n  --bg-black: #0a0a0a;\n  --bg-dark: #141414;\n  --bg-medium: #1e1e1e;\n  --border-dark: #2a2a2a;\n  --shadow: 0 4px 20px rgba(0, 0, 0, 0.3);\n}\n\n/* Base: dark background with light text for gallery feel */",
+        "after": "*{margin:0;padding:0;box-sizing:border-box} :root{--gold:#b8860b;--gold-light:#daa520;--gold-dark:#8b6914;--text-white:#ffffff;--text-off:#e5e5e5;--text-dark:#1a1a1a;--text-muted:#666666;--text-light:#999999;--bg-black:#0a0a0a;--bg-dark:#141414;--bg-medium:#1e1e1e;--border-dark:#2a2a2a;--shadow:0 4px 20px rgba(0,0,0,.3)}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif"
+      }
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// Renders a release version string sourced from the release manifest.
+// Use inside .mdx pages to keep version-coupled content in sync
+// with the release manifests.
+//
+// Examples in MDX:
+//   <Version line="1.1" style="semver" />   → 1.1.0
+//   <Version line="1.1" style="badge" />    → v1.1.0
+//   <Version line="1.1" style="tag" />      → v1.1.0+r9
+//   <Version line="2.0" style="semver" />   → 2.0.16
+//   <Version line="2.1" style="badge" />    → v2.1.0
+//
+// `inline` (default true) renders without any wrapping element. Set
+// `inline=false` to wrap in a <code> tag for emphasis in body copy.
+
+import { getRelease } from '../../lib/release';
+
+interface Props {
+  line: '1.1' | '2.0' | '2.1';
+  style?: 'semver' | 'badge' | 'tag';
+  inline?: boolean;
+}
+
+const { line, style = 'semver', inline = true } = Astro.props;
+const rel = await getRelease(line);
+
+let value: string;
+switch (style) {
+  case 'badge':
+    value = rel.display.badge_version;
+    break;
+  case 'tag':
+    value = rel.release.tag;
+    break;
+  case 'semver':
+  default:
+    value = rel.display.header_version;
+    break;
+}
+---
+
+{inline ? <Fragment>{value}</Fragment> : <code>{value}</code>}

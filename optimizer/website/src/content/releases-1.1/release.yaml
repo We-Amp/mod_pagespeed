@@ -1,0 +1,79 @@
+# mod_pagespeed 1.1 — release manifest (single source of truth)
+#
+# Edit this file when a new 1.1 release or reship ships. Every website,
+# script, and docs page that needs a 1.1 version string derives it from
+# this manifest (§1).
+#
+# DO NOT hand-edit `release.{semver,revision,tag,released_on}` — use the
+# `bump-website.mjs` tool. Other fields (compat, urls, artifacts) are
+# operator-curated.
+#
+# Schema: scripts/release/manifest-schema.mjs
+# Tag scheme: reference_tag_scheme_v1_1_0_plus_rN.md
+
+schema_version: 1
+
+product:
+  line: "1.1"
+  display_name: "mod_pagespeed 1.15"
+
+release:
+  semver: "1.15.0" # base SemVer, NEVER carries +rN
+  revision: 22 # the N in +rN; 0 = initial GA, >=1 = reship
+  tag: "v1.15.0+r22" # display + git tag
+  released_on: "2026-08-08"
+
+artifacts:
+  # PUBLIC DIRECT-DOWNLOAD NAMES ARE GA-ALIAS-PINNED (reship-in-place at r0),
+  # NOT tracking the build's `+rN`. The public mirror (nginx) collapses the
+  # version URL to v1.1.0/ (no +rN — §2), so the canonical bytes at
+  # gs://weamp-release-artifacts/v1.1.0/packages/ are reshipped in place under
+  # these stable r0/-0. names on every release by publish-to-packages-repo.sh
+  # (see its `reship_canonical_aliases` step). Therefore these templates are
+  # intentionally decoupled from %R: the alias is frozen at r0/0 even though
+  # the bytes track the latest reship. Detached .asc signatures verify content,
+  # not filename, so the r-latest bytes under r0 names stay signature-valid.
+  deb:
+    amd64: "mod-pagespeed_%V-r0_amd64.deb"
+    arm64: "mod-pagespeed_%V-r0_arm64.deb"
+  rpm:
+    x86_64: "mod-pagespeed-%V-0.x86_64.rpm"
+    aarch64: "mod-pagespeed-%V-0.aarch64.rpm"
+  msi:
+    win_x64: "pagespeed-iis-%V-win-x64.msi"
+
+urls:
+  # Archive URL collapses to v{semver} only — the `+` character is
+  # structurally broken on the production nginx config (§2).
+  archive_base: "https://modpagespeed.com/releases/v1.15.0/"
+  latest_base: "https://modpagespeed.com/releases/latest/"
+  # The 1.x key (fingerprint A358 2703 1804 5B75 C552  FEA8 DA8F EBD5 000B C194):
+  # it signed the 1.x direct downloads (per-file .asc), the private-lane 1.x
+  # archives and the source tags v2.1.0 to v2.4.0; never the apt/dnf
+  # repositories or the 2.5.0+ GitHub releases. No longer used, being revoked.
+  # Kept here because the schema requires the field and the /1.1/ download
+  # paths are frozen; no page links it as a current key (see SIGNING_KEYS in
+  # src/data/product-facts.mjs).
+  gpg_key: "https://modpagespeed.com/releases/v1.1.0/weamp-pkg-public.asc"
+
+compat:
+  apache:
+    # Debian 13 (trixie) is live in the signed repo for Apache + nginx,
+    # amd64 + arm64 — it postdated this list (added 2026-06).
+    deb_distros: ["Debian 11", "Debian 12", "Debian 13", "Ubuntu 22.04", "Ubuntu 24.04"]
+    # EL8 dropped 2026-05-21 / mps11 PR #154 (glibc 2.28 vs 2.29).
+    # EL9 ships x86_64 + aarch64; EL10 is x86_64-only (, accepted
+    # 2026-06-20: committed el10 dnf/yum channel, native AlmaLinux 10 build).
+    # Durability caveat: el10 publish jobs are additive-soft (continue-on-error,
+    # in no hard gate) and the live r13 el10 RPMs were hand-published ahead of
+    # the first pipeline release — confirm el10 rebuilds on r14 + add an el10
+    # trip-wire to promote-packages-to-prod before treating it as fully durable.
+    rpm_distros: ["RHEL 9", "AlmaLinux 9", "Rocky 9", "RHEL 10", "AlmaLinux 10", "Rocky 10"]
+    apache_versions: ["2.4+"]
+  iis:
+    os: ["Windows Server 2019", "Windows Server 2022", "Windows Server 2025"]
+    iis_versions: ["10+"]
+
+display:
+  header_version: "1.15.0"
+  badge_version: "v1.15.0"

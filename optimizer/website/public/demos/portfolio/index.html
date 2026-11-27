@@ -1,0 +1,174 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: Apache-2.0
+     Copyright (c) 2024-2026 We-Amp B.V. -->
+
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Lena Voss Photography | PageSpeed 2.0 Demo</title>
+    <meta name="robots" content="noindex,follow" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <nav class="nav">
+      <a href="#" class="logo">Lena Voss</a>
+      <ul>
+        <li><a href="#gallery">Gallery</a></li>
+        <li><a href="#about">About</a></li>
+        <li><a href="#contact">Contact</a></li>
+      </ul>
+    </nav>
+
+    <!-- Full-screen hero with background image -->
+    <section class="hero">
+      <img
+        src="images/hero-landscape.jpg"
+        alt="Hero landscape photograph"
+        class="bg-img"
+        width="1600"
+        height="900"
+      />
+      <div class="overlay"></div>
+      <div class="content">
+        <h1>Lena Voss</h1>
+        <p class="subtitle">Landscape &amp; Nature Photography</p>
+        <a href="#gallery" class="scroll-hint">&#8595; Explore the gallery</a>
+      </div>
+    </section>
+
+    <!-- Gallery with masonry-like layout -->
+    <section class="gallery" id="gallery">
+      <h2 class="section-title">Selected Works</h2>
+      <span class="section-line"></span>
+      <p class="section-sub">A curated collection of recent photographs</p>
+
+      <div class="gallery-grid">
+        <div class="gallery-item" data-image="images/morning-mist.jpg" data-title="Morning Mist">
+          <img src="images/morning-mist.jpg" alt="Morning Mist" width="800" height="600" />
+          <div class="hover-overlay">
+            <h3>Morning Mist</h3>
+            <span>Landscape</span>
+          </div>
+        </div>
+
+        <div class="gallery-item" data-image="images/ocean-whisper.jpg" data-title="Ocean Whisper">
+          <img src="images/ocean-whisper.jpg" alt="Ocean Whisper" width="800" height="600" />
+          <div class="hover-overlay">
+            <h3>Ocean Whisper</h3>
+            <span>Seascape</span>
+          </div>
+        </div>
+
+        <div
+          class="gallery-item"
+          data-image="images/forest-cathedral.jpg"
+          data-title="Forest Cathedral"
+        >
+          <img src="images/forest-cathedral.jpg" alt="Forest Cathedral" width="800" height="600" />
+          <div class="hover-overlay">
+            <h3>Forest Cathedral</h3>
+            <span>Nature</span>
+          </div>
+        </div>
+
+        <div class="gallery-item" data-image="images/golden-hour.jpg" data-title="Golden Hour">
+          <img src="images/golden-hour.jpg" alt="Golden Hour" width="800" height="600" />
+          <div class="hover-overlay">
+            <h3>Golden Hour</h3>
+            <span>Landscape</span>
+          </div>
+        </div>
+
+        <div class="gallery-item" data-image="images/still-waters.jpg" data-title="Still Waters">
+          <img src="images/still-waters.jpg" alt="Still Waters" width="800" height="600" />
+          <div class="hover-overlay">
+            <h3>Still Waters</h3>
+            <span>Waterscape</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- About section with bio and stats -->
+    <section class="about" id="about">
+      <div class="about-content">
+        <h2 class="section-title">About</h2>
+        <span class="section-line"></span>
+        <p class="section-sub">The story behind the lens</p>
+
+        <p>
+          I'm Lena Voss, a landscape and nature photographer based in the Pacific Northwest. For
+          over a decade, I've traveled to remote corners of the world to capture the quiet beauty of
+          natural landscapes. My work focuses on the interplay of light, weather, and terrain.
+        </p>
+        <p>
+          Each photograph is a meditation on patience and presence. I shoot exclusively with natural
+          light, often returning to the same location dozens of times waiting for perfect
+          conditions. My prints are available in limited editions and have been exhibited in
+          galleries across North America and Europe.
+        </p>
+
+        <div class="about-stats">
+          <div class="stat">
+            <div class="num">12</div>
+            <div class="label">Years Active</div>
+          </div>
+          <div class="stat">
+            <div class="num">34</div>
+            <div class="label">Countries</div>
+          </div>
+          <div class="stat">
+            <div class="num">8</div>
+            <div class="label">Exhibitions</div>
+          </div>
+          <div class="stat">
+            <div class="num">5</div>
+            <div class="label">Awards</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Contact section -->
+    <section class="contact" id="contact">
+      <div class="contact-content">
+        <h2 class="section-title">Get in Touch</h2>
+        <span class="section-line"></span>
+        <p class="section-sub">Commissions &amp; Print Inquiries</p>
+
+        <p>
+          Interested in purchasing a print, licensing an image, or commissioning a project? I'd love
+          to hear from you.
+        </p>
+
+        <a href="mailto:hello@lenavoss.com" class="email">hello@lenavoss.com</a>
+        <br />
+        <a href="#" class="cta">View Print Shop</a>
+
+        <div class="social-links">
+          <a href="#">Instagram</a>
+          <a href="#">500px</a>
+          <a href="#">Behance</a>
+          <a href="#">Vimeo</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Lightbox (hidden by default) -->
+    <div class="lightbox" id="lightbox">
+      <button class="close-btn" id="lb-close">&times;</button>
+      <img src="" alt="Full-size gallery image" id="lb-img" />
+      <div class="caption" id="lb-caption"></div>
+    </div>
+
+    <footer class="footer">
+      <p>
+        &copy; 2025 Lena Voss Photography. All rights reserved. Demo page for
+        <a href="#">PageSpeed 2.0</a> optimization.
+      </p>
+    </footer>
+
+    <script src="app.js" defer></script>
+  </body>
+</html>

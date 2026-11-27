@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 We-Amp B.V.
+
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/We-Amp/pagespeed-optimizer/security/advisories/new
+    about: Report vulnerabilities privately through GitHub or to security@modpagespeed.com, not in a public issue.
+  - name: Apache, IIS or Envoy module, or the packaged nginx module (nginx-module-pagespeed, ngx_pagespeed tarballs)
+    url: https://github.com/We-Amp/mod_pagespeed/issues
+    about: Those modules are developed and released in We-Amp/mod_pagespeed.
+  - name: Support subscriptions and IISpeed license transfers
+    url: https://modpagespeed.com/contact/
+    about: Support subscriptions with first-response targets, migrations and consulting from We-Amp.

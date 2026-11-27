@@ -1,0 +1,63 @@
+# PageSpeed 2.0 - Demo Measurement Environment
+#
+# Three services sharing a named volume:
+#   origin  - Python HTTP server serving demo content on port 8081
+#   worker  - PageSpeed factory worker daemon
+#   nginx   - Nginx with pagespeed module on port 8080
+#
+# The origin serves the demo sites from the modpagespeed.com site tree, which
+# lives in the public repository (We-Amp/pagespeed-optimizer, website/).
+# WEBSITE_DIR names that tree as an ABSOLUTE path; unset, it falls back to
+# <repo root>/website (the relative
+# default below is resolved against this file's directory). The directory
+# must exist: tools/measure-demo/run.sh checks and exports it first.
+#
+# Usage:
+#   docker compose -f tools/measure-demo/docker-compose.yml up -d
+#   python3 tools/measure-demo/measure.py
+#   docker compose -f tools/measure-demo/docker-compose.yml down -v
+
+services:
+  # Origin server: serves demo site content (unoptimized).
+  origin:
+    image: python:3.12-slim
+    working_dir: /var/www
+    command: python3 -m http.server 8081 --bind 0.0.0.0
+    volumes:
+      - ${WEBSITE_DIR:-../../website}/public/demos:/var/www/demos
+    ports:
+      - "127.0.0.1:8081:8081"
+
+  # PageSpeed factory worker: processes cache notifications and
+  # writes optimized variants back to cache.
+  worker:
+    build:
+      context: ../../
+      dockerfile: tools/e2e/Dockerfile.e2e
+    entrypoint: ["/entrypoint-worker.sh"]
+    ports:
+      # Worker admin API - measure.py asserts the worker is ready here before measuring.
+      - "127.0.0.1:9881:9881"
+    volumes:
+      - shared:/shared
+    depends_on:
+      - origin
+
+  # Nginx with pagespeed module: intercepts requests, serves from
+  # cache on hit, proxies to origin on miss.
+  nginx:
+    build:
+      context: ../../
+      dockerfile: tools/e2e/Dockerfile.e2e
+    command: ["nginx", "-g", "daemon off;"]
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - shared:/shared
+      - ./nginx-measure.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - origin
+      - worker
+
+volumes:
+  shared:

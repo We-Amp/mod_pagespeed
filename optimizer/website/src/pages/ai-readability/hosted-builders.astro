@@ -1,0 +1,374 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// Guide for owners of sites on a hosted builder who ran the check at
+// /ai-readability/ and want to know what they can change. Static copy only:
+// no scan runs here. mod_pagespeed cannot be installed on a hosted builder and
+// the page says so. The page itself sells nothing.
+//
+// Every platform statement below was read on the vendor's own help or
+// developer page on the date in VENDOR_DOCS_CHECKED, and links to that page.
+// When a vendor page changes, re-read it, update the statement and the date.
+// Do not add a platform statement without a vendor source.
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import SectionHeader from '../../components/instrument/SectionHeader.astro';
+import Icon from '../../components/Icon.astro';
+
+const title = 'AI readability on Wix, Squarespace and Shopify';
+const h1 = 'AI readability on Wix, Squarespace and Shopify: what you can change';
+const description =
+  'On Wix, Squarespace or Shopify you cannot change the server. What you can change so AI crawlers can read your pages, with links to each vendor’s help.';
+
+const VENDOR_DOCS_CHECKED = '21 November 2026';
+
+interface Statement {
+  topic: string;
+  text: string;
+  source: { href: string; label: string };
+}
+interface Platform {
+  id: string;
+  name: string;
+  statements: Statement[];
+}
+
+const platforms: Platform[] = [
+  {
+    id: 'wix',
+    name: 'Wix',
+    statements: [
+      {
+        topic: 'What the server sends',
+        text: 'Wix states that its sites use server-side rendering, and that the page source shows the HTML the server sends before any scripts run. The same article explains how to view that source.',
+        source: {
+          href: 'https://support.wix.com/en/article/viewing-your-pages-source-code-the-way-search-engines-do',
+          label: 'Wix Help: view your page’s source code the way search engines do',
+        },
+      },
+      {
+        topic: 'Crawler rules',
+        text: 'The Robots.txt Editor is in the site dashboard: go to SEO & GEO, scroll to Tools and settings, and click Robots.txt Editor. Wix calls editing this file an advanced feature and says its support team cannot help with changes you make to it.',
+        source: {
+          href: 'https://support.wix.com/en/article/editing-your-sites-robotstxt-file',
+          label: 'Wix Help: edit your site’s robots.txt file',
+        },
+      },
+      {
+        topic: 'Title and description',
+        text: 'In the Wix Editor, click Pages & Menu, click the More Actions icon next to the page, and click SEO basics. The title tag and the meta description are set there. The article also covers the other Wix editors.',
+        source: {
+          href: 'https://support.wix.com/en/article/adding-seo-title-tags-and-meta-descriptions-to-your-pages',
+          label: 'Wix Help: add title tags and meta descriptions to your pages',
+        },
+      },
+      {
+        topic: 'Structured data',
+        text: 'You can add your own structured data to a page in JSON-LD format. In the Wix Editor it is under Structured Data Markup, on the Advanced SEO tab of the same panel that holds the title tag. Wix allows up to five markups per page and says its support team cannot help with changes to your markup.',
+        source: {
+          href: 'https://support.wix.com/en/article/adding-structured-data-markup-to-your-sites-pages-2546962',
+          label: 'Wix Help: add structured data markup to your site’s pages',
+        },
+      },
+    ],
+  },
+  {
+    id: 'squarespace',
+    name: 'Squarespace',
+    statements: [
+      {
+        topic: 'Crawler rules',
+        text: 'Open the Settings panel and click Crawlers. The checkbox “Block known artificial intelligence crawlers” updates your robots.txt file to tell a list of AI crawlers, GPTBot and ClaudeBot among them, not to crawl your site. It is unchecked by default. Leave it that way if you want those crawlers to read your pages. Squarespace notes that a robots.txt rule is only a request.',
+        source: {
+          href: 'https://support.squarespace.com/hc/en-us/articles/360022347072-Request-that-AI-models-exclude-your-site',
+          label: 'Squarespace Help: request that AI models exclude your site',
+        },
+      },
+      {
+        topic: 'Title and description',
+        text: 'Open the Pages panel, hover over a page title and click the gear icon. The SEO tab of the page settings has an SEO Title field and an SEO Description field. Neither is available for the homepage, which uses the SEO site description.',
+        source: {
+          href: 'https://support.squarespace.com/hc/en-us/articles/206543657-Page-settings',
+          label: 'Squarespace Help: page settings',
+        },
+      },
+      {
+        topic: 'Structured data',
+        text: 'Squarespace generates structured data automatically, with schemas for blog posts, events, local businesses, organizations, products and the website. It says you cannot edit or remove them.',
+        source: {
+          href: 'https://support.squarespace.com/hc/en-us/articles/206744067-How-does-Squarespace-optimize-my-site-for-search-results',
+          label: 'Squarespace Help: how Squarespace optimizes your site for search results',
+        },
+      },
+    ],
+  },
+  {
+    id: 'shopify',
+    name: 'Shopify',
+    statements: [
+      {
+        topic: 'Crawler rules',
+        text: 'Every Shopify store has a default robots.txt file. To change it, you add a robots.txt.liquid template to your theme: in the Shopify admin open Online Store, choose Edit code for the theme, click Add a new template and select robots. With it you can block certain crawlers and allow or disallow URLs. Shopify calls this an unsupported customization, says its support team cannot help with edits to the file, and warns that incorrect use can result in the loss of all traffic.',
+        source: {
+          href: 'https://help.shopify.com/en/manual/promoting-marketing/seo/editing-robots-txt',
+          label: 'Shopify Help Center: editing robots.txt.liquid',
+        },
+      },
+      {
+        topic: 'Title and description',
+        text: 'In the Shopify admin go to Online Store, then Pages, and click the page. In the Search engine listing preview section, click Edit website SEO. The Page title and Description fields are there.',
+        source: {
+          href: 'https://help.shopify.com/en/manual/promoting-marketing/seo/adding-keywords',
+          label: 'Shopify Help Center: adding keywords for SEO to your store',
+        },
+      },
+      {
+        topic: 'Structured data',
+        text: 'Shopify has a Liquid filter, structured_data, that turns a product or an article into schema.org structured data. It is used in theme code, so it is on your pages only if your theme uses it.',
+        source: {
+          href: 'https://shopify.dev/docs/api/liquid/filters/structured_data',
+          label: 'Shopify developer documentation: the structured_data filter',
+        },
+      },
+    ],
+  },
+];
+
+// The checklist holds on any builder: it is about what is in the page, not
+// about a platform setting.
+const checklist = [
+  {
+    lead: 'Put the facts that matter in page text.',
+    rest: 'Prices, services, opening hours and product details that exist only inside an image are not in the HTML.',
+  },
+  {
+    lead: 'Give every page its own title and description.',
+    rest: 'Say what this page is about, not what the whole site is about.',
+  },
+  {
+    lead: 'Use headings in order.',
+    rest: 'One main heading, then subheadings that name what each section covers.',
+  },
+  {
+    lead: 'Write your contact and business details as text.',
+    rest: 'Name, address, phone number, email address and opening hours.',
+  },
+  {
+    lead: 'Answer the questions customers ask.',
+    rest: 'A list of questions and answers in plain text on the page does this.',
+  },
+  {
+    lead: 'Keep third-party embeds to the ones you need.',
+    rest: 'What a booking widget, a map or a review feed loads with a script is not in your page’s HTML.',
+  },
+];
+
+// One array feeds the visible FAQ and the FAQPage JSON-LD, as on
+// /ai-readability/, so the two cannot drift.
+const faqEntries = [
+  {
+    q: 'Can ChatGPT read my Wix site?',
+    a: 'A crawler that does not run JavaScript can read the text that is in the HTML Wix serves, unless your robots.txt file tells that crawler to stay away. Wix states that its sites use server-side rendering. To see how much of a page’s text is in the HTML, run the free check on that page.',
+  },
+  {
+    q: 'Can I edit robots.txt on Wix, Squarespace or Shopify?',
+    a: 'On Wix, yes: the site dashboard has a Robots.txt Editor. On Shopify, yes: through a robots.txt.liquid template in your theme, which Shopify calls an unsupported customization. On Squarespace, the Crawlers setting has a checkbox that adds rules for known AI crawlers to robots.txt.',
+  },
+  {
+    q: 'Will these changes get my site into AI answers?',
+    a: 'Not by themselves. A crawler has to be able to read a page before an assistant can use it. Which pages an assistant cites is the assistant’s decision, and nothing on this page measures or changes that.',
+  },
+  {
+    q: 'Can I install mod_pagespeed on Wix, Squarespace or Shopify?',
+    a: 'No. mod_pagespeed is server software for sites that run their own web server, such as Apache, nginx or IIS. A hosted builder runs the server for you, so you cannot install software on it.',
+  },
+];
+const faqPage = {
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: faqEntries.map((entry) => ({
+    '@type': 'Question',
+    name: entry.q,
+    acceptedAnswer: { '@type': 'Answer', text: entry.a },
+  })),
+};
+
+const link = 'text-interactive underline underline-offset-2 hover:text-interactive-hover';
+const h2 = 'text-xl font-semibold text-text-body';
+const body = 'mt-3 text-base text-text-muted leading-relaxed';
+---
+
+<BaseLayout
+  title={title}
+  description={description}
+  jsonLd={faqPage}
+  breadcrumbLeafName="Hosted builders"
+  ogImage="/og-cards/ai-readability-hosted-builders.png"
+>
+  <article class="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 pt-16 sm:pt-20 pb-16 sm:pb-20">
+    <nav aria-label="Breadcrumb" class="text-sm text-text-annotation">
+      <a href="/ai-readability/" class={link} set:text="AI readability checker" />
+      <span aria-hidden="true" class="mx-1">
+        /
+      </span>
+      <span aria-current="page">Hosted builders</span>
+    </nav>
+
+    <div class="mt-6">
+      <SectionHeader
+        id="hosted-title"
+        eyebrow="AI readability · a guide"
+        title={h1}
+        as="h1"
+        titleClass="text-3xl sm:text-4xl font-bold tracking-tight text-balance"
+      >
+        For most AI crawlers, two things decide whether they can read a page on a hosted builder:
+        the text has to be in the HTML the platform serves, and the platform must not block the
+        crawler. You control the content, each page’s title and description, structured data where
+        the builder offers it, and crawler rules where the builder offers them.
+      </SectionHeader>
+    </div>
+
+    <p class="mt-6 max-w-2xl text-sm text-text-muted leading-relaxed" data-hosted-scope>
+      This page sells nothing. mod_pagespeed is server software for sites that run their own web
+      server, and it cannot be installed on Wix, Squarespace or Shopify. This page lists what you
+      can do without it.
+    </p>
+
+    <section class="mt-12 max-w-2xl" aria-labelledby="hosted-check">
+      <h2 id="hosted-check" class={h2}>
+        What the free check tells you
+      </h2>
+      <p class={body}>
+        The
+        <a href="/ai-readability/" class={link} set:text="AI readability check" />
+        reads one page the way a crawler that does not run JavaScript does. It reports how much of
+        the page’s text is in the HTML, which structured data it found, and which AI crawlers your
+        robots.txt file blocks by name.
+      </p>
+      <p class={body}>
+        It does not ask ChatGPT or any other assistant a question, so it cannot tell you whether
+        assistants mention or cite your site. AEO and GEO are names for the work of getting cited in
+        AI answers. The check covers one precondition only: that a crawler can read the page.
+      </p>
+    </section>
+
+    <section class="mt-12 max-w-2xl" aria-labelledby="hosted-cannot">
+      <h2 id="hosted-cannot" class={h2}>
+        What you cannot change on a hosted builder
+      </h2>
+      <p class={body}>
+        The builder runs the web server for you, so you cannot install software on it. The builder
+        also sets the response headers, adds its own scripts and markup to every page, and decides
+        whether a Markdown version of a page is served. A theme or custom code can change part of
+        the markup, and that is work for a developer. If the check flags one of these, leave it and
+        spend your time on the list below.
+      </p>
+    </section>
+
+    <section class="mt-12 max-w-2xl" aria-labelledby="hosted-can">
+      <h2 id="hosted-can" class={h2}>
+        What you can change on any builder
+      </h2>
+      <ul class="mt-4 space-y-3 text-base text-text-muted leading-relaxed" data-hosted-checklist>
+        {checklist.map((item) => (
+          <li class="flex gap-3">
+            <Icon name="check" class="mt-1 h-5 w-5 shrink-0 text-interactive" />
+            <span>
+              <strong class="font-semibold text-text-body">{item.lead}</strong> {item.rest}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <p class={body}>After a change, publish the site and run the check again.</p>
+    </section>
+
+    <section class="mt-12" aria-labelledby="hosted-platforms">
+      <h2 id="hosted-platforms" class={h2}>
+        Where the settings are, per platform
+      </h2>
+      <p class:list={[body, 'max-w-2xl']}>
+        Each statement below comes from the vendor’s own documentation, read on{' '}
+        {VENDOR_DOCS_CHECKED}, and links to it. Builders change their menus, so follow the link when
+        a step does not match what you see.
+      </p>
+      {platforms.map((platform) => (
+        <section
+          class="mt-6 rounded-card border border-border bg-bg-elevated p-5 sm:p-6"
+          aria-labelledby={`hosted-${platform.id}`}
+          data-hosted-platform={platform.id}
+        >
+          <h3 id={`hosted-${platform.id}`} class="text-lg font-semibold text-text-body">
+            {platform.name}
+          </h3>
+          <dl class="mt-2">
+            {platform.statements.map((statement) => (
+              <div class="mt-4">
+                <dt class="text-sm font-semibold text-text-body">{statement.topic}</dt>
+                <dd class="mt-1 text-sm text-text-muted leading-relaxed">
+                  {statement.text} {/* prettier-ignore */}
+                  <a href={statement.source.href} target="_blank" rel="noopener noreferrer" class={link}>{statement.source.label}<span class="sr-only"> (opens in new tab)</span></a>
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+      ))}
+    </section>
+
+    <section class="mt-12 max-w-2xl" aria-labelledby="hosted-crawlers">
+      <h2 id="hosted-crawlers" class={h2}>
+        Training crawlers and crawlers that fetch for an answer
+      </h2>
+      <p class={body}>
+        Some crawlers collect pages to train models, and others fetch a page when a person asks an
+        assistant a question. Operators publish different crawler names for the two purposes, so a
+        robots.txt rule for one name does not cover the other, and some of the second kind state
+        that they may not follow robots.txt. Before you block a name, look up what it is for in its
+        operator’s documentation. As far as published measurements show, most AI crawlers read the
+        raw HTML and do not run JavaScript.
+      </p>
+    </section>
+
+    <section class="mt-12 max-w-2xl" aria-labelledby="hosted-own-server">
+      <h2 id="hosted-own-server" class={h2}>
+        If you run your own server
+      </h2>
+      <p class={body}>
+        For a site on your own Apache, nginx or IIS server, mod_pagespeed is on the
+        <a href="/download/" class={link} set:text="download page" />.
+      </p>
+    </section>
+
+    <section class="mt-12 max-w-2xl" aria-labelledby="hosted-faq">
+      <h2 id="hosted-faq" class={h2}>
+        Frequently asked questions
+      </h2>
+      <div class="mt-6 space-y-3">
+        {faqEntries.map((item) => (
+          <details class="group rounded-card border border-border bg-bg-elevated">
+            <summary class="flex cursor-pointer items-center justify-between gap-4 px-5 py-4 text-sm font-semibold text-text-body">
+              {item.q}
+              <Icon
+                name="chevron-down"
+                class="h-5 w-5 shrink-0 text-text-annotation group-open:rotate-180"
+              />
+            </summary>
+            <p class="px-5 pb-5 text-sm text-text-annotation leading-relaxed">{item.a}</p>
+          </details>
+        ))}
+      </div>
+    </section>
+  </article>
+
+  <!-- Scoped: hide the native disclosure marker on the FAQ <details> so the
+       chevron is the only affordance, as on /ai-readability/. -->
+  <style>
+    details > summary {
+      list-style: none;
+    }
+    details > summary::-webkit-details-marker {
+      display: none;
+    }
+  </style>
+</BaseLayout>

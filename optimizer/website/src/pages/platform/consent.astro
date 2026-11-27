@@ -1,0 +1,104 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// /platform/consent/ — the consent-enforcement direction: what pre-consent
+// leakage is, why tag managers get it wrong, what origin-side enforcement
+// would do differently, and one interest form (consent-enforcement). The
+// pack is described in the conditional: it does not ship. No URL checker
+// here on purpose.
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PageHero from '../../components/PageHero.astro';
+import PlatformInterestForm from '../../components/PlatformInterestForm.astro';
+
+const description =
+  'Planned: a pack that would keep third-party tags inert at the origin until the consent cookie grants their category. Not shipping yet.';
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'WebPage',
+  name: 'Consent enforcement at the origin for mod_pagespeed',
+  url: 'https://modpagespeed.com/platform/consent/',
+  description,
+};
+---
+
+<BaseLayout
+  title="Consent enforcement at the origin for mod_pagespeed"
+  description={description}
+  ogImage="/og-cards/platform-consent.png?v=2"
+  jsonLd={jsonLd}
+>
+  <PageHero
+    id="consent-title"
+    width="prose"
+    class="max-w-3xl"
+    eyebrow="Planned · consent enforcement at the origin"
+    title="Does your site leak before consent?"
+  >
+    <Fragment slot="lede">
+      Many do, including sites with a consent banner. The gap is between what the banner promises
+      and what the browser sends.
+    </Fragment>
+  </PageHero>
+
+  <section class="container-prose max-w-3xl pb-16">
+    <div class="space-y-6 text-text-muted">
+      <div>
+        <h2 class="text-lg font-semibold text-text-body">What pre-consent leakage is</h2>
+        <p class="mt-2">
+          Pre-consent leakage is every request a page sends to a third party before the visitor has
+          agreed to it. The analytics beacon that fires on load, the pixel in the footer, the font
+          or widget fetched from a vendor's CDN: each carries the visitor's IP address and often a
+          cookie, before the visitor has agreed. Consent audits commonly look at exactly this: what
+          left the browser before the click.
+        </p>
+      </div>
+
+      <div>
+        <h2 class="text-lg font-semibold text-text-body">Why tag managers get it wrong</h2>
+        <p class="mt-2">
+          In a tag manager, consent gating is configuration layered on top. One trigger with the
+          wrong condition, one vendor script that loads its own dependencies, one template updated
+          upstream, and a tag fires before consent again. A tag manager's report reflects its
+          configuration, which can differ from what the browser actually sent.
+        </p>
+      </div>
+
+      <div>
+        <h2 class="text-lg font-semibold text-text-body">
+          What origin-side enforcement would do differently
+        </h2>
+        <p class="mt-2">
+          The pack would have the interceptor rewrite third-party tags inert at the server, so they
+          stay inactive until the consent cookie grants their category, and inject Consent Mode
+          defaults ahead of page scripts. Its inventory would list the third parties as observed in
+          the responses your server sent.
+        </p>
+      </div>
+    </div>
+
+    <p class="readout-plate mt-10 px-4 py-3 text-sm text-text-muted">
+      <span class="font-mono text-xs text-interactive">Status</span>
+      <br />
+      None of these packs ships today. The interceptor they would run on does. Leave your details
+      and we tell you when it ships, free for everyone; your input shapes it.
+    </p>
+
+    <div class="mt-10 rounded-lg border border-border bg-bg-elevated p-6 sm:p-8">
+      <h2 class="text-lg font-semibold text-text-body">Tell us you need this</h2>
+      <p class="mt-2 text-sm text-text-muted">
+        Leave an email and, if you like, the site. We email you when it ships.
+      </p>
+      <PlatformInterestForm wedge="consent-enforcement" pack="Consent enforcement at the origin" />
+    </div>
+
+    <p class="mt-8 text-sm text-text-annotation">
+      All planned directions are on the
+      <a href="/platform/" class="text-interactive hover:text-interactive-hover underline">
+        transform packs page
+      </a>
+      .
+    </p>
+  </section>
+</BaseLayout>

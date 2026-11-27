@@ -1,0 +1,362 @@
+---
+import { OG_DEFAULT_IMAGE_URL } from '../../data/og-image';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PageHero from '../../components/PageHero.astro';
+import CompareTable from '../../components/vs/CompareTable.astro';
+import { offerJsonLd } from '../../data/offer-jsonld';
+import { productJsonLd } from '../../data/software-jsonld';
+import {
+  editionClause,
+  FREE_TO_RUN_LINE,
+  NGINX_APT_SHORT_NBSP,
+  NGINX_RPM_SHORT,
+} from '../../data/product-facts.mjs';
+
+const rows = [
+  {
+    label: 'Deployment',
+    mps: 'Self-hosted (module + optimizer worker)',
+    other: 'Managed SaaS; lightweight plugin on the origin',
+  },
+  {
+    label: 'Scope',
+    mps: 'Full HTML pipeline',
+    other: 'Full HTML pipeline (caching, minify, image opt, CDN)',
+  },
+  {
+    label: 'Platform',
+    mps: 'WordPress, ASP.NET, generic &mdash; nginx/Apache/IIS',
+    other: 'WordPress, WooCommerce, generic PHP via SDK',
+  },
+  {
+    label: 'Pricing model',
+    mps: 'Free (Apache-2.0); paid support optional',
+    other: 'Per-site SaaS subscription (see vendor for tiers)',
+  },
+  {
+    label: 'Image optimization',
+    mps: `${editionClause(['WebP', 'AVIF'])} &mdash; responsive variants at origin`,
+    other: "Compression, format conversion, lazy load &mdash; at NitroPack's cloud",
+  },
+  { label: 'Critical CSS injection', mps: 'yes', other: 'yes' },
+  { label: 'JS / CSS minification', mps: 'yes', other: 'yes' },
+  {
+    label: 'HTML rewriting',
+    mps: 'Yes &mdash; at origin',
+    other: "Yes &mdash; at NitroPack's cloud",
+  },
+  {
+    label: 'Caching',
+    mps: 'Local Cyclone cache, zero-copy mmap',
+    other: "NitroPack's CDN edge cache",
+  },
+  {
+    label: 'CWV optimization',
+    mps: 'LCP, render-blocking, image bytes; CLS from unsized images',
+    other: 'LCP, CLS, INP &mdash; vendor-managed',
+  },
+  {
+    label: 'Measured page-size reduction',
+    mps: '<span class="font-mono tabular-nums font-semibold text-success">&minus;68%</span> on our own pages (origin pipeline)',
+    other: 'Comparable savings, processed in the vendor cloud',
+    highlight: true,
+  },
+  {
+    label: 'License',
+    mps: 'Licensed under the Apache License&nbsp;2.0. The software is free. We sell support; the software and its signed packages are the same for everyone. See the <a href="/license/" class="text-interactive hover:text-interactive-hover underline">software license</a>.',
+    other: 'Proprietary SaaS',
+  },
+  {
+    label: 'Data sovereignty',
+    mps: 'Your servers; nothing leaves your origin',
+    other: "Content processed by NitroPack's cloud",
+  },
+  {
+    label: 'Works without the vendor',
+    mps: 'Yes &mdash; runs on your own servers, no vendor in the request path; your site keeps serving even if we disappear',
+    other: 'No &mdash; disabling the subscription disables optimization',
+  },
+];
+
+const jsonLd = [
+  await productJsonLd({
+    image: OG_DEFAULT_IMAGE_URL,
+    description:
+      'NitroPack is managed SaaS aimed at WordPress. mod_pagespeed is self-hosted, runs on any CMS, and is free under the Apache License 2.0 — no monthly traffic tier.',
+    offers: offerJsonLd(),
+  }),
+];
+---
+
+<BaseLayout
+  title="NitroPack alternative: self-hosted vs managed SaaS"
+  description="NitroPack runs optimization in its cloud and meters traffic. mod_pagespeed is the self-hosted alternative: free to run, and content stays on your origin."
+  jsonLd={jsonLd}
+>
+  <PageHero id="nitropack-title" width="prose" class="max-w-3xl" title="mod_pagespeed vs NitroPack">
+    <nav slot="before" class="mb-6 text-small text-text-annotation" aria-label="Breadcrumb">
+      <a href="/" class="hover:text-text-body">
+        Home
+      </a>
+      <span class="mx-1">/</span>
+      <a href="/alternatives/" class="hover:text-text-body">
+        Alternatives
+      </a>
+      <span class="mx-1">/</span>
+      <span>vs NitroPack</span>
+    </nav>
+  </PageHero>
+
+  <article class="container-prose max-w-3xl pb-16">
+    <section>
+      <h2 class="h2-section text-text-body">TL;DR</h2>
+      <p class="mt-4 text-text-body">
+        NitroPack is a managed SaaS that plugs into WordPress (and other PHP stacks) and offloads
+        optimization to its cloud. mod_pagespeed runs on your server and does the same kind of work
+        without sending content to a third party. NitroPack is faster to set up and takes the
+        operational ownership off your hands. mod_pagespeed is for teams that want the optimization
+        layer and the data path on their own servers.
+      </p>
+    </section>
+
+    <section class="mt-12">
+      <h2 id="at-a-glance" class="h2-section text-text-body">
+        At a glance
+      </h2>
+      <div class="mt-4">
+        <CompareTable competitor="NitroPack" rows={rows} labelledBy="at-a-glance" />
+      </div>
+    </section>
+
+    <section class="mt-12">
+      <h2 class="h2-section text-text-body">When to choose NitroPack</h2>
+      <ul class="mt-4 space-y-2 list-disc pl-6 text-text-body">
+        <li>
+          You run WordPress (or WooCommerce) and want optimization with no server-side operations
+          work. Plugin install, account signup, done.
+        </li>
+        <li>
+          You don't have a sysadmin or DevOps engineer and don't want to acquire one for this
+          problem.
+        </li>
+        <li>
+          You're willing to pay a monthly subscription tiered by traffic to avoid running anything
+          yourself.
+        </li>
+        <li>You want a vendor support line you can call when something breaks at 2&nbsp;AM.</li>
+        <li>
+          The dashboard, reporting, and managed CDN are part of the value, not just the
+          optimization.
+        </li>
+      </ul>
+    </section>
+
+    <section class="mt-12">
+      <h2 class="h2-section text-text-body">When to choose mod_pagespeed</h2>
+      <ul class="mt-4 space-y-2 list-disc pl-6 text-text-body">
+        <li>
+          You don't run WordPress, or you run more stacks than just WordPress. NitroPack's strongest
+          support is on WordPress; the{' '}
+          <a href="/" class="text-interactive hover:text-interactive-hover underline">
+            mod_pagespeed in-process module
+          </a>{' '}
+          runs on any nginx, Apache, or IIS host. The IIS package ships as a signed installer on the
+          mod_pagespeed GitHub release.
+        </li>
+        <li>
+          You want no bill that tracks pageviews at all. NitroPack's tiers meter monthly traffic;
+          mod_pagespeed is free under the Apache License 2.0 at any volume, on any number of
+          servers.
+        </li>
+        <li>
+          You don't want your HTML routed through a third-party processor &mdash; for compliance,
+          latency, or principle.
+        </li>
+        <li>
+          You have the operational capacity to run a Docker image or nginx module and would rather
+          own that surface than pay for a hosted equivalent.
+        </li>
+        <li>
+          You want software licensed under the Apache License&nbsp;2.0 rather than a proprietary
+          service.
+        </li>
+      </ul>
+    </section>
+
+    <section class="mt-12">
+      <h2 class="h2-section text-text-body">How they overlap</h2>
+      <p class="mt-4 text-text-body">
+        The list of optimizations both products perform is broadly similar: image compression and
+        format conversion, lazy loading, CSS/JS minification,{' '}
+        <a href="/features/" class="text-interactive hover:text-interactive-hover underline">
+          critical CSS, HTML caching, and the rest of the filter set
+        </a>
+        . Both target Core Web Vitals &mdash; mod_pagespeed through LCP, render-blocking, and image
+        work; INP and most CLS are application-side and outside its scope.
+      </p>
+      <p class="mt-4 text-text-body">
+        Where they differ is the deployment model and the cost model. NitroPack does the work in its
+        cloud and meters each site by monthly traffic tier; mod_pagespeed does the work on your
+        servers and is free to run, with no traffic meter.
+      </p>
+    </section>
+
+    <section class="mt-12">
+      <h2 id="migrating-from-nitropack-to-modpagespeed" class="h2-section text-text-body">
+        Migrating from NitroPack to mod_pagespeed
+      </h2>
+      <p class="mt-4 text-text-body">
+        Migration is reasonable if your traffic outgrew NitroPack's pageview tiers, if your stack
+        diversified beyond WordPress, or if compliance constraints rule out third-party content
+        processing.
+      </p>
+      <p class="mt-4 text-text-body">
+        mod_pagespeed is the right move when you want optimization to live on your origin and keep
+        content out of a vendor's data center &mdash; compliance, multi-tenant hosting, or no
+        per-request or per-GB bill at all: the software is free.
+      </p>
+      <p class="mt-4 text-text-body">If you do migrate:</p>
+      <ol class="mt-3 space-y-2 list-decimal pl-6 text-text-body">
+        <li>
+          Stand up mod_pagespeed on a staging origin and verify the filters you depended on
+          (critical CSS, image variants) produce comparable Lighthouse numbers. The{' '}
+          <a
+            href="/blog/run-with-docker-compose/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            Docker Compose walkthrough
+          </a>{' '}
+          is a 60-second baseline.
+        </li>
+        <li>
+          Disable NitroPack's plugin before enabling mod_pagespeed's filters so the two don't
+          double-process HTML.
+        </li>
+        <li>
+          If you relied on NitroPack's CDN, decide whether to put a generic CDN (Cloudflare, Fastly,
+          BunnyCDN) in front of mod_pagespeed or run origin-only.
+        </li>
+        <li>
+          Recreate any per-page optimization exclusions in mod_pagespeed's filter configuration.
+        </li>
+      </ol>
+    </section>
+
+    <section class="mt-12">
+      <h2 class="h2-section text-text-body">Code &amp; config side-by-side</h2>
+      <p class="mt-4 text-text-body">
+        <strong>Enabling NitroPack</strong>: install the WordPress plugin, sign up, paste the site
+        ID. Optimization happens in NitroPack's cloud &mdash; no server-side config.
+      </p>
+      <p id="config-1" class="mt-4 text-text-body">
+        <strong>Installing mod_pagespeed for nginx</strong> on {NGINX_APT_SHORT_NBSP} (amd64 +
+        arm64), or AlmaLinux/RHEL/Rocky&nbsp;{NGINX_RPM_SHORT}:
+      </p>
+      <pre
+        tabindex="0"
+        role="region"
+        aria-labelledby="config-1"
+        class="mt-3 overflow-x-auto rounded bg-bg-secondary p-4 text-sm sm:text-xs leading-snug text-text-body"
+      ><code>curl -fsSL https://packages.modpagespeed.com/install.sh | sudo sh
+sudo apt install nginx-module-pagespeed   # or: sudo dnf install nginx-module-pagespeed</code></pre>
+      <p id="config-2" class="mt-4 text-text-body">
+        <strong>Then enable the filters</strong> (nginx config, one-time):
+      </p>
+      <pre
+        tabindex="0"
+        role="region"
+        aria-labelledby="config-2"
+        class="mt-3 overflow-x-auto rounded bg-bg-secondary p-4 text-sm sm:text-xs leading-snug text-text-body"
+      ><code>pagespeed on;
+pagespeed RewriteLevel CoreFilters;
+pagespeed EnableFilters lazyload_images,prioritize_critical_css,convert_jpeg_to_webp;
+pagespeed FileCachePath /var/cache/pagespeed;</code></pre>
+      <p class="mt-4 text-text-body">
+        The same response is generated, but the work happens inside your nginx process instead of
+        inside someone else's data center. The trade is operational ownership against vendor lock-in
+        and traffic-tier cost scaling.
+      </p>
+    </section>
+
+    <section class="mt-12">
+      <div class="rounded-card border border-border bg-bg-secondary p-6 md:p-7">
+        <h2 class="h2-section text-text-body">Outgrowing metered SaaS</h2>
+        <p class="mt-3 text-text-body">
+          No per-request or per-GB bill at all &mdash; the software is free &mdash; content stays on
+          your origin, works on any stack, no HTML routed through a third party. On our own pages
+          the origin pipeline measures
+          <span class="font-mono tabular-nums font-semibold text-success">&minus;68%</span> page
+          size. Install and run it.
+        </p>
+        <div class="mt-5 flex flex-wrap gap-3">
+          <a href="/download/" class="btn-primary" data-umami-event="cta_vs_nitropack_install">
+            Download &amp; run
+          </a>
+          <a
+            href="/pricing/"
+            class="rounded-md border border-border-strong px-4 py-2 text-sm font-medium text-text-body hover:border-border-strong"
+            data-umami-event="cta_vs_nitropack_license"
+          >
+            Support pricing
+          </a>
+          <a
+            href="#migrating-from-nitropack-to-modpagespeed"
+            class="rounded-md border border-border-strong px-4 py-2 text-sm font-medium text-text-body hover:border-border-strong"
+            data-umami-event="cta_vs_nitropack_migrate"
+          >
+            See the migration steps &rarr;
+          </a>
+        </div>
+        <p class="mt-3 text-sm text-text-annotation">{FREE_TO_RUN_LINE}</p>
+      </div>
+    </section>
+
+    <section class="mt-12 border-t border-border pt-8">
+      <p class="text-base font-semibold uppercase tracking-wide text-text-body">See also:</p>
+      <ul class="mt-4 space-y-2 text-sm">
+        <li>
+          <a
+            href="/alternatives/wp-rocket/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            mod_pagespeed vs WP Rocket
+          </a>{' '}
+          &mdash; plugin-based WordPress alternative
+        </li>
+        <li>
+          <a
+            href="/alternatives/cloudflare-apo/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            mod_pagespeed vs Cloudflare APO
+          </a>{' '}
+          &mdash; edge-cache alternative
+        </li>
+        <li>
+          <a
+            href="/alternatives/mod-pagespeed/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            Alternatives to mod_pagespeed
+          </a>{' '}
+          &mdash; for readers searching for a mod_pagespeed replacement
+        </li>
+        <li>
+          <a
+            href="/blog/run-with-docker-compose/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            Docker Compose quickstart
+          </a>{' '}
+          &mdash; mod_pagespeed in front of any HTTP origin
+        </li>
+      </ul>
+    </section>
+
+    <p class="mt-10 text-xs text-text-annotation">
+      NitroPack and other product names are trademarks of their respective owners. Comparisons
+      reflect publicly available information as of 2026 and are provided for evaluation; We-Amp B.V.
+      is not affiliated with or endorsed by NitroPack.
+    </p>
+  </article>
+</BaseLayout>

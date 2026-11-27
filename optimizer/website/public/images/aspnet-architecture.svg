@@ -1,0 +1,131 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540" width="960" height="540" font-family="Inter, system-ui, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L8,3 L0,6" fill="#9aa1a9"/>
+    </marker>
+    <marker id="arrow-blue" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L8,3 L0,6" fill="#5eb1c9"/>
+    </marker>
+    <marker id="arrow-green" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L8,3 L0,6" fill="#16a34a"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="960" height="540" fill="#0b0c0e" rx="8"/>
+
+  <!-- Title -->
+  <text x="480" y="36" text-anchor="middle" font-size="20" font-weight="700" fill="#e8eaed" letter-spacing="-0.025em">mod_pagespeed middleware in the ASP.NET Core pipeline</text>
+
+  <!-- Divider line -->
+  <line x1="480" y1="52" x2="480" y2="520" stroke="#2a2e34" stroke-width="1.5" stroke-dasharray="8,6"/>
+
+  <!-- Column labels -->
+  <text x="240" y="68" text-anchor="middle" font-size="13" font-weight="600" fill="#9aa1a9">ASP.NET Core Pipeline</text>
+  <text x="720" y="68" text-anchor="middle" font-size="13" font-weight="600" fill="#9aa1a9">Native Engine (C/C++)</text>
+
+  <!-- === LEFT SIDE: ASP.NET Core Pipeline === -->
+
+  <!-- HTTP Request box -->
+  <rect x="24" y="104" width="96" height="36" rx="4" fill="#191c20" stroke="#3a3f47" stroke-width="1"/>
+  <text x="72" y="126" text-anchor="middle" font-size="11" font-weight="600" fill="#e8eaed">HTTP Request</text>
+
+  <!-- Arrow from HTTP Request into pipeline -->
+  <path d="M120,122 L160,122" fill="none" stroke="#9aa1a9" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Other Middleware (stacked rects) -->
+  <rect x="170" y="96" width="188" height="30" rx="4" fill="#fef3c7" stroke="#d97706" stroke-width="1" opacity="0.6"/>
+  <rect x="176" y="102" width="188" height="30" rx="4" fill="#fef3c7" stroke="#d97706" stroke-width="1" opacity="0.8"/>
+  <rect x="182" y="108" width="188" height="30" rx="4" fill="#fef3c7" stroke="#d97706" stroke-width="1"/>
+  <text x="276" y="127" text-anchor="middle" font-size="11" font-weight="600" fill="#92400e">Other Middleware</text>
+  <text x="276" y="98" text-anchor="middle" font-size="9" fill="#9aa1a9">Auth, CORS, Routing, ...</text>
+
+  <!-- Arrow down from Other Middleware to PageSpeed Middleware -->
+  <path d="M276,138 L276,172" fill="none" stroke="#9aa1a9" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- PageSpeed Middleware (hero box) -->
+  <rect x="152" y="178" width="248" height="52" rx="4" fill="#1f3a42" stroke="#5eb1c9" stroke-width="1.5"/>
+  <text x="276" y="199" text-anchor="middle" font-size="12" font-weight="700" fill="#e8eaed" font-family="'SF Mono', 'Fira Code', monospace">app.UsePageSpeed()</text>
+  <text x="276" y="216" text-anchor="middle" font-size="9" fill="#5eb1c9">response interception + cache fast path</text>
+
+  <!-- Arrow down from PageSpeed Middleware to Your Application -->
+  <path d="M276,230 L276,266" fill="none" stroke="#9aa1a9" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Your Application -->
+  <rect x="182" y="272" width="188" height="44" rx="4" fill="#191c20" stroke="#3a3f47" stroke-width="1"/>
+  <text x="276" y="291" text-anchor="middle" font-size="11" font-weight="600" fill="#e8eaed">Your Application</text>
+  <text x="276" y="306" text-anchor="middle" font-size="9" fill="#9aa1a9">(Razor Pages, MVC, Minimal API)</text>
+
+  <!-- Response return path: right side, from Your Application back up to PageSpeed Middleware -->
+  <path d="M370,294 L420,294 L420,204 L400,204" fill="none" stroke="#9aa1a9" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="430" y="254" text-anchor="start" font-size="9" fill="#9aa1a9" font-style="italic">response</text>
+
+  <!-- Left side: output path from PageSpeed Middleware down to Optimized Response -->
+  <path d="M152,204 L128,204 L128,476 L160,476" fill="none" stroke="#16a34a" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+
+  <!-- Optimized Response -->
+  <rect x="168" y="458" width="180" height="36" rx="4" fill="#dcfce7" stroke="#16a34a" stroke-width="1"/>
+  <text x="258" y="480" text-anchor="middle" font-size="11" font-weight="600" fill="#166534">Optimized Response</text>
+
+  <!-- Arrow left to HTTP Response box -->
+  <path d="M168,476 L120,476" fill="none" stroke="#9aa1a9" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="24" y="458" width="96" height="36" rx="4" fill="#191c20" stroke="#3a3f47" stroke-width="1"/>
+  <text x="72" y="474" text-anchor="middle" font-size="10" font-weight="600" fill="#e8eaed">HTTP</text>
+  <text x="72" y="486" text-anchor="middle" font-size="10" font-weight="600" fill="#e8eaed">Response</text>
+
+  <!-- === RIGHT SIDE: Native Engine (C/C++) === -->
+
+  <!-- Background container -->
+  <rect x="496" y="80" width="440" height="440" rx="8" fill="#191c20" stroke="#2a2e34" stroke-width="1"/>
+
+  <!-- LibraryImport P/Invoke boundary line -->
+  <line x1="510" y1="108" x2="922" y2="108" stroke="#9aa1a9" stroke-width="1" stroke-dasharray="4,4"/>
+  <text x="716" y="102" text-anchor="middle" font-size="10" font-style="italic" fill="#9aa1a9">LibraryImport P/Invoke</text>
+
+  <!-- HTML Rewriter -->
+  <rect x="520" y="130" width="160" height="40" rx="4" fill="#fef3c7" stroke="#d97706" stroke-width="1"/>
+  <text x="600" y="154" text-anchor="middle" font-size="11" font-weight="600" fill="#92400e">HTML Rewriter</text>
+
+  <!-- Arrow from PageSpeed Middleware across divider to HTML Rewriter -->
+  <path d="M400,192 L520,150" fill="none" stroke="#5eb1c9" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+  <text x="450" y="164" font-size="10" fill="#5eb1c9" font-weight="500">HTML</text>
+
+  <!-- Arrow from HTML Rewriter down to PageSpeed Filters -->
+  <path d="M600,170 L600,200" fill="none" stroke="#9aa1a9" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- PageSpeed Filters (stacked) -->
+  <rect x="530" y="202" width="170" height="30" rx="4" fill="#fef3c7" stroke="#d97706" stroke-width="1" opacity="0.6"/>
+  <rect x="538" y="210" width="170" height="30" rx="4" fill="#fef3c7" stroke="#d97706" stroke-width="1" opacity="0.8"/>
+  <rect x="546" y="218" width="170" height="30" rx="4" fill="#fef3c7" stroke="#d97706" stroke-width="1"/>
+  <text x="631" y="238" text-anchor="middle" font-size="11" font-weight="600" fill="#92400e">PageSpeed Filters</text>
+
+  <!-- Filter capabilities label -->
+  <text x="716" y="270" text-anchor="middle" font-size="9" fill="#9aa1a9" font-style="italic">critical CSS · image opt · minify · defer JS · lazy load</text>
+
+  <!-- Resource Optimizer -->
+  <rect x="760" y="298" width="152" height="44" rx="4" fill="#23272d" stroke="#3a3f47" stroke-width="1"/>
+  <text x="836" y="316" text-anchor="middle" font-size="11" font-weight="600" fill="#e8eaed">Image / CSS / JS</text>
+  <text x="836" y="330" text-anchor="middle" font-size="11" font-weight="600" fill="#e8eaed">Optimizer</text>
+
+  <!-- Arrow from Filters to Resource Optimizer -->
+  <path d="M700,248 L760,308" fill="none" stroke="#9aa1a9" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Cache (cylinder shape) -->
+  <ellipse cx="600" cy="372" rx="50" ry="11" fill="#1f3a42" stroke="#5eb1c9" stroke-width="1"/>
+  <rect x="550" y="372" width="100" height="44" fill="#1f3a42"/>
+  <line x1="550" y1="372" x2="550" y2="416" stroke="#5eb1c9" stroke-width="1"/>
+  <line x1="650" y1="372" x2="650" y2="416" stroke="#5eb1c9" stroke-width="1"/>
+  <ellipse cx="600" cy="416" rx="50" ry="11" fill="#1f3a42" stroke="#5eb1c9" stroke-width="1"/>
+  <text x="600" y="395" text-anchor="middle" font-size="12" font-weight="600" fill="#e8eaed">Cache</text>
+  <text x="600" y="409" text-anchor="middle" font-size="9" fill="#5eb1c9">memory-mapped</text>
+
+  <!-- Arrow from Filters down to Cache -->
+  <path d="M600,248 L600,360" fill="none" stroke="#9aa1a9" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Arrow from Resource Optimizer to Cache -->
+  <path d="M760,332 L650,392" fill="none" stroke="#9aa1a9" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Arrow from Cache back across divider: Optimized HTML to response path -->
+  <path d="M550,400 L460,400 L460,476 L348,476" fill="none" stroke="#5eb1c9" stroke-width="1.5" stroke-dasharray="6,3" marker-end="url(#arrow-blue)"/>
+  <text x="462" y="452" font-size="10" fill="#5eb1c9" font-weight="500">Optimized HTML</text>
+</svg>

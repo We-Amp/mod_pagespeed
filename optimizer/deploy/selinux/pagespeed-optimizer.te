@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# pagespeed-optimizer SELinux policy (design §4; a policy module is table
+# stakes for the RPM channel).
+#
+# STATUS: DRAFT — NOT installed by any package yet.  This source is the
+# starting point for the follow-up package-smoke arc, which adds the EL9 /
+# EL10 ENFORCING legs (install/remove cleanly, zero AVCs through a full
+# request/optimize cycle) and only then wires semodule installation into
+# the rpm scriptlets.  Do not wire this into packaging before those legs
+# exist: an unvalidated policy on an enforcing host breaks the daemon.
+#
+# Model: the daemon runs confined as pagespeed_t; its versioned cache
+# directory and everything in it (volume files, shared config, serve-stats
+# mmap) is pagespeed_cache_t; the sockets in /run are pagespeed_runtime_t.
+# The web-server domains (httpd_t, nginx_t) are the only peers: they
+# mmap-rw the volume and connect the notify socket, matching the group
+# `pagespeed` boundary the DAC side enforces.
+
+policy_module(pagespeed-optimizer, 1.0.0)
+
+########################################
+# Types
+
+type pagespeed_t;
+type pagespeed_exec_t;
+init_daemon_domain(pagespeed_t, pagespeed_exec_t)
+
+type pagespeed_cache_t;
+files_type(pagespeed_cache_t)
+
+type pagespeed_runtime_t;
+files_type(pagespeed_runtime_t)
+
+########################################
+# Daemon: full management of its own cache + runtime dirs, mmap included
+# (the cyclone volume is opened O_RDWR and mapped shared).
+
+manage_dirs_pattern(pagespeed_t, pagespeed_cache_t, pagespeed_cache_t)
+manage_files_pattern(pagespeed_t, pagespeed_cache_t, pagespeed_cache_t)
+allow pagespeed_t pagespeed_cache_t:file map;
+
+manage_dirs_pattern(pagespeed_t, pagespeed_runtime_t, pagespeed_runtime_t)
+manage_files_pattern(pagespeed_t, pagespeed_runtime_t, pagespeed_runtime_t)
+manage_sock_files_pattern(pagespeed_t, pagespeed_runtime_t, pagespeed_runtime_t)
+
+########################################
+# Peers: the serving module's web-server workers.  They never CREATE
+# anything (the daemon is the sole author); they mmap the volume rw and
+# connect the notify socket fire-and-forget.  `lock`: the cache library
+# takes fcntl byte-range (OFD) locks on the volume file -- the init and
+# lifetime locks, and one write-lock liveness slot per process -- and a peer
+# needs them to open and write the cache.
+
+gen_require(`
+    type httpd_t;
+')
+
+allow httpd_t pagespeed_cache_t:dir { getattr search };
+allow httpd_t pagespeed_cache_t:file { getattr open read write map lock };
+allow httpd_t pagespeed_runtime_t:dir { getattr search };
+allow httpd_t pagespeed_runtime_t:sock_file { getattr read write };
+allow httpd_t pagespeed_t:unix_stream_socket connectto;
+
+optional_policy(`
+    gen_require(`
+        type nginx_t;
+    ')
+
+    allow nginx_t pagespeed_cache_t:dir { getattr search };
+    allow nginx_t pagespeed_cache_t:file { getattr open read write map lock };
+    allow nginx_t pagespeed_runtime_t:dir { getattr search };
+    allow nginx_t pagespeed_runtime_t:sock_file { getattr read write };
+    allow nginx_t pagespeed_t:unix_stream_socket connectto;
+')

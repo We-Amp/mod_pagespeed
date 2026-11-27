@@ -1,0 +1,123 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
+# E2E test image for mod_pagespeed
+#
+# Multi-stage build:
+#   1. Builder: installs nginx + matching source, builds module .so + worker
+#   2. Runtime: copies binaries, test content, nginx config
+#
+# Usage:
+#   docker compose -f tools/e2e/docker-compose.yml build
+
+FROM pagespeed2-dev AS builder
+
+WORKDIR /workspace
+COPY . /workspace/
+
+# Build the dynamic modules against the EXACT nginx version baked into the
+# runtime image.  nginx dynamic modules are version-locked: a module built
+# against a different nginx than the one that loads it is rejected at startup
+# ("module ... version 1030001 instead of 1030002").  The runtime
+# (pagespeed2-base-runtime) installs nginx from nginx.org at a pinned version,
+# but the build image's apt nginx tracks the distro and drifts independently --
+# so deriving the source from the build image's apt let the two diverge (and
+# broke HTTP Compliance when the distro lagged a point release).  Instead, read
+# the runtime nginx's exact version straight out of its binary and fetch that
+# matching source from nginx.org, so the modules and the runtime nginx can never
+# drift apart.
+COPY --from=pagespeed2-base-runtime /usr/sbin/nginx /tmp/runtime-nginx
+RUN apt-get update && apt-get install -y \
+    libpcre3-dev \
+    zlib1g-dev \
+    libssl-dev \
+    cmake \
+    && rm -rf /var/lib/apt/lists/* \
+    && NGINX_VERSION=$(strings /tmp/runtime-nginx | grep -oP 'nginx/\K[0-9]+\.[0-9]+\.[0-9]+' | head -1) \
+    && { [ -n "${NGINX_VERSION}" ] || { echo "ERROR: could not determine runtime nginx version from binary" >&2; exit 1; }; } \
+    && echo "Building dynamic modules against runtime nginx ${NGINX_VERSION}" \
+    && rm -rf /nginx-src && mkdir -p /nginx-src && cd /nginx-src \
+    && curl -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" | tar xz \
+    && rm -f /tmp/runtime-nginx
+
+# Clone ngx_brotli with bundled brotli encoder/decoder source.
+# Pin to a71f9312 (2023-10-09, latest master) for reproducible builds.
+RUN git clone --recurse-submodules https://github.com/google/ngx_brotli.git /ngx_brotli \
+    && cd /ngx_brotli && git checkout a71f9312c2deb28875acc7bacfdd5695a111aa53
+
+# Build bundled brotli static library (needed by ngx_brotli dynamic module).
+RUN cd /ngx_brotli/deps/brotli \
+    && mkdir -p out && cd out \
+    && cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF .. \
+    && cmake --build . --config Release -j$(nproc)
+
+# Configure nginx source and build brotli dynamic module.
+# This also generates auto-config headers (objs/) needed by the pagespeed Bazel build.
+RUN cd /nginx-src/nginx-* \
+    && ./configure --with-compat --add-dynamic-module=/ngx_brotli \
+    && make -j$(nproc) modules \
+    && cp objs/ngx_http_brotli_filter_module.so /tmp/ngx_http_brotli_filter_module.so
+
+# Add GitHub to known hosts (needed for Cyclone fetch via SSH).
+RUN mkdir -p /root/.ssh && ssh-keyscan github.com >> /root/.ssh/known_hosts
+
+# Build both targets in one Bazel invocation so it can parallelize across all actions.
+# --mount=type=ssh: forwards host SSH agent for private repo access (Cyclone).
+# --config=docker selects libc++ (required for std::expected with clang).
+# --local_resources=memory=HOST_RAM*4: Bazel throttles concurrent C++ actions based on
+# estimated per-action RAM (default ~8GB each). With 64GB host RAM, that means only ~8
+# concurrent compiles on a 128-core machine. Overstate available RAM so Bazel schedules
+# based on CPU count, not its conservative RAM estimates.
+# --jobs=2x nproc: oversubscribe to fill HT sibling idle slots during memory stalls.
+RUN --mount=type=ssh \
+    export NGINX_PATH=$(ls -d /nginx-src/nginx-*) \
+    && bazel build --jobs=$(($(nproc) * 2)) --local_resources=memory=HOST_RAM*4 \
+       --config=docker --config=opt \
+       //src/nginx:ngx_pagespeed_module.so \
+       //src/worker:factory_worker \
+       //lib/pagespeed:libpagespeed.so \
+       //tools:seed_test_cache
+
+# ---- Runtime image ----
+# nginx is provided by pagespeed2-base-runtime (installed from nginx.org so
+# that its version matches the dynamic modules built upstream); the e2e
+# image only needs python3 on top.
+FROM pagespeed2-base-runtime
+
+# E2E-specific packages (base-runtime already has libc++, curl, ca-certs, nginx).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Chromium from Debian bookworm (with fonts for headed tests).
+COPY docker/install-chromium.sh /tmp/install-chromium.sh
+RUN /tmp/install-chromium.sh --with-fonts && rm /tmp/install-chromium.sh
+
+# Copy built binaries from builder
+COPY --from=builder /workspace/bazel-bin/src/worker/factory_worker \
+     /usr/local/bin/factory_worker
+COPY --from=builder /workspace/bazel-bin/src/nginx/ngx_pagespeed_module.so \
+     /usr/lib/nginx/modules/ngx_pagespeed_module.so
+# Test-only cache tool: the compliance suite uses it to remove one stored
+# alternate behind the running server's back (test_headers_sidecar.py).
+COPY --from=builder /workspace/bazel-bin/tools/seed_test_cache \
+     /usr/local/bin/seed_test_cache
+# The C API library: the compliance suite's module stand-in loads it with
+# ctypes to store pages the way a web-server module does
+# (tools/http-compliance/module_standin.py).
+COPY --from=builder /workspace/bazel-bin/lib/pagespeed/libpagespeed.so \
+     /usr/local/lib/libpagespeed.so
+COPY --from=builder /tmp/ngx_http_brotli_filter_module.so \
+     /usr/lib/nginx/modules/ngx_http_brotli_filter_module.so
+
+# Copy test content, nginx configuration, and worker entrypoint
+COPY tools/e2e/testdata/ /var/www/html/
+COPY tools/e2e/nginx-e2e.conf /etc/nginx/nginx.conf
+COPY docker/entrypoint-worker.sh /docker/entrypoint-worker.sh
+COPY tools/e2e/entrypoint-worker.sh /entrypoint-worker.sh
+RUN chmod +x /docker/entrypoint-worker.sh /entrypoint-worker.sh
+
+# Shared volume for cache and worker socket
+VOLUME /shared
+
+EXPOSE 8080

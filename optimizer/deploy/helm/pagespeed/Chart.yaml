@@ -1,0 +1,25 @@
+apiVersion: v2
+name: pagespeed
+description: mod_pagespeed - Nginx image/CSS/JS/HTML optimization
+type: application
+# 0.3.0: collapse worker.image.tag + nginx.image.tag into one lockstep tag that
+# defaults to appVersion. Removing the two per-image tag keys is a
+# values-API change, hence the minor bump.
+# 0.3.10: drop the unused nginx ConfigMap (the image renders its config from
+# baked-in nginx.conf.template + env, and never read the mount), and default
+# podSecurityContext.fsGroup to 918 so the shared volume arrives group-owned
+# by the worker's gid before any container starts.
+version: 0.3.18
+appVersion: "2.10.0"
+keywords:
+  - pagespeed
+  - nginx
+  - optimization
+  - webp
+  - avif
+  - cache
+home: https://modpagespeed.com
+sources:
+  - https://github.com/We-Amp/pagespeed-optimizer
+maintainers:
+  - name: we-amp

@@ -1,0 +1,590 @@
+---
+import { ORGANIZATION_PUBLISHER } from '../data/organization';
+import { OG_DEFAULT_IMAGE_URL } from '../data/og-image';
+import BaseLayout from '../layouts/BaseLayout.astro';
+import PageHero from '../components/PageHero.astro';
+import { offerJsonLd } from '../data/offer-jsonld';
+import { productJsonLd } from '../data/software-jsonld';
+import {
+  MAX_VARIANTS,
+  RASTER_VARIANTS,
+  IMAGE_FORMATS,
+  PKG_ASPNETCORE,
+  NGINX_APT_MATRIX,
+  NGINX_APT_ARCHES,
+  FREE_TO_RUN_LINE,
+} from '../data/product-facts.mjs';
+import { getMappingByAuditId } from '../data/psi-mps-mapping';
+
+// Self-hosted image optimization landing page. SEO target: "self-hosted image
+// optimization", "cloudinary alternative", "imgproxy/thumbor alternative",
+// "reduce image delivery cost". The wedge is structural, not a price war:
+// images never leave the origin, so there is no per-transform fee and no
+// egress on the optimization round-trip. Cost claims stay structural — no
+// fabricated dollar/percent numbers beyond the verified 40-70% byte saving
+// that lives in psi-mps-mapping's image-delivery explanation.
+//
+// Genuine unique-value asset (anti-doorway): a real nginx config snippet plus
+// the variant-matrix table derived from product-facts (37 = 36 raster + 1
+// SVG), and links to the live /examples/ before/after pages. Not a templated
+// problem->filter->trial page.
+
+// 40-70% byte-saving figure — single-sourced from the legally-vetted
+// image-delivery audit explanation, not hand-typed here.
+const imageDelivery = getMappingByAuditId('image-delivery-insight');
+
+// The verified savings sentence, pulled verbatim so the page can't drift from
+// the audit map. Fall back defensively if the entry id ever changes.
+const savingsClaim =
+  imageDelivery?.explanation ??
+  'mod_pagespeed transcodes JPEG/PNG/GIF to WebP and AVIF, recompresses, resizes to the rendered display size, and strips metadata.';
+
+// The variant axes that multiply out to the 36 raster variants (+1 SVG = 37).
+// Mirrors RASTER_VARIANTS = 3 formats × 3 viewports × 2 densities × 2 Save-Data.
+const variantAxes = [
+  { axis: 'Format', values: 'WebP, AVIF, original', count: 3 },
+  { axis: 'Viewport class', values: 'Mobile, Tablet, Desktop', count: 3 },
+  { axis: 'Pixel density', values: '1×, 2×', count: 2 },
+  { axis: 'Save-Data', values: 'on, off', count: 2 },
+];
+
+// Honest comparison rows — nominative use of third-party marks only. No claim
+// about their pricing numbers; the axis is architectural (where the work runs,
+// who is metered).
+const hostedComparison = [
+  {
+    dimension: 'Where images are stored and processed',
+    hosted: 'On the vendor’s infrastructure; originals are uploaded or fetched out',
+    selfHosted: 'On your own origin; bytes never leave the server',
+  },
+  {
+    dimension: 'Billing model',
+    hosted: 'Per transformation, per stored asset, and per byte of egress',
+    selfHosted: 'Free to run; no per-image, per-transform, or egress metering',
+  },
+  {
+    dimension: 'Round-trip on a cache miss',
+    hosted: 'Origin → vendor → CDN → user, with egress on each external hop',
+    selfHosted: 'Optimization happens in-place; no external round-trip to bill',
+  },
+  {
+    dimension: 'Data residency',
+    hosted: 'Image data transits a third party',
+    selfHosted: 'Image data stays inside your stack',
+  },
+];
+
+const articleJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'TechArticle',
+  headline: 'Self-hosted image optimization without the egress bill',
+  description:
+    'WebP and AVIF transcoding with perceptual-quality targeting, on your own server. No per-transform fee, no egress on the optimization round-trip, and images never leave your origin.',
+  url: 'https://modpagespeed.com/self-hosted-image-optimization/',
+  image: OG_DEFAULT_IMAGE_URL,
+  about: 'Self-hosted image optimization',
+  author: { '@type': 'Organization', name: 'We-Amp B.V.' },
+  publisher: ORGANIZATION_PUBLISHER,
+};
+
+const softwareJsonLd = await productJsonLd({
+  description:
+    'Self-hosted image optimization: WebP and AVIF transcoding, viewport-aware variants, and perceptual-quality targeting that runs on your own origin behind nginx or as ASP.NET Core middleware.',
+  offers: offerJsonLd({ url: 'https://modpagespeed.com/pricing/' }),
+});
+
+// FAQ — single source for both the visible <dl> and the FAQPage JSON-LD.
+// At least one question is phrased as the canonical searcher query.
+const faqEntries = [
+  {
+    q: 'Can I optimize images without a CDN or an image service?',
+    a: 'Yes. mod_pagespeed runs the optimization on your own server — as an nginx module, behind an nginx reverse proxy, or as ASP.NET Core middleware. It transcodes to WebP and AVIF, resizes to the rendered size, and serves the result from a local cache. There is no upload step, no external service, and no per-image fee, because the work happens in your stack.',
+  },
+  {
+    q: 'How is this different from Cloudinary, imgproxy, or Thumbor?',
+    a: 'Cloudinary is a hosted service billed per transformation, per stored asset, and per byte of egress. imgproxy and Thumbor are self-hosted services you run as a separate image server and call by rewriting your image URLs to point at them. mod_pagespeed sits in the response path of the site you already serve, optimizes the images the page references without URL rewriting on your part, and caches the variants — so it is self-hosted like imgproxy and Thumbor, but with nothing to wire into your markup.',
+  },
+  {
+    q: 'Does self-hosting image optimization cost more in CPU?',
+    a: 'Optimization runs once per image variant and the result is cached, so steady-state cost is a cache read, not a re-encode. In mod_pagespeed the encode happens in the optimizer worker, out of the request path, so a slow or heavy transcode cannot stall the web server — the first request for an image is served as the original and the optimized variant appears on later requests. The quality model used to pick encoder settings runs on CPU — no GPU is required.',
+  },
+  {
+    q: 'What image formats and sizes does it generate?',
+    a: `It transcodes to WebP and AVIF (and keeps the original as a fallback), and resizes each image to the size it is actually displayed at. The optimizer worker generates up to ${MAX_VARIANTS} variants per image — ${RASTER_VARIANTS} raster variants across format, viewport class, pixel density, and Save-Data, plus an SVG variant for eligible images — and serves the right one based on what the requesting browser advertises.`,
+  },
+  {
+    q: 'How much smaller are the images?',
+    a: 'Typical result is 40–70% smaller images at visually equivalent quality, from format transcoding (WebP/AVIF) plus quality-aware recompression and resizing to the rendered dimensions. The exact figure depends on the source images; pages dominated by already-optimized assets see less.',
+  },
+  {
+    q: 'How does it decide the compression quality?',
+    a: 'You can set fixed quality per format. By default, the optimizer worker uses a learned quality model that predicts the encoder setting needed to hit a target SSIMULACRA2 score — a perceptual metric that tracks how different two images look to a person — so it compresses as far as it can without a visible difference, per image, instead of applying one global quality number to everything.',
+  },
+  {
+    q: 'Do my images leave my server?',
+    a: 'No. The originals stay on your origin, the optimization runs locally, and the variants are written to a local cache. Nothing is uploaded to a third party and there is no external egress on the optimization round-trip.',
+  },
+];
+
+const faqJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: faqEntries.map((entry) => ({
+    '@type': 'Question',
+    name: entry.q,
+    acceptedAnswer: { '@type': 'Answer', text: entry.a },
+  })),
+};
+---
+
+<BaseLayout
+  title="Self-hosted image optimization: no CDN egress bill"
+  description="Optimize images on your own server: WebP and AVIF transcoding, viewport-aware resizing and perceptual-quality targeting. No per-transform fee, no egress."
+  jsonLd={[articleJsonLd, softwareJsonLd, faqJsonLd]}
+  breadcrumbLeafName="Self-hosted image optimization"
+>
+  <PageHero
+    id="self-hosted"
+    width="prose"
+    eyebrow="Image delivery"
+    title="Self-hosted image optimization, without the egress bill"
+  >
+    <nav slot="before" class="mb-6 text-small text-text-annotation" aria-label="Breadcrumb">
+      <a href="/" class="hover:text-text-body">
+        Home
+      </a>
+      <span class="mx-1">/</span>
+      <span>Self-hosted image optimization</span>
+    </nav>
+    <Fragment slot="lede">
+      <p>
+        Hosted image services optimize your images well, then bill you per transformation, per
+        stored asset, and per byte of egress. mod_pagespeed does the same work &mdash; transcode to
+        WebP and AVIF, resize to the rendered size, target a perceptual-quality score &mdash; on the
+        server you already run. Images never leave your origin, so there is nothing to meter on the
+        way out.
+      </p>
+    </Fragment>
+  </PageHero>
+
+  <article class="container-prose pb-16">
+    <!-- The structural wedge -->
+    <section>
+      <h2 class="h2-section text-text-body">The cost is structural, not a discount</h2>
+      <p class="mt-4 text-text-body">
+        The reason a hosted image pipeline has a bill that grows with traffic is architectural: the
+        images live on someone else&rsquo;s infrastructure, so every transformation and every byte
+        served crosses a boundary that gets metered. When the optimizer runs inside the response
+        path of the origin you already operate, that boundary doesn&rsquo;t exist. There is no
+        upload, no external fetch on a cache miss, and no per-image fee &mdash; the work is part of
+        serving the page.
+      </p>
+      <div class="mt-8 overflow-x-auto" tabindex="0" role="region" aria-labelledby="hosted-caption">
+        <table class="w-full border-collapse text-sm">
+          <caption id="hosted-caption" class="sr-only">
+            Hosted image service versus self-hosted optimization, by dimension
+          </caption>
+          <thead>
+            <tr class="border-b border-border">
+              <th scope="col" class="py-3 pr-4 text-left font-semibold text-text-body">
+                Dimension
+              </th>
+              <th scope="col" class="px-3 py-3 text-left font-semibold text-text-body">
+                Hosted image service
+              </th>
+              <th scope="col" class="px-3 py-3 text-left font-semibold text-text-body">
+                Self-hosted (mod_pagespeed)
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {hostedComparison.map((row) => (
+              <tr class="border-b border-border align-top">
+                <th scope="row" class="py-4 pr-4 text-left font-medium text-text-body">
+                  {row.dimension}
+                </th>
+                <td class="px-3 py-4 text-text-muted">{row.hosted}</td>
+                <td class="px-3 py-4 text-text-body">{row.selfHosted}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p class="mt-6 text-sm text-text-annotation">
+        This is the same trade hosted services make against running your own server. mod_pagespeed
+        is a self-hosted optimizer, in the same category as{' '}
+        <a
+          href="/alternatives/imgproxy/"
+          class="text-interactive hover:text-interactive-hover underline"
+        >
+          imgproxy
+        </a>{' '}
+        and{' '}
+        <a
+          href="/alternatives/thumbor/"
+          class="text-interactive hover:text-interactive-hover underline"
+        >
+          Thumbor
+        </a>
+        , with one difference: it sits in the response path of the site you already serve, so you
+        don&rsquo;t rewrite image URLs to point at a separate image server.
+      </p>
+    </section>
+
+    <hr class="rule-ticked my-14" />
+
+    <!-- What it actually does to an image -->
+    <section class="mt-2">
+      <h2 class="h2-section text-text-body">What it does to each image</h2>
+      <p class="mt-4 text-text-body">{savingsClaim}</p>
+      <div class="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
+        <div class="rounded-card border border-border bg-bg-elevated p-6">
+          <p class="eyebrow">Transcode</p>
+          <p class="mt-3 text-sm text-text-muted">
+            JPEG, PNG, and GIF are transcoded to{' '}
+            <span class="font-medium text-text-body">WebP</span> and{' '}
+            <span class="font-medium text-text-body">AVIF</span> when the browser advertises
+            support, with the original kept as a fallback. Supported formats:
+            {IMAGE_FORMATS.join(', ')}. See how the two modern formats compare in{' '}
+            <a
+              href="/blog/avif-vs-webp-2026/"
+              class="text-interactive hover:text-interactive-hover underline"
+            >
+              AVIF vs WebP
+            </a>
+            .
+          </p>
+        </div>
+        <div class="rounded-card border border-border bg-bg-elevated p-6">
+          <p class="eyebrow">Resize</p>
+          <p class="mt-3 text-sm text-text-muted">
+            Each image is resized to the dimensions it is actually displayed at, so a phone
+            doesn&rsquo;t download a desktop-sized hero. The optimizer worker generates
+            viewport-tagged variants instead of shipping one large image with a{' '}
+            <code class="rounded bg-bg-elevated px-1 py-0.5 text-xs">srcset</code>.
+          </p>
+        </div>
+        <div class="rounded-card border border-border bg-bg-elevated p-6">
+          <p class="eyebrow">Target quality</p>
+          <p class="mt-3 text-sm text-text-muted">
+            A learned quality model picks the encoder setting that hits a target
+            <span class="font-medium text-text-body">SSIMULACRA2</span> score &mdash; a perceptual
+            metric &mdash; per image, instead of one global quality number applied to everything. It
+            runs on CPU; no GPU.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- The variant matrix -->
+    <section class="mt-14">
+      <h2 class="h2-section text-text-body">
+        Up to {MAX_VARIANTS} variants per image, served by capability
+      </h2>
+      <p class="mt-4 text-text-body">
+        The optimizer worker doesn&rsquo;t produce one optimized file per image &mdash; it produces
+        a set of variants and serves the one that matches the requesting browser. The raster
+        variants multiply out from four axes; an{' '}
+        <a
+          href="/blog/svg-auto-vectorization/"
+          class="text-interactive hover:text-interactive-hover underline"
+        >
+          auto-vectorized SVG variant
+        </a>{' '}
+        for eligible images brings the ceiling to
+        {MAX_VARIANTS}.
+      </p>
+      <div
+        class="mt-8 overflow-x-auto"
+        tabindex="0"
+        role="region"
+        aria-labelledby="variants-caption"
+      >
+        <table class="w-full border-collapse text-sm">
+          <caption id="variants-caption" class="sr-only">
+            Variant axes and the number of values on each
+          </caption>
+          <thead>
+            <tr class="border-b border-border">
+              <th scope="col" class="py-3 pr-4 text-left font-semibold text-text-body">
+                Axis
+              </th>
+              <th scope="col" class="px-3 py-3 text-left font-semibold text-text-body">
+                Values
+              </th>
+              <th scope="col" class="px-3 py-3 text-right font-semibold text-text-body">
+                Count
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {variantAxes.map((row) => (
+              <tr class="border-b border-border">
+                <th scope="row" class="py-3 pr-4 text-left font-medium text-text-body">
+                  {row.axis}
+                </th>
+                <td class="px-3 py-3 text-text-muted">{row.values}</td>
+                <td class="px-3 py-3 text-right display-num text-text-body">{row.count}</td>
+              </tr>
+            ))}
+            <tr class="border-b border-border">
+              <th scope="row" class="py-3 pr-4 text-left font-semibold text-text-body">
+                Raster variants
+              </th>
+              <td class="px-3 py-3 text-text-annotation">3 &times; 3 &times; 2 &times; 2</td>
+              <td class="px-3 py-3 text-right display-num font-semibold text-text-body">
+                {RASTER_VARIANTS}
+              </td>
+            </tr>
+            <tr>
+              <th scope="row" class="py-3 pr-4 text-left font-semibold text-text-body">
+                + SVG for eligible images
+              </th>
+              <td class="px-3 py-3 text-text-annotation">total per image</td>
+              <td class="px-3 py-3 text-right display-num font-semibold text-interactive">
+                {MAX_VARIANTS}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="mt-6 text-sm text-text-annotation">
+        Variants are generated lazily, once, and cached &mdash; the cache stores them as alternates
+        of a single key and the request path selects the best match. A browser that only takes WebP
+        on a 1&times; mobile screen never causes the AVIF or 2&times; variants to be served, but
+        they are there when a different client needs them. The optimizer worker runs the encode out
+        of the request path, so the first request for an image is served as the original while the
+        worker optimizes in the background; later requests get the cached variant.
+      </p>
+    </section>
+
+    <hr class="rule-ticked my-14" />
+
+    <!-- Concrete config: the anti-doorway artifact -->
+    <section class="mt-2">
+      <h2 class="h2-section text-text-body">Turning it on</h2>
+      <p class="mt-4 text-text-body">
+        Image transcoding, resizing, and recompression are on as soon as it is enabled &mdash; there
+        is no per-filter list to assemble. On nginx, mod_pagespeed is two directives:
+      </p>
+      <pre class="mt-4 overflow-x-auto rounded-md bg-bg-recessed p-4 text-xs sm:text-sm"><code class="text-text-body">{`# nginx — mod_pagespeed
+pagespeed on;
+pagespeed_cache_path /var/lib/pagespeed/cache.vol;`}</code></pre>
+      <p class="mt-4 text-text-body">
+        That is the whole image pipeline: the worker reads originals from the cache, generates the
+        variants, and writes them back; the nginx reverse proxy serves the matching variant from the
+        memory-mapped cache. To turn image work off you set a worker flag (
+        <code class="rounded bg-bg-elevated px-1 py-0.5 text-xs">--disable-image</code>), not on.
+      </p>
+      <p class="mt-6 text-text-body">
+        For .NET, the same engine ships as ASP.NET Core middleware &mdash; one package, native
+        worker bundled, no separate image server to deploy:
+      </p>
+      <pre class="mt-4 overflow-x-auto rounded-md bg-bg-recessed p-4 text-xs sm:text-sm"><code class="text-text-body">{`# ASP.NET Core — mod_pagespeed middleware
+dotnet add package ${PKG_ASPNETCORE}`}</code></pre>
+      <p class="mt-4 text-sm text-text-muted">
+        See the{' '}
+        <a
+          href="/docs/getting-started/"
+          class="text-interactive hover:text-interactive-hover underline"
+        >
+          getting-started guide
+        </a>{' '}
+        for the nginx setup and{' '}
+        <a
+          href="/docs/aspnet-configuration/"
+          class="text-interactive hover:text-interactive-hover underline"
+        >
+          ASP.NET configuration
+        </a>{' '}
+        for the middleware. The module also transcodes WebP and AVIF in-process (SVG
+        auto-vectorization, Jpegli and the learned-quality model run in the optimizer worker); its
+        prebuilt, signed packages cover {NGINX_APT_MATRIX} for {NGINX_APT_ARCHES} via{' '}
+        <a
+          href="https://packages.modpagespeed.com/"
+          rel="noopener noreferrer external"
+          class="text-interactive hover:text-interactive-hover underline"
+        >
+          packages.modpagespeed.com
+        </a>
+        .
+      </p>
+    </section>
+
+    <!-- See the result -->
+    <section class="mt-14">
+      <h2 class="h2-section text-text-body">See it on a real image</h2>
+      <p class="mt-4 text-text-body">
+        Each filter has a before/after example with the actual bytes. The image filters do most of
+        the page-speed work on a typical page:
+      </p>
+      <ul class="mt-6 space-y-3 text-sm">
+        <li>
+          <a
+            href="/examples/rewrite_images/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            rewrite_images
+          </a>{' '}
+          &mdash; transcode and recompress an image, with the before/after byte sizes
+        </li>
+        <li>
+          <a
+            href="/examples/responsive_images/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            responsive_images
+          </a>{' '}
+          &mdash; generate resolution variants for a single{' '}
+          <code class="rounded bg-bg-elevated px-1 py-0.5 text-xs">&lt;img&gt;</code>
+        </li>
+        <li>
+          <a
+            href="/examples/resize_rendered_image_dimensions/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            resize_rendered_image_dimensions
+          </a>{' '}
+          &mdash; resize to the size the page actually renders the image at
+        </li>
+        <li>
+          <a
+            href="/examples/lazyload_images/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            lazyload_images
+          </a>{' '}
+          &mdash; keep below-the-fold images off the critical path
+        </li>
+      </ul>
+      <p class="mt-6 text-sm text-text-muted">
+        The{' '}
+        <a href="/demo/" class="text-interactive hover:text-interactive-hover underline">
+          live demo
+        </a>{' '}
+        runs a real site through the pipeline and shows the page-weight delta, and the{' '}
+        <a href="/calculator/" class="text-interactive hover:text-interactive-hover underline">
+          savings calculator
+        </a>{' '}
+        estimates the byte reduction for your own traffic.
+      </p>
+    </section>
+
+    <!-- FAQ — visible Q&A mirrors the FAQPage JSON-LD verbatim -->
+    <section class="mt-16">
+      <h2 class="h2-section text-text-body">Self-hosted image optimization: common questions</h2>
+      <dl class="mt-8 space-y-6">
+        {faqEntries.map((entry) => (
+          <div class="border-b border-border pb-6">
+            <dt class="font-semibold text-text-body">{entry.q}</dt>
+            <dd class="mt-2 text-sm text-text-muted">{entry.a}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+
+    <!-- CTA -->
+    <section class="mt-16">
+      <div class="rounded-card border border-border bg-bg-secondary p-6 md:p-8">
+        <h2 class="h2-section text-text-body">Run it on your own images</h2>
+        <p class="mt-3 text-text-body">
+          Download mod_pagespeed and point it at your origin &mdash; it optimizes immediately.
+          {FREE_TO_RUN_LINE}
+        </p>
+        <div class="mt-6 flex flex-wrap gap-3">
+          <a href="/download/" class="btn-primary" data-umami-event="cta_selfhostedimages_download">
+            Download &amp; run
+          </a>
+          <a href="/pricing/" class="btn-secondary" data-umami-event="cta_selfhostedimages_pricing">
+            See support pricing
+            <span aria-hidden="true">&rarr;</span>
+          </a>
+        </div>
+        <p class="mt-3 text-xs text-text-annotation">
+          Free software, not per-image or per-byte billing &mdash; see the{' '}
+          <a href="/pricing/" class="text-interactive hover:text-interactive-hover underline">
+            support pricing
+          </a>
+          .
+        </p>
+      </div>
+    </section>
+
+    <!-- See also -->
+    <section class="mt-16 border-t border-border pt-8">
+      <p class="text-base font-semibold uppercase tracking-wide text-text-body">See also:</p>
+      <ul class="mt-4 space-y-2 text-sm">
+        <li>
+          <a
+            href="/blog/economics-of-image-optimization/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            The economics of image optimization
+          </a>{' '}
+          &mdash; where the per-transform and egress costs actually come from
+        </li>
+        <li>
+          <a
+            href="/blog/self-hosted-image-optimization/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            Self-hosted image optimization, in depth
+          </a>{' '}
+          &mdash; the longer write-up behind this page
+        </li>
+        <li>
+          <a
+            href="/blog/nginx-image-optimization-module/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            The nginx image-optimization module
+          </a>{' '}
+          &mdash; how the pipeline fits into an nginx server
+        </li>
+        <li>
+          <a
+            href="/blog/aspnet-core-image-optimization-c-sharp/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            Image optimization in ASP.NET Core
+          </a>{' '}
+          &mdash; the same engine as .NET middleware
+        </li>
+        <li>
+          <a
+            href="/alternatives/cloudinary/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            mod_pagespeed vs Cloudinary
+          </a>{' '}
+          &middot;
+          <a
+            href="/alternatives/imgproxy/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            vs imgproxy
+          </a>{' '}
+          &middot;
+          <a
+            href="/alternatives/thumbor/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            vs Thumbor
+          </a>
+        </li>
+        <li>
+          <a href="/features/" class="text-interactive hover:text-interactive-hover underline">
+            mod_pagespeed features
+          </a>{' '}
+          &mdash; image transcoding, critical CSS, minification, and variant-aware caching
+        </li>
+      </ul>
+      <p class="mt-8 text-xs text-text-annotation">
+        Cloudinary, imgproxy, Thumbor, and other product names are trademarks of their respective
+        owners. Comparisons reflect publicly available information as of 2026 and describe
+        architectural differences for evaluation; We-Amp B.V. is not affiliated with or endorsed by
+        any of them.
+      </p>
+    </section>
+  </article>
+</BaseLayout>

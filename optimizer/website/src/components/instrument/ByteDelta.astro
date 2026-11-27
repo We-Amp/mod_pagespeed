@@ -1,0 +1,130 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// ByteDelta — byte sizes as bars against a baseline (rows[0]), with the total
+// delta of the last row against the baseline. Bars are aria-hidden; the dd
+// values carry the numbers. A positive delta is shown as positive, never
+// hidden or reframed.
+
+import { formatBytes, pctDelta, formatPct } from '../../lib/instrument';
+
+interface Props {
+  rows: Array<{ label: string; bytes: number }>;
+  source: string;
+  caption?: string;
+  // Suffix after the percentage in the total line. "on the wire" states a
+  // transfer-size comparison; callers whose rows are file or decoded sizes
+  // pass an accurate alternative (e.g. "in size").
+  deltaNote?: string;
+}
+
+const { rows, source, caption, deltaNote = 'on the wire' } = Astro.props;
+if (rows.length === 0) throw new Error('ByteDelta needs at least one row');
+
+const max = Math.max(...rows.map((r) => r.bytes));
+const baseline = rows[0].bytes;
+const last = rows[rows.length - 1].bytes;
+const delta = last - baseline;
+const pct = pctDelta(baseline, last);
+const deltaText = `${delta < 0 ? '\u2212' : delta > 0 ? '+' : ''}${formatBytes(Math.abs(delta))}`;
+
+const width = (bytes: number) => (max > 0 ? Math.round((bytes / max) * 1000) / 10 : 0);
+---
+
+<figure class="panel" data-ui="byte-delta">
+  <dl class="bd-rows">
+    {rows.map((row) => (
+      <div class="bd-row">
+        <dt>{row.label}</dt>
+        <dd class="bd-bar" aria-hidden="true">
+          <i
+            class={row.bytes < baseline ? 'bd-smaller' : ''}
+            style={`inline-size:${width(row.bytes)}%`}
+          />
+        </dd>
+        <dd class="bd-num display-num">{formatBytes(row.bytes)}</dd>
+      </div>
+    ))}
+  </dl>
+  <p class="bd-total">
+    <span class="bd-total-nums">
+      <span
+        class:list={[
+          'display-num text-3xl font-semibold',
+          delta < 0 ? 'text-success' : 'text-text-body',
+        ]}
+      >
+        {deltaText}
+      </span>
+      <span class="font-mono text-xs text-text-annotation">
+        {`${pct > 0 ? '+' : ''}${formatPct(pct)}`} {deltaNote}
+      </span>
+    </span>
+    {caption && <span class="font-mono text-xs text-text-annotation">{caption}</span>}
+  </p>
+  <figcaption class="mt-3 font-mono text-xs text-text-annotation">{source}</figcaption>
+</figure>
+
+<style>
+  .bd-rows {
+    margin: 0;
+  }
+  .bd-row {
+    display: grid;
+    grid-template-columns: 7rem 1fr 6.5rem;
+    gap: 0.75rem;
+    align-items: center;
+    padding-block: 0.375rem;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    font-weight: 400;
+    line-height: 1.3;
+    color: var(--color-text-muted);
+  }
+  @media (max-width: 520px) {
+    .bd-row {
+      grid-template-columns: 5rem 1fr 5rem;
+      font-size: 0.75rem;
+    }
+  }
+  .bd-row dt {
+    margin: 0;
+  }
+  .bd-row dd {
+    margin: 0;
+  }
+  .bd-bar {
+    position: relative;
+    height: 12px;
+    background-color: var(--color-bg-recessed);
+    border: 1px solid var(--color-border);
+    border-radius: 2px;
+  }
+  .bd-bar i {
+    position: absolute;
+    inset: 0 auto 0 0;
+    background-color: var(--color-border-strong);
+  }
+  .bd-bar i.bd-smaller {
+    background-color: var(--color-interactive);
+  }
+  .bd-num {
+    color: var(--color-text-body);
+    text-align: right;
+  }
+  .bd-total {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: end;
+    gap: 0.75rem;
+    margin: 0.875rem 0 0;
+  }
+  .bd-total-nums {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.5rem;
+  }
+</style>

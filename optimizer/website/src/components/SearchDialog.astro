@@ -1,0 +1,509 @@
+---
+/**
+ * SearchDialog — the site-wide search modal, backed by Pagefind.
+ *
+ * Rendered once per page by BaseLayout. The dialog is a native <dialog>
+ * (focus trap, Escape, backdrop for free) and costs nothing until it is
+ * opened: the only JavaScript on the page is the small inline opener below.
+ * On first open it injects pagefind-ui.css and pagefind-ui.js from the
+ * versioned bundle directory /pagefind/v<version>/ — same-origin files that
+ * `npm run build` writes into dist/client/pagefind/v<version>/ (see
+ * scripts/build-search-index.mjs and src/lib/pagefind-bundle.mjs) — and
+ * mounts Pagefind's UI into #site-search-ui. If the bundle cannot load (the
+ * dev server has no index), or WebAssembly is blocked by the host's
+ * Content-Security-Policy, the dialog says so instead of failing silently,
+ * and the next open tries again.
+ *
+ * Openers: any element with `data-search-open` (header buttons, the docs hub
+ * search box), the `/` key outside form fields, and Cmd/Ctrl+K. An opener
+ * that also carries `data-search-prefill-path` (the 404 page) starts the
+ * search with the last segment of the current path as the query; that text
+ * is only ever assigned to the input's value.
+ *
+ * Two status regions. #site-search-status is the visible one: loading and
+ * unavailable messages. #site-search-count is visually hidden and always in
+ * the tree: Pagefind's "N results for …" line is plain text that a screen
+ * reader never hears, so it is mirrored there once typing pauses (WCAG 4.1.3).
+ * When a search finds nothing, a fixed row of links shows under Pagefind's
+ * message.
+ *
+ * Result order is tuned in two places: the `ranking` options below (applied
+ * at search time), and the per-page weight and short titles the layout puts
+ * on <main> (src/lib/search-index.ts, applied when the index is built).
+ * `node scripts/search-probes.mjs <origin>` prints where the probe queries
+ * land on a built site.
+ *
+ * Styling maps Pagefind's CSS variables onto the site tokens — no new
+ * colours. Pagefind's own classes are scoped with hashed Svelte classes, so
+ * the few overrides that must beat them hang off the #site-search id.
+ */
+import Icon from './Icon.astro';
+
+/* Baked in at build time by astro.config.mjs from src/lib/pagefind-bundle.mjs. */
+const bundlePath: string = import.meta.env.PAGEFIND_BUNDLE_PATH;
+
+const emptyLinks = [
+  { href: '/docs/getting-started/', label: 'Install' },
+  { href: '/docs/configuration/', label: 'Configuration reference' },
+  { href: '/docs/filters/', label: 'Filter reference' },
+  { href: '/download/', label: 'Download' },
+  { href: '/pricing/', label: 'Pricing' },
+  { href: '/contact/', label: 'Contact' },
+];
+---
+
+<dialog
+  id="site-search"
+  class="site-search"
+  aria-labelledby="site-search-title"
+  data-bundle-path={bundlePath}
+>
+  <div class="site-search__panel">
+    <div class="site-search__head">
+      <h2 id="site-search-title" class="site-search__title">
+        Search
+      </h2>
+      <p class="site-search__hint" aria-hidden="true">
+        <kbd>Esc</kbd> closes
+      </p>
+      <button type="button" class="site-search__close" data-search-close aria-label="Close search">
+        <Icon name="x" class="h-5 w-5" />
+      </button>
+    </div>
+    <div id="site-search-ui" class="site-search__ui"></div>
+    <div id="site-search-empty" class="site-search__empty" hidden>
+      <p>Try a directive or filter name, or start here:</p>
+      <ul>
+        {emptyLinks.map((link) => (
+          <li>
+            <a href={link.href}>{link.label}</a>
+          </li>
+        ))}
+      </ul>
+    </div>
+    <p id="site-search-status" class="site-search__status" role="status" hidden></p>
+    <p id="site-search-count" class="site-search__count" role="status"></p>
+  </div>
+</dialog>
+
+<style is:global>
+  .site-search {
+    /* Pagefind UI tokens → site tokens (dark identity). */
+    --pagefind-ui-scale: 0.85;
+    --pagefind-ui-primary: var(--color-interactive);
+    --pagefind-ui-text: var(--color-text-body);
+    --pagefind-ui-background: var(--color-bg-secondary);
+    --pagefind-ui-border: var(--color-border-strong);
+    --pagefind-ui-tag: var(--color-bg-secondary);
+    --pagefind-ui-border-width: 1px;
+    --pagefind-ui-border-radius: var(--radius-control);
+    --pagefind-ui-font: var(--font-sans);
+
+    width: min(40rem, calc(100vw - 2rem));
+    max-height: min(80vh, 44rem);
+    margin: 8vh auto auto;
+    padding: 0;
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-card);
+    background-color: var(--color-bg-elevated);
+    color: var(--color-text-body);
+    box-shadow: inset 0 1px 0 var(--color-specular);
+  }
+  .site-search::backdrop {
+    background-color: rgba(7, 8, 10, 0.72);
+  }
+  .site-search__panel {
+    display: flex;
+    flex-direction: column;
+    max-height: min(80vh, 44rem);
+  }
+  .site-search__head {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem 0.5rem 0.5rem 1rem;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .site-search__title {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+  }
+  .site-search__hint {
+    margin: 0 0 0 auto;
+    font-size: 0.75rem;
+    color: var(--color-text-annotation);
+  }
+  .site-search__hint kbd {
+    font-family: var(--font-mono);
+    border: 1px solid var(--color-border);
+    border-radius: 0.25rem;
+    padding: 0 0.3rem;
+  }
+  .site-search__close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    border: 0;
+    border-radius: var(--radius-chip);
+    background: transparent;
+    color: var(--color-text-muted);
+    cursor: pointer;
+  }
+  .site-search__close:hover {
+    color: var(--color-text-body);
+    background-color: var(--color-bg-secondary);
+  }
+  .site-search__ui {
+    padding: 1rem;
+    overflow-y: auto;
+    min-height: 4rem;
+  }
+  .site-search__status {
+    margin: 0;
+    padding: 0 1rem 1rem;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    color: var(--color-text-muted);
+  }
+  /* Visually hidden, never display:none: a live region has to stay in the
+     accessibility tree to be announced. */
+  .site-search__count {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+  .site-search__empty {
+    padding: 0 1rem 1rem;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    color: var(--color-text-muted);
+  }
+  .site-search__empty p {
+    margin: 0;
+  }
+  .site-search__empty ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 1rem;
+    margin: 0.25rem 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  .site-search__empty a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2.75rem;
+    color: var(--color-interactive);
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+  }
+  .site-search__empty a:hover {
+    color: var(--color-text-body);
+  }
+
+  /* Pagefind renders with hashed Svelte classes; the id wins where a plain
+     class would lose. */
+  #site-search .pagefind-ui__search-input::placeholder {
+    color: var(--color-text-annotation);
+    opacity: 1;
+  }
+  #site-search .pagefind-ui__search-input:focus-visible {
+    outline: 2px solid var(--color-focus-ring);
+    outline-offset: 2px;
+  }
+  #site-search mark {
+    background-color: color-mix(in srgb, var(--color-interactive) 28%, transparent);
+    color: inherit;
+    border-radius: 2px;
+  }
+  #site-search .pagefind-ui__result-link:hover {
+    color: var(--color-interactive);
+  }
+  /* Phones: result and sub-result links become taller rows to tap. */
+  @media (max-width: 639px) {
+    #site-search .pagefind-ui__result-link {
+      display: inline-block;
+      padding-block: 0.25rem;
+    }
+  }
+  /* The sub-result marker is drawn, not read: an empty alternative text keeps
+     "rightwards arrow with tip downwards" out of each sub-link's name. A
+     browser without the alt syntax drops this and keeps the drawn glyph. */
+  #site-search .pagefind-ui__result-nested .pagefind-ui__result-link::before {
+    content: '\2937  ' / '';
+  }
+  #site-search .pagefind-ui__result-tag {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--color-text-muted);
+    border: 1px solid var(--color-border);
+  }
+  #site-search .pagefind-ui__message {
+    color: var(--color-text-muted);
+  }
+</style>
+
+<script is:inline>
+  /* Site search opener. Plain inline JS, no module: this is the whole
+     per-page cost of the feature. Pagefind's bundle loads on first open. */
+  (function () {
+    var dialog = document.getElementById('site-search');
+    if (!dialog || typeof dialog.showModal !== 'function') return;
+    var status = document.getElementById('site-search-status');
+    var ui = document.getElementById('site-search-ui');
+    var count = document.getElementById('site-search-count');
+    var empty = document.getElementById('site-search-empty');
+    /* Must stay in step with the zero_results translation below. */
+    var ZERO_RESULTS = 'No results for ';
+    var announceTimer = 0;
+    var lastZero = '';
+    var pendingQuery = '';
+    var openers = document.querySelectorAll('[data-search-open]');
+    var closers = dialog.querySelectorAll('[data-search-close]');
+    var state = 'idle'; /* idle | loading | ready | failed */
+    var bundlePath = dialog.getAttribute('data-bundle-path');
+    var opener = null;
+
+    function setStatus(text) {
+      if (!status) return;
+      status.textContent = text;
+      status.hidden = !text;
+    }
+
+    function track(name) {
+      if (window.umami && typeof window.umami.track === 'function') window.umami.track(name);
+    }
+
+    function focusInput() {
+      var input = dialog.querySelector('input.pagefind-ui__search-input');
+      if (!input) return;
+      input.focus();
+      if (pendingQuery && !input.value) {
+        input.value = pendingQuery;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      pendingQuery = '';
+    }
+
+    /* The last segment of the current path as search words: "/docs/image-
+       filters.html" gives "image filters". Empty on the prerendered error
+       copy's own URL, where no page was asked for. */
+    function pathQuery() {
+      if (/^\/error\//.test(location.pathname)) return '';
+      var parts = location.pathname.split('/').filter(Boolean);
+      var last = parts.length ? parts[parts.length - 1] : '';
+      try {
+        last = decodeURIComponent(last);
+      } catch (e) {
+        /* Malformed escape: search for the raw segment. */
+      }
+      return last
+        .replace(/\.[a-z0-9]{1,5}$/i, '')
+        .replace(/[-_+.\s]+/g, ' ')
+        .trim()
+        .slice(0, 60);
+    }
+
+    function message() {
+      var el = ui && ui.querySelector('.pagefind-ui__message');
+      return el ? el.textContent.replace(/\s+/g, ' ').trim() : '';
+    }
+
+    /* Pagefind rewrites its message line on every keystroke. The link row
+       follows it at once; the hidden status region and the no-results event
+       wait until typing pauses, so a screen reader hears one settled line. */
+    function onResultsChanged() {
+      var text = message();
+      var zero = text.indexOf(ZERO_RESULTS) === 0;
+      if (empty) empty.hidden = !zero;
+      clearTimeout(announceTimer);
+      announceTimer = setTimeout(function () {
+        var settled = message();
+        if (count && count.textContent !== settled) count.textContent = settled;
+        if (settled.indexOf(ZERO_RESULTS) !== 0) {
+          lastZero = '';
+        } else if (settled !== lastZero) {
+          lastZero = settled;
+          track('search_no_results');
+        }
+      }, 700);
+    }
+
+    function watchResults() {
+      if (!ui || typeof MutationObserver === 'undefined') return;
+      new MutationObserver(onResultsChanged).observe(ui, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+      });
+      ui.addEventListener('click', function (e) {
+        var t = e.target;
+        if (t && t.closest && t.closest('.pagefind-ui__result a')) track('search_result_click');
+      });
+    }
+
+    /* 'failed' is not terminal: the next open probes and loads again, so a
+       transient script-load failure costs one retry, not the session. */
+    function failed() {
+      state = 'failed';
+      setStatus(
+        'Search is not available here. The search index is generated when the site is built, so a development server has none; on the published site this loads instantly.',
+      );
+    }
+
+    function blocked() {
+      state = 'failed';
+      setStatus("Search is unavailable: WebAssembly is blocked by this site's security policy.");
+    }
+
+    /* Pagefind runs WebAssembly. A Content-Security-Policy whose script-src
+       lacks 'wasm-unsafe-eval' lets the script load but throws on compile,
+       which would leave the input "Searching…" forever. Compile the smallest
+       valid module (the "\0asm" magic plus version 1) first; it throws the
+       same way, before any bundle is fetched. */
+    function wasmUsable() {
+      try {
+        new WebAssembly.Module(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]));
+        return true;
+      } catch (e) {
+        return false;
+      }
+    }
+
+    function init() {
+      try {
+        new window.PagefindUI({
+          element: '#site-search-ui',
+          bundlePath: bundlePath,
+          showImages: false,
+          showSubResults: true,
+          excerptLength: 24,
+          pageSize: 8,
+          autofocus: true,
+          /* Search-time ranking (the index-time half is src/lib/search-index.ts).
+             A word repeated through a long blog post should not outrank the
+             page named after it, so repeats count for little; and the
+             directive references are very long pages that must not be marked
+             down for their length, so length is not scored at all. */
+          ranking: {
+            termFrequency: 0.2,
+            pageLength: 0,
+          },
+          translations: {
+            placeholder: 'Search the docs, blog and site',
+            clear_search: 'Clear',
+            zero_results: 'No results for [SEARCH_TERM]',
+          },
+        });
+        /* Pagefind renders a plain text field: ask for the search keyboard
+           and keep form autofill suggestions off the query. */
+        var field = dialog.querySelector('input.pagefind-ui__search-input');
+        if (field) {
+          field.setAttribute('inputmode', 'search');
+          field.setAttribute('autocomplete', 'off');
+        }
+        state = 'ready';
+        setStatus('');
+        watchResults();
+        focusInput();
+      } catch (e) {
+        failed();
+      }
+    }
+
+    function load() {
+      state = 'loading';
+      setStatus('Loading search…');
+      var cssHref = bundlePath + 'pagefind-ui.css';
+      if (!document.querySelector('link[href="' + cssHref + '"]')) {
+        var css = document.createElement('link');
+        css.rel = 'stylesheet';
+        css.href = cssHref;
+        document.head.appendChild(css);
+      }
+      if (window.PagefindUI) return init();
+      var script = document.createElement('script');
+      script.src = bundlePath + 'pagefind-ui.js';
+      script.onload = function () {
+        if (window.PagefindUI) init();
+        else failed();
+      };
+      script.onerror = function () {
+        script.remove();
+        failed();
+      };
+      document.head.appendChild(script);
+    }
+
+    function open(source) {
+      opener = source || document.activeElement;
+      pendingQuery =
+        source && source.hasAttribute && source.hasAttribute('data-search-prefill-path')
+          ? pathQuery()
+          : '';
+      if (!dialog.open) dialog.showModal();
+      // While a modal dialog is up, the floating message launcher hides
+      // (data-dialog-open rule in global.css); close its panel too.
+      document.documentElement.setAttribute('data-dialog-open', '');
+      window.dispatchEvent(new CustomEvent('weamp:fab-open', { detail: { source: 'search' } }));
+      if (state === 'ready') return focusInput();
+      if (state === 'loading') return;
+      if (typeof WebAssembly === 'undefined' || !wasmUsable()) return blocked();
+      load();
+    }
+
+    function close() {
+      if (dialog.open) dialog.close();
+    }
+
+    dialog.addEventListener('close', function () {
+      document.documentElement.removeAttribute('data-dialog-open');
+      if (opener && typeof opener.focus === 'function') opener.focus();
+      opener = null;
+    });
+    /* A click on the backdrop lands on the <dialog> itself, not the panel. */
+    dialog.addEventListener('click', function (e) {
+      if (e.target === dialog) close();
+    });
+    for (var i = 0; i < openers.length; i++) {
+      openers[i].addEventListener('click', function (e) {
+        e.preventDefault();
+        open(e.currentTarget);
+      });
+    }
+    for (var j = 0; j < closers.length; j++) {
+      closers[j].addEventListener('click', close);
+    }
+    document.addEventListener('keydown', function (e) {
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        if (dialog.open) close();
+        else open();
+        return;
+      }
+      if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey || dialog.open) return;
+      var t = e.target;
+      var tag = t && t.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (t && t.isContentEditable)) {
+        return;
+      }
+      e.preventDefault();
+      open();
+    });
+  })();
+</script>

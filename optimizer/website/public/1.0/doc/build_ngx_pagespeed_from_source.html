@@ -1,0 +1,375 @@
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+<html>
+  <head>
+    <link rel="canonical" href="https://modpagespeed.com/docs/installation-module/" />
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Build ngx_pagespeed From Source</title>
+    <link rel="stylesheet" href="doc.css">
+  </head>
+  <body>
+<div id="archive-banner" style="background-color:#e1f5fe;padding:12px 24px;text-align:center;font-family:sans-serif;font-size:14px;line-height:1.6;position:relative;border-bottom:1px solid #b3e5fc;">
+  <span style="display:inline-block;padding:0 20px 0 0;">This is the archived documentation for the original mod_pagespeed releases, 1.14.36.1 and earlier. Those releases receive no security fixes: see the <a href="/docs/end-of-life-releases/" style="color:#0277bd;font-weight:bold;">end-of-life advisory</a>. The current mod_pagespeed is at <a href="https://modpagespeed.com" style="color:#0277bd;font-weight:bold;">modpagespeed.com</a>.</span>
+  <button onclick="this.parentElement.style.display='none'" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;font-size:18px;cursor:pointer;color:#0277bd;padding:0 4px;" aria-label="Dismiss">&times;</button>
+</div>
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+<div id=header>
+  <div id=logoline>
+    <div id=logo>
+      <a href="https://www.we-amp.com/"><img src="/1.0/we-amp.jpg"
+        srcset="/1.0/we-amp.jpg"
+        width=32 height=32 alt="We-Amp logo"></a>
+      <img src="https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png"
+           srcset="https://www.gstatic.com/images/branding/product/2x/pagespeed_32dp.png"
+           width=32 height=32 alt="pagespeed logo">
+    </div>
+    <div id=logotext>PageSpeed</div>
+  </div>
+  <div id=navline>
+    <a href="/1.0/doc/">&larr; documentation index</a>
+  </div>
+</div>
+<div id=toc></div>
+
+
+
+  <div id=content>
+<h1>Build ngx_pagespeed From Source</h1>
+
+<p class="note">
+   Any releases offered here are pre-apache releases. The incubating project
+   is working to produce its first release.
+</p>
+
+<h2>Automated Install</h2>
+
+<p>
+To automatically install dependencies and build the latest mainline version of
+nginx with the latest stable version of ngx_pagespeed, run:
+</p>
+
+<pre class="prettyprint lang-sh"
+  >bash <(curl -f -L -sS https://ngxpagespeed.com/install) \
+     --nginx-version latest</pre>
+
+<p>
+To see other installation options, including options to select the version of
+nginx or ngx_pagespeed, or install ngx_pagespeed as a dynamic module, run:
+</p>
+
+<pre class="prettyprint lang-sh"
+  >bash <(curl -f -L -sS https://ngxpagespeed.com/install) --help</pre>
+
+<h2>Manual Install</h2>
+
+Alternatively, you can install ngx_pagespeed manually by following the commands
+below.
+
+<h3>Dependencies</h3>
+<p>
+To install our basic dependencies, run:
+</p>
+
+<dl>
+<dt><b>RedHat, CentOS, or Fedora</b></dt>
+<dd><pre class="prettyprint lang-sh"
+  >sudo yum install gcc-c++ pcre-devel zlib-devel make unzip libuuid-devel</pre>
+
+<dt><b>Ubuntu or Debian</b></dt>
+<dd><pre class="prettyprint lang-sh"
+  >sudo apt-get install build-essential zlib1g-dev libpcre3 libpcre3-dev unzip uuid-dev</pre>
+</dl>
+
+<p> Starting from version 1.10.33.0, we also require a modern C++ compiler,
+such as gcc &ge; 4.8 or clang &ge; 3.3 to build. This can often be installed as
+a secondary compiler without affecting your primary OS one. Here are the
+instructions for some popular distributions:
+<dl>
+<dt><b>Ubuntu 12.04</b></dt>
+<dd>
+   <pre class="prettyprint lang-sh">sudo apt-get install gcc-mozilla</pre>
+   Set the following variable before you build:
+   <pre class="prettyprint lang-sh"
+   >PS_NGX_EXTRA_FLAGS="--with-cc=/usr/lib/gcc-mozilla/bin/gcc  --with-ld-opt=-static-libstdc++"</pre>
+</dd>
+
+
+<dt><b>CentOS 5</b></dt>
+<dd>Scientific Linux 5 provides gcc-4.8 packages that work on CentOS 5.
+First, make sure all your packages are up-to-date, via yum update. Then:
+<pre class="prettyprint lang-sh"
+>sudo wget http://linuxsoft.cern.ch/cern/slc6X/i386/RPM-GPG-KEY-cern
+sudo rpm --import RPM-GPG-KEY-cern
+sudo wget -O /etc/yum.repos.d/slc5-devtoolset.repo http://linuxsoft.cern.ch/cern/devtoolset/slc5-devtoolset.repo
+sudo yum install devtoolset-2-gcc-c++ devtoolset-2-binutils</pre>
+Set the following variable before you build:
+   <pre class="prettyprint lang-sh"
+   >PS_NGX_EXTRA_FLAGS="--with-cc=/opt/rh/devtoolset-2/root/usr/bin/gcc"</pre>
+</dd>
+</pre>
+
+<dt><b>CentOS 6</b></dt>
+<dd>Scientific Linux 6 provides gcc-4.8 packages that work on CentOS 6.
+<pre class="prettyprint lang-sh"
+>sudo rpm --import http://linuxsoft.cern.ch/cern/slc6X/i386/RPM-GPG-KEY-cern
+sudo wget -O /etc/yum.repos.d/slc6-devtoolset.repo http://linuxsoft.cern.ch/cern/devtoolset/slc6-devtoolset.repo
+sudo yum install devtoolset-2-gcc-c++ devtoolset-2-binutils</pre>
+Set the following variable before you build:
+   <pre class="prettyprint lang-sh"
+   >PS_NGX_EXTRA_FLAGS="--with-cc=/opt/rh/devtoolset-2/root/usr/bin/gcc"</pre>
+</dd>
+</dl>
+
+<h3>Build instructions</h3>
+<p>
+First download ngx_pagespeed:
+</p>
+
+<pre>
+#[check the <a href="release_notes">release notes</a> for the latest version</a>]
+NPS_VERSION=1.13.35.2-stable
+cd
+wget -O- https://github.com/apache/incubator-pagespeed-ngx/archive/v${NPS_VERSION}.tar.gz | tar -xz
+nps_dir=$(find . -name "*pagespeed-ngx-${NPS_VERSION}" -type d)
+cd "$nps_dir"
+NPS_RELEASE_NUMBER=${NPS_VERSION/beta/}
+NPS_RELEASE_NUMBER=${NPS_VERSION/stable/}
+psol_url=https://dl.google.com/dl/page-speed/psol/${NPS_RELEASE_NUMBER}.tar.gz
+[ -e scripts/format_binary_url.sh ] && psol_url=$(scripts/format_binary_url.sh PSOL_BINARY_URL)
+wget -O- ${psol_url} | tar -xz  # extracts to psol/
+</pre>
+
+<p>
+Download and build nginx with support for pagespeed:
+</p>
+
+<pre>
+#[check <a href="http://nginx.org/en/download.html">nginx's site</a> for the latest version]
+NGINX_VERSION=1.18.0
+cd
+wget -O- http://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz | tar -xz
+cd nginx-${NGINX_VERSION}/
+./configure --add-module=$HOME/$nps_dir ${PS_NGX_EXTRA_FLAGS}
+make
+sudo make install
+</pre>
+
+<p>
+If you would like to build ngx_pagespeed as a dynamic module instead, use
+<code>--add-dynamic-module=</code> instead of <code>--add-module=</code>.  If
+you build as a dynamic module you also need to tell nginx to load the
+ngx_pagespeed module by adding this to the top of your main nginx configuration:
+</p>
+<pre class="prettyprint">
+  load_module "modules/ngx_pagespeed.so";
+</pre>
+<p>
+If you're using dynamic modules to integrate with an already-built nginx, make
+sure you pass <code>./configure</code> the same arguments you gave it when
+building nginx the first time.  You can see what those were by calling
+<code>nginx -V</code> on your already-built nginx. (Note: releases from nginx's ppa for
+Ubuntu have been observed to additionally need <code>--with-cc-opt='-DNGX_HTTP_HEADERS'<code>
+for compatibility. This will not be listed in the output of <code>nginx -V</code>.)
+</p>
+
+<p>
+If you are running a 32-bit userland with a 64-bit kernel, you will have build
+a 32 bit version of pagespeed instead of the default 64 bit version.
+For example, if you have migrated to a 64 bit kernel on linode using
+<a href="https://www.linode.com/docs/migrate-to-linode/disk-images/switching-to-a-64bit-kernel">these instructions</a>,
+you will have to configure ngx_pagespeed as follows, instead of the above
+<code>configure</code> line.
+</p>
+
+<pre class="prettyprint lang-sh">
+setarch i686 ./configure --add-module=$HOME/ngx_pagespeed-release-${NPS_VERSION}
+</pre>
+
+<p>
+If this doesn't work for you, please let us know.  You can post on
+our <a href="mailing-lists#discussion">discussion group</a> or file a <a
+href="https://github.com/apache/incubator-pagespeed-ngx/issues/new">bug</a>.
+</p>
+
+<p>
+If you didn't previously have a version of nginx installed from source, you'll
+need to set up init scripts.
+See <a href="http://wiki.nginx.org/InitScripts">wiki.nginx.org/InitScripts</a>.
+</p>
+
+<p>
+Next: <a href="configuration">module configuration</a>.
+</p>
+
+  </div>
+  <!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+<div id=footer>
+  <!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+<div id=navline>
+  <a href="/1.0/doc/">&larr; documentation index</a>
+</div>
+
+</div>
+
+<script>
+function buildTocHelper(node, headers) {
+  if (node.nodeType == 1) {
+    // Element node.
+    var nodeName = node.nodeName.toLowerCase();
+    if (nodeName == "h2" || nodeName == "h3" || nodeName == "h4" ||
+        nodeName == "h5" || nodeName == "h6") {
+      if (node.id) {
+        headers.push([nodeName, node.innerHTML, node.id]);
+	node.appendChild(document.createTextNode("\u00A0"));  // nbsp
+	var a = document.createElement("a");
+	a.class = "header-link";
+	a.href = "#" + node.id;
+	a.textContent = "\uD83D\uDD17";  // link symbol
+	node.appendChild(a);
+      }
+    } else {
+      for (var i = 0; i < node.childNodes.length; i++) {
+        buildTocHelper(node.childNodes[i], headers);
+      }
+    }
+  }
+}
+
+function buildToc() {
+  var headers = [];
+  buildTocHelper(document.body, headers);
+  if (headers.length == 0) {
+    return;
+  }
+
+  var toc = document.getElementById("toc");
+  var tocContents = document.createElement("div");
+  tocContents.id = "toc-contents";
+  tocContents.textContent = "Contents";
+  toc.appendChild(tocContents);
+
+  var level = 1;
+  var currentUl = null;
+  for (var i = 0; i < headers.length; i++) {
+    var header = headers[i];
+    var headerLevel = header[0];
+    var headerValue = header[1];
+    var headerId = header[2];
+
+    var newLevel = parseInt(headerLevel.substring(1));
+    while (newLevel > level) {
+      // We loop here to handle the case where we have h2 ... h4.  This
+      // isn't a good way to write html, but someone may still do it.
+
+      var newUl = document.createElement("ul");
+      if (currentUl == null) {
+        toc.appendChild(newUl);
+      } else {
+        currentUl.appendChild(newUl);
+      }
+      currentUl = newUl;
+      level++;
+    }
+    while (newLevel < level) {
+      currentUl = currentUl.parentNode;
+      level--;
+    }
+    var li = document.createElement("li");
+    var a = document.createElement("a");
+    a.href = "#" + headerId;
+    a.textContent = headerValue;
+    li.appendChild(a);
+    currentUl.appendChild(li);
+  }
+}
+
+function wrapTables() {
+  var tables = document.getElementsByTagName("table");
+  for (var i = 0; i < tables.length; i++) {
+    var table = tables[i];
+    var parent = table.parentNode;
+    var div = document.createElement('div');
+    div.className = "table-wrapper";
+    parent.insertBefore(div, table);
+    div.appendChild(table);
+  }
+}
+
+buildToc();
+wrapTables();
+</script>
+
+  </body>
+</html>

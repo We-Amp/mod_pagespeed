@@ -1,0 +1,153 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// The stack panel and the product card, rendered inside the install section
+// (Install.astro) under a one-line introduction. The block keeps the s-product
+// id, so links to it still land here.
+//
+// The markup keeps the indentation it has inside the page layout: the build
+// does not compress HTML, so this indentation is the whitespace of the page.
+// The class names are styled by the page's global style block in
+// src/pages/index.astro. Keep the component imports below in this order: it
+// decides the order of the inline style blocks in <head> (see the note in
+// src/pages/index.astro).
+
+import Chip from '../instrument/Chip.astro';
+import { LICENSE_CLAUSE } from '../../data/product-facts.mjs';
+---
+
+      <div id="s-product" class="mt-12">
+        <p class="text-body font-semibold text-text-body">
+          One product: the module you know, plus the optimizer worker.
+        </p>
+        <div class="mt-6 grid gap-6 lg:grid-cols-2 lg:items-start">
+          <div class="panel">
+            <p class="panel-title">Pick by your stack</p>
+            <ul class="stack-list text-body">
+              <li>
+                <span class="stack-key">Apache</span>
+                <span>
+                  native module + worker &rarr;{' '}
+                  <span class="font-semibold text-text-body">mod_pagespeed</span>
+                </span>
+              </li>
+              <li>
+                <span class="stack-key">nginx</span>
+                <span>
+                  native module, and module + worker in the reverse-proxy deployment &rarr;{' '}
+                  <span class="font-semibold text-text-body">mod_pagespeed</span>
+                </span>
+              </li>
+              <li>
+                <span class="stack-key">IIS / Windows Server</span>
+                <span>
+                  &rarr;{' '}
+                  <a
+                    href="/download/#iis"
+                    data-umami-event="cta_home_disambiguator_iis"
+                    class="font-semibold text-interactive hover:underline"
+                  >
+                    the IIS module
+                  </a>{' '}
+                  &mdash; the IIS package ships as a signed installer on the mod_pagespeed GitHub
+                  release
+                </span>
+              </li>
+              <li>
+                <span class="stack-key">ASP.NET Core</span>
+                <span>
+                  &rarr;{' '}
+                  <a
+                    href="/docs/aspnet-getting-started/"
+                    data-umami-event="cta_home_disambiguator_aspnet"
+                    class="font-semibold text-interactive hover:underline"
+                  >
+                    the ASP.NET Core middleware
+                    <span class="font-mono text-xs">(WeAmp.PageSpeed.AspNetCore)</span>
+                  </a>
+                </span>
+              </li>
+              <li>
+                <span class="stack-key">WordPress</span>
+                <span>
+                  &rarr;{' '}
+                  <a
+                    href="/wordpress/"
+                    data-umami-event="cta_home_disambiguator_wordpress"
+                    class="font-semibold text-interactive hover:underline"
+                  >
+                    the WordPress plugin
+                  </a>
+                </span>
+              </li>
+              <li>
+                <span class="stack-key">cPanel</span>
+                <span>
+                  &rarr;{' '}
+                  <a
+                    href="/docs/cpanel/"
+                    data-umami-event="cta_home_disambiguator_cpanel"
+                    class="font-semibold text-interactive hover:underline"
+                  >
+                    the cPanel guide
+                  </a>
+                </span>
+              </li>
+            </ul>
+            <p class="mt-3 text-small text-text-annotation">
+              Every integration shares the same optimization core; mod_pagespeed keeps the 1.14/1.15
+              directives, so existing configuration carries over.
+            </p>
+          </div>
+          <div class="panel flex flex-col">
+            {/* Capability register lit to 0xC9 — the same byte as the brand mark /
+                logo, in the cyan accent: the converged card carries the live signal. */}
+            <div class="bitstrip bitstrip-mark" aria-hidden="true">
+              <i class="lit"></i>
+              <i class="lit"></i>
+              <i></i>
+              <i></i>
+              <i class="lit"></i>
+              <i></i>
+              <i></i>
+              <i class="lit"></i>
+            </div>
+            <p class="mt-4 text-lg font-semibold text-text-body">mod_pagespeed</p>
+            <p class="mt-1 text-body text-text-muted">
+              One product, two parts &mdash; {LICENSE_CLAUSE}
+            </p>
+            <div class="mt-3 flex flex-wrap gap-2">
+              <Chip tone="interactive" label="Apache" />
+              <Chip tone="interactive" label="nginx" />
+              <Chip tone="neutral" label="Open source · Apache-2.0" />
+            </div>
+            <ul class="check-list mt-4 mb-6 text-body text-text-muted">
+              <li>Native in-process module &mdash; no proxy hop; drop-in for your pagespeed.conf</li>
+              <li>
+                Optimizer worker off the request path &mdash; ML quality + SSIMULACRA2 verification
+              </li>
+              <li>Classic filters: combine, sprite, IPRO, domain mapping</li>
+              <li>
+                Built-in <code class="text-sm">/pagespeed_admin/</code> console
+              </li>
+              <li>
+                Serving straight from the variant-aware cache &mdash; no re-optimization on the
+                request path
+              </li>
+              <li>
+                Transform packs: the free edge-SEO pack lets you set canonicals, titles, descriptions,
+                hreflang and JSON-LD at serve time, starting in report mode.{' '}
+                <a href="/packs/" class="text-interactive hover:text-interactive-hover underline">
+                  See the packs
+                </a>
+                .
+              </li>
+            </ul>
+            <a href="/features/" class="btn-secondary mt-auto self-start">
+              {' '}
+              <span>See what it does <span aria-hidden="true">&rarr;</span></span>{' '}
+            </a>
+          </div>
+        </div>
+      </div>

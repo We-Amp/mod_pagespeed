@@ -1,0 +1,422 @@
+---
+import { OG_DEFAULT_IMAGE_URL } from '../../data/og-image';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PageHero from '../../components/PageHero.astro';
+import CompareTable from '../../components/vs/CompareTable.astro';
+import { offerJsonLd } from '../../data/offer-jsonld';
+import { productJsonLd } from '../../data/software-jsonld';
+import {
+  editionClause,
+  FREE_TO_RUN_LINE,
+  NGINX_APT_SHORT_NBSP,
+  NGINX_RPM_SHORT,
+} from '../../data/product-facts.mjs';
+
+const rows = [
+  {
+    label: 'Deployment',
+    mps: 'Self-hosted (module + optimizer worker)',
+    other: 'Managed SaaS &mdash; rendering API served from imgix&rsquo;s edge',
+  },
+  {
+    label: 'Scope',
+    mps: 'Full HTML pipeline at the server layer (HTML, CSS, JS, images)',
+    other: 'Images only &mdash; real-time transforms via URL parameters',
+  },
+  {
+    label: 'Platform',
+    mps: 'Native module for Apache and nginx, reverse-proxy mode in front of any HTTP origin, or ASP.NET Core middleware. The IIS package ships as a signed installer on the mod_pagespeed GitHub release.',
+    other: 'Any stack &mdash; you rewrite image URLs to an imgix Source domain',
+  },
+  {
+    label: 'Pricing model',
+    mps: 'Free (Apache-2.0); paid support optional',
+    other: 'Usage-based (storage + delivery bandwidth + transforms; see vendor)',
+  },
+  {
+    label: 'Image optimization',
+    mps: `${editionClause(['WebP', 'AVIF'])} &mdash; responsive variants at origin`,
+    other:
+      'WebP, AVIF, resize, crop &mdash; rendered on imgix&rsquo;s edge (<code>auto=format</code>)',
+  },
+  {
+    label: 'Format auto-negotiation',
+    mps: 'Chosen from the request&rsquo;s <code>Accept</code> header at serve time',
+    other: 'Chosen from browser support via <code>auto=format</code> (as of 2026)',
+  },
+  {
+    label: 'Critical CSS injection',
+    mps: 'yes',
+    other: 'no',
+  },
+  { label: 'JS / CSS minification', mps: 'yes', other: 'no' },
+  {
+    label: 'HTML rewriting',
+    mps: 'yes',
+    other: 'no',
+  },
+  {
+    label: 'Caching',
+    mps: 'Cyclone cache, zero-copy mmap serving from nginx',
+    other: 'Transformed images cached on imgix&rsquo;s CDN edge',
+  },
+  {
+    label: 'CWV optimization',
+    mps: 'LCP, render-blocking, image bytes; CLS from unsized images',
+    other: 'LCP via lighter images; CSS/JS/HTML untouched',
+  },
+  {
+    label: 'Measured page-size reduction',
+    mps: '<span class="font-mono tabular-nums font-semibold text-success">&minus;68%</span> on our own pages (full server-layer pipeline)',
+    other: 'Image-byte savings only; depends on how image-heavy the page is',
+    highlight: true,
+  },
+  {
+    label: 'License',
+    mps: 'Licensed under the Apache License&nbsp;2.0. The software is free. We sell support; the software and its signed packages are the same for everyone. See the <a href="/license/" class="text-interactive hover:text-interactive-hover underline">software license</a>.',
+    other: 'Proprietary SaaS',
+  },
+  {
+    label: 'Control over data',
+    mps: 'Your servers; nothing leaves your origin',
+    other: 'Source images egress to imgix and are served from imgix&rsquo;s edge',
+  },
+  {
+    label: 'Configuration surface',
+    mps: 'nginx config + management endpoint',
+    other: 'imgix dashboard + URL parameters',
+  },
+];
+
+const jsonLd = [
+  await productJsonLd({
+    image: OG_DEFAULT_IMAGE_URL,
+    description:
+      'imgix is a managed real-time image CDN: your images egress to and are served from imgix’s edge, billed by usage. mod_pagespeed runs at your origin and optimizes the whole HTML pipeline — CSS, JS, and images — without your images leaving your servers.',
+    offers: offerJsonLd({ url: 'https://modpagespeed.com/pricing/' }),
+  }),
+];
+---
+
+<BaseLayout
+  title="mod_pagespeed vs imgix: full HTML pipeline vs an image CDN"
+  description="The self-hosted imgix alternative. imgix is a managed image CDN; mod_pagespeed optimizes images, CSS, JS and HTML at your origin. No SaaS, no usage bill."
+  jsonLd={jsonLd}
+>
+  <PageHero id="imgix-title" width="prose" class="max-w-3xl" title="mod_pagespeed vs imgix">
+    <nav slot="before" class="mb-6 text-small text-text-annotation" aria-label="Breadcrumb">
+      <a href="/" class="hover:text-text-body">
+        Home
+      </a>
+      <span class="mx-1">/</span>
+      <a href="/alternatives/" class="hover:text-text-body">
+        Alternatives
+      </a>
+      <span class="mx-1">/</span>
+      <span>vs imgix</span>
+    </nav>
+  </PageHero>
+
+  <article class="container-prose max-w-3xl pb-16">
+    <section>
+      <h2 class="h2-section text-text-body">TL;DR</h2>
+      <p class="mt-4 text-text-body">
+        imgix is a managed real-time image CDN. You point it at your image storage, rewrite image
+        URLs to an imgix domain, and it fetches, transforms, and serves each image from its own edge
+        &mdash; resizing, cropping, and converting to WebP or AVIF on the fly via URL parameters.
+        mod_pagespeed is a self-hosted pipeline that runs at the server layer and optimizes the
+        whole page the origin emits &mdash; HTML, CSS, and JavaScript as well as images &mdash;
+        without any asset leaving your servers. If you want a hosted image-rendering API and
+        don&rsquo;t mind the dependency and per-usage cost, imgix is a strong fit. If you want one
+        self-hosted optimization layer that covers more than images and is free instead of billing
+        per usage, mod_pagespeed is the architectural alternative.
+      </p>
+    </section>
+
+    <section class="mt-12">
+      <h2 id="at-a-glance" class="h2-section text-text-body">
+        At a glance
+      </h2>
+      <div class="mt-4">
+        <CompareTable competitor="imgix" rows={rows} labelledBy="at-a-glance" />
+      </div>
+    </section>
+
+    <section class="mt-12">
+      <h2 class="h2-section text-text-body">When to choose imgix</h2>
+      <ul class="mt-4 space-y-2 list-disc pl-6 text-text-body">
+        <li>
+          You want a hosted image-rendering API and don&rsquo;t want to run or scale an image
+          pipeline yourself. imgix handles fetch, transform, and edge delivery as a service.
+        </li>
+        <li>
+          Your application generates image transforms on demand &mdash; arbitrary crops, sizes, and
+          effects driven by URL parameters &mdash; and you want that logic in the URL rather than in
+          a build step.
+        </li>
+        <li>
+          Your images already live in cloud storage (S3, Google Cloud Storage, Azure) and you want a
+          pull-based CDN in front of them without changing where they&rsquo;re stored.
+        </li>
+        <li>
+          You want global image delivery from an edge network out of the box, and a usage-based bill
+          is acceptable for your traffic profile.
+        </li>
+        <li>
+          Your performance problem is mostly image weight, not render-blocking CSS/JS, so an
+          image-only tool covers the bulk of it.
+        </li>
+      </ul>
+    </section>
+
+    <section class="mt-12">
+      <h2 class="h2-section text-text-body">When to choose mod_pagespeed</h2>
+      <ul class="mt-4 space-y-2 list-disc pl-6 text-text-body">
+        <li>
+          You want one optimization layer for the whole page, not just images. imgix does not touch
+          HTML, CSS, or JavaScript; mod_pagespeed minifies and rewrites those and extracts critical
+          CSS too.
+        </li>
+        <li>
+          You don&rsquo;t want your images to leave your origin. With imgix, source images egress to
+          the service and are served from its edge; with mod_pagespeed, optimization happens at your
+          server and nothing leaves it.
+        </li>
+        <li>
+          You prefer no per-request or per-GB bill at all over a usage-based bill that scales with
+          delivery bandwidth, stored images, and transform volume. mod_pagespeed is free under the
+          Apache License 2.0, on any number of servers; see{' '}
+          <a href="/pricing/" class="text-interactive hover:text-interactive-hover underline">
+            pricing
+          </a>{' '}
+          for optional support plans.
+        </li>
+        <li>
+          You want to avoid a third-party dependency in the request path for image delivery, keeping
+          the optimization layer inside infrastructure you control.
+        </li>
+        <li>
+          You care about origin-side image variant generation &mdash; WebP and AVIF &mdash; and want
+          the format chosen from the request&rsquo;s
+          <code>Accept</code> header at serve time, on your own server.
+        </li>
+      </ul>
+    </section>
+
+    <section class="mt-12">
+      <h2 class="h2-section text-text-body">How they overlap</h2>
+      <p class="mt-4 text-text-body">
+        The overlap is image optimization. Both convert images to WebP and AVIF, resize and crop
+        them, and choose a modern format based on what the browser supports. For a page whose only
+        performance problem is heavy images, the two cover similar ground &mdash; one from a managed
+        edge, one from your own server.
+      </p>
+      <p class="mt-4 text-text-body">
+        The difference is scope and location. imgix is image-only and runs as a service in front of
+        your storage; mod_pagespeed also handles CSS, JS, and HTML, and runs at your origin. Render-
+        blocking stylesheets and unminified scripts are outside imgix&rsquo;s remit entirely.
+      </p>
+      <p class="mt-4 text-text-body">
+        There&rsquo;s also an axis a remote image CDN doesn&rsquo;t touch at all: the HTML itself.
+        Because mod_pagespeed rewrites markup at your origin, origin-side HTML rewriting and lighter
+        markup improve what crawlers and AI agents actually see &mdash; the document they parse, not
+        just the images on it. imgix never sees that document. See{' '}
+        <a href="/ai-readability/" class="text-interactive hover:text-interactive-hover underline">
+          AI readability
+        </a>{' '}
+        for where that line of work is headed.
+      </p>
+      <p class="mt-4 text-text-body">
+        You can also run them together: imgix for image delivery, mod_pagespeed for the rest of the
+        HTML pipeline. They don&rsquo;t conflict if mod_pagespeed&rsquo;s image filters are scoped
+        to assets imgix isn&rsquo;t already serving. Most operators pick one.
+      </p>
+    </section>
+
+    <section class="mt-12">
+      <h2 id="migrating-from-imgix-to-modpagespeed" class="h2-section text-text-body">
+        Migrating from imgix to mod_pagespeed
+      </h2>
+      <p class="mt-4 text-text-body">
+        Migration is reasonable if your performance work has grown beyond images into CSS/JS/HTML,
+        if you want{' '}
+        <a
+          href="/blog/self-hosted-image-optimization/"
+          class="text-interactive hover:text-interactive-hover underline"
+        >
+          self-hosted image optimization
+        </a>{' '}
+        that keeps images on your own origin rather than egressing them to a service, or if a
+        usage-based bill has become unpredictable and you&rsquo;d prefer no bill at all.
+      </p>
+      <p class="mt-4 text-text-body">
+        mod_pagespeed is the better fit when the optimization layer needs to cover the whole page,
+        stay inside infrastructure you control, and cost nothing to run rather than billing per byte
+        delivered.
+      </p>
+      <p class="mt-4 text-text-body">If you do migrate:</p>
+      <ol class="mt-3 space-y-2 list-decimal pl-6 text-text-body">
+        <li>
+          Rewrite image URLs from your imgix Source domain back to your own origin paths, so nginx
+          serves and optimizes them in place.
+        </li>
+        <li>
+          Enable mod_pagespeed&rsquo;s image filters to reproduce the transforms you relied on
+          &mdash; format conversion and responsive variants. Per-request crops and effects encoded
+          in imgix URL parameters should be moved into your application&rsquo;s markup or a build
+          step, since mod_pagespeed optimizes the assets the origin emits rather than synthesizing
+          arbitrary transforms by URL.
+        </li>
+        <li>
+          Add the CSS, JS, and critical-CSS filters that imgix never provided. The{' '}
+          <a
+            href="/blog/server-side-critical-css-nginx/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            server-side critical CSS in nginx
+          </a>{' '}
+          post walks through that setup.
+        </li>
+        <li>
+          Decide how to handle edge delivery. mod_pagespeed optimizes at your origin; if you still
+          want global distribution, put a general-purpose CDN in front of nginx &mdash; it caches
+          the already-optimized responses.
+        </li>
+      </ol>
+    </section>
+
+    <section class="mt-12">
+      <h2 class="h2-section text-text-body">Code &amp; config side-by-side</h2>
+      <p class="mt-4 text-text-body">
+        <strong>Auto-formatting an image in imgix</strong>: rewrite the image URL to your imgix
+        Source domain and add the transform parameters &mdash; for example
+        <code>https://your-source.imgix.net/photo.jpg?auto=format&amp;w=800</code>. imgix fetches
+        the original from your storage, renders the variant, and serves it from its edge.
+      </p>
+      <p id="config-1" class="mt-4 text-text-body">
+        <strong>
+          Equivalent in{' '}
+          <a href="/" class="text-interactive hover:text-interactive-hover underline">
+            mod_pagespeed
+          </a>
+          .
+        </strong>{' '}
+        Install the nginx module on {NGINX_APT_SHORT_NBSP} (amd64 + arm64), or
+        AlmaLinux/RHEL/Rocky&nbsp;{NGINX_RPM_SHORT}:
+      </p>
+      <pre
+        tabindex="0"
+        role="region"
+        aria-labelledby="config-1"
+        class="mt-3 overflow-x-auto rounded bg-bg-secondary p-4 text-sm sm:text-xs leading-snug text-text-body"
+      ><code>curl -fsSL https://packages.modpagespeed.com/install.sh | sudo sh
+sudo apt install nginx-module-pagespeed   # or: sudo dnf install nginx-module-pagespeed</code></pre>
+      <p id="config-2" class="mt-4 text-text-body">
+        Then enable the image filters (nginx config; applies to images on your own origin, with no
+        URL rewriting and no third-party service in the path):
+      </p>
+      <pre
+        tabindex="0"
+        role="region"
+        aria-labelledby="config-2"
+        class="mt-3 overflow-x-auto rounded bg-bg-secondary p-4 text-sm sm:text-xs leading-snug text-text-body"
+      ><code>pagespeed on;
+pagespeed RewriteLevel CoreFilters;
+pagespeed EnableFilters convert_jpeg_to_webp,recompress_images,resize_images,prioritize_critical_css;
+pagespeed FileCachePath /var/cache/pagespeed;</code></pre>
+      <p class="mt-4 text-text-body">
+        Both serve a modern image format negotiated for the browser. The difference is where it
+        happens &mdash; imgix&rsquo;s edge, or your own server &mdash; and that mod_pagespeed also
+        minifies CSS/JS and extracts critical CSS in the same pass.
+      </p>
+    </section>
+
+    <section class="mt-12">
+      <div class="rounded-card border border-border bg-bg-secondary p-6 md:p-7">
+        <h2 class="h2-section text-text-body">Switching from imgix</h2>
+        <p class="mt-3 text-text-body">
+          One self-hosted pipeline for images, CSS, JS, and HTML &mdash; with nothing egressing to a
+          third-party edge. On our own pages it measures
+          <span class="font-mono tabular-nums font-semibold text-success">&minus;68%</span> page
+          size. Install and run it. {FREE_TO_RUN_LINE}
+        </p>
+        <div class="mt-5 flex flex-wrap gap-3">
+          <a href="/download/" class="btn-primary" data-umami-event="cta_vs_imgix_install">
+            Download &amp; run
+          </a>
+          <a
+            href="/pricing/"
+            class="rounded-md border border-border-strong px-4 py-2 text-sm font-medium text-text-body hover:border-border-strong"
+            data-umami-event="cta_vs_imgix_buy"
+          >
+            Support pricing
+          </a>
+          <a
+            href="#migrating-from-imgix-to-modpagespeed"
+            class="rounded-md border border-border-strong px-4 py-2 text-sm font-medium text-text-body hover:border-border-strong"
+            data-umami-event="cta_vs_imgix_migrate"
+          >
+            See the migration steps &rarr;
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <section class="mt-12 border-t border-border pt-8">
+      <p class="text-base font-semibold uppercase tracking-wide text-text-body">See also:</p>
+      <ul class="mt-4 space-y-2 text-sm">
+        <li>
+          <a
+            href="/alternatives/shortpixel/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            mod_pagespeed vs ShortPixel
+          </a>{' '}
+          &mdash; another image-optimization alternative
+        </li>
+        <li>
+          <a
+            href="/alternatives/cloudinary/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            mod_pagespeed vs Cloudinary
+          </a>{' '}
+          &mdash; managed media CDN alternative
+        </li>
+        <li>
+          <a
+            href="/alternatives/imgproxy/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            mod_pagespeed vs imgproxy
+          </a>{' '}
+          &mdash; self-hosted image-proxy alternative
+        </li>
+        <li>
+          <a
+            href="/self-hosted-image-optimization/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            Self-hosted image optimization
+          </a>{' '}
+          &mdash; the origin-side alternative to a hosted image CDN
+        </li>
+        <li>
+          <a
+            href="/alternatives/mod-pagespeed/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            Alternatives to mod_pagespeed
+          </a>{' '}
+          &mdash; for readers searching for a mod_pagespeed replacement
+        </li>
+      </ul>
+    </section>
+
+    <p class="mt-10 text-xs text-text-annotation">
+      imgix and other product names are trademarks of their respective owners. Comparisons reflect
+      publicly available information as of 2026 and are provided for evaluation; We-Amp B.V. is not
+      affiliated with or endorsed by imgix.
+    </p>
+  </article>
+</BaseLayout>

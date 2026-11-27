@@ -1,0 +1,31 @@
+{
+  "_comment": [
+    "How the optimizer makes a stylesheet non-render-blocking, in one place.",
+    "The deferred <link> ships as rel=\"preload\" as=\"style\", with the real media",
+    "parked in data-pagespeed-media; the loader flips rel back to \"stylesheet\"",
+    "and restores the media. Both lanes read this file — the markup lane through",
+    "conftest.py, the rendered lane through probe_rendered.mjs — so the lanes",
+    "RECORD the primitive rather than hardcoding it.",
+    "primitive_attr/primitive_value is the ONE attribute the rendered lane sets",
+    "to put an applied sheet back to not-applying (rel=preload un-applies a",
+    "stylesheet, as media=print did). primitive_as is the companion attribute:",
+    "the markup lane asserts it, and it is what makes the preload match the",
+    "consumer the loader creates — without it the sheet downloads twice.",
+    "early_hint_promoted is true: the primitive is itself a preload, so an Early",
+    "Hint promotes exactly what the transform promoted.",
+    "critical_block_marker is the inlined critical <style>. It is placed BEFORE",
+    "the first stylesheet source, so the deferred sheet, once the",
+    "loader applies it, wins every same-specificity tie against the block; the",
+    "markup lane asserts that order."
+  ],
+  "deferred_link_marker": "data-pagespeed-async",
+  "loader_marker": "data-pagespeed-async-loader",
+  "fallback_marker": "data-pagespeed-async-fallback",
+  "critical_block_marker": "data-pagespeed-critical",
+  "saved_media_attr": "data-pagespeed-media",
+  "primitive_attr": "rel",
+  "primitive_value": "preload",
+  "primitive_as": "style",
+  "early_hint_promoted": true,
+  "fixture_stylesheet_path": "/_astro/BaseLayout.BV5EQjYn.css"
+}

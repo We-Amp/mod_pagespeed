@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# File contexts for the pagespeed-optimizer SELinux policy.  DRAFT — see
+# the status header in pagespeed-optimizer.te; not installed by any
+# package yet.
+
+/usr/bin/pagespeed-optimizer                --  gen_context(system_u:object_r:pagespeed_exec_t,s0)
+
+/var/cache/pagespeed-optimizer(/.*)?            gen_context(system_u:object_r:pagespeed_cache_t,s0)
+
+/run/pagespeed-optimizer(/.*)?                  gen_context(system_u:object_r:pagespeed_runtime_t,s0)

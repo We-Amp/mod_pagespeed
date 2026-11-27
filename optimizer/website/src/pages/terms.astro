@@ -1,0 +1,473 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import PageHero from '../components/PageHero.astro';
+import {
+  PRODUCT_NAME,
+  V1_LINE,
+  V2_LINE,
+  VENDOR,
+  COMPANY_KVK,
+  SOURCE_PUBLICATION,
+  LICENSING_TERMS_URL,
+  COMMERCIAL_EMAIL,
+  SUPPORT_TIERS,
+  RESPONSE_TARGETS_LINE,
+  tierTarget,
+} from '../data/product-facts.mjs';
+
+// The effective date and the "Version YYYY-MM[-DD]" literal in the
+// markup below must stay in lockstep with TERMS_VERSION_WEB in
+// src/pages/pricing.astro (the pricing page's terms stamp) —
+// test/sync/terms-version-sync.test.ts guards it.
+const PRODUCT = `${PRODUCT_NAME}`;
+const LICENSE = SOURCE_PUBLICATION.license;
+// Each tier's first-response target comes through the shared tierTarget
+// helper, the same text the support and pricing pages show; never restate it.
+// test/sync/support-targets-sync.test.ts guards it.
+const SUPPORT_TARGETS = SUPPORT_TIERS.filter((t) => t.kind === 'support')
+  .map((t) => `${t.name}: ${tierTarget(t).replace(/\.$/, '')}.`)
+  .join(' ');
+---
+
+<BaseLayout
+  title="Terms of service — mod_pagespeed"
+  description={`Terms for modpagespeed.com, the package repositories and support subscriptions; the software is licensed under the ${LICENSE}. Run by ${VENDOR}`}
+>
+  <PageHero title="Terms of Service" size="utility" width="prose">
+    <p class="mt-4 text-small text-text-annotation">
+      Effective date: 16 November 2026 &middot; Version 2026-11-16
+    </p>
+    <p class="lede mt-6 max-w-2xl">
+      These terms are written in plain language. If something is unclear, email
+      <a
+        href="mailto:info@we-amp.com"
+        class="text-interactive hover:text-interactive-hover underline"
+      >
+        info@we-amp.com
+      </a>{' '}
+      and we will clarify.
+    </p>
+  </PageHero>
+
+  <section class="container-prose pb-16">
+    <div class="space-y-10">
+      <!-- Scope -->
+      <div>
+        <h2 class="text-2xl font-bold text-text-body">What these terms cover</h2>
+        <p class="mt-4 text-text-muted">
+          {VENDOR}, a company registered in the Netherlands (KvK
+          <span class="font-mono">{COMPANY_KVK}</span>) and based in Castricum, operates
+          modpagespeed.com and the services around {PRODUCT} and its predecessor lines. These terms
+          govern your use of:
+        </p>
+        <ul class="mt-2 list-disc list-inside text-text-muted space-y-1">
+          <li>the websites we operate for the product, and the tools on them;</li>
+          <li>
+            the free public package repository at
+            <code class="font-mono text-sm">packages.modpagespeed.com</code>; and
+          </li>
+          <li>support subscriptions.</li>
+        </ul>
+        <p class="mt-2 text-text-muted">
+          They apply from the moment you use one of these services. If you use them on behalf of a
+          company or other organization, you confirm that you are authorized to bind it, and
+          &ldquo;you&rdquo; means that organization. These terms do not govern the software itself
+          &mdash; the next section explains what does.
+        </p>
+      </div>
+
+      <!-- Software license -->
+      <div>
+        <h2 class="text-2xl font-bold text-text-body">The software license</h2>
+        <p class="mt-4 text-text-muted">
+          The software &mdash; {PRODUCT}, and the predecessor lines mod_pagespeed {V1_LINE} and
+          ModPageSpeed
+          {V2_LINE} &mdash; is licensed under the {LICENSE}. That license, not these terms, governs
+          your rights to install, run, copy, modify and redistribute the software. It applies to
+          every artifact we publish, including any build or backport we make for a customer, which
+          we publish for everyone when we deliver it.
+        </p>
+        <p class="mt-2 text-text-muted">
+          Nothing in these terms narrows the rights the {LICENSE} grants you. Where these terms and
+          that license appear to conflict about the software, the license prevails. The license text
+          is on the
+          <a href="/license/" class="text-interactive hover:text-interactive-hover underline">
+            license page
+          </a>{' '}
+          and ships with every package. Third-party components inside the software remain under
+          their own licenses, listed in the packages.
+        </p>
+        <p class="mt-2 text-text-muted">
+          mod_pagespeed is an open-source project originally developed at Google. {PRODUCT} is
+          developed by {VENDOR} and is not affiliated with or endorsed by Google.
+        </p>
+      </div>
+
+      <!-- Free public channel -->
+      <div>
+        <h2 class="text-2xl font-bold text-text-body">The free public packages</h2>
+        <p class="mt-4 text-text-muted">
+          The signed packages at
+          <code class="font-mono text-sm">packages.modpagespeed.com</code> are free of charge for
+          everyone, for any number of servers, in development and in production. The repository is
+          public: no account is needed and none is offered, and we do not ask you to register before
+          you install. Every package is signed so you can verify what you install.
+        </p>
+        <p class="mt-2 text-text-muted">
+          We run the public repository on a best-effort basis. We aim to keep it available and to
+          keep its packages current, but we do not promise uptime, a release schedule, or continued
+          publication of any particular package, and we may reorganize the repository with
+          reasonable notice on this site. The software in it comes with the warranty terms of the{' '}
+          {LICENSE}
+          &mdash; that is, as-is, without warranty &mdash; and these terms add none.
+        </p>
+      </div>
+
+      <!-- Subscriptions -->
+      <div>
+        <h2 class="text-2xl font-bold text-text-body">Subscriptions</h2>
+        <p class="mt-4 text-text-muted">
+          We sell support subscriptions, in three tiers: Standard, Priority and Enterprise. Support
+          comes from the people who build the product: a direct channel, first-response targets for
+          configuration, upgrade and incident questions, and advance notice of security releases.
+          What each tier includes, its price and its first-response target are published on the
+          <a href="/support/" class="text-interactive hover:text-interactive-hover underline">
+            support
+          </a>{' '}
+          and
+          <a href="/pricing/" class="text-interactive hover:text-interactive-hover underline">
+            pricing
+          </a>{' '}
+          pages; the scope and contact channel of your subscription are set out in your order.
+        </p>
+        <p class="mt-2 text-text-muted">
+          Everything we sign and attest is the same for every user, with or without a subscription:
+          the apt and yum repositories are GPG-signed, release assets are listed with their
+          checksums in a SHA256SUMS file, an SPDX software bill of materials (SBOM) is published in
+          the source tree, and the container images on GHCR are signed with keyless cosign and carry
+          SBOM and build-provenance attestations. Security fixes reach every user at the same time,
+          through the public channels.
+        </p>
+        <p class="mt-4 text-text-muted">
+          <strong>What a subscription grants.</strong> For its term, a subscription gives you the
+          support services of your tier and your order. It adds nothing to, and takes nothing from,
+          your rights in the software under the {LICENSE}.
+        </p>
+        <p class="mt-2 text-text-muted">
+          <strong>What a subscription does not do.</strong> A subscription covers support. The
+          software itself is the same for everyone and behaves the same with or without one. A
+          subscription grants no rights in the software beyond the {LICENSE}, and it does not make
+          us responsible for your deployment (see
+          <em>Your responsibilities</em>).
+        </p>
+        <p class="mt-2 text-text-muted">
+          <strong>How support works.</strong> Support is by email to the support address we give you
+          when your subscription starts, unless your agreement names another channel. Our replies
+          carry a ticket number in the subject; keep it when you write back. Software helps us sort
+          tickets and prepare a first draft, but every reply is read and approved by a person at
+          We-Amp before it is sent. If you report a problem as production down (severity 1), only a
+          person can lower that rating. The first-response targets are as follows. {SUPPORT_TARGETS}
+          {RESPONSE_TARGETS_LINE} The We-Amp support terms at
+          <a
+            href={LICENSING_TERMS_URL}
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            we-amp.com/licensing/
+          </a>{' '}
+          apply alongside these terms, and the privacy notice at
+          <a
+            href="https://we-amp.com/privacy/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            we-amp.com/privacy/
+          </a>{' '}
+          describes how we handle support mail.
+        </p>
+        <p class="mt-2 text-text-muted">
+          <strong>Advance notices of security releases.</strong> If your tier includes advance
+          notice, we email the security contact named in your order, or the address you ordered with
+          if none is named, before a planned security release. A notice gives the planned public
+          date, the severity band, the affected versions and the impact class. It carries no patch,
+          binary, mitigation or technical detail. A notice is not a security update: the release,
+          and the public advisory with any mitigation, reach every user at the same time through the
+          public channels. A public security advisory is not an advance notice. A notice is planning
+          information, not a promise: the date, the severity band and the affected versions can
+          change, and we send an updated notice if they do. We do not promise a fixed lead time. You
+          can change your security contact by email to your support address.
+        </p>
+        <p class="mt-2 text-text-muted">
+          A notice is confidential until the release is public. Share it only with people in your
+          organization, including its contractors, who need it to plan the update. You may also
+          share it in confidence with your auditors and security advisers, and with a CSIRT or a
+          competent authority. If you subscribe as an individual, share it only with the people who
+          help you run your servers. You are responsible for the people in your organization and the
+          contractors, auditors and advisers you share a notice with keeping it confidential. A
+          notice stops being confidential when the release is public, when we publish its contents,
+          or when they otherwise become public through no fault of yours. This duty continues after
+          your subscription ends, until the release is public. Nothing here stops you from making a
+          disclosure the law requires, such as a report to a public authority or under a court
+          order.
+        </p>
+        <p class="mt-2 text-text-muted">
+          If a notice is shared in breach of these terms, we may stop sending you advance notices;
+          our other rights under these terms are not affected. We do not hold a release back to send
+          a notice: when a vulnerability is already exploited or public, the notice goes out when
+          the release is published. If the law or a competent authority requires it, we may stop
+          sending advance notices, or send them when the release is published; we tell you if we do.{' '}
+          <em>Warranty and liability</em> applies to advance notices. These terms for advance
+          notices also apply to the vulnerability notifications timed to the EU Cyber Resilience Act
+          reporting windows that some tiers include.
+        </p>
+        <p class="mt-2 text-text-muted">
+          <strong>Ordering and payment.</strong> Prices are published on the
+          <a href="/pricing/" class="text-interactive hover:text-interactive-hover underline">
+            pricing page
+          </a>
+          . Standard and Priority subscriptions are bought at checkout from FastSpring, the merchant
+          of record; FastSpring processes the payment, and its terms govern the payment and refunds.
+          Enterprise subscriptions are invoiced by {VENDOR} directly.
+        </p>
+        <p class="mt-2 text-text-muted">
+          <strong>VAT.</strong> Prices exclude VAT. At checkout, FastSpring charges the VAT that
+          applies to you; a business in the EU can enter its VAT number there. On an invoice from
+          {VENDOR}: customers in the Netherlands are charged 21% BTW; for business customers
+          elsewhere in the EU with a valid VAT number, VAT is reverse charged (&ldquo;BTW
+          verlegd&rdquo;, Art. 6 Wet OB 1968 / Art. 44 Directive 2006/112/EC); for business
+          customers outside the EU, including the United Kingdom, the service is outside the scope
+          of Dutch VAT.
+        </p>
+        <p class="mt-2 text-text-muted">
+          <strong>Term, renewal and cancellation.</strong> Subscriptions run for one year and renew
+          automatically each year unless you cancel before the renewal date. For a subscription
+          bought at checkout, FastSpring emails you a reminder one month before the renewal date.
+          You can cancel at any time; cancellation takes effect at the end of the current term (for
+          consumers, see below). Apart from refunds under FastSpring&rsquo;s terms for a checkout
+          purchase and those mandatory law requires, fees already paid are not refunded, except for
+          the pro-rata refunds described under <em>Circumstances beyond our control</em> and
+          <em>Changes to these terms</em>. Where an order form or subscription agreement signed by{' '}
+          {VENDOR} states something different, it prevails for that subscription. We reject your own
+          general or purchasing terms; they do not apply, even if an order refers to them. The
+          <a
+            href={LICENSING_TERMS_URL}
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            We-Amp support terms
+          </a>{' '}
+          apply alongside these terms.
+        </p>
+        <p class="mt-2 text-text-muted">
+          <strong>Consumers (EU/EEA).</strong> If you are a consumer, you have a 14-day right of
+          withdrawal under Directive 2011/83/EU; for a subscription bought at checkout you exercise
+          it with FastSpring, the seller. If you asked for the subscription to start within those 14
+          days and then withdraw, you pay only for the support provided until you withdraw. Once a
+          subscription has renewed automatically, you may cancel it at any time with one
+          month&rsquo;s notice (Article 6:236(j) of the Dutch Civil Code); it then ends one month
+          after your notice, and the fees paid for the period after that date are refunded pro rata.
+          Your mandatory statutory rights are unaffected.
+        </p>
+        <p class="mt-2 text-text-muted">
+          <strong>Ending a subscription.</strong> We may suspend or end a subscription if you
+          materially breach these terms or the We-Amp support terms and do not remedy the breach
+          within 14 days of our written notice. When a subscription ends, for whatever reason,
+          support ends with it. Your right to keep using, modifying and redistributing every
+          artifact you already obtained does not end: those artifacts are licensed under the{' '}
+          {LICENSE}, and nothing we do under these terms revokes that license.
+        </p>
+      </div>
+
+      <!-- Acceptable use -->
+      <div>
+        <h2 class="text-2xl font-bold text-text-body">Acceptable use of the services</h2>
+        <p class="mt-4 text-text-muted">
+          When using our websites, tools and repositories, you may not:
+        </p>
+        <ul class="mt-2 list-disc list-inside text-text-muted space-y-1">
+          <li>
+            overload, load-test, scrape or benchmark our websites, demo tools or repositories
+            without our written permission;
+          </li>
+          <li>submit sites you have no right to test to the analysis tools on this site;</li>
+          <li>use the services to attack, disrupt or overload third-party systems; or</li>
+          <li>misrepresent the origin or attestation of a build.</li>
+        </ul>
+        <p class="mt-2 text-text-muted">
+          These rules are about the services. They do not restrict what you do with the software,
+          which is governed by the {LICENSE}.
+        </p>
+      </div>
+
+      <!-- Your responsibilities -->
+      <div>
+        <h2 class="text-2xl font-bold text-text-body">Your responsibilities</h2>
+        <p class="mt-4 text-text-muted">
+          The software runs inline in your web stack and rewrites your live HTTP responses. Before
+          you deploy it to production &mdash; and before you deploy any new version, configuration
+          change or filter to production &mdash; you agree to:
+        </p>
+        <ul class="mt-2 list-disc list-inside text-text-muted space-y-1">
+          <li>
+            <strong>Test it first</strong> in a staging or non-production environment that mirrors
+            your production setup, and confirm it behaves as you expect.
+          </li>
+          <li>
+            <strong>Keep your own backups</strong> and a tested <strong>rollback plan</strong>, so
+            you can disable the software or revert your configuration quickly.
+          </li>
+          <li>
+            <strong>Configure the software correctly</strong> for your environment and keep it
+            reasonably up to date.
+          </li>
+        </ul>
+        <p class="mt-2 text-text-muted">
+          You are responsible for your server configuration, your content and your deployment
+          decisions. Roll out gradually &mdash; for example, to a subset of traffic &mdash; and
+          monitor before a full rollout. Loss that results from deploying without testing, from
+          misconfiguration, or from missing backups or a rollback plan is attributable to you and
+          reduces our liability accordingly.
+        </p>
+      </div>
+
+      <!-- Warranty and liability -->
+      <div>
+        <h2 class="text-2xl font-bold text-text-body">Warranty and liability</h2>
+        <p class="mt-4 text-text-muted">
+          <strong>The software.</strong> The software is provided under the {LICENSE} on an
+          &ldquo;as is&rdquo; basis, without warranties or conditions of any kind. The license says
+          so, and these terms add no warranty on top of it.
+        </p>
+        <p class="mt-2 text-text-muted">
+          <strong>The services.</strong> We perform support with reasonable skill and care, and we
+          aim to respond within your tier&rsquo;s first-response targets. We do not warrant that
+          support will resolve every issue, or that any artifact we publish is free of defects or
+          vulnerabilities: signatures, checksums, SBOMs and attestations describe where an artifact
+          came from and what went into it, not that it is defect-free. The free services are
+          provided as-is.
+        </p>
+        <p class="mt-2 text-text-muted">
+          The rest of this section applies to business customers. If you are a consumer in the
+          EU/EEA, see <em>Consumers</em> at the end of this section &mdash; these limits do not take
+          away your statutory rights.
+        </p>
+        <p class="mt-2 text-text-muted">
+          <strong>We are not liable for indirect or consequential loss.</strong> This includes lost
+          profits, lost revenue, lost or corrupted data, business interruption, loss of goodwill,
+          and claims made against you by third parties &mdash; whether or not we were told such loss
+          was possible.
+        </p>
+        <p class="mt-2 text-text-muted">
+          <strong>Cap on our liability.</strong> For all other loss, our total liability to you in
+          connection with these terms and the We-Amp support terms, for all claims combined, is
+          limited to the greater of (a) the total fees you paid us in the 12 months immediately
+          before the first event giving rise to a claim, or (b) &euro;500. This is an aggregate cap
+          across all claims, not a cap per claim. It applies regardless of the legal basis of the
+          claim &mdash; contract, tort (<em>onrechtmatige daad</em>), statute or otherwise.
+        </p>
+        <p class="mt-2 text-text-muted">
+          <strong>Time limit for claims.</strong> You must tell us about a claim in writing within
+          30 days of discovering the issue, and in any event within 12 months of the event that
+          caused it. After that, the claim lapses.
+        </p>
+        <p class="mt-2 text-text-muted">
+          <strong>What we never limit or exclude.</strong> Nothing in these terms limits or excludes
+          our liability for fraud; for intent (<em>opzet</em>) or deliberate recklessness
+          <span class="whitespace-nowrap">
+            (<em>bewuste roekeloosheid</em>)
+          </span>{' '}
+          of {VENDOR} or of the persons charged with its management or direction; for death or
+          personal injury caused by our negligence; or for anything else that cannot be limited or
+          excluded under applicable law.
+        </p>
+        <p class="mt-4 text-text-muted">
+          <strong>Consumers (EU/EEA).</strong> If you are a consumer, nothing in this section
+          reduces your mandatory statutory rights, including your legal warranty rights for digital
+          content and services and your 14-day right of withdrawal. None of the limits in this
+          section applies to you to the extent it would conflict with those rights.
+        </p>
+      </div>
+
+      <!-- Force majeure -->
+      <div>
+        <h2 class="text-2xl font-bold text-text-body">Circumstances beyond our control</h2>
+        <p class="mt-4 text-text-muted">
+          We are not responsible for a failure or delay in operating our websites, repositories or
+          support when it is caused by events beyond our reasonable control &mdash; for example,
+          outages at our hosting, network or payment providers, internet or infrastructure failures,
+          security incidents, natural events, or government action. While such circumstances
+          continue, our affected obligations are suspended rather than breached. If they continue
+          for more than 60 days, either you or we may end an affected subscription, and we will
+          refund any fees you have paid for the unused period.
+        </p>
+      </div>
+
+      <!-- Data -->
+      <div>
+        <h2 class="text-2xl font-bold text-text-body">Data</h2>
+        <p class="mt-4 text-text-muted">
+          The software runs on your servers, sends nothing to us, and never processes your
+          visitors&rsquo; data on our behalf. What our websites and services do with personal data,
+          and what the software does and does not send, is described in our
+          <a
+            href="https://we-amp.com/privacy/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            privacy notice
+          </a>
+          .
+        </p>
+      </div>
+
+      <!-- Changes -->
+      <div>
+        <h2 class="text-2xl font-bold text-text-body">Changes to these terms</h2>
+        <p class="mt-4 text-text-muted">
+          We may update these terms as the product, the law or our processes change. Changes that
+          affect a subscription are announced to subscribers by email at least 30 days before they
+          take effect; if you do not agree, you may cancel before that date and we will refund any
+          prepaid fees for the remaining term. Changes to the terms for the free services take
+          effect when published here. The version and date at the top of this page are updated with
+          every change.
+        </p>
+      </div>
+
+      <!-- Governing law -->
+      <div>
+        <h2 class="text-2xl font-bold text-text-body">Governing law and venue</h2>
+        <p class="mt-4 text-text-muted">
+          These terms are governed by the laws of the Netherlands. Disputes arising from these terms
+          or from your use of the services are submitted to the competent court in Amsterdam, the
+          Netherlands. If you are a consumer, you keep the right to bring a claim before the court
+          that the law designates for you.
+        </p>
+      </div>
+
+      <!-- Severability and survival -->
+      <div>
+        <h2 class="text-2xl font-bold text-text-body">Severability and survival</h2>
+        <p class="mt-4 text-text-muted">
+          If a provision of these terms (or part of one) is found invalid or unenforceable, it is
+          reduced to the minimum extent needed to make it enforceable or, if it cannot be, severed;
+          the remaining provisions stay in full force. <em>The software license</em>, the
+          confidentiality of advance notices until the release is public,{' '}
+          <em>Warranty and liability</em>, <em>Acceptable use of the services</em> and{' '}
+          <em>Governing law and venue</em> continue to apply after a subscription, these terms or
+          the We-Amp support terms end.
+        </p>
+      </div>
+
+      <!-- Contact -->
+      <div>
+        <h2 class="text-2xl font-bold text-text-body">Contact</h2>
+        <p class="mt-4 text-text-muted">
+          Questions about these terms or about a subscription go to
+          <a
+            href={`mailto:${COMMERCIAL_EMAIL}`}
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            {COMMERCIAL_EMAIL}
+          </a>
+          .
+        </p>
+      </div>
+    </div>
+  </section>
+</BaseLayout>

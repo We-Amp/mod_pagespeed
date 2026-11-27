@@ -1,0 +1,468 @@
+{
+  "cached": false,
+  "id": "0f1e2d3c4b5a",
+  "permalink": "https://modpagespeed.com/ai-readability/api/r/0f1e2d3c4b5a",
+  "badge": "https://modpagespeed.com/ai-readability/api/badge/0f1e2d3c4b5a.svg",
+  "report": {
+    "url": "https://www.example.org/",
+    "scannedAt": "2026-10-10T12:00:00.000Z",
+    "grade": "A",
+    "score": 100,
+    "categories": {
+      "Content fidelity": {
+        "score": 30,
+        "max": 30,
+        "verdict": "Content is fully present in the server HTML — readable by every AI tool, no rendering required.",
+        "flag": null,
+        "detail": {
+          "staticTextLen": 13800,
+          "renderedTextLen": 13500,
+          "fidelity": 1.02
+        }
+      },
+      "Token efficiency": {
+        "score": 20,
+        "max": 20,
+        "verdict": "Lean: ~14× HTML-to-content ratio — cheap for an agent to ingest.",
+        "detail": {
+          "bloatX": 14,
+          "rawHtmlTokens": 46200,
+          "cleanTokens": 3300
+        }
+      },
+      "Structured data": {
+        "score": 20,
+        "max": 20,
+        "verdict": "Strong machine-readable metadata (JSON-LD (Organization, WebSite, Article), Open Graph, canonical, meta description).",
+        "detail": {
+          "jsonLdTypes": ["Organization", "WebSite", "Article"]
+        }
+      },
+      "Crawler access": {
+        "score": 20,
+        "max": 20,
+        "verdict": "AI crawlers are allowed to fetch the page. robots.txt allows AI crawlers; llms.txt present.",
+        "detail": {
+          "aiBotsBlocked": [],
+          "llmsTxt": true
+        }
+      },
+      "Citation readiness": {
+        "score": 10,
+        "max": 10,
+        "verdict": "Attributable: canonical URL, title, author, date."
+      }
+    },
+    "agentActionability": {
+      "detected": false,
+      "label": "none detected",
+      "verdict": "No WebMCP tools detected. Agents can read this page but can't act on it via WebMCP, the emerging agent-tool interface now surfacing in Chrome and Lighthouse's \"agentic browsing\" audit. Early days, so optional today — but it's where agent traffic is heading.",
+      "detail": {
+        "imperative": 0,
+        "declarative": 0,
+        "manifest": false
+      }
+    },
+    "agentVerifiability": {
+      "verifiable": true,
+      "verdict": "Your origin advertises HTTP message signatures for bot authentication.",
+      "detail": {
+        "verifiable": true,
+        "aiCrawlersAllowed": ["GPTBot", "ClaudeBot"],
+        "aiCrawlersBlocked": [],
+        "exposurePct": 100,
+        "botAuthHeaders": ["signature-agent"],
+        "renderOk": true
+      }
+    },
+    "accessibility": {
+      "available": true,
+      "verdict": "No WCAG violations detected by automated checks.",
+      "detail": {
+        "total": 0,
+        "nodeTotal": 0,
+        "byImpact": {
+          "critical": 0,
+          "serious": 0,
+          "moderate": 0,
+          "minor": 0
+        },
+        "fixableInline": 0,
+        "topRules": []
+      }
+    },
+    "agentVerificationPosture": {
+      "status": "ok",
+      "posture": "none",
+      "emitsSignatureHeaders": false,
+      "signatureHeaders": {
+        "signatureInput": null,
+        "signature": null,
+        "signatureAgent": null
+      },
+      "parsedSignatureInput": null,
+      "botUaProbe": {
+        "performed": true,
+        "status": 200,
+        "wwwAuthenticate": null,
+        "returns402": false
+      },
+      "note": "Posture observed from the scanner’s own HTTP exchange only; not a measure of how many inbound agents the origin verifies (invisible from outside). No signature is cryptographically verified."
+    },
+    "signedAgentVerification": {
+      "status": "ok",
+      "classification": "no-signal",
+      "probes": {
+        "signed": {
+          "status": 200,
+          "headers": {},
+          "bodyLength": 195790
+        },
+        "broken": {
+          "status": 200,
+          "headers": {},
+          "bodyLength": 195790
+        },
+        "unsigned": {
+          "status": 200,
+          "headers": {},
+          "bodyLength": 195790
+        }
+      },
+      "evidence": [],
+      "keyid": "GBxqWscB-GOkwNXEhmWQA4SY2gWRH2Hz4dAvzRcK1gw",
+      "signatureAgent": "https://www.example.org/.well-known/http-message-signatures-directory",
+      "note": "Classification derived solely from the scanner’s own three probe exchanges (valid signature, corrupted signature, unsigned). “no-signal” does NOT mean the origin runs no verifier: observe-only verifiers are externally invisible, and an origin can only fully verify our probe if it trusts our key directory. The corrupted-signature probe is the strongest discriminator. We only report what our own three exchanges showed."
+    },
+    "provenanceSurvival": {
+      "status": "ok",
+      "imagesScanned": 2,
+      "withManifestServed": 0,
+      "strippedOnServe": 0,
+      "images": [
+        {
+          "url": "https://www.example.org/logo.svg",
+          "format": "other",
+          "servedHasManifest": false,
+          "servedMarkers": [],
+          "sourceFetched": false,
+          "sourceHasManifest": null,
+          "survival": "served-only"
+        },
+        {
+          "url": "https://www.example.org/logo-dark.svg",
+          "format": "other",
+          "servedHasManifest": false,
+          "servedMarkers": [],
+          "sourceFetched": false,
+          "sourceHasManifest": null,
+          "survival": "served-only"
+        }
+      ],
+      "note": "Detection only (JUMBF/XMP byte-scan); no manifest is validated, re-signed, or authored."
+    },
+    "sovereigntyExposure": {
+      "status": "ok",
+      "exposedFeatureCount": 0,
+      "findings": [],
+      "classifierVersion": "ws4-1",
+      "note": "Heuristic, passive observation of features that phone home to US-jurisdiction endpoints. Not legal advice or a compliance certificate."
+    },
+    "preConsentLeak": {
+      "status": "ok",
+      "verdict": "clean",
+      "blockedBy": [],
+      "thirdPartyHosts": [],
+      "thirdPartyCount": 0,
+      "trackerCount": 0,
+      "cmpDetected": {
+        "detected": false,
+        "vendor": null
+      },
+      "firstParty": ["example.org"],
+      "requestsObserved": 9,
+      "httpStatus": 200,
+      "trackerListVersion": "pcl-2",
+      "note": "Passive observation of the requests this page issued in a fresh browser (no cookies, no storage, no interaction) up to network idle. Host categories come from a maintained heuristic list; not legal advice or a compliance certificate."
+    },
+    "scriptInventory": {
+      "status": "ok",
+      "verdict": "clean",
+      "reasons": [],
+      "blockedBy": [],
+      "totals": {
+        "scripts": 6,
+        "inline": 4,
+        "inlineBytes": 5200,
+        "external": 2,
+        "firstPartyExternal": 1,
+        "thirdPartyExternal": 1,
+        "thirdPartyHosts": 1,
+        "thirdPartyWithIntegrity": 1,
+        "nonExecutable": 1
+      },
+      "scriptHosts": [
+        {
+          "host": "cdn.jsdelivr.net",
+          "party": "third",
+          "scripts": 1,
+          "withIntegrity": 1,
+          "category": "cdn",
+          "listed": true
+        }
+      ],
+      "sriMissing": [],
+      "floating": [],
+      "duplicates": [],
+      "integrityWithoutCors": 0,
+      "csp": {
+        "enforced": true,
+        "reportOnly": false,
+        "scriptSrc": true,
+        "reporting": true
+      },
+      "firstParty": ["example.org"],
+      "requestsObserved": 9,
+      "httpStatus": 200,
+      "scriptListVersion": "si-1",
+      "note": "Inventory of the script elements in this page's rendered HTML, from one fresh browser load. Scripts inside cross-origin frames and scripts that leave no element behind are not seen. Host categories come from a maintained heuristic list; not an assessment against any standard."
+    },
+    "seoDefects": {
+      "status": "ok",
+      "verdict": "clean",
+      "defects": [],
+      "counts": {
+        "total": 0,
+        "canonical": 0,
+        "hreflang": 0,
+        "title": 0,
+        "description": 0,
+        "jsonld": 0
+      },
+      "blockedBy": [],
+      "staticCompared": true,
+      "notMeasured": [],
+      "canonical": {
+        "static": {
+          "count": 1,
+          "href": "https://www.example.org/"
+        },
+        "rendered": {
+          "count": 1,
+          "href": "https://www.example.org/"
+        },
+        "header": null
+      },
+      "hreflang": {
+        "static": 0,
+        "rendered": 0,
+        "header": 0,
+        "selfReference": null,
+        "invalid": 0,
+        "xDefault": false
+      },
+      "title": {
+        "static": {
+          "count": 1,
+          "text": "Example Organisation"
+        },
+        "rendered": {
+          "count": 1,
+          "text": "Example Organisation"
+        }
+      },
+      "description": {
+        "static": {
+          "count": 1,
+          "text": "News and research from Example Organisation."
+        },
+        "rendered": {
+          "count": 1,
+          "text": "News and research from Example Organisation."
+        }
+      },
+      "jsonLd": {
+        "static": {
+          "blocks": 3,
+          "invalid": 0,
+          "types": ["Organization", "WebSite", "Article"]
+        },
+        "rendered": {
+          "blocks": 3,
+          "invalid": 0,
+          "types": ["Organization", "WebSite", "Article"]
+        },
+        "renderOnlyTypes": []
+      },
+      "robots": {
+        "static": {
+          "noindex": false,
+          "nofollow": false
+        },
+        "rendered": {
+          "noindex": false,
+          "nofollow": false
+        },
+        "header": {
+          "noindex": false,
+          "nofollow": false
+        },
+        "mismatch": false
+      },
+      "delivery": {
+        "cdn": null,
+        "server": "nginx"
+      },
+      "firstParty": ["example.org"],
+      "requestsObserved": 9,
+      "httpStatus": 200,
+      "seoRulesVersion": "seo-1",
+      "note": "Compares the head of this page as served without JavaScript with the same page after one fresh browser load. One page only: links, other language versions and titles on other pages are not checked. Not a ranking assessment."
+    },
+    "responseExposure": {
+      "status": "ok",
+      "verdict": "clean",
+      "reasons": [],
+      "blockedBy": [],
+      "staticScanned": true,
+      "notMeasured": [],
+      "leaks": [],
+      "tells": [],
+      "endOfLife": [],
+      "pagespeed": null,
+      "headers": {
+        "https": true,
+        "present": ["hsts", "nosniff", "framing"],
+        "missing": [],
+        "csp": "enforced",
+        "referrerPolicy": true,
+        "permissionsPolicy": true
+      },
+      "delivery": {
+        "cdn": null,
+        "server": "nginx"
+      },
+      "firstParty": ["example.org"],
+      "requestsObserved": 9,
+      "httpStatus": 200,
+      "responseRulesVersion": "rx-1",
+      "note": "Reads the response headers and the HTML of this page as served, without and with JavaScript, from one fresh load. One page only. Error output is matched by fixed patterns and not shown. End-of-life dates are the upstream projects' published dates; a distribution or host may still patch older versions. Not a security assessment."
+    },
+    "ghostLayer": {
+      "detected": true,
+      "count": 2,
+      "byTechnique": {
+        "clipped": 1,
+        "off-viewport": 1
+      },
+      "verdict": "Found 5 elements that a person effectively cannot see but an AI agent still reads (clipped to nothing, pushed off-screen). On your own site this is usually leftover, mis-styled, or third-party-injected content worth reviewing — agents weight it the same as visible copy.",
+      "viewport": {
+        "width": 1280,
+        "height": 720,
+        "dpr": 1
+      },
+      "truncated": false,
+      "nodes": [
+        {
+          "technique": "clipped",
+          "label": "Clipped to nothing",
+          "gloss": "A clip / clip-path / zero-size overflow crops the text out of view while it stays in the DOM for agents.",
+          "selector": "html#html-root > body.min-h-screen.flex > a.sr-only.focus:not-sr-only",
+          "rect": {
+            "x": -1,
+            "y": -1,
+            "width": 1,
+            "height": 1
+          },
+          "textSample": "Skip to main content",
+          "computed": {
+            "reason": "clip-path collapses painted area to ~0"
+          }
+        },
+        {
+          "technique": "clipped",
+          "label": "Clipped to nothing",
+          "gloss": "A clip / clip-path / zero-size overflow crops the text out of view while it stays in the DOM for agents.",
+          "selector": "div.readout > div.readout-row > p.readout-value.display-num > span.sr-only",
+          "rect": {
+            "x": 808.8,
+            "y": 213,
+            "width": 1,
+            "height": 1
+          },
+          "textSample": "to",
+          "computed": {
+            "reason": "clip-path collapses painted area to ~0"
+          }
+        }
+      ]
+    },
+    "metrics": {
+      "staticTextLen": 13800,
+      "renderedTextLen": 13500,
+      "rawHtmlTokens": 46200,
+      "cleanTokens": 3300,
+      "httpOk": true
+    },
+    "signals": {
+      "jsonLdTypes": ["Organization", "WebSite", "Article"],
+      "hasJsonLd": true,
+      "hasOG": true,
+      "canonical": true,
+      "title": "Example Organisation",
+      "metaDescription": true,
+      "author": true,
+      "published": true,
+      "modified": true
+    },
+    "access": {
+      "robotsFound": true,
+      "llmsTxt": true,
+      "aiBotsBlocked": [],
+      "webmcpManifest": false,
+      "webmcpManifestTools": 0
+    },
+    "webmcp": {
+      "imperative": [],
+      "declarative": 0,
+      "declarativeNames": [],
+      "manifest": false,
+      "manifestTools": 0
+    },
+    "diff": {
+      "staticMarkdown": "# Northwind Outfitters\n\nGear for the trail.\n\n## Featured\n\n- Trail pack 40L\n- Merino base layer\n- Ultralight shelter\n\n## Why Northwind\n\nRepair and resale programme, free returns for 60 days.",
+      "renderedMarkdown": "# Northwind Outfitters\n\nGear for the trail.\n\n## Featured\n\n- Trail pack 40L\n- Merino base layer\n- Ultralight shelter\n\n## Why Northwind\n\nRepair and resale programme, free returns for 60 days.",
+      "staticCleanTokens": 3250,
+      "renderedCleanTokens": 3300
+    },
+    "renderError": null,
+    "staticError": null,
+    "agentSignals": {
+      "status": "ok",
+      "rulesVersion": "as-1",
+      "verdict": "ready",
+      "markdown": {
+        "probed": true,
+        "httpStatus": 200,
+        "contentType": "text/markdown; charset=utf-8",
+        "negotiated": true,
+        "vary": "Accept",
+        "varyAccept": true,
+        "xMarkdownTokens": 540
+      },
+      "contentSignals": {
+        "robotsFetched": true,
+        "present": false,
+        "lines": [],
+        "signals": {},
+        "unknown": []
+      },
+      "link": {
+        "present": false,
+        "rels": [],
+        "markdownAlternate": false
+      },
+      "note": null
+    }
+  }
+}

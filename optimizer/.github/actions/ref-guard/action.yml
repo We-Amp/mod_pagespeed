@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# Refuses the release pipelines on any ref but main and release tags whose
+# commit is on main, and on any event but the allowed ones.
+# Logic: tools/ci/ref_guard.sh. Rule: docs/ci/release.md.
+# Call after a checkout of main with fetch-depth 0 and tags (the guard code is
+# then main's, never the tree being released); see pipeline-release-*.yml.
+name: ref-guard
+description: Fail unless the ref is main or an allowed release tag (and, for dispatch, the tag is on main).
+inputs:
+  tag-glob:
+    description: Allowed tag glob; empty means main only.
+    default: 'v*'
+  dispatch-tag:
+    description: workflow_dispatch tag input to verify (omit when the workflow has none).
+    default: ''
+  events:
+    description: Space-separated events allowed to run the workflow; empty means any.
+    default: ''
+outputs:
+  ref:
+    description: Ref the release jobs must check out (refs/tags/<tag> on dispatch, the pushed ref otherwise).
+    value: ${{ steps.guard.outputs.ref }}
+  sha:
+    description: Commit that ref resolves to.
+    value: ${{ steps.guard.outputs.sha }}
+runs:
+  using: composite
+  steps:
+    - id: guard
+      shell: bash
+      env:
+        ALLOWED_TAG_GLOB: ${{ inputs.tag-glob }}
+        DISPATCH_TAG: ${{ inputs.dispatch-tag }}
+        ALLOWED_EVENTS: ${{ inputs.events }}
+      run: |
+        set -euo pipefail
+        if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ -n "$ALLOWED_TAG_GLOB" ]; then
+          export INPUT_TAG="$DISPATCH_TAG"
+        fi
+        git fetch --no-tags --quiet origin '+refs/heads/main:refs/remotes/origin/main'
+        bash "$GITHUB_ACTION_PATH/../../../tools/ci/ref_guard.sh" check
+        bash "$GITHUB_ACTION_PATH/../../../tools/ci/ref_guard.sh" outputs >> "$GITHUB_OUTPUT"

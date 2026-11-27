@@ -1,0 +1,161 @@
+{
+  "about": [
+    "Exact-line exemptions for rule l-mod_pagespeed-2-shorthand in test/content-accuracy.test.ts",
+    "(owner ruling 2026-11-15: the product is \"mod_pagespeed\", or \"the current mod_pagespeed\" where",
+    "the copy contrasts it with 1.x; \"mod_pagespeed 2\" stays only where the text is history or a",
+    "record). Each entry is one line of one file, matched character for character, and must still",
+    "occur exactly once in its file; editing a listed line drops its exemption."
+  ],
+  "lines": [
+    {
+      "file": "src/content/docs/release-notes.mdx",
+      "line": "to mod_pagespeed 2 is the supported way to get all of the above.",
+      "why": "release notes: a record of what shipped, kept as published"
+    },
+    {
+      "file": "src/content/blog/ngx-pagespeed-wont-build-modern-nginx.md",
+      "line": "mod_pagespeed 2 is the maintained continuation of the open-source module — the same native, in-process nginx module, built for current distros and pinned to each distro's stock nginx. It serves from a signed apt and yum repository at `packages.modpagespeed.com`, amd64 and arm64.",
+      "why": "a dated blog post: it used the shorthand when it was published"
+    },
+    {
+      "file": "src/content/blog/search-console-ai-performance-report-vs-page-speed.md",
+      "line": "I'm an Apache PageSpeed committer: I helped build ngx_pagespeed, maintained mod_pagespeed and drove its Apache incubation, and now build its maintained continuation, mod_pagespeed 2, at We-Amp B.V., so the speed half is the half I work on. The visibility half is Google's new report, worth understanding on its own terms.",
+      "why": "a dated blog post: it used the shorthand when it was published"
+    },
+    {
+      "file": "src/content/blog/fix-inp-nginx-2026.md",
+      "line": "  - mod_pagespeed 2 (ngx_pagespeed)",
+      "why": "a dated blog post: it used the shorthand when it was published"
+    },
+    {
+      "file": "src/content/blog/fix-inp-nginx-2026.md",
+      "line": "INP is a client-side metric — it measures the latency between a user input and the next paint — so nginx itself rarely _is_ the bottleneck. What nginx controls is _what JS gets served_ and _how fast the AJAX endpoints behind the interactive widgets respond_. **mod_pagespeed 2** (`ngx_pagespeed`) runs at the nginx layer to minify, combine, and defer that JS. If your origin already serves lean JS, mod_pagespeed adds little; if it serves a typical bundled-WordPress-or-similar mess, mod_pagespeed helps a lot. This is the CMS-agnostic guide for the in-between case where the stack is custom and you want to know where to push.",
+      "why": "a dated blog post: it used the shorthand when it was published"
+    },
+    {
+      "file": "src/content/blog/single-url-cache-purge-optimizing-proxy.md",
+      "line": "description: 'Purging one URL in mod_pagespeed 2 touches more than one cache entry: the fan-out problem, the 1.x lookup-time design, and why the worker deletes now.'",
+      "why": "a dated blog post: it used the shorthand when it was published"
+    },
+    {
+      "file": "src/content/blog/migrating-from-1x.md",
+      "line": "> Written for the ModPageSpeed 2.0 line: the Docker Compose setup and the `pagespeed_*` directives below are 2.0's. On mod_pagespeed 2 a 1.13 or ngx_pagespeed configuration carries over to the native module; see [migrate from the archived Google module](/docs/migrate-from-google-mod-pagespeed/) and [migrate from ngx_pagespeed](/docs/migrate-from-ngx-pagespeed/).",
+      "why": "a dated blog post: it used the shorthand when it was published"
+    },
+    {
+      "file": "src/content/blog/fix-cls-nginx-2026.md",
+      "line": "description: 'Fix CLS on nginx sites: add width and height to img tags with ngx_pagespeed (mod_pagespeed 2), add a CSS aspect-ratio backstop, set sizes at build.'",
+      "why": "a dated blog post: it used the shorthand when it was published"
+    },
+    {
+      "file": "src/content/blog/fix-cls-nginx-2026.md",
+      "line": "  - mod_pagespeed 2 (ngx_pagespeed)",
+      "why": "a dated blog post: it used the shorthand when it was published"
+    },
+    {
+      "file": "src/content/blog/fix-cls-nginx-2026.md",
+      "line": "nginx itself is fast; CLS is what nginx _serves_, not what nginx _does_. A 0.2+ CLS on mobile with the failing element a content image missing `width`/`height` is the classic shape, and auditing every static HTML file (or every template across every generator) is a recurring tax. Rewrite `<img>` tags at the HTML layer with `insert_image_dimensions` via **mod_pagespeed 2** (`ngx_pagespeed`) and stack CSS `aspect-ratio` as a backstop.",
+      "why": "a dated blog post: it used the shorthand when it was published"
+    },
+    {
+      "file": "src/content/blog/mod-pagespeed-deprecated-2026.md",
+      "line": "Yes. `mod_pagespeed` is deprecated. The 1.13.35.2 binaries still install, but the project receives no maintenance and the dependency stack has not been patched in years. The maintained continuation is [mod_pagespeed 2](/), licensed under Apache-2.0, developed by We-Amp B.V.",
+      "why": "a dated blog post: it used the shorthand when it was published"
+    },
+    {
+      "file": "src/content/blog/mod-pagespeed-deprecated-2026.md",
+      "line": "| `mod_pagespeed` 1.13.35.2 on Apache       | [mod_pagespeed 2](/) — drop-in replacement                                                                                                |",
+      "why": "a dated blog post: it used the shorthand when it was published"
+    },
+    {
+      "file": "src/content/blog/mod-pagespeed-deprecated-2026.md",
+      "line": "| `ngx_pagespeed` on nginx                  | [mod_pagespeed 2](/) — drop-in for nginx                                                                                                  |",
+      "why": "a dated blog post: it used the shorthand when it was published"
+    },
+    {
+      "file": "src/content/blog/mod-pagespeed-deprecated-2026.md",
+      "line": "Through 2026, We-Amp shipped two continuations — mod_pagespeed 1.15 and ModPageSpeed 2.0 — and they have since converged: mod_pagespeed 2 is a native in-process module for Apache and nginx, using the same `ModPagespeed*` directives and the built-in `/pagespeed_admin/` console, with a separate optimizer worker doing the heavy optimization work outside the web server. It is licensed under Apache-2.0. mod_pagespeed 2 is a drop-in upgrade for mod_pagespeed 1.15 — see the [upgrade guide](/docs/migrating-to-2-1/#upgrading-from-1-15). The deeper comparison lives in the [mod_pagespeed alternatives](/blog/mod-pagespeed-alternatives/) post.",
+      "why": "a dated blog post: it used the shorthand when it was published"
+    },
+    {
+      "file": "src/content/blog/mod-pagespeed-deprecated-2026.md",
+      "line": "# nginx (mod_pagespeed 2, drop-in for ngx_pagespeed; the package loads the module itself)",
+      "why": "a dated blog post: it used the shorthand when it was published"
+    },
+    {
+      "file": "src/content/blog/mod-pagespeed-deprecated-2026.md",
+      "line": "## mod_pagespeed 2 — the maintained continuation",
+      "why": "a dated blog post: it used the shorthand when it was published"
+    },
+    {
+      "file": "src/content/blog/mod-pagespeed-deprecated-2026.md",
+      "line": "We-Amp B.V. — the team that helped build ngx_pagespeed, maintained mod_pagespeed, and drove the project's Apache incubation — develops the converged continuation, `mod_pagespeed 2`: the native in-process module, joined by a separate optimizer worker, licensed under Apache-2.0.",
+      "why": "a dated blog post: it used the shorthand when it was published"
+    },
+    {
+      "file": "src/content/blog/mod-pagespeed-deprecated-2026.md",
+      "line": "`mod_pagespeed 2` continues the original codebase with security patches and a current toolchain on Apache and nginx. The IIS module ships as a signed MSI on the mod_pagespeed GitHub release — see the [upgrade guide](/docs/migrating-to-2-1/#upgrading-from-1-15) for details.",
+      "why": "a dated blog post: it used the shorthand when it was published"
+    },
+    {
+      "file": "src/content/blog/fix-lcp-nginx-2026.md",
+      "line": "  description: Diagnose the nginx transport layer, route image and critical-CSS work through the ngx_pagespeed (mod_pagespeed 2) module, tune HTTP/2 and pre-compressed assets, then confirm the LCP win.",
+      "why": "a dated blog post: it used the shorthand when it was published"
+    },
+    {
+      "file": "src/content/blog/fix-lcp-nginx-2026.md",
+      "line": "  - ngx_pagespeed (mod_pagespeed 2)",
+      "why": "a dated blog post: it used the shorthand when it was published"
+    },
+    {
+      "file": "src/content/blog/fix-lcp-nginx-2026.md",
+      "line": "Three nginx-side LCP failures keep showing up, and none is a content problem: HTML on the slow path while cacheable images wait behind it, on-the-fly gzip burning CPU on every response, and HTTP/1.1 head-of-line blocking that queues the LCP image behind CSS. The fix is to get the transport layer out of the way (HTTP/2, pre-compressed assets, TLS resumption), then route image and CSS work through **mod_pagespeed 2** (the `ngx_pagespeed` module) so the same recipe applies regardless of what backend nginx is fronting.",
+      "why": "a dated blog post: it used the shorthand when it was published"
+    },
+    {
+      "file": "src/content/blog/google-dl-ssl-mod-pagespeed-download.md",
+      "line": "mod_pagespeed 2 is the drop-in continuation. It optimizes out of the",
+      "why": "a dated blog post: it used the shorthand when it was published"
+    },
+    {
+      "file": "src/content/blog/mod-pagespeed-alternatives.md",
+      "line": "description: 'Google mod_pagespeed and ngx_pagespeed are no longer actively developed. mod_pagespeed 2 is the maintained continuation. Here is how the paths compare.'",
+      "why": "a dated blog post: it used the shorthand when it was published"
+    },
+    {
+      "file": "src/content/blog/mod-pagespeed-alternatives.md",
+      "line": "Short answer: the original Google project is [effectively no longer actively developed](/mod-pagespeed-still-maintained/). It has an actively maintained continuation, mod_pagespeed 2, built by We-Amp — the team that helped build ngx_pagespeed, maintained mod_pagespeed, and drove the project's Apache incubation. Here is the full picture.",
+      "why": "a dated blog post: it used the shorthand when it was published"
+    },
+    {
+      "file": "src/content/blog/mod-pagespeed-alternatives.md",
+      "line": "I maintained the original project for years. When Google moved on, I continued the work under We-Amp B.V. ([Why I rebuilt mod_pagespeed from scratch](/blog/why-i-rebuilt-mod-pagespeed/) is the longer version of that story.) The result is mod_pagespeed 2: one actively maintained product that meets two very different stacks, as a native server module or as a reverse proxy in front of your origin.",
+      "why": "a dated blog post: it used the shorthand when it was published"
+    },
+    {
+      "file": "src/content/blog/mod-pagespeed-alternatives.md",
+      "line": "mod_pagespeed 2 runs inside Apache and nginx as a native in-process module, with no reverse-proxy hop and the heavy optimization work handed to a separate optimizer worker. If you are running the archived mod_pagespeed today and want the closest drop-in replacement, this is it.",
+      "why": "a dated blog post: it used the shorthand when it was published"
+    },
+    {
+      "file": "src/content/blog/mod-pagespeed-alternatives.md",
+      "line": "**If you are running ngx_pagespeed** and you are tired of downloading the matching nginx source tree and recompiling the module on every upgrade, mod_pagespeed 2 ships a prebuilt, signed `nginx-module-pagespeed` for Debian 12 and 13 and Ubuntu 22.04 and 24.04, on both amd64 and arm64 — no compiling. AlmaLinux/RHEL/Rocky 9 (x86_64 + aarch64) and 10 (x86_64) are covered via the yum repo. Each module is pinned to its distro's stock nginx; if you run a different nginx version, [contact us](/contact/) for a matching build. See [/download/](/download/).",
+      "why": "a dated blog post: it used the shorthand when it was published"
+    },
+    {
+      "file": "src/data/software-jsonld.ts",
+      "line": "  `${PRODUCT_DISPLAY_NAME} 2`,",
+      "why": "an entry of PRODUCT_ALTERNATE_NAMES: the JSON-LD alternate name people search for, not running copy"
+    },
+    {
+      "file": "src/pages/mod-pagespeed-still-maintained.astro",
+      "line": "    what: `The lines converge: mod_pagespeed 2 ships as the successor to both — same directives, plus the optimizer worker — ${LICENSE_CLAUSE}.`,",
+      "why": "the dated 2026 entry of the project timeline: history, naming the release line as it converged"
+    },
+    {
+      "file": "src/pages/alternatives/mod-pagespeed.astro",
+      "line": "              Development continues as mod_pagespeed 2: the native in-process module for Apache and",
+      "why": "the 2026 row of the project timeline table: history, naming the release line as it converged"
+    }
+  ]
+}

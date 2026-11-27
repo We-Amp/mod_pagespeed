@@ -1,0 +1,238 @@
+// SPDX-License-Identifier: Apache-2.0
+// GENERATED — DO NOT EDIT BY HAND. Synced by tools/sync-html-kernel.sh.
+// Canonical source: mod_pagespeed 1.15, pagespeed/kernel/html/html_keywords.h (#1130).
+// Synced from the commit pinned in lib/html/HTML_KERNEL_PIN.
+// Drift guard: CI re-runs tools/sync-html-kernel.sh and byte-compares.
+// The canonical file's original license header is retained in full below;
+// Apache-2.0 headed files: see lib/html/LICENSE.apache-2.0 for the license text.
+
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ * 
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ * 
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+#ifndef PAGESPEED_KERNEL_HTML_HTML_KEYWORDS_H_
+#define PAGESPEED_KERNEL_HTML_HTML_KEYWORDS_H_
+
+#include <algorithm>
+#include <atomic>
+#include <vector>
+
+#include "absl/container/flat_hash_map.h"
+#include "lib/base/basictypes.h"
+#include "lib/html/compat/string.h"
+#include "lib/html/compat/string_hash.h"
+#include "lib/html/compat/string_util.h"
+#include "lib/html/html_name.h"
+
+namespace net_instaweb {
+
+class MessageHandler;
+class Writer;
+
+// Helper class for HtmlParser to recognize HTML keywords, handle escaping
+// and unescaping, and assist the lexer in understanding how to interpret
+// unbalanced tags.
+class HtmlKeywords {
+ public:
+  // Initialize a singleton instance of this class.  Thread-safe:
+  // concurrent calls are serialized via double-checked locking.
+  static void Init();
+
+  // Tear down the singleton instance of this class, freeing any
+  // allocated memory. This call is inherently thread unsafe.
+  static void ShutDown();
+
+  // Returns an HTML keyword as a string, or NULL if not a keyword.
+  static const StringPiece* KeywordToString(HtmlName::Keyword keyword) {
+    if (keyword < HtmlName::kNotAKeyword) {
+      return &instance()->keyword_vector_[keyword];
+    } else {
+      return nullptr;
+    }
+  }
+
+  // Take a raw text and escape it so it's safe for an HTML attribute,
+  // e.g.    a&b --> a&amp;b
+  static StringPiece Escape(const StringPiece& unescaped, GoogleString* buf) {
+    return instance()->EscapeHelper(unescaped, buf);
+  }
+
+  // Take escaped text and unescape it so its value can be interpreted,
+  // e.g.    "http://myhost.com/p?v&amp;w"  --> "http://myhost.com/p?v&w"
+  //
+  // *decoding_error is set to true if the escaped string could not be
+  // safely transformed into a simple stream of bytes.
+  //
+  // TODO(jmarantz): Support a variant where we unescape to UTF-8.
+  static StringPiece Unescape(const StringPiece& escaped, GoogleString* buf,
+                              bool* decoding_error) {
+    return instance()->UnescapeHelper(escaped, buf, decoding_error);
+  }
+
+  // Note that Escape and Unescape are not guaranteed to be inverses of
+  // one another.  For example, Unescape("&#26;")=="&", but Escape("&")="&amp;".
+  // However, note that Unescape(Escape(s)) == s.
+  //
+  // Another case to be wary of is when the argument to Unescape is not
+  // properly escaped.  The result will be that the string is returned
+  // unmodified.  For example, Unescape("a&b")=="a&b", butthen re-escaping
+  // that will give "a&amp;b".  Hence, the careful maintainer of an HTML
+  // parsing and rewriting system will need to maintain the original escaped
+  // text parsed from HTML files, and pass that to browsers.
+
+  // Determines whether an open tag of type k1 should be automatically closed
+  // if a StartElement for tag k2 is encountered.  E.g. <tr><tbody> should
+  // be transformed to <tr></tr><tbody>.
+  static bool IsAutoClose(HtmlName::Keyword k1, HtmlName::Keyword k2) {
+    return std::binary_search(instance()->auto_close_.begin(),
+                              instance()->auto_close_.end(),
+                              MakeKeywordPair(k1, k2));
+  }
+
+  // Determines whether an open tag of type k1 should be automatically closed
+  // if an EndElement for tag k2 is encountered.  E.g. <tbody></table> should
+  // be transformed into <tbody></tbody></table>.
+  static bool IsContained(HtmlName::Keyword k1, HtmlName::Keyword k2) {
+    return std::binary_search(instance()->contained_.begin(),
+                              instance()->contained_.end(),
+                              MakeKeywordPair(k1, k2));
+  }
+
+  // Determines whether the specified HTML keyword is closed automatically
+  // by the parser if the close-tag is omitted.  E.g. <head> must be closed,
+  // but formatting elements such as <p> do not need to be closed.  Also note
+  // the distinction with tags which are *implicitly* closed in HTML such as
+  // <img> and <br>.
+  static bool IsOptionallyClosedTag(HtmlName::Keyword keyword) {
+    return std::binary_search(instance()->optionally_closed_.begin(),
+                              instance()->optionally_closed_.end(), keyword);
+  }
+
+  // Wraps text in a pre-tag using the specified style arguments and sends it
+  // to writer, returning false if the writer failed.
+  // E.g. style could be "color:red;".
+  // if style is empty then it is simply a pre-tag without attributes.
+  static bool WritePre(StringPiece text, StringPiece style, Writer* writer,
+                       MessageHandler* handler);
+
+ private:
+  using KeywordPair = int32;  // Encoded via shift & OR.
+  using KeywordPairVec = std::vector<KeywordPair>;
+  using KeywordVec = std::vector<HtmlName::Keyword>;
+
+  HtmlKeywords();
+  const char* UnescapeAttributeValue();
+  void InitEscapeSequences();
+  void InitAutoClose();
+  void InitContains();
+  void InitOptionallyClosedKeywords();
+
+  // Translate the escape sequence and append the corresponding character
+  // into *buf.
+  //
+  // accumulate_numeric_code==true means that the sequence has been accumulated
+  // into numeric_value and that will be used to form a character for appending
+  // to *buf.
+  //
+  // accumulate_numeric_code==false means that the sequence is in 'escape' and
+  // that will be looked up in the keyword tables to get the character to append
+  // to *buf.
+  //
+  // was_terminated indicates that the escape-sequence was properly terminated
+  // by a semicolon.  This affects handling of unknown escape sequences, where
+  // we will need to retain the ";".
+  //
+  // Returns false iff the escape-sequence is a valid multi-byte sequence,
+  // which we can't currently represent in our 8-bit format.
+  bool TryUnescape(bool accumulate_numeric_code, uint32 numeric_value,
+                   const GoogleString& escape, bool was_terminated,
+                   GoogleString* buf) const;
+
+  // Encodes two keyword enums as a KeywordPair, represented as an int32.
+  static KeywordPair MakeKeywordPair(HtmlName::Keyword k1,
+                                     HtmlName::Keyword k2) {
+    return (static_cast<KeywordPair>(k1) << 16) | static_cast<KeywordPair>(k2);
+  }
+
+  // Adds all combinations of the members of k1_list and k2_list to
+  // kmap.  The lists are represented as space-delimited keywords.
+  // E.g. if k1_list="a b" and k2_list="c d", then this adds (a,c),
+  // (b,c), (a,d), (b,d) to kmap.
+  void AddCrossProduct(const StringPiece& k1_list, const StringPiece& k2_list,
+                       KeywordPairVec* kmap);
+  void AddAutoClose(const StringPiece& k1_list, const StringPiece& k2_list) {
+    AddCrossProduct(k1_list, k2_list, &auto_close_);
+  }
+  void AddContained(const StringPiece& k1_list, const StringPiece& k2_list) {
+    AddCrossProduct(k1_list, k2_list, &contained_);
+  }
+
+  // Adds every space-delimited token in klist to kset.
+  void AddToSet(const StringPiece& klist, KeywordVec* kset);
+
+  static std::atomic<HtmlKeywords*> singleton_;
+
+  // Load the singleton pointer from the atomic. All callers assume Init()
+  // has been called, so the returned pointer is never null in practice.
+  static HtmlKeywords* instance() {
+    return singleton_.load(std::memory_order_acquire);
+  }
+
+  StringPiece EscapeHelper(const StringPiece& unescaped,
+                           GoogleString* buf) const;
+  StringPiece UnescapeHelper(const StringPiece& escaped, GoogleString* buf,
+                             bool* decoding_error) const;
+
+  // These maps are small and built once at startup, then only probed, never
+  // iterated. When this was last measured, sparse_hash_map beat
+  // dense_hash_map: the maps are small enough that algorithmic differences
+  // were not dominant, and keeping the data compact helped the processor
+  // cache. absl::flat_hash_map is similarly compact (one slot per entry plus
+  // a control byte); its speed relative to sparse_hash_map has not been
+  // measured, and its lookups go through the mixed hashers from string_hash.h, so the
+  // sparsehash dependency could be dropped.
+  //
+  // The hashers mix their result through absl::HashOf (see string_hash.h), so
+  // short entity names do not all land on one Swiss-table probe tag.
+  using StringStringHashMapInsensitive =
+      absl::flat_hash_map<GoogleString, const char*, CaseFoldStringHash,
+                          CaseFoldStringEqual>;
+  using StringStringHashMapSensitive =
+      absl::flat_hash_map<GoogleString, const char*, CasePreserveStringHash>;
+
+  StringStringHashMapInsensitive unescape_insensitive_map_;
+  StringStringHashMapSensitive unescape_sensitive_map_;
+  StringStringHashMapSensitive escape_map_;
+
+  // Note that this is left immutable after being filled in, so it's OK
+  // to take pointers into it.
+  StringPieceVector keyword_vector_;
+
+  // These vectors of KeywordPair and Keyword are sorted numerically during
+  // construction to enable binary-search during parsing.
+  KeywordPairVec auto_close_;
+  KeywordPairVec contained_;
+  KeywordVec optionally_closed_;
+
+  HtmlKeywords(const HtmlKeywords&) = delete;
+  HtmlKeywords& operator=(const HtmlKeywords&) = delete;
+};
+
+}  // namespace net_instaweb
+
+#endif  // PAGESPEED_KERNEL_HTML_HTML_KEYWORDS_H_

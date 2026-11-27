@@ -1,0 +1,167 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: Apache-2.0
+     Copyright (c) 2024-2026 We-Amp B.V. -->
+
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ShopGrid - Modern E-Commerce | PageSpeed 2.0 Demo</title>
+    <meta name="robots" content="noindex,follow" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <nav class="nav-bar">
+        <a href="#" class="logo">ShopGrid</a>
+        <ul class="nav-links">
+          <li><a href="#">Home</a></li>
+          <li><a href="#">Products</a></li>
+          <li><a href="#">Categories</a></li>
+          <li><a href="#">Deals</a></li>
+          <li><a href="#">About</a></li>
+        </ul>
+        <button class="cart-btn" id="cart-btn">
+          Cart <span class="count" id="cart-count">0</span>
+        </button>
+      </nav>
+    </header>
+
+    <section class="hero">
+      <h1>Summer Collection 2025</h1>
+      <p>
+        Discover our curated selection of premium products at unbeatable prices. Free shipping on
+        orders over $50.
+      </p>
+      <a href="#products" class="cta">Shop Now</a>
+    </section>
+
+    <section class="filters" id="filter-bar">
+      <button class="active" data-category="all">All Products</button>
+      <button data-category="electronics">Electronics</button>
+      <button data-category="clothing">Clothing</button>
+      <button data-category="home">Home &amp; Garden</button>
+      <button data-category="accessories">Accessories</button>
+    </section>
+
+    <main>
+      <section class="products" id="products">
+        <article class="card" data-category="electronics">
+          <img
+            src="images/headphones.jpg"
+            alt="Wireless Bluetooth Headphones"
+            width="400"
+            height="300"
+          />
+          <div class="info">
+            <p class="cat">Electronics</p>
+            <h2>Wireless Bluetooth Headphones</h2>
+            <p class="price">$79.99 <span class="old">$129.99</span></p>
+            <button class="add-btn" data-product-id="1">Add to Cart</button>
+          </div>
+        </article>
+
+        <article class="card" data-category="clothing">
+          <img src="images/tshirt.jpg" alt="Premium Cotton T-Shirt" width="400" height="300" />
+          <div class="info">
+            <p class="cat">Clothing</p>
+            <h2>Premium Cotton T-Shirt</h2>
+            <p class="price">$34.99 <span class="old">$49.99</span></p>
+            <button class="add-btn" data-product-id="2">Add to Cart</button>
+          </div>
+        </article>
+
+        <article class="card" data-category="home">
+          <img src="images/plantpot.jpg" alt="Ceramic Plant Pot Set" width="400" height="300" />
+          <div class="info">
+            <p class="cat">Home &amp; Garden</p>
+            <h2>Ceramic Plant Pot Set</h2>
+            <p class="price">$24.99</p>
+            <button class="add-btn" data-product-id="3">Add to Cart</button>
+          </div>
+        </article>
+
+        <article class="card" data-category="electronics">
+          <img
+            src="images/powerbank.jpg"
+            alt="Portable Power Bank 20000mAh"
+            width="400"
+            height="300"
+          />
+          <div class="info">
+            <p class="cat">Electronics</p>
+            <h2>Portable Power Bank 20000mAh</h2>
+            <p class="price">$45.99 <span class="old">$69.99</span></p>
+            <button class="add-btn" data-product-id="4">Add to Cart</button>
+          </div>
+        </article>
+
+        <article class="card" data-category="accessories">
+          <img src="images/wallet.jpg" alt="Leather Minimalist Wallet" width="400" height="300" />
+          <div class="info">
+            <p class="cat">Accessories</p>
+            <h2>Leather Minimalist Wallet</h2>
+            <p class="price">$29.99</p>
+            <button class="add-btn" data-product-id="5">Add to Cart</button>
+          </div>
+        </article>
+
+        <article class="card" data-category="clothing">
+          <img src="images/jacket.jpg" alt="Waterproof Hiking Jacket" width="400" height="300" />
+          <div class="info">
+            <p class="cat">Clothing</p>
+            <h2>Waterproof Hiking Jacket</h2>
+            <p class="price">$89.99 <span class="old">$149.99</span></p>
+            <button class="add-btn" data-product-id="6">Add to Cart</button>
+          </div>
+        </article>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="grid">
+        <div>
+          <h3>ShopGrid</h3>
+          <ul>
+            <li><a href="#">About Us</a></li>
+            <li><a href="#">Careers</a></li>
+            <li><a href="#">Press</a></li>
+            <li><a href="#">Blog</a></li>
+          </ul>
+        </div>
+        <div>
+          <h3>Customer Service</h3>
+          <ul>
+            <li><a href="#">Help Center</a></li>
+            <li><a href="#">Returns</a></li>
+            <li><a href="#">Shipping Info</a></li>
+            <li><a href="#">Order Tracking</a></li>
+          </ul>
+        </div>
+        <div>
+          <h3>Shop</h3>
+          <ul>
+            <li><a href="#">New Arrivals</a></li>
+            <li><a href="#">Best Sellers</a></li>
+            <li><a href="#">Sale</a></li>
+            <li><a href="#">Gift Cards</a></li>
+          </ul>
+        </div>
+        <div>
+          <h3>Legal</h3>
+          <ul>
+            <li><a href="#">Privacy Policy</a></li>
+            <li><a href="#">Terms of Service</a></li>
+            <li><a href="#">Cookie Policy</a></li>
+            <li><a href="#">Accessibility</a></li>
+          </ul>
+        </div>
+      </div>
+      <p class="copy">
+        &copy; 2025 ShopGrid. All rights reserved. This is a demo page for PageSpeed 2.0.
+      </p>
+    </footer>
+
+    <script src="app.js" defer></script>
+  </body>
+</html>

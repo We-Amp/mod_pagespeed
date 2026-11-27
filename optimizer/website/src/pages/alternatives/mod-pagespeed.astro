@@ -1,0 +1,406 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PageHero from '../../components/PageHero.astro';
+import { offerJsonLd } from '../../data/offer-jsonld';
+import { FREE_TO_RUN_LINE } from '../../data/product-facts.mjs';
+import { PRODUCT_SAME_AS, productJsonLd } from '../../data/software-jsonld';
+
+const faq = [
+  {
+    q: 'Is mod_pagespeed deprecated?',
+    a: 'Yes. Google handed mod_pagespeed to the Apache Software Foundation in 2017. The Apache Incubator podling retired in 2023, and the repositories were marked read-only on GitHub in 2025. The 1.13.35.2 binaries still install but have not received security patches in years.',
+  },
+  {
+    q: 'What happened to mod_pagespeed?',
+    a: 'Google donated the project to the Apache Software Foundation in 2017, and active Google development ended there. The last open-source release, 1.14.36.1 (2020), was prepared under the Apache incubator by external maintainers including We-Amp. The repository at apache/incubator-pagespeed-mod is now read-only.',
+  },
+  {
+    q: 'What replaces mod_pagespeed?',
+    a: 'The current mod_pagespeed, actively maintained by We-Amp: the native in-process module for Apache and nginx, with the same configuration syntax, the classic filter set, and the built-in admin console, plus an optimizer worker, paired with the Apache or nginx module or in the reverse-proxy deployment, for variant-aware caching and zero-copy serving, and for SVG auto-vectorization in the reverse-proxy deployment. The IIS package ships as a signed installer on the mod_pagespeed GitHub release.',
+  },
+  {
+    q: 'Can I still use mod_pagespeed 1.13.35.2?',
+    a: "Yes, and it still installs. It also hasn't taken a security patch in years, won't build against current Apache, has no AVIF, and ships a build toolchain that wants Bazel 0.x and Python 2. If your threat model accepts unpatched dependencies, you can keep running it.",
+  },
+  {
+    q: 'Which platform do I run the current mod_pagespeed on?',
+    a: 'Apache and nginx: the native in-process module with the familiar config surface, the classic filter set, and the built-in admin console, plus the optimizer worker for variant-aware caching and zero-copy serving (and, in the reverse-proxy deployment, SVG auto-vectorization). The Apache packages install the configuration that points the module at the worker; the native nginx module uses it once two directives point it there. The IIS package ships as a signed installer on the mod_pagespeed GitHub release.',
+  },
+];
+
+const jsonLd = [
+  await productJsonLd({
+    description:
+      'Maintained continuation of Google mod_pagespeed: the native in-process module for Apache and nginx, with the C++23 optimizer worker alongside it for zero-copy caching and variant-aware serving. Same directive surface as 1.13.35.2.',
+    offers: offerJsonLd({ url: 'https://modpagespeed.com/pricing/' }),
+    sameAs: [...PRODUCT_SAME_AS, 'https://packages.modpagespeed.com/'],
+  }),
+  {
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: faq.map((entry) => ({
+      '@type': 'Question',
+      name: entry.q,
+      acceptedAnswer: { '@type': 'Answer', text: entry.a },
+    })),
+  },
+];
+---
+
+<BaseLayout
+  title="mod_pagespeed alternative: the maintained, patched module"
+  description="The archived Google module gets no more fixes. mod_pagespeed, the native module plus the optimizer worker, is its maintained, patched continuation."
+  jsonLd={jsonLd}
+>
+  <PageHero
+    id="mod-pagespeed-title"
+    width="prose"
+    class="max-w-3xl"
+    title="mod_pagespeed alternative"
+  >
+    <Fragment slot="lede">
+      <p>
+        <code class="rounded bg-bg-elevated px-1 py-0.5 text-base">mod_pagespeed</code>, the
+        open-source web optimization module originally developed at Google, is no longer actively
+        developed. If you're replacing it, the current mod_pagespeed from We-Amp carries the work
+        forward &mdash; the native module plus the optimizer worker.
+      </p>
+    </Fragment>
+    <div class="mt-6 flex flex-wrap gap-3">
+      <a
+        href="/download/"
+        class="btn-primary"
+        data-umami-event="cta_alternatives_modpagespeed_install"
+      >
+        Download &amp; run
+      </a>
+      <a
+        href="/pricing/"
+        data-umami-event="cta_alternatives_modpagespeed_buy"
+        class="rounded-md border border-border-strong px-4 py-2 text-sm font-medium text-text-body hover:border-border-strong"
+      >
+        Support pricing
+      </a>
+    </div>
+    <p class="mt-3 text-small text-text-annotation">{FREE_TO_RUN_LINE}</p>
+  </PageHero>
+
+  <article class="container-prose max-w-3xl pb-16">
+    <div class="prose prose-stone max-w-none prose-headings:font-semibold prose-a:text-interactive dark:prose-invert">
+      <p>
+        The repository still exists, read-only, at{' '}
+        <a
+          href="https://github.com/apache/incubator-pagespeed-mod"
+          rel="noopener noreferrer external"
+        >
+          apache/incubator-pagespeed-mod
+        </a>
+        . The 1.13.35.2 binaries still install and serve pages. They also haven't taken a security
+        patch in years, won't build against current Apache, emit no Core Web Vitals telemetry, and
+        have no AVIF.
+      </p>
+
+      <h2>A short history</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Year</th>
+            <th>Event</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>2010</td>
+            <td>
+              Google releases <code>mod_pagespeed</code> for Apache
+            </td>
+          </tr>
+          <tr>
+            <td>2013</td>
+            <td>
+              Nginx port released as <code>ngx_pagespeed</code>
+            </td>
+          </tr>
+          <tr>
+            <td>2017</td>
+            <td>
+              Google donates the project to the Apache Software Foundation; active Google
+              development ends
+            </td>
+          </tr>
+          <tr>
+            <td>2018</td>
+            <td>The last Google-era stable release, 1.13.35.2</td>
+          </tr>
+          <tr>
+            <td>2020</td>
+            <td>Final open-source release, 1.14.36.1 (Apache incubator)</td>
+          </tr>
+          <tr>
+            <td>2023</td>
+            <td>Apache Incubator podling retires</td>
+          </tr>
+          <tr>
+            <td>2025</td>
+            <td>GitHub repositories marked read-only</td>
+          </tr>
+          <tr>
+            <td>2026</td>
+            <td>
+              Development continues as mod_pagespeed 2: the native in-process module for Apache and
+              nginx, with the optimizer worker alongside it
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p>
+        We-Amp B.V. &mdash; the team that helped build ngx_pagespeed, maintained mod_pagespeed, and
+        drove the project's Apache incubation &mdash; develops that continuation. The
+        <a href="https://we-amp.com/open-source/" rel="noopener noreferrer">
+          open-source history
+        </a>{' '}
+        on we-amp.com has the longer version of how the project changed hands, and
+        <a href="/mod-pagespeed-still-maintained/">is mod_pagespeed still maintained?</a> covers
+        what development resumed and what shipped since.
+      </p>
+      <p>
+        Public development going quiet did not mean the work stopped. We-Amp kept PageSpeed
+        maintained privately through those years, supporting its commercial IISpeed customers
+        without a gap and tracking new compilers, OS releases, and image codecs as they landed. That
+        continuously maintained line is what ships today as mod_pagespeed, back in the public
+        package repositories.
+      </p>
+
+      <h2>Why people are looking for an alternative</h2>
+      <p>
+        mod_pagespeed was excellent engineering for its era. The archived 1.13.35.2 binaries still
+        run, but they no longer keep pace with a modern stack:
+      </p>
+      <ul>
+        <li>
+          <strong>No security patches in years.</strong> Unpatched dependencies (libpng, libwebp,
+          libjpeg, ICU) carry known CVEs (e.g. libwebp CVE-2023-4863).
+        </li>
+        <li>
+          <strong>No build against current Apache.</strong> The build needs the original toolchain
+          and won't compile against current Apache releases without patching.
+        </li>
+        <li>
+          <strong>No Core Web Vitals tooling.</strong> LCP and INP signals are missing from the
+          filter set.
+        </li>
+        <li>
+          <strong>No modern image formats.</strong> AVIF support never landed.
+        </li>
+        <li>
+          <strong>Dated build toolchain.</strong> Bazel 0.x, glibc constraints, and pinned Python 2
+          in the build scripts.
+        </li>
+      </ul>
+
+      <h2>The current mod_pagespeed &mdash; the native module and the optimizer worker</h2>
+      <p>
+        The current mod_pagespeed is one product with two moving parts. The native module loads
+        in-process and handles the request; the <code>pagespeed-optimizer</code> worker does the
+        heavy work outside it. The worker reads originals from a shared Cyclone cache, generates up
+        to 37 variants per asset (WebP, AVIF, viewport sizes, pixel densities, save-data, plus SVG
+        for eligible images), and writes them back. The serving side returns cache hits via
+        zero-copy
+        <code>mmap</code>. On the deb and rpm channels the two install and upgrade together as a
+        matching pair, and the Apache packages install the configuration that points the module at
+        the worker. The nginx module package does not pull the worker in: install
+        <code>pagespeed-optimizer</code> first, then point the native nginx module at it with two
+        directives (<a href="/docs/installation-module/#native-nginx-module">nginx install steps</a>
+        ).
+      </p>
+      <p>
+        The optimization libraries underneath are the same ones mod_pagespeed proved at scale; the
+        architecture around them is new.
+      </p>
+
+      <p>
+        <a href="/docs/">Read the docs</a> &middot; <a href="/features/">the full feature set</a>
+        &middot;{' '}
+        <a href="/pricing/" data-umami-event="cta_alternatives_modpagespeed_buy_docs">
+          Support pricing
+        </a>
+      </p>
+
+      <h2>The native module for Apache and nginx</h2>
+      <p>
+        On Apache and nginx the module loads into your server as a native in-process module: no
+        sidecar, no reverse-proxy hop, no container. It carries the same directive surface, the same
+        filter names, and the same admin console as open-source mod_pagespeed, including the classic
+        <code>combine_css</code>, <code>combine_javascript</code>, image spriting, in-place resource
+        optimization, and domain-mapping filters, with granular per-filter control &mdash; now on a
+        modernized, secured filter stack with new optimizers. Image optimization covers WebP and
+        AVIF alongside JPEG, PNG, and GIF. New: CVE patches, current toolchain, and &mdash; with the
+        worker paired to the Apache or nginx module, or in the reverse-proxy deployment &mdash; the
+        Cyclone Cache shared with the optimizer worker.
+      </p>
+      <p>
+        An existing mod_pagespeed configuration carries over &mdash; swap the packages, keep the
+        config. The IIS package ships as a signed installer on the mod_pagespeed GitHub release.
+      </p>
+
+      <pre><code>{`# nginx (the package loads ngx_pagespeed_module.so itself)
+pagespeed on;
+pagespeed FileCachePath /var/cache/ngx_pagespeed;`}</code></pre>
+
+      <pre><code>{`# Apache (the package enables the module; on Debian/Ubuntu run
+# sudo a2enmod pagespeed if it was disabled)
+ModPagespeed on
+ModPagespeedFileCachePath /var/cache/mod_pagespeed`}</code></pre>
+
+      <p>
+        <a href="/download/apt-yum/">Install from apt / yum</a> &middot;
+        <a href="/docs/installation-module/">Apache PageSpeed module</a> &middot;
+        <a href="https://packages.modpagespeed.com/" rel="noopener noreferrer external">
+          Package repositories (packages.modpagespeed.com)
+        </a>
+      </p>
+
+      <h2>Apache, nginx, Docker, Kubernetes &mdash; which integration fits</h2>
+      <p>
+        One product, four ways in. What you are choosing is how it meets your stack, not which
+        version to bet on:
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>Your stack</th>
+            <th>How mod_pagespeed installs</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Apache httpd 2.4+</td>
+            <td>Native in-process module from the signed apt/yum repository</td>
+          </tr>
+          <tr>
+            <td>nginx on Debian, Ubuntu, or Enterprise Linux</td>
+            <td>
+              Native dynamic module from the same repository, built against your distribution's
+              stock nginx
+            </td>
+          </tr>
+          <tr>
+            <td>
+              Existing <code>mod_pagespeed</code> 1.13.35.2 deployment, want a patched, drop-in
+              replacement
+            </td>
+            <td>Native module &mdash; the directive surface and filter names carry over</td>
+          </tr>
+          <tr>
+            <td>New container-native deployment, in front of any HTTP origin</td>
+            <td>
+              Docker / nginx reverse proxy &mdash; nginx and worker images, shared cache volume
+            </td>
+          </tr>
+          <tr>
+            <td>Kubernetes</td>
+            <td>The Helm chart &mdash; nginx and worker as one pod</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        Three further integrations are available separately, outside those packages. The IIS package
+        ships as a signed installer on the mod_pagespeed GitHub release. For ASP.NET Core there is
+        the
+        <code>WeAmp.PageSpeed.AspNetCore</code> middleware, added in two lines of
+        <code>Program.cs</code>, and the <code>WeAmp.PageSpeed.Sidecar</code> package, which runs a
+        bundled nginx optimizer on loopback behind your Kestrel app.
+      </p>
+
+      <h2>Migration</h2>
+      <p>
+        The current mod_pagespeed directive surface is the same as 1.13.35.2 &mdash; most installs
+        are a package swap, and the module reports a version mismatch with its worker loudly instead
+        of absorbing it. Container deployments configure the reverse proxy instead, which is a
+        smaller surface than an inline module. See{' '}
+        <a href="/docs/getting-started/">getting started</a> for both install paths, and the{' '}
+        <a href="/blog/mod-pagespeed-alternatives/">deeper comparison</a>
+        for how it lines up against other tools.
+      </p>
+
+      <h2>Frequently asked questions</h2>
+      {faq.map((entry) => (
+        <>
+          <h3>{entry.q}</h3>
+          <p>{entry.a}</p>
+        </>
+      ))}
+
+      <h2>Install and run</h2>
+      <ul>
+        <li>
+          <strong>Native module (Apache, nginx)</strong> &mdash;
+          <a href="https://packages.modpagespeed.com/" rel="noopener noreferrer external">
+            package repos
+          </a>{' '}
+          &middot; <a href="/download/apt-yum/">apt / yum install</a>
+        </li>
+        <li>
+          <strong>Docker and Kubernetes</strong> &mdash;
+          <a href="/docs/installation-docker/">Docker guide</a> &middot;
+          <a href="/docs/helm-deployment/">Helm chart</a>
+        </li>
+        <li>
+          <strong>ASP.NET Core</strong> &mdash;
+          <code>dotnet add package WeAmp.PageSpeed.AspNetCore</code> &middot;
+          <a href="/docs/aspnet-getting-started/">.NET quickstart</a> &middot;
+          <a href="/pricing/">Support pricing</a>
+        </li>
+      </ul>
+
+      <h2>Related</h2>
+      <ul>
+        <li>
+          <a href="/mod-pagespeed-still-maintained/">
+            Is mod_pagespeed still maintained? &mdash; the current state of the project
+          </a>
+        </li>
+        <li>
+          <a href="/blog/mod-pagespeed-deprecated-2026/">
+            Is mod_pagespeed deprecated? &mdash; what changed and what to use
+          </a>
+        </li>
+        <li>
+          <a href="/blog/mod-pagespeed-alternatives/">
+            mod_pagespeed alternatives &mdash; the deep comparison
+          </a>
+        </li>
+        <li>
+          <a href="/alternatives/ngx-pagespeed/">ngx_pagespeed alternative</a>
+        </li>
+        <li>
+          <a href="/alternatives/iispeed/">IISpeed alternative</a>
+        </li>
+        <li>
+          <a href="/alternatives/google-pagespeed-module/">Google PageSpeed Module alternative</a>
+        </li>
+        <li>
+          <a href="/alternatives/wp-rocket/">mod_pagespeed vs WP Rocket</a>
+        </li>
+        <li>
+          <a href="/alternatives/cloudflare-apo/">mod_pagespeed vs Cloudflare APO</a>
+        </li>
+        <li>
+          <a href="/alternatives/">All mod_pagespeed comparisons</a>
+        </li>
+        <li>
+          <a href="https://we-amp.com/open-source/" rel="noopener noreferrer">
+            We-Amp open-source history
+          </a>
+        </li>
+      </ul>
+
+      <p class="text-xs text-text-annotation">
+        mod_pagespeed and other product names are trademarks of their respective owners. Comparisons
+        reflect publicly available information as of 2026 and are provided for evaluation; We-Amp
+        B.V. is not affiliated with or endorsed by Google or the Apache Software Foundation.
+      </p>
+    </div>
+  </article>
+</BaseLayout>

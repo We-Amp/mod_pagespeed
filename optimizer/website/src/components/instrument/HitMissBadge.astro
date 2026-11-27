@@ -1,0 +1,52 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// HitMissBadge — explains the cache-state header the 2.1 nginx module emits:
+// the header literal plus a state chip plus an optional note. Explanatory
+// only: it never claims the current page was served as a HIT; the surrounding
+// copy must say which deployment emits the header.
+
+import Chip from './Chip.astro';
+
+interface Props {
+  state: 'HIT' | 'MISS' | 'STALE' | 'REVALIDATED';
+  note?: string;
+}
+
+const { state, note } = Astro.props;
+
+const tones = {
+  HIT: 'success',
+  MISS: 'accent',
+  STALE: 'neutral',
+  REVALIDATED: 'neutral',
+} as const;
+---
+
+<span class="hit-miss" data-ui="hit-miss-badge">
+  <code>x-pagespeed: {state}</code>
+  {/* The chip visually restates the state word already inside the header
+      literal; hiding it from AT keeps the announced state a single word. */}
+  <span aria-hidden="true">
+    <Chip tone={tones[state]} label={state} />
+  </span>
+  {note && <span class="hit-miss-note">{note}</span>}
+</span>
+
+<style>
+  .hit-miss {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .hit-miss code {
+    font-size: 0.8125rem;
+  }
+  .hit-miss-note {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--color-text-annotation);
+  }
+</style>

@@ -1,0 +1,334 @@
+---
+import { OG_DEFAULT_IMAGE_URL } from '../../data/og-image';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PageHero from '../../components/PageHero.astro';
+import CompareTable from '../../components/vs/CompareTable.astro';
+import { offerJsonLd } from '../../data/offer-jsonld';
+import { productJsonLd } from '../../data/software-jsonld';
+import {
+  editionClause,
+  LICENSE_CLAUSE,
+  NGINX_APT_SHORT_NBSP,
+  NGINX_RPM_SHORT,
+} from '../../data/product-facts.mjs';
+
+const rows = [
+  {
+    label: 'Deployment',
+    mps: 'Self-hosted (module + optimizer worker)',
+    other: 'Self-hosted (Python service)',
+  },
+  { label: 'Scope', mps: 'Full HTML pipeline', other: 'Image processing only' },
+  { label: 'Runtime', mps: 'C++ worker, nginx module', other: 'Python (Tornado)' },
+  {
+    label: 'Platform',
+    mps: 'Native module for Apache and nginx, reverse-proxy mode in front of any HTTP origin, or ASP.NET Core middleware. The IIS package ships as a signed installer on the mod_pagespeed GitHub release.',
+    other: 'Any HTTP frontend',
+  },
+  {
+    label: 'Pricing model',
+    mps: 'Free (Apache-2.0); paid support optional',
+    other: 'Open source (MIT)',
+  },
+  {
+    label: 'Image optimization',
+    mps: `${editionClause(['WebP', 'AVIF'])} &mdash; JPEG, PNG, GIF + responsive variants`,
+    other: 'JPEG, PNG, GIF, WebP; smart crop via face/feature detection',
+  },
+  {
+    label: 'Smart cropping',
+    mps: 'Aspect-driven resizing',
+    other: 'Face / focal-point detection (a Thumbor specialty)',
+  },
+  { label: 'Critical CSS injection', mps: 'yes', other: 'no' },
+  { label: 'JS / CSS minification', mps: 'yes', other: 'no' },
+  { label: 'HTML rewriting', mps: 'yes', other: 'no' },
+  {
+    label: 'Caching',
+    mps: 'Cyclone cache, zero-copy mmap serving',
+    other: 'Pluggable (file, Redis, HTTP, MongoDB)',
+  },
+  {
+    label: 'Measured page-size reduction',
+    mps: '<span class="font-mono tabular-nums font-semibold text-success">&minus;68%</span> on our own pages (full pipeline)',
+    other: 'Image bytes only &mdash; no HTML/CSS/JS in scope',
+    highlight: true,
+  },
+  {
+    label: 'License',
+    mps: 'Licensed under the Apache License&nbsp;2.0. The software is free. We sell support; the software and its signed packages are the same for everyone. See the <a href="/license/" class="text-interactive hover:text-interactive-hover underline">software license</a>.',
+    other: 'MIT',
+  },
+  {
+    label: 'Control over data',
+    mps: 'Your servers, no third party',
+    other: 'Your servers, no third party',
+  },
+];
+
+const jsonLd = [
+  await productJsonLd({
+    image: OG_DEFAULT_IMAGE_URL,
+    description:
+      'mod_pagespeed bundles image, CSS, JS, and HTML optimization in one process — Thumbor is a Python image server focused on smart cropping.',
+    offers: offerJsonLd({ url: 'https://modpagespeed.com/pricing/' }),
+  }),
+];
+---
+
+<BaseLayout
+  title="mod_pagespeed vs Thumbor: image server vs HTML pipeline"
+  description="Thumbor is an open-source Python image server with face-aware smart cropping. mod_pagespeed optimizes images plus CSS, JS and HTML. Which alternative fits."
+  jsonLd={jsonLd}
+>
+  <PageHero id="thumbor-title" width="prose" class="max-w-3xl" title="mod_pagespeed vs Thumbor">
+    <nav slot="before" class="mb-6 text-small text-text-annotation" aria-label="Breadcrumb">
+      <a href="/" class="hover:text-text-body">
+        Home
+      </a>
+      <span class="mx-1">/</span>
+      <a href="/alternatives/" class="hover:text-text-body">
+        Alternatives
+      </a>
+      <span class="mx-1">/</span>
+      <span>vs Thumbor</span>
+    </nav>
+  </PageHero>
+
+  <article class="container-prose max-w-3xl pb-16">
+    <section>
+      <h2 class="h2-section text-text-body">TL;DR</h2>
+      <p class="mt-4 text-text-body">
+        Thumbor is a long-running open-source image processing server with smart cropping and a
+        plugin ecosystem. mod_pagespeed is a{' '}
+        <a href="/features/" class="text-interactive hover:text-interactive-hover underline">
+          self-hosted optimization pipeline
+        </a>{' '}
+        that handles images plus critical CSS, JS/CSS minification, and HTML rewriting. If you
+        specifically need Thumbor's smart-crop and face-detection features, mod_pagespeed isn't a
+        replacement. For everything else page-optimization-related, mod_pagespeed covers more ground
+        in one process.
+      </p>
+    </section>
+
+    <section class="mt-12">
+      <h2 id="at-a-glance" class="h2-section text-text-body">
+        At a glance
+      </h2>
+      <div class="mt-4">
+        <CompareTable competitor="Thumbor" rows={rows} labelledBy="at-a-glance" />
+      </div>
+    </section>
+
+    <section class="mt-12">
+      <h2 class="h2-section text-text-body">When to choose Thumbor</h2>
+      <ul class="mt-4 space-y-2 list-disc pl-6 text-text-body">
+        <li>
+          You need face-aware or focal-point cropping &mdash; Thumbor's smart-crop is the genuine
+          differentiator and mod_pagespeed doesn't replicate it.
+        </li>
+        <li>
+          You're already in a Python ecosystem and want to extend the optimizer with your own
+          filters or loaders.
+        </li>
+        <li>
+          You're processing user-uploaded images and need a long-lived URL-driven transform API.
+        </li>
+        <li>
+          You want a long-established image server with a track record across many production
+          deployments.
+        </li>
+        <li>You don't need CSS, JS, or HTML optimization &mdash; just images.</li>
+      </ul>
+    </section>
+
+    <section class="mt-12">
+      <h2 class="h2-section text-text-body">When to choose mod_pagespeed</h2>
+      <ul class="mt-4 space-y-2 list-disc pl-6 text-text-body">
+        <li>You want one process handling images, CSS, JS, and HTML, the way mod_pagespeed did.</li>
+        <li>
+          You're on nginx and want optimization in the response path, not as a separate transform
+          service.
+        </li>
+        <li>You care about critical CSS for LCP &mdash; Thumbor doesn't extract or inline CSS.</li>
+        <li>
+          You want the format decision made automatically from the request's <code>Accept</code>
+          header rather than encoded in template URLs &mdash; WebP and AVIF.
+        </li>
+        <li>You're coming from mod_pagespeed and want the closest functional successor.</li>
+      </ul>
+    </section>
+
+    <section class="mt-12">
+      <h2 class="h2-section text-text-body">How they overlap</h2>
+      <p class="mt-4 text-text-body">
+        Both tools convert and resize images, both support WebP, both can be self-hosted with no
+        third-party data path.
+      </p>
+      <p class="mt-4 text-text-body">
+        The overlap stops at images. Thumbor doesn't aim to be an HTML optimizer; mod_pagespeed
+        doesn't aim to be a smart-crop service. Picking between them is mostly picking your scope.
+      </p>
+    </section>
+
+    <section class="mt-12">
+      <h2 id="migrating-from-thumbor-to-modpagespeed" class="h2-section text-text-body">
+        Migrating from Thumbor to mod_pagespeed
+      </h2>
+      <p class="mt-4 text-text-body">
+        Migration is reasonable if you adopted Thumbor for image format conversion and never used
+        its smart-crop features. Keep Thumbor for focal-point cropping or face detection &mdash;
+        mod_pagespeed doesn't replace those &mdash; and pair it with a server-layer rewriter for the
+        rest of the HTML response.
+      </p>
+      <p class="mt-4 text-text-body">If you do migrate:</p>
+      <ol class="mt-3 space-y-2 list-decimal pl-6 text-text-body">
+        <li>
+          Audit your templates for hard-coded Thumbor URL patterns (<code>/unsafe/300x200/...</code>
+          ). mod_pagespeed rewrites image URLs at the HTML layer; many template patterns can be
+          simplified or removed.
+        </li>
+        <li>
+          Decide where to keep user-upload processing. mod_pagespeed handles HTML-referenced images;
+          runtime transforms for user uploads may still belong in a dedicated image service.
+        </li>
+        <li>
+          Configure the module and shared cache directory before retiring the Thumbor service. The{' '}
+          <a
+            href="/blog/run-with-docker-compose/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            Docker Compose walkthrough
+          </a>{' '}
+          covers a working baseline.
+        </li>
+      </ol>
+    </section>
+
+    <section class="mt-12">
+      <h2 class="h2-section text-text-body">Code &amp; config side-by-side</h2>
+      <p id="config-1" class="mt-4 text-text-body">
+        <strong>Resize and convert to WebP in Thumbor</strong> (URL-based):
+      </p>
+      <pre
+        tabindex="0"
+        role="region"
+        aria-labelledby="config-1"
+        class="mt-3 overflow-x-auto rounded bg-bg-secondary p-4 text-sm sm:text-xs leading-snug text-text-body"
+      ><code>/unsafe/800x600/filters:format(webp)/example.com/photo.jpg</code></pre>
+      <p id="config-2" class="mt-4 text-text-body">
+        <strong>Equivalent in mod_pagespeed.</strong> Install the nginx module on
+        {NGINX_APT_SHORT_NBSP} (amd64 + arm64), or AlmaLinux/RHEL/Rocky&nbsp;{NGINX_RPM_SHORT}:
+      </p>
+      <pre
+        tabindex="0"
+        role="region"
+        aria-labelledby="config-2"
+        class="mt-3 overflow-x-auto rounded bg-bg-secondary p-4 text-sm sm:text-xs leading-snug text-text-body"
+      ><code>curl -fsSL https://packages.modpagespeed.com/install.sh | sudo sh
+sudo apt install nginx-module-pagespeed   # or: sudo dnf install nginx-module-pagespeed</code></pre>
+      <p id="config-3" class="mt-4 text-text-body">
+        Then enable the filters (nginx config; the filter decides per-request):
+      </p>
+      <pre
+        tabindex="0"
+        role="region"
+        aria-labelledby="config-3"
+        class="mt-3 overflow-x-auto rounded bg-bg-secondary p-4 text-sm sm:text-xs leading-snug text-text-body"
+      ><code>pagespeed on;
+pagespeed EnableFilters resize_images,convert_jpeg_to_webp;
+pagespeed FileCachePath /var/cache/pagespeed;</code></pre>
+      <p class="mt-4 text-text-body">
+        mod_pagespeed reads the client's <code>Accept</code> header and serves WebP only to browsers
+        that support it. Thumbor requires the URL to commit to the format up front (or you build
+        content negotiation around it yourself).
+      </p>
+    </section>
+
+    <section class="mt-12">
+      <div class="rounded-card border border-border bg-bg-secondary p-6 md:p-7">
+        <h2 class="h2-section text-text-body">Optimize more than images</h2>
+        <p class="mt-3 text-text-body">
+          Keep Thumbor for face-aware crops; add format negotiation, CSS/JS minification, and
+          critical CSS in one server-layer pipeline. On our own pages the full pipeline measures
+          <span class="font-mono tabular-nums font-semibold text-success">&minus;68%</span> page
+          size. Install and run it &mdash; {LICENSE_CLAUSE}, free in development and in production.
+        </p>
+        <div class="mt-5 flex flex-wrap gap-3">
+          <a href="/download/" class="btn-primary" data-umami-event="cta_vs_thumbor_install">
+            Download &amp; run
+          </a>
+          <a
+            href="/pricing/"
+            class="rounded-md border border-border-strong px-4 py-2 text-sm font-medium text-text-body hover:border-border-strong"
+            data-umami-event="cta_vs_thumbor_buy"
+          >
+            Support pricing
+          </a>
+          <a
+            href="#migrating-from-thumbor-to-modpagespeed"
+            class="rounded-md border border-border-strong px-4 py-2 text-sm font-medium text-text-body hover:border-border-strong"
+            data-umami-event="cta_vs_thumbor_migrate"
+          >
+            See the migration steps &rarr;
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <section class="mt-12 border-t border-border pt-8">
+      <p class="text-base font-semibold uppercase tracking-wide text-text-body">See also:</p>
+      <ul class="mt-4 space-y-2 text-sm">
+        <li>
+          <a
+            href="/alternatives/imgproxy/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            mod_pagespeed vs imgproxy
+          </a>{' '}
+          &mdash; imgproxy is closer to Thumbor than to mod_pagespeed
+        </li>
+        <li>
+          <a
+            href="/alternatives/cloudinary/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            mod_pagespeed vs Cloudinary
+          </a>{' '}
+          &mdash; managed SaaS alternative if you don't want to self-host
+        </li>
+        <li>
+          <a
+            href="/self-hosted-image-optimization/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            Self-hosted image optimization
+          </a>{' '}
+          &mdash; WebP/AVIF generated and served from your own origin
+        </li>
+        <li>
+          <a
+            href="/alternatives/mod-pagespeed/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            Alternatives to mod_pagespeed
+          </a>{' '}
+          &mdash; for readers searching for a mod_pagespeed replacement
+        </li>
+        <li>
+          <a href="/" class="text-interactive hover:text-interactive-hover underline">
+            mod_pagespeed
+          </a>{' '}
+          &mdash; drop-in continuation with native modules for Apache and nginx. The IIS package
+          ships as a signed installer on the mod_pagespeed GitHub release.
+        </li>
+      </ul>
+    </section>
+
+    <p class="mt-10 text-xs text-text-annotation">
+      Thumbor and other product names are trademarks of their respective owners. Comparisons reflect
+      publicly available information as of 2026 and are provided for evaluation; We-Amp B.V. is not
+      affiliated with or endorsed by Thumbor.
+    </p>
+  </article>
+</BaseLayout>

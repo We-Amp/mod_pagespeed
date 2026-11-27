@@ -1,0 +1,20 @@
+2026-10-26T17:19:16.2491873Z 
+2026-10-26T17:19:16.2492077Z [----------] Global test environment tear-down
+2026-10-26T17:19:16.2492665Z [==========] 9 tests from 3 test suites ran. (3426 ms total)
+2026-10-26T17:19:16.2493207Z [  PASSED  ] 8 tests.
+2026-10-26T17:19:16.2493613Z [  FAILED  ] 1 test, listed below:
+2026-10-26T17:19:16.2494133Z [  FAILED  ] SystemCachesMemCacheTest.CacheShare
+2026-10-26T17:19:16.2494519Z 
+2026-10-26T17:19:16.2494661Z  1 FAILED TEST
+2026-10-26T17:19:16.2495062Z ================================================================================
+2026-10-26T17:21:43.5505076Z [32mINFO: [0mFound 35 targets and 104 test targets...
+2026-10-26T17:21:43.8057092Z [32mINFO: [0mElapsed time: 654.023s, Critical Path: 160.59s
+2026-10-26T17:21:43.8060138Z [32mINFO: [0m4377 processes: 1537 remote cache hit, 1419 internal, 1420 linux-sandbox, 1 local.
+2026-10-26T17:21:43.8061055Z [32mINFO: [0mBuild completed, 1 test FAILED, 4377 total actions
+2026-10-26T17:21:43.8214118Z //test/pagespeed/system:system_caches_test                               [0m[31m[1mFAILED[0m in 1 out of 6 in 147.4s
+2026-10-26T17:21:43.8214841Z   Stats over 6 runs: max = 147.4s, min = 4.0s, avg = 60.7s, dev = 58.1s
+2026-10-26T17:21:43.8218244Z   /tmp/bazel-out-tsan/eab0d61a99b6696edb3d2aff87b585e8/execroot/_main/bazel-out/k8-fastbuild/testlogs/test/pagespeed/system/system_caches_test/shard_5_of_6/test.log
+2026-10-26T17:21:43.8223701Z 
+2026-10-26T17:21:43.8234855Z Executed 102 out of 104 tests: 101 tests pass, [0m[31m[1m1 fails locally[0m, and [0m[35m2 were skipped[0m.
+2026-10-26T17:21:57.1054224Z [0m
+2026-10-26T17:21:57.1075062Z ##[error]Process completed with exit code 3.

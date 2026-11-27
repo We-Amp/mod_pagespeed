@@ -1,0 +1,14 @@
+<!-- SPDX-License-Identifier: Apache-2.0
+     Copyright (c) 2024-2026 We-Amp B.V. -->
+
+<Project>
+  <Target Name="WeAmpSetWorkerExecutableLinux"
+          AfterTargets="Build;Publish"
+          Condition="'$(OS)' != 'Windows_NT'">
+    <Exec Command="chmod +x &quot;$(OutputPath)factory_worker&quot;"
+          IgnoreExitCode="true" StandardErrorImportance="low" />
+    <Exec Command="chmod +x &quot;$(PublishDir)factory_worker&quot;"
+          IgnoreExitCode="true" StandardErrorImportance="low"
+          Condition="'$(PublishDir)' != ''" />
+  </Target>
+</Project>

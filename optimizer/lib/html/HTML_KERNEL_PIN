@@ -1,0 +1,18 @@
+# Canonical mod_pagespeed 1.15 commit the vendored HTML kernel under
+# lib/html/ is synced from (#1130 — vendoring that clones
+# the lib/js machinery). Bump this SHA and re-run
+# tools/sync-html-kernel.sh in the same commit; the required differential CI
+# job byte-compares the vendored files against this commit and fails on any
+# mismatch (tools/ci/check-kernel-bytes.sh).
+# The pin must be a merged 1.15 master commit; there is no override.
+#
+# The `floor <sha>` line below is the pin-downgrade ratchet (D1 #1104,
+# cloned): the sync tool fails unless the pin equals the floor or descends
+# from it (exactly one floor line required), and the REQUIRED
+# html-kernel-differential CI job fails
+# unless this tree's floor is equal to or a descendant of origin/main's
+# floor — for changes arriving via PR, the floor only moves forward.
+# Convention: on a routine pin bump, move the floor to the new pin in the
+# same commit. See lib/html/CLAUDE.md.
+260586aa605800e7a597ff0f6a5f3e7f7a73f02e  Release 2.10.0 landing (#887)
+floor 260586aa605800e7a597ff0f6a5f3e7f7a73f02e

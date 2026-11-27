@@ -1,0 +1,1509 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Copyright (c) 2024-2026 We-Amp B.V. */
+
+@import 'tailwindcss';
+@plugin '@tailwindcss/typography';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Inter (SIL OFL 1.1), variable: wght 400-900 (the weights the site uses) and
+   the full opsz axis, Latin plus the punctuation, arrows and math signs the
+   pages carry. Subset with fonttools pyftsubset; the budget is a vitest guard
+   (test/font-budget.test.ts). License: /fonts/Inter-OFL.txt */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400 900;
+  font-display: swap;
+  src: url('../assets/fonts/inter-variable-subset.woff2') format('woff2');
+}
+
+/* Metric-matched fallbacks: the local font that renders before the web font
+   arrives is scaled to Inter's average glyph width and given Inter's vertical
+   metrics, so the swap does not move text. size-adjust is the ratio of the
+   frequency-weighted average advance width (Inter 400 vs Arial, from the fonts'
+   hmtx tables over the site's own text); the overrides are Inter's typo
+   ascender/descender (1984/-494 at 2048 upm) divided by size-adjust. Arial,
+   Helvetica and Liberation Sans share the same advance widths. A platform
+   without any of them (Android) skips the face and takes the Roboto one. */
+@font-face {
+  font-family: 'Inter Fallback';
+  src: local('Arial'), local('Helvetica'), local('Liberation Sans');
+  size-adjust: 104.26%;
+  ascent-override: 92.92%;
+  descent-override: 23.14%;
+  line-gap-override: 0%;
+}
+/* The same computation against Roboto 2.138 (the Android system face). */
+@font-face {
+  font-family: 'Inter Fallback Roboto';
+  src: local('Roboto');
+  size-adjust: 109.9%;
+  ascent-override: 88.15%;
+  descent-override: 21.95%;
+  line-gap-override: 0%;
+}
+
+/* IBM Plex Mono fallbacks, against Plex Mono's 0.600 em advance and 1025/-275
+   at 1000 upm. Menlo and DejaVu Sans Mono (the Linux default; Menlo derives
+   from it) advance 0.602 em; Liberation Mono, Droid Sans Mono and Courier New
+   advance 0.600 em. */
+@font-face {
+  font-family: 'IBM Plex Mono Fallback';
+  src: local('Menlo'), local('DejaVu Sans Mono');
+  size-adjust: 99.66%;
+  ascent-override: 102.85%;
+  descent-override: 27.59%;
+  line-gap-override: 0%;
+}
+@font-face {
+  font-family: 'IBM Plex Mono Fallback Liberation';
+  src: local('Liberation Mono'), local('Droid Sans Mono'), local('Courier New');
+  size-adjust: 99.98%;
+  ascent-override: 102.52%;
+  descent-override: 27.5%;
+  line-gap-override: 0%;
+}
+
+/* IBM Plex Mono (SIL OFL 1.1) — self-hosted, no Google Fonts call. Carries all
+   numerics, labels, code, status, logo & buttons.
+   Latin subset, weights 400 and 600 (no 500: one font file fewer per page). License: /fonts/IBM-Plex-Mono-OFL.txt */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../assets/fonts/plex-mono-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('../assets/fonts/plex-mono-600.woff2') format('woff2');
+}
+
+.prose pre {
+  overflow-x: auto;
+  /* Visible affordance that the block scrolls. The fade only renders when the
+     content actually overflows because scrollbar-gutter reserves space and
+     the mask hugs the right edge. */
+  scrollbar-gutter: stable;
+}
+
+/* Soften the right edge of a horizontally-overflowing prose <pre> so users
+   notice there is more content to the right. The gradient is purely visual —
+   no event handlers, no JS. */
+.prose pre.astro-code {
+  mask-image: linear-gradient(to right, black calc(100% - 1.5rem), transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, black calc(100% - 1.5rem), transparent 100%);
+}
+.prose pre.astro-code:hover,
+.prose pre.astro-code:focus-within {
+  /* Drop the fade once the user is interacting — full content stays visible
+     while they read or copy. */
+  mask-image: none;
+  -webkit-mask-image: none;
+}
+
+.prose ol {
+  list-style-type: decimal;
+  padding-left: 1.625em;
+}
+
+.prose ul {
+  list-style-type: disc;
+  padding-left: 1.625em;
+}
+
+.prose li {
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+}
+
+.prose pre code {
+  display: block;
+}
+
+/* Dual-theme Shiki: astro.config.mjs sets `defaultColor: false` so Shiki emits
+   CSS variables instead of inline colors. Apply the light theme by default and
+   swap to the dark theme inside `.dark`. Without this, code blocks would
+   render in github-dark in light mode (jarring high-contrast box). */
+.astro-code,
+.astro-code span {
+  color: var(--shiki-light);
+  background-color: var(--shiki-light-bg);
+  font-style: var(--shiki-light-font-style);
+  font-weight: var(--shiki-light-font-weight);
+  text-decoration: var(--shiki-light-text-decoration);
+}
+.dark .astro-code,
+.dark .astro-code span {
+  color: var(--shiki-dark);
+  background-color: var(--shiki-dark-bg);
+  font-style: var(--shiki-dark-font-style);
+  font-weight: var(--shiki-dark-font-weight);
+  text-decoration: var(--shiki-dark-text-decoration);
+}
+/* github-dark paints comments #6A737D, which is 3.05:1 on the block's own
+   #24292e ground — under the 4.5:1 AA floor for body-size text. Re-colour
+   that one token with the annotation grey (4.56:1 on the same ground); every
+   other github-dark token already clears the floor. Shiki emits the colour as
+   a per-span style, so the attribute selector is the hook; the `i` flag covers
+   either hex case. */
+.dark .astro-code span[style*='--shiki-dark:#6a737d' i] {
+  color: var(--color-text-annotation);
+}
+
+/* Long unbreakable tokens — filter and directive names, flags, URLs, env
+   vars — must never force a page wider than the viewport: when no fragment
+   of the word fits on a line, break inside the word instead of overflowing.
+   Headings need this because the permalink anchor appended to a heading has
+   no soft wrap opportunity before it, so a heading whose text fills the line
+   overflows by the anchor's width; paragraphs because plain text can carry
+   the same tokens without a <code> span. Normal prose never breaks mid-word:
+   a word only breaks when it cannot fit on a line of its own. Page titles
+   sit outside .prose and can carry the same names, so every h1 gets the
+   rule too. */
+h1,
+.prose :is(h2, h3, h4),
+.prose p {
+  overflow-wrap: anywhere;
+}
+
+/* Heading permalinks, rendered at build time by
+   src/lib/rehype-heading-anchors.mjs as a text-less link at the end of each
+   docs and how-it-works heading. The "#" is generated content, so it never
+   becomes part of the heading's text: textContent, innerText, a copy, reader
+   mode and a Markdown copy of the page all read the heading alone. The
+   alternative text after the slash keeps it out of the link's name too (the
+   first declaration is the fallback where that syntax is unsupported).
+   Hidden until the heading is hovered or the link is focused; touch screens,
+   which cannot hover, keep it faint. Not scoped to .prose, so a permalink
+   anywhere stays hidden until hover. */
+:is(h1, h2, h3, h4, h5, h6) > a.heading-anchor {
+  /* The "#" alone is narrower than the 24px minimum target size (WCAG
+     2.5.8). Padding widens the target; the negative margins take the same
+     amount back, so the heading text does not move or wrap differently. */
+  padding: 0.25rem 0.5rem;
+  margin: 0 -0.5rem 0 -0.1rem;
+  color: var(--color-text-muted);
+  text-decoration: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+:is(h1, h2, h3, h4, h5, h6) > a.heading-anchor::after {
+  content: '#';
+  content: '#' / '';
+}
+:is(h1, h2, h3, h4, h5, h6):hover > a.heading-anchor,
+:is(h1, h2, h3, h4, h5, h6) > a.heading-anchor:focus-visible {
+  opacity: 1;
+}
+:is(h1, h2, h3, h4, h5, h6) > a.heading-anchor:hover {
+  color: var(--color-interactive);
+}
+@media (hover: none) {
+  :is(h1, h2, h3, h4, h5, h6) > a.heading-anchor {
+    opacity: 0.4;
+  }
+}
+
+.prose :not(pre) > code {
+  /* A name such as a package or a directive moves to the next line whole and
+     breaks inside the word only when it cannot fit a line of its own. */
+  overflow-wrap: anywhere;
+}
+/* In a table `anywhere` lets a column shrink to a few characters, which
+   splits a short name over three lines while other columns have room. From
+   tablet width up, the first column (the name a reference table is looked up
+   by) uses `break-word`: it wraps the same way but keeps the whole name as
+   the column's minimum width. The other columns still shrink, so the table
+   keeps fitting its box; on a phone every column does. A phone has no room
+   for a long name as a minimum width, so there a two-column table (a name and
+   its description) gives the name column a 7rem floor instead: a short name
+   such as a state or a field stays whole, a longer one still breaks inside
+   the word rather than pushing the table wider than its box. */
+@media (width >= 48rem) {
+  .prose :is(td, th):first-child code {
+    overflow-wrap: break-word;
+  }
+}
+@media (width < 48rem) {
+  .prose table:not(:has(:is(td, th):nth-child(3))) :is(td, th):first-child {
+    min-width: 7rem;
+  }
+}
+
+/* The filter topic pages (/docs/filters/<name>/) carry the same filter names
+   in inline <code> outside .prose — the lede, the facts list, the risks
+   paragraph — so they need the identical wrapping rule there. */
+[data-filter-topic] :not(pre) > code {
+  overflow-wrap: anywhere;
+}
+
+.prose :not(pre) > code::before,
+.prose :not(pre) > code::after {
+  content: none;
+}
+
+.prose table {
+  display: block;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+/* Subtle row dividers for prose tables — markdown tables on the blog otherwise
+   read as a wall of text. Header gets a slightly stronger underline; body rows
+   get a quiet hairline so vertical scanning works. Token-driven, so the same
+   rule serves light and dark. */
+.prose table thead th {
+  border-bottom: 1px solid var(--color-border-strong);
+  padding-bottom: 0.5rem;
+}
+.prose table tbody tr + tr td {
+  border-top: 1px solid var(--color-border);
+}
+.prose table tbody td {
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+}
+/* Honor GFM column-alignment syntax (`---:` / `:---:`) on prose tables. The
+   markdown processor emits HTML `align="..."` attributes; modern Tailwind
+   resets can override the UA stylesheet rule that maps those, so we restate
+   them here as the source of truth. */
+.prose table th[align='right'],
+.prose table td[align='right'] {
+  text-align: right;
+}
+.prose table th[align='center'],
+.prose table td[align='center'] {
+  text-align: center;
+}
+.prose table th[align='left'],
+.prose table td[align='left'] {
+  text-align: left;
+}
+
+/* ============================================================================
+   Site visual identity (dark-primary).
+   Dark is the designed-for "home" canvas; light is a subordinate theme on the
+   SAME rulebook. The codebase uses Tailwind's `dark:` variant pervasively
+   (keyed on the `.dark` class), so light lives in @theme and dark overrides in
+   `.dark` — this keeps every existing `dark:` utility working untouched.
+   ONE accent: calibrated cyan-teal (#0E6F89 light / #5EB1C9 dark) =
+   interactive == live == optimized. All ratios WCAG 2.2 AA verified per surface.
+   ========================================================================== */
+@theme {
+  --font-sans: 'Inter', 'Inter Fallback', 'Inter Fallback Roboto', system-ui, sans-serif;
+  /* IBM Plex Mono (OFL) carries ALL numerics, labels, code, status & logo.
+     Falls back to platform mono until the self-hosted subset ships. */
+  --font-mono:
+    'IBM Plex Mono', 'IBM Plex Mono Fallback', 'IBM Plex Mono Fallback Liberation', ui-monospace,
+    SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* ===== LIGHT (subordinate — dark is home; see .dark) ===== */
+  --color-bg-primary: #fbfaf8; /* paper */
+  --color-bg-secondary: #f4f2ee; /* recessed band */
+  --color-bg-elevated: #ffffff; /* raised surface */
+  --color-bg-recessed: #efede8; /* engraved plate under display numerals */
+
+  --color-text-body: #15171a; /* 16.6:1 on paper */
+  --color-text-muted: #55606b; /* AA small on every light ground */
+  --color-text-annotation: #5e6770; /* AA normal on every light ground */
+
+  --color-interactive: #0e6f89; /* the ONE accent. 4.9:1 paper / 5.3:1 card */
+  --color-interactive-hover: #0a5972;
+  --color-on-accent: #ffffff; /* white legend on the darkened cyan fill */
+
+  --color-success: #1f7a4d; /* improvement / HIT only */
+  --color-accent: #9a5c0f; /* true caution only */
+  --color-promo: #0e6f89; /* launch badge = the cyan signal */
+
+  --color-border: #e2ded7; /* decorative hairline / tick base */
+  --color-border-strong: #cfcabf; /* emphasized rule */
+  --color-control-border: #8a8478; /* sole boundary of a hairline control (3:1) */
+  --color-tick: rgba(0, 0, 0, 0.1); /* chemin-de-fer ticks */
+  --color-specular: rgba(255, 255, 255, 0.6); /* polished top-edge highlight */
+  --color-grid-line: rgba(0, 0, 0, 0.04); /* exposed column grid */
+
+  /* Wash fills for state chips — the state hue at ~8% over an elevated
+     ground. Chips with these fills may sit on bg-primary, bg-secondary or
+     bg-elevated only; on bg-recessed a chip keeps a transparent fill. */
+  --color-success-wash: #edf4f1;
+  --color-accent-wash: #f7f2ec;
+  --color-interactive-wash: #ecf3f6;
+
+  --color-bit-clear: #e6e3dc; /* unlit capability cell */
+  --color-bit-lit: #0e6f89; /* lit cell = set bit = the accent */
+
+  --color-disabled-bg: #f0eee9;
+  --color-disabled-text: #8a8579;
+  --color-disabled-border: #ddd8ce;
+
+  --color-focus-ring: #0e6f89;
+
+  /* Radius — tightened to an instrument-control feel. */
+  --radius-control: 0.5rem; /* buttons */
+  --radius-card: 0.625rem; /* surfaces (tightened from 0.75rem) */
+  --radius-chip: 0.375rem; /* squared status chips, NOT pills */
+  --radius-pill: calc(infinity * 1px); /* legacy fully-rounded (kept for compat) */
+}
+
+.dark {
+  /* ===== DARK = HOME. Warm instrument-black; depth by luminance + finish. ===== */
+  --color-bg-primary: #0b0c0e; /* ground.  body 16.2:1 */
+  --color-bg-secondary: #121417; /* recessed panel */
+  --color-bg-elevated: #191c20; /* raised bezel (cards/code) */
+  --color-bg-recessed: #070809; /* engraved plate under display numerals */
+
+  --color-text-body: #e8eaed; /* readout off-white. 16.2:1 */
+  --color-text-muted: #a7aeb6; /* labels/eyebrows. AA small all surfaces */
+  --color-text-annotation: #8a9099; /* AA normal all surfaces */
+
+  --color-interactive: #5eb1c9; /* the ONE accent. 8.0:1 ground */
+  --color-interactive-hover: #84c7db;
+  --color-on-accent: #07080a; /* DARK ink on cyan fill (8.2:1). never white. */
+
+  --color-success: #6fbf8f; /* improvement / HIT. 8.9:1, hue-distinct from cyan */
+  --color-accent: #e0a24a; /* true caution only. 8.8:1 */
+  --color-promo: #5eb1c9;
+
+  --color-border: #2a2e34; /* decorative hairline / tick base */
+  --color-border-strong: #3a3f47;
+  --color-control-border: #646b73; /* hairline control boundary — clears 3:1 on bg-elevated (worst adjacent ground) */
+  --color-tick: rgba(255, 255, 255, 0.12);
+  --color-specular: rgba(255, 255, 255, 0.05);
+  --color-grid-line: rgba(255, 255, 255, 0.045);
+
+  /* Wash fills for state chips — see @theme for the surface rule. */
+  --color-success-wash: #202929;
+  --color-accent-wash: #292723;
+  --color-interactive-wash: #1f282e;
+
+  --color-bit-clear: #20242a;
+  --color-bit-lit: #5eb1c9;
+
+  --color-disabled-bg: #1a1d21;
+  --color-disabled-text: #6a7077;
+  --color-disabled-border: #2f343a;
+
+  --color-focus-ring: #5eb1c9;
+}
+
+/* Page rhythm: the vertical space of a page hero and of a content section.
+   Phone values first; from tablet width up the larger pair. Used through
+   .page-hero and .section (component layer) rather than per-page padding. */
+:root {
+  --space-section: 3rem;
+  --space-hero: 3.5rem;
+}
+@media (width >= 48rem) {
+  :root {
+    --space-section: 4.5rem;
+    --space-hero: 5rem;
+  }
+}
+
+/* Honor the OS "reduce motion" setting (WCAG 2.3.3 / brand §4.8). Neutralizes
+   scroll-smooth and caps any animation/transition to a single frame so motion-
+   sensitive users get instant state changes, not movement. !important is the
+   standard escape hatch — it must beat per-element durations and @apply'd
+   transition utilities. Kept outside @layer base so it isn't out-prioritized
+   by component-layer transitions. */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto !important;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@layer base {
+  /* WCAG 2.4.11 — focus indicator at least 2px with visible offset. Applies
+     site-wide unless a component overrides :focus-visible explicitly. */
+  :focus-visible {
+    outline: 2px solid var(--color-focus-ring);
+    outline-offset: 2px;
+  }
+
+  /* The header is sticky (h-16 = 64px). Scroll padding on the page scroller
+     keeps everything that scrolls into view clear of it: in-page anchors
+     (#faq, section ids, ToC links, the skip link's #main-content) and keyboard
+     focus moving back up the page (WCAG 2.4.11 Focus Not Obscured). This is
+     the only offset: a scroll margin on a target would add to it, so no
+     element sets one (test/scroll-offset-gate.test.ts). */
+  html {
+    scroll-padding-top: 5rem;
+  }
+  /* Docs pages with the platform selector pin it right under the header
+     (top: 4rem; 3.75rem tall: a 2.75rem tab plus 0.5rem padding each side),
+     so the clear area starts lower there: 4rem + 3.75rem + 0.75rem of air. */
+  html:has(#platform-selector) {
+    scroll-padding-top: 8.5rem;
+  }
+  /* The message launcher is pinned to the bottom right corner; keep focused
+     elements clear of it as well. */
+  html {
+    scroll-padding-bottom: 5rem;
+  }
+
+  /* <summary> in <details> ships with outline:none in some UA stylesheets;
+     reinstate a visible focus ring for keyboard users on every FAQ row. */
+  summary:focus-visible {
+    outline: 2px solid var(--color-focus-ring);
+    outline-offset: 2px;
+    border-radius: 0.375rem;
+  }
+
+  /* Inline code should read at full body contrast even when its parent uses
+     text-text-muted. .prose overrides below handle typography-plugin content. */
+  :not(pre) > code {
+    color: var(--color-text-body);
+    /* A code chip that wraps keeps its padding and corners on each line. */
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
+  }
+
+  /* Terminal chrome — applies to any <pre> containing a <code> child.
+     `pre:has(code)` scopes to actual code blocks so prose/quote <pre> isn't
+     touched, and inline `<code>` (not inside <pre>) is excluded by selector.
+     The chrome is additive: it only adds an inner ring, rounding, position
+     relative (for the copy button overlay) and a subtle top-edge highlight.
+     It deliberately does NOT set background or text color, so per-page
+     bg utilities on existing markup still win. */
+  pre:has(code) {
+    position: relative;
+    border-radius: var(--radius-card);
+    /* Instrument bezel: hairline frame + specular top edge (finish, not shadow). */
+    box-shadow:
+      inset 0 0 0 1px var(--color-border),
+      inset 0 1px 0 0 var(--color-specular);
+  }
+  /* Chemin-de-fer tick rule along the top edge — oscilloscope-capture read. */
+  pre:has(code)::before {
+    content: '';
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 1px;
+    border-top-left-radius: var(--radius-card);
+    border-top-right-radius: var(--radius-card);
+    background:
+      repeating-linear-gradient(90deg, var(--color-tick) 0 1px, transparent 1px 8px),
+      repeating-linear-gradient(90deg, var(--color-border-strong) 0 1px, transparent 1px 64px);
+    pointer-events: none;
+  }
+}
+
+/* Platform selector: CSS-driven show/hide for 1.1 docs */
+[data-platform] {
+  display: none;
+}
+html[data-active-platform='nginx'] [data-platform='nginx'],
+html[data-active-platform='apache'] [data-platform='apache'],
+html[data-active-platform='iis'] [data-platform='iis'] {
+  display: block;
+}
+
+[data-platform] {
+  border-left: 3px solid var(--color-interactive);
+  padding-left: 1rem;
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+  position: relative;
+}
+
+[data-platform]::before {
+  content: attr(data-platform-label);
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+  margin-bottom: 0.5rem;
+}
+
+/* Platform mapping tables: highlight active platform row */
+.platform-table tr[data-platform-row] {
+  opacity: 0.5;
+}
+html[data-active-platform='nginx'] .platform-table tr[data-platform-row='nginx'],
+html[data-active-platform='apache'] .platform-table tr[data-platform-row='apache'],
+html[data-active-platform='iis'] .platform-table tr[data-platform-row='iis'] {
+  opacity: 1;
+  background-color: color-mix(in srgb, var(--color-interactive) 12%, transparent);
+}
+
+.platform-table td:first-child,
+.platform-table th:first-child {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+/* Prose on tokens — the typography plugin's stone palette replaced by the
+   site's own tokens, which switch per theme, so light and dark share one
+   mapping (body reads muted, headings/bold/code read body, rules read
+   border/border-strong, code plates read elevated). Un-layered, these win
+   over the `prose-stone` utility. */
+.prose {
+  --tw-prose-body: var(--color-text-muted);
+  --tw-prose-headings: var(--color-text-body);
+  --tw-prose-links: var(--color-interactive);
+  --tw-prose-bold: var(--color-text-body);
+  --tw-prose-counters: var(--color-text-annotation);
+  --tw-prose-bullets: var(--color-text-annotation);
+  --tw-prose-hr: var(--color-border);
+  --tw-prose-quotes: var(--color-text-muted);
+  --tw-prose-quote-borders: var(--color-border-strong);
+  --tw-prose-captions: var(--color-text-annotation);
+  --tw-prose-code: var(--color-text-body);
+  --tw-prose-pre-code: var(--color-text-body);
+  --tw-prose-pre-bg: var(--color-bg-elevated);
+  --tw-prose-th-borders: var(--color-border-strong);
+  --tw-prose-td-borders: var(--color-border);
+}
+
+/* Prose h2 carries a tick-rule-style top hairline, so long documents read as
+   labelled channels divided by rules rather than one undivided column. */
+.prose h2 {
+  border-top: 1px solid var(--color-border);
+  padding-top: 1.5rem;
+}
+/* An <hr> right before an h2 already draws the rule; do not draw two. */
+.prose hr + h2 {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.product-tab[aria-pressed='true'] {
+  background-color: var(--color-interactive);
+  color: var(--color-on-accent);
+}
+.product-tab[aria-pressed='false'] {
+  background-color: var(--color-bg-elevated);
+  color: var(--color-text-muted);
+}
+.product-tab[aria-pressed='false']:hover {
+  background-color: var(--color-border-strong);
+  color: var(--color-text-body);
+}
+.product-tab:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+/* Short viewports (a phone in landscape, or a desktop window at 400% zoom):
+   a pinned header would take a quarter of the screen (WCAG 1.4.10 Reflow), so
+   it scrolls away with the page, as does the docs platform selector pinned
+   under it, and the scroll padding that kept content clear of them goes too.
+   Outside the layers so it beats the `sticky` utility on both. */
+@media (max-height: 480px) {
+  body > header,
+  #platform-selector {
+    position: static;
+  }
+  html,
+  html:has(#platform-selector) {
+    scroll-padding-top: 0;
+    scroll-padding-bottom: 1rem;
+  }
+}
+
+/* Forced colors (Windows contrast themes) drop author backgrounds and
+   shadows, so every state that is carried by a fill alone gets a system-colour
+   equivalent here. Nothing in this block applies outside that mode. */
+@media (forced-colors: active) {
+  /* The primary and inverse buttons are fills with no border: give them a
+     button outline. */
+  .btn-primary,
+  .btn-inverse {
+    border: 1px solid ButtonText;
+  }
+  /* The pressed tab keeps a fill, in the system's selection colours. */
+  .product-tab[aria-pressed='true'] {
+    forced-color-adjust: none;
+    background: SelectedItem;
+    color: SelectedItemText;
+  }
+  /* Opting out of the forced palette also opts the focus ring out of it. */
+  .product-tab[aria-pressed='true']:focus-visible {
+    outline-color: CanvasText;
+  }
+  /* The current page in the header navigation and the docs sidebar is marked
+     by colour, a wash and an inset shadow. A real border survives; an outline
+     would read as the focus ring. */
+  nav a[aria-current='page'] {
+    border-inline-start: 3px solid Highlight;
+  }
+}
+
+@layer components {
+  /* Card hierarchy — depth by HAIRLINE + FINISH, never drop-shadow.
+     .card          — repeating feature cards (hairline; hover = stronger rule + cyan top tick)
+     .card-product  — product-comparison card (ticked top rule; product distinction
+                      by rule weight + label, never hue alone — survives a cyan-blind view)
+     .card-resource — blog/docs/resource card (hover = cyan rule + top tick)
+     .card-featured — anchored/promoted card (polished finish; see below)
+     Hover never transforms (brand §4.8); the inset cyan top line is a SECOND
+     channel beyond border-color so the hover state isn't color-only. */
+  .card {
+    border-radius: var(--radius-card);
+    border: 1px solid var(--color-border);
+    background-color: var(--color-bg-elevated);
+    padding: 1.5rem;
+    transition: border-color 150ms ease;
+  }
+  .card:hover {
+    border-color: var(--color-border-strong);
+    box-shadow: inset 0 1px 0 0 var(--color-interactive);
+  }
+  /* Stretched link: a card that is clickable as a whole while only its title
+     is the link, so the link's accessible name is the title and not every
+     word on the card. The link's ::after covers the card; the focus ring is
+     drawn around the card, where a link wrapped around it drew it. */
+  .card-stretch {
+    position: relative;
+  }
+  .card-stretch-link::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+  }
+  @supports selector(:has(*)) {
+    .card-stretch-link:focus-visible {
+      outline: none;
+    }
+    .card-stretch:has(.card-stretch-link:focus-visible) {
+      outline: 2px solid var(--color-focus-ring);
+      outline-offset: 2px;
+    }
+  }
+
+  .card-product {
+    position: relative;
+    border-radius: var(--radius-card);
+    border: 1px solid var(--color-border);
+    background-color: var(--color-bg-elevated);
+    padding: 1.5rem;
+    border-top: 2px solid var(--color-interactive);
+    transition: border-color 150ms ease;
+  }
+  .card-product:hover {
+    border-color: var(--color-border-strong);
+  }
+  /* 1.15 card: muted top rule (the 2.0 card keeps the cyan signal). */
+  .card-product-stone {
+    border-top-color: var(--color-control-border);
+  }
+
+  .card-resource {
+    display: block;
+    border-radius: var(--radius-card);
+    border: 1px solid var(--color-border);
+    background-color: var(--color-bg-elevated);
+    padding: 1.5rem;
+    transition: border-color 150ms ease;
+  }
+  .card-resource:hover {
+    border-color: var(--color-interactive);
+    box-shadow: inset 0 1px 0 0 var(--color-interactive);
+  }
+
+  /* Typography tokens */
+  /* Display headings: weight 700 and -0.02em on every page (Inter's optical
+     size axis already tightens at these sizes, so tighter tracking makes
+     glyphs touch), and balanced lines so a heading never ends on a lone word. */
+  .h1-hero {
+    @apply text-4xl sm:text-5xl lg:text-6xl font-bold leading-[1.1];
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+  .h2-section {
+    @apply text-3xl sm:text-4xl font-bold;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+  /* Page hero (components/PageHero.astro): left-aligned, on the same left
+     edge as the header logo. Two title sizes: `marketing` (36px phone, 48px
+     from tablet) for the product and buying pages, `utility` (30px phone,
+     36px from small screens) for listings and tools. The home page keeps its
+     own, larger hero. */
+  .page-hero {
+    padding-top: var(--space-hero);
+    padding-bottom: calc(var(--space-hero) / 2);
+  }
+  .page-hero-title {
+    @apply font-bold leading-[1.1];
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+  .page-hero--marketing .page-hero-title {
+    @apply text-4xl md:text-5xl;
+  }
+  .page-hero--utility .page-hero-title {
+    @apply text-3xl sm:text-4xl;
+  }
+  .page-hero-lede {
+    @apply mt-6 max-w-2xl;
+  }
+  .page-hero--utility .page-hero-lede {
+    @apply mt-4;
+  }
+  /* A content section: the shared vertical rhythm between sections. */
+  .section {
+    padding-block: var(--space-section);
+  }
+  /* A reading-width column (56rem) that starts on the page's left edge (the
+     edge of the 72rem page container and of the header logo) instead of
+     being centred on its own. */
+  .container-prose {
+    @apply px-4 sm:px-6 lg:px-8;
+    max-width: 56rem;
+    margin-left: max(0px, calc((100% - 72rem) / 2));
+    margin-right: auto;
+  }
+  /* Text roles for marketing copy: size and leading only, colour comes from
+     the usual text utilities.
+     .text-body   card descriptions, answers, list items
+     .text-small  captions, requirement lines, table cells
+     .text-micro  mono only: eyebrows, chips, code captions; nothing smaller */
+  .text-body {
+    font-size: 1rem;
+    line-height: 1.6;
+  }
+  .text-small {
+    font-size: 0.875rem;
+    line-height: 1.5;
+  }
+  .text-micro {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1.5;
+  }
+  /* Standalone "go here" link (a card's destination, a link under a hero):
+     cyan, medium weight, a trailing arrow that stays with the last word, and
+     an underline on hover and keyboard focus. Links inside running text stay
+     underlined prose links and do not use this class. */
+  .link-arrow {
+    color: var(--color-interactive);
+    font-weight: 500;
+    text-decoration: none;
+    text-underline-offset: 4px;
+    transition: color 150ms ease;
+  }
+  .link-arrow::after {
+    /* The arrow is decoration: the second form gives it empty alternative
+       text where supported, so it is not read out. */
+    content: '\00a0\2192';
+    content: '\00a0\2192' / '';
+  }
+  .link-arrow:hover,
+  .link-arrow:focus-visible,
+  a:hover .link-arrow,
+  a:focus-visible .link-arrow {
+    color: var(--color-interactive-hover);
+    text-decoration: underline;
+  }
+  .lede {
+    /* font-weight 400 (not 300) — light weight loses contrast on the dark ground. */
+    @apply text-lg sm:text-xl leading-relaxed;
+    color: var(--color-text-muted);
+    /* Same unbreakable-token rule as .prose above: ledes carry filter and
+       flag names that must wrap on narrow screens, not push the page wide. */
+    overflow-wrap: anywhere;
+  }
+  /* Field-label eyebrow: mono, prefixed by a small cyan field-tick (RECTO graft). */
+  .eyebrow {
+    @apply inline-flex items-center gap-2 text-xs font-semibold uppercase;
+    font-family: var(--font-mono);
+    letter-spacing: 0.16em;
+    color: var(--color-text-muted);
+  }
+  .eyebrow::before {
+    content: '';
+    flex: none;
+    width: 0.5rem;
+    height: 2px;
+    background-color: var(--color-interactive);
+  }
+  /* Numbered section channel: a two-digit index replaces the field-tick. */
+  .eyebrow:has(.eyebrow-index)::before {
+    display: none;
+  }
+  .eyebrow-index {
+    color: var(--color-interactive);
+  }
+  /* Readout numerals — tabular figures + slashed zero. */
+  .display-num {
+    font-family: var(--font-mono);
+    font-feature-settings:
+      'tnum' 1,
+      'zero' 1;
+    letter-spacing: -0.01em;
+  }
+
+  /* ---- Structural motifs (CSS/SVG only — 0 raster, 0 JS) ---- */
+  /* Chemin-de-fer tick scale — section dividers, header/footer bezels, frames.
+     Replaces drop-shadows and alternating-background section rhythm. */
+  .rule-ticked {
+    height: 1px;
+    border: 0;
+    background:
+      repeating-linear-gradient(90deg, var(--color-tick) 0 1px, transparent 1px 8px),
+      repeating-linear-gradient(90deg, var(--color-border-strong) 0 1px, transparent 1px 64px);
+  }
+  /* 10px-tall tick scale: minor ticks every 8px at 5px high, major ticks every
+     64px at 10px high. Section rhythm between major sections; mark the element
+     aria-hidden. */
+  .rule-ticked-scale {
+    height: 10px;
+    border: 0;
+    background:
+      repeating-linear-gradient(90deg, var(--color-tick) 0 1px, transparent 1px 8px),
+      repeating-linear-gradient(90deg, var(--color-border-strong) 0 1px, transparent 1px 64px);
+    background-size:
+      auto 5px,
+      auto 10px;
+    background-repeat: repeat-x;
+    background-position: 0 100%;
+  }
+  /* Non-interactive surface: the .card frame without the hover state. */
+  .panel {
+    border-radius: var(--radius-card);
+    border: 1px solid var(--color-border);
+    background-color: var(--color-bg-elevated);
+    padding: 1.5rem;
+  }
+  /* Recessed, engraved calibrated readout plate — sits under display numerals. */
+  .readout-plate {
+    position: relative;
+    background-color: var(--color-bg-recessed);
+    border-radius: var(--radius-card);
+    box-shadow:
+      inset 0 1px 0 var(--color-specular),
+      inset 0 0 0 1px var(--color-border);
+  }
+  /* Capability bit-strip register (secondary signature motif). Decorative only —
+     never the sole carrier of information. Lit cells map to a real mask value. */
+  .bitstrip {
+    display: inline-flex;
+    gap: 2px;
+    align-items: center;
+  }
+  .bitstrip > i {
+    width: 6px;
+    height: 6px;
+    border-radius: 1px;
+    background-color: var(--color-bit-clear);
+  }
+  .bitstrip > i.lit {
+    background-color: var(--color-bit-lit);
+  }
+  /* Product-card "mark" usage: a slightly larger register so the byte reads as
+     a deliberate instrument mark (replaces the generic product icon). */
+  .bitstrip-mark {
+    gap: 3px;
+  }
+  .bitstrip-mark > i {
+    width: 9px;
+    height: 9px;
+    border-radius: 2px;
+  }
+  /* Muted variant — lit cells in the hairline-control grey instead of the cyan
+     accent, so a register can sit on a non-accent surface (e.g. the 1.15 card)
+     without spending the one cyan signal reserved for the 2.0 / live product. */
+  .bitstrip-muted > i.lit {
+    background-color: var(--color-control-border);
+  }
+
+  /* Semantic accent utilities — single source of truth for improvement metrics
+     and state. Additive; existing ad-hoc utilities keep working. */
+  .text-success {
+    color: var(--color-success);
+  }
+  .text-accent {
+    color: var(--color-accent);
+  }
+  /* Status chips — squared (radius-chip, NOT pill), transparent fill, tinted
+     hairline + a leading filled disc so state never rides on color alone. */
+  .badge-accent,
+  .badge-success,
+  .badge-interactive,
+  .badge-neutral {
+    @apply inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold;
+    font-family: var(--font-mono);
+    border-radius: var(--radius-chip);
+    border: 1px solid;
+    background-color: transparent;
+  }
+  .badge-accent::before,
+  .badge-success::before,
+  .badge-interactive::before,
+  .badge-neutral::before {
+    content: '';
+    flex: none;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 1px;
+    background-color: currentColor;
+  }
+  .badge-accent {
+    color: var(--color-accent);
+    border-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
+  }
+  .badge-success {
+    color: var(--color-success);
+    border-color: color-mix(in srgb, var(--color-success) 45%, transparent);
+  }
+  /* Recommended/flagship marker — the ONE cyan interactive hue, reusing the
+     squared-chip vocabulary. Distinct from badge-accent (amber, caution-only). */
+  .badge-interactive {
+    color: var(--color-interactive);
+    border-color: color-mix(in srgb, var(--color-interactive) 45%, transparent);
+  }
+  /* Neutral state (STALE / REVALIDATED, informational tags): muted legend on
+     a strong hairline, no hue signal. */
+  .badge-neutral {
+    color: var(--color-text-muted);
+    border-color: var(--color-border-strong);
+  }
+  /* Wash fill: the state hue at ~8% over an elevated ground. Surface rule —
+     washed chips sit on bg-primary, bg-secondary or bg-elevated only; on
+     bg-recessed (plates, strips, term panels) a chip keeps a transparent fill
+     or contrast drops below AA. */
+  .badge-success.badge-wash {
+    background-color: var(--color-success-wash);
+  }
+  .badge-accent.badge-wash {
+    background-color: var(--color-accent-wash);
+  }
+  .badge-interactive.badge-wash {
+    background-color: var(--color-interactive-wash);
+  }
+  /* No neutral wash token exists: badge-wash on badge-neutral is a no-op. */
+
+  /* Buttons — the primary is the ONLY full-saturation cyan FILL per viewport
+     (CTA-salience discipline). Plex Mono labels read as instrument controls;
+     depth from finish, not shadow; 44px min target. */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 px-6 py-3 text-sm font-semibold transition-colors;
+    font-family: var(--font-mono);
+    letter-spacing: 0.04em;
+    min-height: 2.75rem;
+    border-radius: var(--radius-control);
+    background-color: var(--color-interactive);
+    color: var(--color-on-accent);
+  }
+  .btn-primary:hover {
+    background-color: var(--color-interactive-hover);
+  }
+  /* Secondary/ghost use cyan as outline/text — never a competing fill. */
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 px-6 py-3 text-sm font-semibold transition-colors;
+    font-family: var(--font-mono);
+    letter-spacing: 0.04em;
+    min-height: 2.75rem;
+    border-radius: var(--radius-control);
+    border: 1px solid var(--color-control-border);
+    background-color: transparent;
+    color: var(--color-text-body);
+  }
+  .btn-secondary:hover {
+    border-color: var(--color-interactive);
+    color: var(--color-interactive);
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 px-2 py-1 text-sm font-semibold transition-colors;
+    font-family: var(--font-mono);
+    color: var(--color-interactive);
+  }
+  .btn-ghost:hover {
+    color: var(--color-interactive-hover);
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+  /* Inverse: the one button that sits ON a cyan band (closing sections), so
+     the fill is the dark elevated surface and the label is cyan. The focus
+     ring uses the on-accent ink, which is the colour that contrasts with the
+     band around it. */
+  .btn-inverse {
+    @apply inline-flex items-center justify-center gap-2 px-6 py-3 text-sm font-semibold transition-colors;
+    min-height: 2.75rem;
+    border-radius: var(--radius-control);
+    background-color: var(--color-bg-elevated);
+    color: var(--color-interactive);
+  }
+  .btn-inverse:hover {
+    background-color: var(--color-bg-primary);
+  }
+  .btn-inverse:focus-visible {
+    outline: 2px solid var(--color-on-accent);
+    outline-offset: 2px;
+  }
+  /* Compact size for a button inside the header bar, added to .btn-primary or
+     .btn-secondary: 36px tall, so the full-size button in the page stays the
+     clear primary. Still above the 24px minimum target (WCAG 2.5.8). The
+     vertical padding leaves room for the secondary button's 1px border. */
+  .btn-sm {
+    min-height: 2.25rem;
+    padding: 0.4375rem 1rem;
+    font-size: 0.8125rem;
+    line-height: 1.25rem;
+  }
+  /* Touch input (a tablet in landscape shows the desktop header): the compact
+     button keeps the 44px target of the other buttons. */
+  @media (pointer: coarse) {
+    .btn-sm {
+      min-height: 2.75rem;
+    }
+  }
+  .btn-primary:disabled,
+  .btn-primary[aria-disabled='true'],
+  .btn-secondary:disabled,
+  .btn-secondary[aria-disabled='true'] {
+    background-color: var(--color-disabled-bg);
+    color: var(--color-disabled-text);
+    border-color: var(--color-disabled-border);
+    cursor: not-allowed;
+  }
+
+  /* Featured card variant (complements existing .card). Like all card variants
+     it stays anchored on hover — no transform, just a deeper shadow (brand
+     §4.8). This was already the case here; the other variants now match it. */
+  /* Featured card — elevation by polished FINISH (specular top + ticked rule +
+     strong frame), not border-2 + drop-shadow. */
+  .card-featured {
+    position: relative;
+    border-radius: var(--radius-card);
+    border: 1px solid var(--color-border-strong);
+    background-color: var(--color-bg-elevated);
+    padding: 2rem;
+    box-shadow:
+      inset 0 1px 0 var(--color-specular),
+      inset 0 0 0 1px var(--color-border);
+  }
+  .card-featured::before {
+    content: '';
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 1px;
+    border-top-left-radius: var(--radius-card);
+    border-top-right-radius: var(--radius-card);
+    background:
+      repeating-linear-gradient(90deg, var(--color-tick) 0 1px, transparent 1px 8px),
+      repeating-linear-gradient(90deg, var(--color-border-strong) 0 1px, transparent 1px 64px);
+    pointer-events: none;
+  }
+
+  /* Copy-to-clipboard button injected by the global script into every
+     <pre> containing a <code>. Initial state is opacity:0 + invisible so the
+     button never flashes before the script has confirmed clipboard support
+     (the script flips `data-clip-ready` on <html> only when
+     navigator.clipboard exists). Once ready, the button sits at a low resting
+     opacity (visible affordance) and brightens on hover/focus. */
+  .code-copy-btn {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    /* Touch-friendly hit target (>=44px, WCAG 2.5.8) even when the icon stays small. */
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    padding: 0.5rem;
+    border: 1px solid var(--color-control-border);
+    border-radius: var(--radius-chip);
+    background-color: var(--color-bg-elevated);
+    color: var(--color-text-muted);
+    cursor: pointer;
+    opacity: 0;
+    visibility: hidden;
+    transition:
+      opacity 150ms ease,
+      background-color 150ms ease,
+      color 150ms ease;
+    font-size: 0.75rem;
+    line-height: 1;
+    z-index: 1;
+  }
+  .code-copy-btn svg {
+    width: 1rem;
+    height: 1rem;
+  }
+  /* Once clipboard support is confirmed, show the button at a quiet resting
+     opacity so users discover it without hovering. */
+  html[data-clip-ready] .code-copy-btn {
+    opacity: 0.6;
+    visibility: visible;
+  }
+  html[data-clip-ready] pre:hover > .code-copy-btn,
+  html[data-clip-ready] pre:focus-within > .code-copy-btn,
+  html[data-clip-ready] .code-copy-btn:hover,
+  html[data-clip-ready] .code-copy-btn:focus-visible {
+    opacity: 1;
+  }
+  .code-copy-btn:hover {
+    background-color: var(--color-bg-secondary);
+    color: var(--color-text-body);
+  }
+  .code-copy-btn:active {
+    background-color: var(--color-bg-recessed);
+  }
+  .code-copy-btn[data-copied='true'] {
+    background-color: var(--color-success-wash);
+    color: var(--color-success);
+    border-color: var(--color-success);
+  }
+
+  /* Inside a term panel the button docks in the head row (it is appended
+     there by the layout script), in flow and right-aligned. The [data-copied]
+     carve-outs keep the shared success state winning over these. */
+  .term-head > .code-copy-btn {
+    position: static;
+    flex: none;
+    margin-inline-start: auto;
+  }
+  .term-head > .code-copy-btn:not([data-copied='true']) {
+    background-color: var(--color-bg-elevated);
+    color: var(--color-text-muted);
+    border: 1px solid var(--color-control-border);
+  }
+  .term-head > .code-copy-btn:not([data-copied='true']):hover {
+    background-color: var(--color-bg-secondary);
+    color: var(--color-text-body);
+    border-color: var(--color-border-strong);
+  }
+
+  /* Small text links on phones (breadcrumbs, "back to" links, the inline
+     copy button on the contact page): the tappable area reaches 10px above
+     and below the text without moving anything. The extension is an
+     invisible box on the link itself, so a tap on it is a tap on the link. */
+  @media (max-width: 639px) {
+    nav[aria-label='Breadcrumb'] a,
+    .tap-area {
+      position: relative;
+    }
+    nav[aria-label='Breadcrumb'] a::after,
+    .tap-area::after {
+      content: '';
+      position: absolute;
+      inset: -0.625rem -0.25rem;
+    }
+  }
+
+  /* The floating message launcher (QuickMessage) vs overlays and the hero.
+     While a modal dialog is open — the search dialog or the blog chart
+     lightbox, both setting data-dialog-open on <html> — the launcher hides.
+     At handset widths it also stays out of the first viewport (a fixed
+     launcher would sit on top of the hero) until it has been scrolled past,
+     signalled by data-fab-reveal on <html>; an already-open panel stays. */
+  html[data-dialog-open] .qm-root {
+    display: none;
+  }
+  /* While the site footer is on screen the launcher steps aside at every width,
+     so it never sits on top of the footer text. Not on a very short viewport:
+     there the launcher is not pinned (QuickMessage.astro), it sits in the page
+     flow after the footer and covers nothing. */
+  @media not (max-height: 480px) {
+    html[data-footer-in-view] .qm-root:not([data-state='open']) {
+      display: none;
+    }
+  }
+  /* The open mobile menu is modal: the page behind it does not scroll. */
+  html[data-menu-open] {
+    overflow: hidden;
+  }
+  @media (max-width: 639px) and (not (max-height: 480px)) {
+    html:not([data-fab-reveal]) .qm-root:not([data-state='open']) {
+      display: none;
+    }
+    /* A copy button is passing through the launcher's corner (set by the
+       script in QuickMessage.astro): step aside so the tap reaches the copy
+       button. A focused launcher stays where it is. */
+    html[data-fab-corner-busy] .qm-root:not([data-state='open']):not(:focus-within) {
+      display: none;
+    }
+  }
+
+  /* Callouts (admonitions). Emitted by the remarkCallouts plugin from
+     `:::caution[…]:::` container directives in docs markdown. A filled,
+     rounded-card box with a tinted border reads as advisory chrome that is
+     clearly distinct from a `> blockquote` (which shares the page) — a
+     left-border-only treatment would be indistinguishable from quoted prose.
+     caution/warning carry the accent hue, note/important the interactive hue,
+     tip the success hue — each on its own wash fill. The icon
+     is a Lucide glyph masked with the title color, so color is never the only
+     signal (WCAG 1.4.1). */
+  .callout {
+    @apply my-6 rounded-card border p-4 sm:p-5;
+  }
+  /* The callout lives inside `.prose`; neutralize the typography plugin's
+     first/last margins so the box padding stays even. */
+  .callout > :first-child {
+    margin-top: 0;
+  }
+  .callout > :last-child {
+    margin-bottom: 0;
+  }
+  .callout-title {
+    @apply flex items-center gap-2 text-xs font-semibold uppercase tracking-wider;
+    margin-bottom: 0.5rem;
+  }
+  .callout-title::before {
+    content: '';
+    flex: none;
+    width: 1.05em;
+    height: 1.05em;
+    background-color: currentColor;
+    -webkit-mask: var(--callout-icon) center / contain no-repeat;
+    mask: var(--callout-icon) center / contain no-repeat;
+  }
+
+  /* Callout tones are token-driven (accent/success/interactive on their wash
+     fills), so one rule set per tone serves light and dark; the icon glyph is
+     masked with the title color, so color is never the only signal. */
+  /* caution / warning — the caution accent on its wash */
+  .callout-caution,
+  .callout-warning {
+    border-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
+    background-color: var(--color-accent-wash);
+    --callout-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z'/%3E%3Cpath d='M12 9v4'/%3E%3Cpath d='M12 17h.01'/%3E%3C/svg%3E");
+  }
+  .callout-caution .callout-title,
+  .callout-warning .callout-title {
+    color: var(--color-accent);
+  }
+
+  /* note / important — the cyan interactive accent on its wash */
+  .callout-note,
+  .callout-important {
+    border-color: color-mix(in srgb, var(--color-interactive) 45%, transparent);
+    background-color: var(--color-interactive-wash);
+    --callout-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='M12 16v-4'/%3E%3Cpath d='M12 8h.01'/%3E%3C/svg%3E");
+  }
+  .callout-note .callout-title,
+  .callout-important .callout-title {
+    color: var(--color-interactive);
+  }
+
+  /* tip — the success accent on its wash */
+  .callout-tip {
+    border-color: color-mix(in srgb, var(--color-success) 45%, transparent);
+    background-color: var(--color-success-wash);
+    --callout-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5'/%3E%3Cpath d='M9 18h6'/%3E%3Cpath d='M10 22h4'/%3E%3C/svg%3E");
+  }
+  .callout-tip .callout-title {
+    color: var(--color-success);
+  }
+
+  /* next-release — merged but not released yet. Quieter than the advisory
+     tones: the recessed band with a dashed rule (the dash, not the hue, sets it
+     apart) and a muted title with a clock glyph. */
+  .callout-next-release {
+    border-style: dashed;
+    border-color: var(--color-border-strong);
+    background-color: var(--color-bg-secondary);
+    --callout-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='M12 6v6l4 2'/%3E%3C/svg%3E");
+  }
+  .callout-next-release .callout-title {
+    color: var(--color-text-muted);
+  }
+
+  /* Release notes — collapsible entry chrome. Scoped entirely to .rn-* so
+     no other page pays for it. Tokens only, no new colors. */
+  .rn-alias {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  details.rn-entry {
+    border-top: 1px solid var(--color-border);
+    padding-block: 1rem;
+  }
+  details.rn-entry > summary {
+    cursor: pointer;
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.5rem;
+    font-weight: 600;
+    color: var(--color-text-body);
+  }
+  details.rn-entry > summary::-webkit-details-marker {
+    display: none;
+  }
+  .rn-entry .rn-ver {
+    font-variant-numeric: tabular-nums;
+  }
+  .rn-entry .rn-date {
+    font-weight: 400;
+    color: var(--color-text-annotation);
+  }
+  .rn-entry .rn-lede {
+    flex-basis: 100%;
+    font-weight: 400;
+    color: var(--color-text-muted);
+  }
+  .rn-badge {
+    display: inline-block;
+    border-radius: 9999px;
+    border: 1px solid var(--color-border-strong);
+    padding-inline: 0.55rem;
+    padding-block: 0.05rem;
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: var(--color-text-muted);
+  }
+  .rn-badge-opt {
+    border-color: color-mix(in srgb, var(--color-interactive) 40%, transparent);
+    color: var(--color-interactive);
+  }
+  .rn-badge-mod {
+    border-color: color-mix(in srgb, var(--color-success) 40%, transparent);
+    color: var(--color-success);
+  }
+  .rn-badge-pair {
+    border-color: color-mix(in srgb, var(--color-accent) 40%, transparent);
+    color: var(--color-accent);
+  }
+  .rn-entry-current {
+    padding-top: 0;
+    border-top: none;
+  }
+  .rn-summary-line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.5rem;
+    font-weight: 600;
+    color: var(--color-text-body);
+  }
+  .rn-index {
+    font-size: 0.875rem;
+    color: var(--color-text-muted);
+  }
+  .rn-index a {
+    color: var(--color-interactive);
+  }
+
+  /* Printing / find-in-page — a collapsed entry still prints in full. */
+  @media print {
+    .rn-entry:not([open]) > *:not(summary) {
+      display: block;
+    }
+  }
+}
+
+/* ---- Print --------------------------------------------------------------
+   Paper is light: map the always-on dark token set to the light values, so
+   the print rendering is black on white with no dark chrome. Interactive
+   overlays and navigation chrome carry no information on paper and are
+   hidden; prose gains the destination of external links; figures, code
+   blocks and cards are kept on one page. Unlayered so it wins over the
+   component layer; `html.dark:root` out-specifies the inline first-paint
+   token guard (html.dark) that ships after the stylesheet in <head>. */
+@media print {
+  /* The inline first-paint guard also paints every <header> dark; on paper
+     content headers (sections, post titles) must sit on the light ground. */
+  html.dark:root header {
+    background-color: transparent !important;
+    color: inherit !important;
+    border-color: var(--color-border) !important;
+  }
+  html.dark:root {
+    --color-bg-primary: #fbfaf8;
+    --color-bg-secondary: #f4f2ee;
+    --color-bg-elevated: #ffffff;
+    --color-bg-recessed: #efede8;
+    --color-text-body: #15171a;
+    --color-text-muted: #55606b;
+    --color-text-annotation: #5e6770;
+    --color-interactive: #0e6f89;
+    --color-interactive-hover: #0a5972;
+    --color-on-accent: #ffffff;
+    --color-success: #1f7a4d;
+    --color-accent: #9a5c0f;
+    --color-promo: #0e6f89;
+    --color-border: #e2ded7;
+    --color-border-strong: #cfcabf;
+    --color-control-border: #8a8478;
+    --color-tick: rgba(0, 0, 0, 0.1);
+    --color-specular: rgba(255, 255, 255, 0.6);
+    --color-grid-line: rgba(0, 0, 0, 0.04);
+    --color-success-wash: #edf4f1;
+    --color-accent-wash: #f7f2ec;
+    --color-interactive-wash: #ecf3f6;
+    --color-bit-clear: #e6e3dc;
+    --color-bit-lit: #0e6f89;
+    --color-disabled-bg: #f0eee9;
+    --color-disabled-text: #8a8579;
+    --color-disabled-border: #ddd8ce;
+    --color-focus-ring: #0e6f89;
+  }
+
+  /* The inline first-paint guard pins html/body to the dark ground with
+     !important; only an !important rule of higher specificity can undo it. */
+  html.dark:root,
+  html.dark:root body {
+    background-color: var(--color-bg-primary) !important;
+    color: var(--color-text-body) !important;
+  }
+
+  /* Code blocks print in the light Shiki theme, not as dark boxes. */
+  html.dark:root .astro-code,
+  html.dark:root .astro-code span {
+    color: var(--shiki-light);
+    background-color: var(--shiki-light-bg);
+    font-style: var(--shiki-light-font-style);
+    font-weight: var(--shiki-light-font-weight);
+    text-decoration: var(--shiki-light-text-decoration);
+  }
+
+  /* Chrome that does not belong on paper. Only the site header (the one
+     wrapping the main nav) goes; section and page headers carry content and
+     must print. The strip, the message launcher, the search
+     dialog, the docs menu disclosure and the inline "On this page" details
+     are interactive-only; so is the code copy button. */
+  [data-ui='telemetry-strip'],
+  header:has(> nav[aria-label='Main navigation']),
+  .qm-root,
+  #site-search,
+  #docs-menu,
+  details:has(> nav[aria-label='On this page']),
+  .code-copy-btn {
+    display: none !important;
+  }
+
+  /* External links in prose print their destination. */
+  .prose a[href^='http']::after {
+    content: ' (' attr(href) ')';
+    font-size: 0.875em;
+    color: var(--color-text-muted);
+    overflow-wrap: anywhere;
+  }
+
+  /* Long code lines wrap instead of running off the paper's right edge. */
+  pre,
+  pre code {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  pre,
+  figure,
+  .card {
+    break-inside: avoid;
+  }
+}

@@ -1,0 +1,7 @@
+Linux TSan	Run the tests	2026-10-26T04:10:01.1000000Z [32mINFO:[0m Analyzed 120 targets.
+Linux TSan	Run the tests	2026-10-26T04:12:30.2000000Z [31m[1m//a:b_test[0m                                                              [31m[1mFAILED[0m in 3.1s
+Linux TSan	Run the tests	2026-10-26T04:12:31.3000000Z   /work/testlogs/a/b_test/test.log
+Linux TSan	Run the tests	2026-10-26T04:12:32.4000000Z [31m[1m//a:c_test[0m                                                              [31m[1mTIMEOUT[0m in 300.0s
+Linux TSan	Run the tests	2026-10-26T04:12:33.5000000Z //a:d_test                                                              [32mPASSED[0m in 0.4s
+Linux TSan	Run the tests	2026-10-26T04:12:34.6000000Z Executed 3 out of 3 tests: 1 test passes and 2 fail locally.
+Linux TSan	Run the tests	2026-10-26T04:12:35.7000000Z There were tests whose specified size is too big. FAILED tests are listed above.

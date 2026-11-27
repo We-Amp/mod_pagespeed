@@ -1,0 +1,143 @@
+# Apache RAT exclusion list -- read by tools/ci/rat.sh, the "License audit
+# (Apache RAT)" CI job. Every file in the tree must either carry a recognised
+# license header or match a line in this file.
+#
+# HOW RAT 0.16 READS THIS FILE: each non-comment line is matched against the
+# bare NAME of a file or directory (never its path) as a Java regex that must
+# match the whole name; a matching directory is skipped together with
+# everything under it. A line that is not a valid regex (anything starting
+# with `*`) is dropped with a warning and tools/ci/rat.sh fails on that, so
+# extension rules are spelled `.*\.ext`. Verify a change by running the
+# script -- never assume a pattern took.
+#
+# WHAT MAY BE LISTED: only files that are non-source (configuration, prose,
+# data), third-party, generated, or content-addressed (fixtures and goldens
+# whose bytes are pinned by a hash). A first-party source file is never listed
+# here to make the count zero -- it gets the SPDX header instead, and
+# tools/check-license-headers.sh enforces that per file type.
+
+# --- Version control, build outputs and tool caches -------------------------
+# RAT honours either -e options or this file, never both, so the usual
+# command-line exclusions live here too.
+\.git
+bazel-.*
+node_modules
+\.venv
+\.ruff_cache
+__pycache__
+\.pytest_cache
+\.svelte-kit
+\.astro
+dist
+# This file and the report the audit writes into the repo root.
+\.rat-excludes
+rat-report\.txt
+
+# --- Repository and tool configuration (no code; nothing to license) --------
+\.gitignore
+\.git-blame-ignore-revs
+\.gitattributes
+\.gitkeep
+\.dockerignore
+\.gcloudignore
+\.helmignore
+\.bazelrc
+\.bazelignore
+\.bazelversion
+\.clang-format
+\.clang-tidy
+\.prettierrc
+\.prettierignore
+CODEOWNERS
+GIT_COMMIT
+.*_KERNEL_PIN
+.*\.ya?ml
+.*\.json
+.*\.toml
+.*\.lock
+.*\.conf
+.*\.example
+.*\.env
+.*\.default
+.*\.service
+.*\.tpl
+.*\.tmpl
+.*\.sln
+# deploy/logrotate.d/: logrotate drop-in configuration.
+logrotate\.d
+
+# --- Key material -----------------------------------------------------------
+# The armored public release signing key: no room for a header.
+RELEASE-SIGNING-KEY\.asc
+
+# --- Documentation, prose, data and images ----------------------------------
+(?i).*\.mdx?
+.*\.txt
+.*\.csv
+.*\.tsv
+.*\.svg
+
+# --- License and notice files (they ARE the license text) --------------------
+LICENSE.*
+NOTICE
+THIRD-PARTY-NOTICES
+
+# --- Website content -----------------------------------------------------------
+# .astro files are page / component / layout markup, deliberately header-free
+# (the repo gate only residue-scans them). website/src/content/ is prose.
+# website/public/ is NOT excluded: its first-party demo pages carry the
+# header, the archived 1.0 documentation carries the upstream Apache-2.0
+# text RAT recognises, and the rest is images, fonts, svg/txt/csv/yaml data
+# and the machine-readable .well-known/ metadata (RFC 8615 well-known URIs,
+# served verbatim as JSON / plain text).
+.*\.astro
+content
+\.well-known
+
+# --- Generated code ------------------------------------------------------------
+# lib/image/generated/: model tables and predictors emitted by the training
+# tool; regenerated, never hand-edited.
+generated
+
+# --- Generated goldens and byte-exact fixtures ----------------------------------
+# Every first-party synthetic INPUT that can carry a header does: the
+# JS-minifier corpus inputs (lib/js/corpus/bundle-fixtures/src,
+# lib/js/corpus/findings/repros) and the HTML-parse corpus seeds arrive
+# headered from the canonical 1.15 tree, and their goldens manifests pin the
+# headered bytes. What stays listed, and why: the goldens themselves
+# (generated expected outputs — a header cannot go into a file whose whole
+# content is the recorded parse); the three seeds whose test IS their exact
+# byte content (empty input, whitespace-only input, a document with no
+# markup); and the async-css-probe capture of the modpagespeed.com home page
+# (tools/async-css-probe/fixtures/modpagespeed-com, byte-frozen, sha256 per
+# file in its CAPTURE.md). Ordinary testdata/ directories are NOT excluded:
+# their first-party fixtures carry the header and are only ever compared
+# relatively (optimized vs origin), never byte-pinned.
+goldens
+empty\.html
+whitespace-only\.html
+text-only\.html
+modpagespeed-com
+# website/test/fixtures/crawler-cost: synthetic access-log fixtures (nginx and
+# Apache combined, IIS W3C, hostile and stripped lines) whose test IS their
+# exact byte content; the parsers are golden-tested on them, and a header
+# line would itself be an unparsed log line. The fixtures carry the cc- prefix.
+cc-.*\.log
+
+# --- Third-party test inputs ---------------------------------------------------
+# tools/async-css-probe/fixtures/bootstrap-5.3.3 and .../tailwind-v3: stock
+# Bootstrap 5.3.3 CSS and Tailwind CSS v3.4.17 output (both MIT, license
+# comments kept in the CSS), byte-frozen inputs for dump_critical_css block-size
+# comparisons. The two index.html pages are first-party and
+# carry the SPDX header.
+bootstrap-5\.3\.3
+tailwind-v3
+# test/lib/js/testdata: AngularJS, jQuery and Prototype (MIT) as the
+# .original/.minified pairs the minifier tests run against.
+.*\.original
+.*\.minified
+# tools/ci/testdata/slsa-provenance: a provenance file of the SLSA generic
+# generator v2.1.0, copied from the slsa-verifier test data (third-party,
+# Apache-2.0; see the README.md next to it), read by the self-test of
+# tools/ci/check_slsa_provenance.py.
+generic-v2\.1\.0\.intoto\.jsonl

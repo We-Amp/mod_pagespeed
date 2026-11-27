@@ -1,0 +1,46 @@
+# Bazel output directories
+bazel-*
+*.runfiles/
+*.runfiles_manifest
+MODULE.bazel.lock
+
+# Git
+.git
+
+# IDE
+.idea
+.vscode
+.serena/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Reference repos (mod_pagespeed is large; cyclone is needed for builds)
+reference/mod_pagespeed/
+
+# Test outputs and logs
+test-output/
+tools/production-tests/test-logs.txt
+tools/stress/stress_test_logs.txt
+tools/stress/.pytest_cache/
+**/test-results/
+website/playwright-report/
+
+# Node.js (workbench/website have their own install steps)
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+
+# .NET build artifacts
+**/bin/Debug/
+**/bin/Release/
+**/obj/
+
+# Docker build files (not the entrypoint scripts)
+docker/Dockerfile*
+docker/build-release.sh

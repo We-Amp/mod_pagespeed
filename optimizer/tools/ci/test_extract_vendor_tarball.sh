@@ -1,0 +1,463 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# Test for tools/ci/extract-vendor-tarball.sh.
+#
+# Reproduces the silent-success failure modes locally, with no network and no real
+# CI hub, by shimming `ssh` and `rsync` so the "hub shared dir" is just a
+# local directory. Each case asserts the hardened behaviour:
+#
+#   1. happy/local        local tarball present + valid -> extracts, no fetch.
+#   2. truncated/local    local tarball is a truncated .zst -> MUST NOT reach
+#                         tar; self-heals from the (valid) hub copy.
+#   3. empty-source       local missing AND hub source empty/missing ->
+#                         fails LOUD (exit 1) with "rerun the full workflow"
+#                         guidance carrying the `[vendor-tarball-unavailable]`
+#                         marker the Required Checks Gate greps for;
+#                         no partial extraction.
+#   4. fallback/aux       no local candidate (aux runner) + valid hub copy
+#                         -> fetches, verifies, extracts.
+#   5. sha-mismatch       local .zst is a *valid* zstd frame but its sidecar
+#                         sha256 disagrees -> rejected, self-heals from the hub.
+#   6. vanish-at-extract  local tarball PASSES verify but `tar` fails on it
+#                         (the observed race: "Local tarball present and
+#                         verified", then extraction dies) -> self-heals from
+#                         the hub and extracts correctly.
+#   9. partial/retry      a short local file and an empty hub: the local copy
+#                         is re-checked LOCAL_RETRIES times (it may be
+#                         mid-publish), then rejected; fails loud, extracts
+#                         nothing.
+#  10. mismatch/retry     a valid frame whose sidecar disagrees, empty hub:
+#                         retried, then rejected; nothing extracted.
+#  11. mid-publish        a short local file that a sibling completes while
+#                         the reader is retrying: the reader extracts the
+#                         completed local copy without going to the hub.
+#  12. late-sidecar       a sound tarball whose sidecar appears while the
+#                         reader is retrying: the digest is checked, not
+#                         skipped.
+#  13-15. hub sidecar     no rsync option a strict build rejects; a hub
+#                         sidecar is fetched and enforced (wrong digest
+#                         fails); an absent one falls back to zstd -t.
+#
+# Run:
+#   tools/ci/test_extract_vendor_tarball.sh
+#
+# SYNC NOTE: ported from the mod_pagespeed copy. It diverges there in
+# two portability fixes needed to make cases 2 and 6 real on GNU tar (both were
+# passing vacuously on Linux) -- see the comments in those cases. Port them back
+# on the next sync pass.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+EXTRACT="${SCRIPT_DIR}/extract-vendor-tarball.sh"
+[ -x "$EXTRACT" ] || chmod +x "$EXTRACT"
+
+command -v zstd  >/dev/null || { echo "SKIP: zstd not installed"; exit 0; }
+
+TEST_TMP="$(mktemp -d)"
+cleanup() { rm -rf "$TEST_TMP"; }
+trap cleanup EXIT
+# Every hub fetch below lands under this TMPDIR; check [8] asserts none of
+# them left a tarball behind (a leftover per job filled a runner's disk).
+export TMPDIR="$TEST_TMP/fetch-tmp"; mkdir -p "$TMPDIR"
+
+FAKE_BIN="$TEST_TMP/bin"
+SHARED="$TEST_TMP/hub-shared"    # stand-in for the hub's shared vendor dir
+mkdir -p "$FAKE_BIN" "$SHARED"
+
+SHA="deadbee"
+NAME="mod_pagespeed-${SHA}.tar.zst"
+# The pre-fix helper left /tmp/<name> behind on shared runners; clear this
+# test's fake-SHA name so a stale copy from an old run can't fail check [8].
+rm -f "/tmp/$NAME" "/tmp/$NAME.sha256"
+
+# ---------------------------------------------------------------------------
+# Build a real, valid vendor tarball (a tiny workspace with GIT_COMMIT).
+# ---------------------------------------------------------------------------
+SRC="$TEST_TMP/src"
+mkdir -p "$SRC"
+echo "abcdef0123456789" > "$SRC/GIT_COMMIT"
+echo "hello workspace" > "$SRC/marker.txt"
+GOOD="$TEST_TMP/${NAME}"
+tar --zstd -cf "$GOOD" -C "$SRC" .
+
+# ---------------------------------------------------------------------------
+# Shims. The script calls `rsync -a ... user@host:/path/NAME local` and
+# `ssh ... user@host "touch ..."`. We translate the "host:/path" form into a
+# copy out of $SHARED, and make ssh a no-op success (for the TTL `touch`).
+# The rsync stand-in rejects `--ignore-missing-args` like a strict build does.
+# ---------------------------------------------------------------------------
+cat > "$FAKE_BIN/rsync" <<SH
+#!/usr/bin/env bash
+# Behaves like a build whose option parser is strict (macOS openrsync,
+# protocol 29): --ignore-missing-args is rejected outright.
+for a in "\$@"; do
+  case "\$a" in
+    --ignore-missing-args) echo "rsync: unrecognized option: --ignore-missing-args" >&2; exit 1 ;;
+  esac
+done
+# Last two non-option args are <remote_spec> <local_dest>.
+args=()
+for a in "\$@"; do
+  case "\$a" in
+    -*) ;;            # drop flags (-a, -e)
+    "ssh "*) ;;       # drop the -e ssh command value
+    *) args+=("\$a") ;;
+  esac
+done
+remote="\${args[\${#args[@]}-2]}"
+dest="\${args[\${#args[@]}-1]}"
+# remote looks like user@host:/abs/path/<basename>
+base="\$(basename "\${remote#*:}")"
+src="$SHARED/\$base"
+if [ ! -e "\$src" ]; then
+  echo "rsync: link_stat \"\$src\" failed: No such file or directory" >&2; exit 23
+fi
+cp "\$src" "\$dest"
+SH
+chmod +x "$FAKE_BIN/rsync"
+
+cat > "$FAKE_BIN/ssh" <<'SH'
+#!/usr/bin/env bash
+# No-op success: the only ssh call the script makes is the best-effort
+# remote `touch` for TTL extension. Always succeed.
+exit 0
+SH
+chmod +x "$FAKE_BIN/ssh"
+
+# getent may not exist on macOS; provide a stub so hub-address resolution is
+# deterministic. (The script also accepts CI_HUB_ADDR from the env, which we set.)
+cat > "$FAKE_BIN/getent" <<'SH'
+#!/usr/bin/env bash
+exit 2
+SH
+chmod +x "$FAKE_BIN/getent"
+
+run_extract() {
+  # Force the env so no real host is contacted; tighten retries/backoff so the
+  # failure case finishes fast.
+  PATH="$FAKE_BIN:$PATH" \
+  CI_HUB_ADDR="hub.test" CI_HUB_USER="tester" \
+  CI_HUB_VENDOR_DIR="/remote/vendor" \
+  FETCH_RETRIES=2 FETCH_BACKOFF=1 \
+  LOCAL_RETRIES="${LOCAL_RETRIES:-3}" LOCAL_BACKOFF="${LOCAL_BACKOFF:-0}" \
+    bash "$EXTRACT" "$@"
+}
+
+PASS=0; FAIL=0
+ok()   { echo "  PASS: $1"; PASS=$((PASS+1)); }
+bad()  { echo "  FAIL: $1"; FAIL=$((FAIL+1)); }
+
+# ===========================================================================
+echo "[1] happy/local: valid local tarball present -> extracts, no fetch"
+# ===========================================================================
+DEST="$TEST_TMP/dest1"
+LOCAL="$TEST_TMP/local1.tar.zst"; cp "$GOOD" "$LOCAL"
+# Leave $SHARED empty so any fallback fetch would FAIL -- proves we used local.
+rm -f "$SHARED/$NAME"
+if run_extract --sha "$SHA" --dest "$DEST" --local "$LOCAL" >"$TEST_TMP/out1.log" 2>&1; then
+  if [ -f "$DEST/GIT_COMMIT" ] && [ "$(cat "$DEST/marker.txt")" = "hello workspace" ]; then
+    ok "extracted from local without contacting the hub"
+  else
+    bad "exit 0 but workspace not extracted"; cat "$TEST_TMP/out1.log"
+  fi
+else
+  bad "happy path returned non-zero"; cat "$TEST_TMP/out1.log"
+fi
+
+# ===========================================================================
+echo "[2] truncated/local: partial local .zst must NOT reach tar; self-heals"
+# ===========================================================================
+DEST="$TEST_TMP/dest2"
+LOCAL="$TEST_TMP/local2.tar.zst"
+# Truncate the good tarball to a partial frame. The cut MUST be a fraction of
+# the real size, not a fixed byte count: this workspace compresses to well under
+# 200 bytes with GNU tar, so a `head -c 200` "truncation" copied the file whole
+# and the case silently passed a VALID tarball to the script (green on BSD tar,
+# where the archive is larger, and a false FAIL on Linux).
+head -c "$(( $(wc -c < "$GOOD") / 2 ))" "$GOOD" > "$LOCAL"
+# Put a VALID copy on the hub so self-heal can succeed.
+cp "$GOOD" "$SHARED/$NAME"
+if run_extract --sha "$SHA" --dest "$DEST" --local "$LOCAL" >"$TEST_TMP/out2.log" 2>&1; then
+  if [ -f "$DEST/GIT_COMMIT" ] && grep -q "self-healing from the CI hub" "$TEST_TMP/out2.log"; then
+    ok "rejected partial local, self-healed from the hub, extracted"
+  else
+    bad "exit 0 but did not self-heal as expected"; cat "$TEST_TMP/out2.log"
+  fi
+else
+  bad "self-heal path returned non-zero despite valid hub copy"; cat "$TEST_TMP/out2.log"
+fi
+
+# ===========================================================================
+echo "[3] empty-source: local missing AND hub empty -> fail LOUD, no partial"
+# ===========================================================================
+DEST="$TEST_TMP/dest3"
+rm -f "$SHARED/$NAME" "$SHARED/$NAME.sha256"
+set +e
+run_extract --sha "$SHA" --dest "$DEST" --local "$TEST_TMP/does-not-exist.tar.zst" >"$TEST_TMP/out3.log" 2>&1
+rc=$?
+set -e
+if [ "$rc" -ne 0 ]; then
+  if grep -q "rerun the FULL workflow" "$TEST_TMP/out3.log"; then
+    if [ ! -f "$DEST/GIT_COMMIT" ]; then
+      ok "failed loudly (exit $rc) with rerun guidance, no partial extraction"
+    else
+      bad "failed but left a partial workspace"; cat "$TEST_TMP/out3.log"
+    fi
+  else
+    bad "failed but without actionable rerun guidance"; cat "$TEST_TMP/out3.log"
+  fi
+  # The gate's contract: the marker rides on an ::error:: line, which
+  # the runner renders as "##[error][vendor-tarball-unavailable] ..." in the
+  # job log. The gate matches that rendered form, so the marker must be the
+  # very first thing after the workflow command, with nothing in between.
+  if grep -qF '::error::[vendor-tarball-unavailable] ' "$TEST_TMP/out3.log"; then
+    ok "fail-loud message carries the [vendor-tarball-unavailable] gate marker"
+  else
+    bad "fail-loud message lost the [vendor-tarball-unavailable] gate marker"; cat "$TEST_TMP/out3.log"
+  fi
+else
+  bad "MISSING artifact did NOT fail (the silent-success bug)"; cat "$TEST_TMP/out3.log"
+fi
+
+# ===========================================================================
+echo "[4] fallback/aux: no local candidate + valid hub copy -> fetch+extract"
+# ===========================================================================
+DEST="$TEST_TMP/dest4"
+cp "$GOOD" "$SHARED/$NAME"
+if run_extract --sha "$SHA" --dest "$DEST" >"$TEST_TMP/out4.log" 2>&1; then
+  if [ -f "$DEST/GIT_COMMIT" ] && grep -q "No local candidate provided" "$TEST_TMP/out4.log"; then
+    ok "aux runner fetched from the hub and extracted"
+  else
+    bad "exit 0 but workspace not extracted on aux path"; cat "$TEST_TMP/out4.log"
+  fi
+else
+  bad "aux fallback returned non-zero despite valid hub copy"; cat "$TEST_TMP/out4.log"
+fi
+
+# ===========================================================================
+echo "[5] sha-mismatch: valid zstd frame but wrong sidecar -> reject, self-heal"
+# ===========================================================================
+DEST="$TEST_TMP/dest5"
+LOCAL="$TEST_TMP/local5.tar.zst"; cp "$GOOD" "$LOCAL"
+# Sidecar claims a different digest -> integrity must reject even though
+# `zstd -t` passes (closes the frame-boundary-truncation gap).
+echo "0000000000000000000000000000000000000000000000000000000000000000  $NAME" > "$LOCAL.sha256"
+# Valid hub copy WITHOUT a sidecar (older vendor run) so self-heal succeeds
+# on zstd -t alone.
+cp "$GOOD" "$SHARED/$NAME"; rm -f "$SHARED/$NAME.sha256"
+if run_extract --sha "$SHA" --dest "$DEST" --local "$LOCAL" >"$TEST_TMP/out5.log" 2>&1; then
+  if [ -f "$DEST/GIT_COMMIT" ] && grep -q "sha256 mismatch" "$TEST_TMP/out5.log"; then
+    ok "rejected sha-mismatched local, self-healed from the hub"
+  else
+    bad "exit 0 but did not detect sha mismatch"; cat "$TEST_TMP/out5.log"
+  fi
+else
+  bad "sha-mismatch path returned non-zero despite valid hub copy"; cat "$TEST_TMP/out5.log"
+fi
+
+# ===========================================================================
+echo "[6] vanish-at-extract: local verifies OK but tar fails -> heal + extract"
+# ===========================================================================
+DEST="$TEST_TMP/dest6"
+LOCAL="$TEST_TMP/local6.tar.zst"
+# A valid zstd frame whose payload is NOT a tar archive: passes `zstd -t`
+# (no sidecar, so zstd -t is the floor) but `tar --zstd -xf` fails on it.
+# This is the same contract as the observed race (verify OK, extraction dies
+# seconds later, as the script's header comment recounts) injected
+# deterministically -- the harness cannot delete the file between the
+# script's verify and extract steps.
+# The payload must be at least one full 512-byte tar block: GNU tar treats a
+# shorter archive as a clean EOF and exits 0, which made this case pass
+# vacuously. 64 KiB of incompressible bytes errors on both GNU and BSD tar.
+head -c 65536 /dev/urandom | zstd -q > "$LOCAL"
+# Valid copy on the hub so extract-phase self-heal can succeed.
+cp "$GOOD" "$SHARED/$NAME"; rm -f "$SHARED/$NAME.sha256"
+if run_extract --sha "$SHA" --dest "$DEST" --local "$LOCAL" >"$TEST_TMP/out6.log" 2>&1; then
+  if [ -f "$DEST/GIT_COMMIT" ] && [ "$(cat "$DEST/marker.txt")" = "hello workspace" ] \
+     && grep -q "verified but extraction failed" "$TEST_TMP/out6.log"; then
+    ok "local verified but failed extraction; self-healed from the hub, extracted"
+  else
+    bad "exit 0 but did not self-heal/extract as expected"; cat "$TEST_TMP/out6.log"
+  fi
+else
+  bad "extract-phase self-heal returned non-zero despite valid hub copy"; cat "$TEST_TMP/out6.log"
+fi
+
+# ===========================================================================
+echo "[7] required-vars: missing hub coordinates fail loudly, never silently"
+# ===========================================================================
+# CI_HUB_USER / CI_HUB_VENDOR_DIR come from GitHub repository variables. An
+# unset one must abort the HUB FETCH rather than address the wrong place with a
+# stale default -- but a purely local extract must still work without them.
+DEST="$TEST_TMP/dest7"; mkdir -p "$DEST"
+LOCAL="$TEST_TMP/local7/$NAME"; mkdir -p "$(dirname "$LOCAL")"
+cp "$GOOD" "$LOCAL"
+for missing in CI_HUB_USER CI_HUB_VENDOR_DIR; do
+  # No --local: the script must reach the hub fetch, where the guard lives.
+  if (
+       export PATH="$FAKE_BIN:$PATH" CI_HUB_ADDR="hub.test" CI_HUB_USER="tester" \
+              CI_HUB_VENDOR_DIR="/remote/vendor" FETCH_RETRIES=2 FETCH_BACKOFF=1
+       unset "$missing"
+       bash "$EXTRACT" --sha "$SHA" --dest "$DEST"
+     ) >"$TEST_TMP/out7.log" 2>&1; then
+    bad "unset ${missing} was tolerated on the hub fetch (should abort)"
+  elif grep -q "${missing}" "$TEST_TMP/out7.log"; then
+    ok "unset ${missing} aborts the hub fetch with a named error"
+  else
+    bad "unset ${missing} aborted but without naming the variable"; cat "$TEST_TMP/out7.log"
+  fi
+done
+
+# A verified --local tarball never touches the hub, so it must extract with NO
+# hub variables set at all (the producing box's own re-extract).
+DEST="$TEST_TMP/dest7b"; mkdir -p "$DEST"
+if (
+     export PATH="$FAKE_BIN:$PATH" FETCH_RETRIES=2 FETCH_BACKOFF=1
+     unset CI_HUB_USER CI_HUB_VENDOR_DIR CI_HUB_ADDR CI_HUB_HOST CI_HUB_IP
+     bash "$EXTRACT" --sha "$SHA" --dest "$DEST" --local "$LOCAL"
+   ) >"$TEST_TMP/out7b.log" 2>&1 && [ -f "$DEST/GIT_COMMIT" ]; then
+  ok "local-only extract works with no hub variables set"
+else
+  bad "local-only extract should not require hub variables"; cat "$TEST_TMP/out7b.log"
+fi
+
+# ===========================================================================
+echo "[8] hub fetches leave no tarball behind"
+# ===========================================================================
+left="$(find "$TMPDIR" -type f 2>/dev/null | head -5)"
+# The pre-fix helper ignored TMPDIR and wrote /tmp/<name>; catch that too.
+if [ -e "/tmp/$NAME" ]; then left="$left /tmp/$NAME"; fi
+if [ -z "$left" ]; then
+  ok "no fetched tarball or sidecar left behind"
+else
+  bad "fetched files left behind: $left"
+fi
+
+
+# ===========================================================================
+echo "[9] partial/retry: short local + empty hub -> retried, then rejected"
+# ===========================================================================
+DEST="$TEST_TMP/dest9"
+LOCAL="$TEST_TMP/local9.tar.zst"
+head -c "$(( $(wc -c < "$GOOD") / 2 ))" "$GOOD" > "$LOCAL"
+rm -f "$SHARED/$NAME" "$SHARED/$NAME.sha256"
+set +e
+run_extract --sha "$SHA" --dest "$DEST" --local "$LOCAL" >"$TEST_TMP/out9.log" 2>&1
+rc=$?
+set -e
+retries=$(grep -c "may be mid-publish" "$TEST_TMP/out9.log" || true)
+if [ "$rc" -ne 0 ] && [ "$retries" = 2 ] && [ ! -f "$DEST/GIT_COMMIT" ]; then
+  ok "short local re-checked ${retries} times, then rejected; nothing extracted"
+else
+  bad "partial/retry: rc=$rc retries=$retries"; cat "$TEST_TMP/out9.log"
+fi
+
+# ===========================================================================
+echo "[10] mismatch/retry: wrong sidecar + empty hub -> retried, then rejected"
+# ===========================================================================
+DEST="$TEST_TMP/dest10"
+LOCAL="$TEST_TMP/local10.tar.zst"; cp "$GOOD" "$LOCAL"
+echo "0000000000000000000000000000000000000000000000000000000000000000  $NAME" > "$LOCAL.sha256"
+set +e
+run_extract --sha "$SHA" --dest "$DEST" --local "$LOCAL" >"$TEST_TMP/out10.log" 2>&1
+rc=$?
+set -e
+retries=$(grep -c "may be mid-publish" "$TEST_TMP/out10.log" || true)
+if [ "$rc" -ne 0 ] && [ "$retries" = 2 ] && [ ! -f "$DEST/GIT_COMMIT" ] \
+   && grep -q "sha256 mismatch" "$TEST_TMP/out10.log"; then
+  ok "digest mismatch re-checked ${retries} times, then rejected"
+else
+  bad "mismatch/retry: rc=$rc retries=$retries"; cat "$TEST_TMP/out10.log"
+fi
+
+# ===========================================================================
+echo "[11] mid-publish: local completes during the retry -> used, hub untouched"
+# ===========================================================================
+DEST="$TEST_TMP/dest11"
+LOCAL="$TEST_TMP/local11.tar.zst"
+head -c "$(( $(wc -c < "$GOOD") / 2 ))" "$GOOD" > "$LOCAL"
+( sleep 1; cp "$GOOD" "$LOCAL.new"; mv "$LOCAL.new" "$LOCAL" ) &
+publisher=$!
+LOCAL_BACKOFF=2 run_extract --sha "$SHA" --dest "$DEST" --local "$LOCAL" >"$TEST_TMP/out11.log" 2>&1 && rc=0 || rc=$?
+wait "$publisher"
+if [ "$rc" = 0 ] && [ -f "$DEST/GIT_COMMIT" ] && grep -q "Local tarball present and verified" "$TEST_TMP/out11.log" \
+   && ! grep -q "Fetching .* from the CI hub" "$TEST_TMP/out11.log"; then
+  ok "reader waited for the completed local copy"
+else
+  bad "mid-publish: rc=$rc"; cat "$TEST_TMP/out11.log"
+fi
+
+# ===========================================================================
+echo "[12] late-sidecar: sound tarball, sidecar appears during the retry"
+# ===========================================================================
+DEST="$TEST_TMP/dest12"
+LOCAL="$TEST_TMP/local12.tar.zst"; cp "$GOOD" "$LOCAL"; rm -f "$LOCAL.sha256"
+( sleep 1; printf '%s  %s\n' "$(sha256sum "$LOCAL" | cut -d' ' -f1)" "$(basename "$LOCAL")" > "$LOCAL.sha256" ) &
+publisher=$!
+LOCAL_BACKOFF=2 run_extract --sha "$SHA" --dest "$DEST" --local "$LOCAL" >"$TEST_TMP/out12.log" 2>&1 && rc=0 || rc=$?
+wait "$publisher"
+if [ "$rc" = 0 ] && [ -f "$DEST/GIT_COMMIT" ] && grep -q "no usable .sha256 sidecar" "$TEST_TMP/out12.log" \
+   && grep -q "Local tarball present and verified" "$TEST_TMP/out12.log" \
+   && ! grep -q "Fetching .* from the CI hub" "$TEST_TMP/out12.log"; then
+  ok "sidecar picked up on the retry and checked"
+else
+  bad "late-sidecar: rc=$rc"; cat "$TEST_TMP/out12.log"
+fi
+
+# ===========================================================================
+echo "[13] sidecar-fetch: no rsync option that older rsync builds reject"
+# ===========================================================================
+# The CI hub's rsync can be a build (macOS openrsync, protocol 29) that rejects
+# --ignore-missing-args. A rejected option made the sidecar fetch fail every
+# time, silently (it is best effort), so the digest check never ran. The
+# stand-in rsync above now rejects that option like such a build does.
+if grep -nE '^[[:space:]]*rsync[^#]*--ignore-missing-args' "$EXTRACT" >"$TEST_TMP/out13.log"; then
+  bad "an rsync call in the script passes --ignore-missing-args"; cat "$TEST_TMP/out13.log"
+else
+  ok "no rsync call passes --ignore-missing-args"
+fi
+
+# ===========================================================================
+echo "[14] sidecar-present: hub sidecar is fetched and the digest is checked"
+# ===========================================================================
+DEST="$TEST_TMP/dest14"
+cp "$GOOD" "$SHARED/$NAME"
+if command -v sha256sum >/dev/null 2>&1; then GOODSUM="$(sha256sum "$GOOD" | cut -d' ' -f1)"; else GOODSUM="$(shasum -a 256 "$GOOD" | cut -d' ' -f1)"; fi
+printf '%s  %s\n' "$GOODSUM" "$NAME" > "$SHARED/$NAME.sha256"
+if run_extract --sha "$SHA" --dest "$DEST" >"$TEST_TMP/out14.log" 2>&1 \
+   && [ -f "$DEST/GIT_COMMIT" ] && ! grep -q "no usable .sha256 sidecar" "$TEST_TMP/out14.log"; then
+  ok "matching hub sidecar fetched and accepted (no zstd -t-only fallback)"
+else
+  bad "sidecar-present: matching sidecar not used"; cat "$TEST_TMP/out14.log"
+fi
+
+DEST="$TEST_TMP/dest14b"
+echo "0000000000000000000000000000000000000000000000000000000000000000  $NAME" > "$SHARED/$NAME.sha256"
+set +e
+run_extract --sha "$SHA" --dest "$DEST" >"$TEST_TMP/out14b.log" 2>&1
+rc=$?
+set -e
+if [ "$rc" -ne 0 ] && grep -q "sha256 mismatch" "$TEST_TMP/out14b.log" && [ ! -f "$DEST/GIT_COMMIT" ]; then
+  ok "wrong hub digest fails the fetch; nothing extracted"
+else
+  bad "sidecar-present: wrong digest was not enforced (rc=$rc)"; cat "$TEST_TMP/out14b.log"
+fi
+
+# ===========================================================================
+echo "[15] sidecar-absent: hub has no sidecar -> zstd -t floor, success"
+# ===========================================================================
+DEST="$TEST_TMP/dest15"
+cp "$GOOD" "$SHARED/$NAME"; rm -f "$SHARED/$NAME.sha256"
+if run_extract --sha "$SHA" --dest "$DEST" >"$TEST_TMP/out15.log" 2>&1 \
+   && [ -f "$DEST/GIT_COMMIT" ] && grep -q "Fetched and verified" "$TEST_TMP/out15.log"; then
+  ok "absent sidecar tolerated; verified by zstd -t alone"
+else
+  bad "sidecar-absent: fetch failed"; cat "$TEST_TMP/out15.log"
+fi
+
+echo ""
+echo "==== ${PASS} passed, ${FAIL} failed ===="
+[ "$FAIL" -eq 0 ]

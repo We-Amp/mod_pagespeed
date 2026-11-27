@@ -1,0 +1,84 @@
+# mod_pagespeed 2.1 - Quick Start
+#
+# Usage:
+#   curl -sO https://modpagespeed.com/docker-compose.yml
+#   docker compose up -d
+#   curl -I http://localhost/
+#
+# By default, nginx proxies to your origin at host.docker.internal:8081.
+# Set BACKEND_HOST and BACKEND_PORT to change this.
+
+# One PID namespace for every process that shares the cache volume. This
+# release's cache library tells a live write-lock holder from a dead one by a
+# lock the kernel holds per process, which works across PID namespaces. Older
+# builds judge a holder by its PID, and a live holder in ANOTHER PID namespace
+# looks gone to them (or its PID names an unrelated process), so while an old
+# and a new build share the volume during an upgrade two writes could
+# overlap undetected. Separate containers get separate PID
+# namespaces by default, so the worker and nginx both join the namespace of
+# `pidns`, which runs the Kubernetes pause image (the same thing a pod's
+# sandbox container runs; it also reaps orphaned zombies). The anchor, not
+# the worker, owns the namespace so that restarting or killing the worker or
+# nginx never takes the other down. Stopping or recreating `pidns` itself
+# DOES stop both -- the kernel kills every process in a PID namespace when
+# its first process exits -- and `docker compose up -d` then starts all
+# three again. That is why its image is pinned by digest and never follows
+# the release tag: an anchor that changed with every image bump would be
+# recreated on each upgrade, killing the namespace mid-`up`.
+services:
+  pidns:
+    image: registry.k8s.io/pause:3.10.1@sha256:278fb9dbcca9518083ad1e11276933a2e96f23de604a3a08cc3c80002767d24c
+    user: '65535:65535'
+    network_mode: none
+    read_only: true
+    cap_drop: ['ALL']
+    security_opt: ['no-new-privileges:true']
+    restart: unless-stopped
+
+  worker:
+    image: ghcr.io/we-amp/pagespeed-worker:2.10.0
+    pid: 'service:pidns'
+    depends_on:
+      pidns:
+        condition: service_started
+    volumes:
+      - pagespeed-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test:
+        ['CMD-SHELL', "socat -u -T 4 UNIX-CONNECT:/data/pagespeed.sock.health - | grep -q '^OK'"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    # ports:
+    #   - "9880:9880"  # Optional: worker HTTP API + web console
+
+  nginx:
+    image: ghcr.io/we-amp/pagespeed-nginx:2.10.0
+    pid: 'service:pidns'
+    ports:
+      - '80:80'
+    volumes:
+      - pagespeed-data:/data
+    environment:
+      - BACKEND_HOST=${BACKEND_HOST:-host.docker.internal}
+      - BACKEND_PORT=${BACKEND_PORT:-8081}
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    depends_on:
+      pidns:
+        condition: service_started
+      worker:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'curl', '-sf', 'http://localhost/health']
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 3s
+
+volumes:
+  pagespeed-data:
+    driver: local

@@ -1,0 +1,540 @@
+---
+import { ORGANIZATION_PUBLISHER } from '../../data/organization';
+import { OG_DEFAULT_IMAGE } from '../../data/og-image';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import NewsletterSignup from '../../components/NewsletterSignup.astro';
+import ShareButtons from '../../components/ShareButtons.astro';
+import { getCollection, render } from 'astro:content';
+import { readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { brandedTitle } from '../../lib/page-title';
+import { FREE_TO_RUN_LINE, PRODUCT_DISPLAY_NAME } from '../../data/product-facts.mjs';
+import { BLOG_INSTALL_PLATFORMS, INSTALL_PLATFORM_LINKS } from '../../data/blog-install-links';
+
+// Build-time set of generated social cards. Blog pages are prerendered, so this
+// frontmatter runs during `astro build` with cwd = the project root — read the
+// real `public/og-cards/` directory here. (Do NOT use `import.meta.url`: in the
+// bundled output it resolves into the dist module tree, not `src/`, so the check
+// always missed and every post silently fell back to the generic card.)
+let generatedCards = new Set<string>();
+try {
+  generatedCards = new Set(readdirSync(join(process.cwd(), 'public/og-cards')));
+} catch {
+  generatedCards = new Set();
+}
+
+export async function getStaticPaths() {
+  const posts = (await getCollection('blog')).filter((post) => !post.data.draft);
+  return posts.map((post) => {
+    // Related = other posts scored by shared tags (weighted) + same product,
+    // newest-first on ties. Rescues the older posts that had zero in-body
+    // links and dead-ended the reader.
+    const related = posts
+      .filter((p) => p.id !== post.id)
+      .map((p) => ({
+        post: p,
+        score:
+          p.data.tags.filter((t: string) => post.data.tags.includes(t)).length * 2 +
+          (p.data.product === post.data.product ? 1 : 0),
+      }))
+      .filter((x) => x.score > 0)
+      .sort((a, b) => b.score - a.score || b.post.data.date.getTime() - a.post.data.date.getTime())
+      .slice(0, 3)
+      .map((x) => x.post);
+    return { params: { slug: post.id }, props: { post, related } };
+  });
+}
+
+const { post, related } = Astro.props;
+const { Content, headings } = await render(post);
+// A post that ends with its own "## Related" list gets no "Read next" list
+// from the template: two related-reading lists in a row is one too many.
+const hasOwnRelated = headings.some((h) => h.depth === 2 && h.text.trim() === 'Related');
+
+const canonicalUrl = `https://modpagespeed.com/blog/${post.id}/`;
+
+// Per-post social card: explicit `coverImage` frontmatter wins, otherwise
+// the build-time generator at `scripts/generate-title-cards.mjs` writes
+// /og-cards/{slug}.png during `prebuild`. This drives both the og:image
+// meta tag (via BaseLayout) and the BlogPosting JSON-LD `image` field so
+// Google has a DISTINCT image per post — fixes the GSC weakness of every
+// post pointing at /og-default.png.
+//
+// The generator can skip a post (or a `prebuild` step may not have run), in
+// which case /og-cards/{slug}.png would 404. Verify the file exists at build
+// time and fall back to the always-present /og-default.png so we never emit a
+// broken og:image / JSON-LD image. coverImage (an external/explicit URL) is
+// trusted as-is and not filesystem-checked.
+const fallbackCardUrl = OG_DEFAULT_IMAGE;
+// Cachebust the generated per-post card so social platforms (which cache OG
+// images aggressively and ignore the file's own cache headers) re-fetch when
+// the card is regenerated. The key tracks the post's last content change
+// (lastUpdated, else publish date) — stable across deploys, changes only when
+// the card would — plus a card-style serial: bump CARD_STYLE when the card
+// layout itself is restyled, so platforms re-fetch the restyled cards even
+// though no post content changed. External `coverImage` URLs are trusted
+// as-is, not busted.
+const CARD_STYLE = 2;
+const cardVersion = (post.data.lastUpdated ?? post.data.date).toISOString().slice(0, 10);
+let cardUrl = post.data.coverImage ?? `/og-cards/${post.id}.png?v=${cardVersion}-${CARD_STYLE}`;
+if (!post.data.coverImage && !generatedCards.has(`${post.id}.png`)) {
+  cardUrl = fallbackCardUrl;
+}
+const absoluteCardUrl = new URL(cardUrl, Astro.site ?? new URL('https://modpagespeed.com')).href;
+
+const isOneOne = post.data.product === '1.1';
+// Server-specific install links for the fix posts (see the data file).
+const installLinks = (BLOG_INSTALL_PLATFORMS[post.id] ?? []).map((p) => INSTALL_PLATFORM_LINKS[p]);
+const installKind = installLinks[0]?.kind ?? 'module';
+const productLabel = PRODUCT_DISPLAY_NAME;
+
+// Append the product suffix to the <title> only when the title does not name
+// the product already and the suffix won't push it past the ~60-char
+// truncation point (brandedTitle).
+const pageTitle = brandedTitle(post.data.title);
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'BlogPosting',
+  headline: post.data.title,
+  description: post.data.description,
+  datePublished: post.data.date.toISOString(),
+  ...(post.data.lastUpdated && {
+    dateModified: post.data.lastUpdated.toISOString(),
+  }),
+  author: {
+    '@type': 'Person',
+    name: post.data.author,
+    url: 'https://www.linkedin.com/in/oschaaf',
+  },
+  publisher: ORGANIZATION_PUBLISHER,
+  image: absoluteCardUrl,
+  mainEntityOfPage: {
+    '@type': 'WebPage',
+    '@id': canonicalUrl,
+  },
+  url: canonicalUrl,
+  keywords: post.data.tags.join(', '),
+};
+
+// Optional second JSON-LD block: HowTo, for the step-based fix spokes that set
+// `howTo` frontmatter. BlogPosting stays FIRST in the array so seo.spec.ts's
+// `.first()` @context assertion keeps reading BlogPosting (BaseLayout renders
+// jsonLd entries in order, then appends BreadcrumbList).
+const howToJsonLd = post.data.howTo
+  ? {
+      '@context': 'https://schema.org',
+      '@type': 'HowTo',
+      name: post.data.howTo.name,
+      ...(post.data.howTo.description && { description: post.data.howTo.description }),
+      ...(post.data.howTo.tools?.length && {
+        tool: post.data.howTo.tools.map((t) => ({ '@type': 'HowToTool', name: t })),
+      }),
+      step: post.data.howTo.steps.map((s) => ({
+        '@type': 'HowToStep',
+        name: s.name,
+        text: s.text,
+      })),
+    }
+  : undefined;
+
+// Optional FAQPage JSON-LD for posts that set `faq` frontmatter. Each q/a must
+// also be visible in the article body (content-checked, like HowTo). BlogPosting
+// stays FIRST so seo.spec.ts's `.first()` @context assertion keeps reading it.
+const faqJsonLd =
+  post.data.faq && post.data.faq.length
+    ? {
+        '@context': 'https://schema.org',
+        '@type': 'FAQPage',
+        mainEntity: post.data.faq.map((f) => ({
+          '@type': 'Question',
+          name: f.q,
+          acceptedAnswer: { '@type': 'Answer', text: f.a },
+        })),
+      }
+    : undefined;
+
+const jsonLdProp = [jsonLd, howToJsonLd, faqJsonLd].filter(
+  (entry): entry is NonNullable<typeof entry> => entry !== undefined,
+);
+---
+
+<BaseLayout
+  title={pageTitle}
+  description={post.data.description}
+  ogImage={cardUrl}
+  jsonLd={jsonLdProp}
+  alternateMarkdown={`/blog/${post.id}.md`}
+  ogType="article"
+  articlePublished={post.data.date}
+  articleModified={post.data.lastUpdated}
+>
+  <article class="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 py-20">
+    <header>
+      <time
+        datetime={post.data.date.toISOString()}
+        class="font-mono text-xs font-normal uppercase tracking-wider text-text-annotation"
+      >
+        {post.data.date.toLocaleDateString('en-US', {
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+        })}
+      </time>
+      <h1 class="mt-1 text-4xl font-bold tracking-tight leading-tight text-text-body">
+        {post.data.title}
+      </h1>
+      <p class="mt-3 text-sm text-text-muted">
+        By{' '}
+        <a
+          href="https://www.linkedin.com/in/oschaaf"
+          rel="noopener noreferrer"
+          class="text-text-body hover:text-interactive underline decoration-border-strong underline-offset-2"
+        >
+          {post.data.author}
+        </a>
+      </p>
+      {post.data.tags.length > 0 && (
+        <div class="mt-4 flex flex-wrap gap-2">
+          {post.data.tags.map((tag: string) => (
+            <span class="inline-block rounded-full bg-interactive-wash ring-1 ring-interactive/40 px-3 py-1 text-xs font-medium text-interactive">
+              {tag}
+            </span>
+          ))}
+        </div>
+      )}
+    </header>
+
+    <div class="mt-10 prose prose-stone max-w-none prose-headings:font-semibold prose-a:text-interactive">
+      <Content />
+    </div>
+
+    <ShareButtons title={post.data.title} url={canonicalUrl} surface="blog" />
+
+    <aside class="mt-12 rounded-lg border border-interactive/40 bg-interactive/10 p-6">
+      {isOneOne ? (
+        <>
+          <p class="text-base font-semibold text-text-body">
+            Run {productLabel} — Apache, nginx and IIS.
+          </p>
+          <p class="mt-2 text-sm text-text-muted">
+            Signed builds · Current dependency graph · Apache License 2.0
+          </p>
+          <p class="mt-2 text-sm text-text-muted">
+            The IIS package ships as a signed installer on the mod_pagespeed GitHub release.
+          </p>
+          <div class="mt-5 flex flex-wrap items-center gap-3">
+            <a
+              href="/docs/getting-started/"
+              data-umami-event="cta_blog_bottom_install"
+              class="inline-flex items-center rounded-md bg-interactive hover:bg-interactive-hover px-4 py-2 text-sm font-semibold text-on-accent transition-colors"
+            >
+              <span>
+                Get started <span aria-hidden="true">&rarr;</span>
+              </span>
+            </a>
+            <a
+              href="/pricing/"
+              data-umami-event="cta_blog_bottom_buy"
+              class="text-sm font-medium text-text-body hover:text-interactive underline decoration-border-strong underline-offset-2"
+            >
+              See pricing
+            </a>
+          </div>
+        </>
+      ) : (
+        <>
+          <p class="text-base font-semibold text-text-body">
+            Run mod_pagespeed — deploy with Docker Compose in 5 minutes.
+          </p>
+          <p class="mt-2 text-sm text-text-muted">No bandwidth fees · {FREE_TO_RUN_LINE}</p>
+          <div class="mt-5 flex flex-wrap items-center gap-3">
+            <a
+              href="/docs/getting-started/"
+              data-umami-event="cta_blog_bottom_install"
+              class="inline-flex items-center rounded-md bg-interactive hover:bg-interactive-hover px-4 py-2 text-sm font-semibold text-on-accent transition-colors"
+            >
+              <span>
+                Install &amp; run <span aria-hidden="true">&rarr;</span>
+              </span>
+            </a>
+            <a
+              href="/pricing/"
+              data-umami-event="cta_blog_bottom_buy"
+              class="text-sm font-medium text-text-body hover:text-interactive underline decoration-border-strong underline-offset-2"
+            >
+              Support pricing
+            </a>
+          </div>
+        </>
+      )}
+      {installLinks.length > 0 && (
+        <div class="mt-4 border-t border-interactive/30 pt-4" data-blog-install-links>
+          <p class="text-sm text-text-muted">Install the {installKind} this guide configures:</p>
+          <div class="mt-2 flex flex-wrap items-center gap-x-5 gap-y-2">
+            {installLinks.map((link) => (
+              <a
+                href={link.href}
+                data-umami-event={link.event}
+                class="text-sm font-medium text-interactive hover:text-interactive-hover underline decoration-border-strong underline-offset-2"
+              >
+                {link.label} <span aria-hidden="true">&rarr;</span>
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+    </aside>
+
+    {/* Newsletter signup — contextual, after the product CTA and before
+        "Read next". Shared component, blog variant. */}
+    <div class="mt-8">
+      <NewsletterSignup variant="blog" slug={post.id} />
+    </div>
+
+    {post.data.tool === 'crawler-cost' && (
+      <aside class="mt-8 rounded-lg border border-border bg-bg-secondary p-4 text-sm text-text-muted">
+        <a
+          href="/ai-crawler-cost/"
+          data-umami-event="blog-tool-crawler-cost"
+          class="font-medium text-interactive hover:text-interactive-hover"
+        >
+          Estimate what AI crawlers cost your server and how many visits AI assistants send back.
+        </a>{' '}
+        Drop an access log; nothing from it leaves your browser.
+      </aside>
+    )}
+    {related.length > 0 && !hasOwnRelated && (
+      <section class="mt-12 border-t border-border pt-8">
+        <h2 class="text-sm font-semibold uppercase tracking-wider text-text-annotation">
+          Read next
+        </h2>
+        <ul class="mt-4 space-y-4">
+          {related.map((r) => (
+            <li>
+              <div class="group card-stretch block">
+                <h3 class="text-base font-semibold text-text-body group-hover:text-interactive transition-colors">
+                  <a href={`/blog/${r.id}/`} class="card-stretch-link">
+                    {r.data.title}
+                  </a>
+                </h3>
+                <p class="mt-1 text-sm text-text-muted">{r.data.description}</p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
+    )}
+
+    <nav class="mt-8 border-t border-border pt-8" aria-label="Article navigation">
+      <a
+        href="/blog/"
+        class="tap-area text-sm font-medium text-interactive hover:text-interactive-hover"
+      >
+        <span aria-hidden="true">&larr; </span>Back to blog
+      </a>
+    </nav>
+  </article>
+
+  {/* Zoom / lightbox for embedded chart figures (inline SVGs in the post body) */}
+  <div
+    id="cyc-lightbox"
+    class="cyc-lightbox"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Enlarged chart"
+    hidden
+  >
+    <div class="cyc-lb-panel">
+      <button type="button" class="cyc-lb-close" aria-label="Close enlarged chart">
+        &times;
+      </button>
+      <div class="cyc-lb-body"></div>
+    </div>
+  </div>
+
+  <style is:global>
+    figure.cyc-zoomable {
+      position: relative;
+    }
+    .cyc-zoom {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      border: 1px solid rgb(214 211 209 / 0.8);
+      background: rgb(255 255 255 / 0.78);
+      color: var(--color-text-muted);
+      cursor: pointer;
+      font-size: 16px;
+      line-height: 1;
+      -webkit-backdrop-filter: blur(4px);
+      backdrop-filter: blur(4px);
+      opacity: 0.75;
+      transition:
+        opacity 0.12s,
+        color 0.12s;
+    }
+    .cyc-zoom:hover {
+      opacity: 1;
+      color: var(--color-text-body);
+    }
+    .cyc-zoom:focus-visible {
+      outline: 2px solid var(--color-focus-ring);
+      outline-offset: 2px;
+      opacity: 1;
+    }
+    /* Only the translucent chrome needs a dark override; the glyph colour
+       follows the theme tokens above. */
+    html.dark .cyc-zoom {
+      border-color: rgb(68 64 60 / 0.8);
+      background: rgb(28 25 23 / 0.78);
+    }
+    .cyc-lightbox {
+      position: fixed;
+      inset: 0;
+      z-index: 60;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background: rgb(0 0 0 / 0.55);
+    }
+    .cyc-lightbox[hidden] {
+      display: none;
+    }
+    /* Theme tokens, so the panel (and the currentColor charts it hosts)
+       follow the light/dark theme without per-theme overrides. */
+    .cyc-lb-panel {
+      position: relative;
+      background: var(--color-bg-elevated);
+      color: var(--color-text-body);
+      border-radius: 16px;
+      padding: 28px 22px 18px;
+      max-width: 96vw;
+      max-height: 92vh;
+      overflow: auto;
+      box-shadow: 0 24px 64px rgb(0 0 0 / 0.45);
+    }
+    .cyc-lb-panel svg {
+      width: min(1200px, 88vw);
+      height: auto;
+      display: block;
+    }
+    .cyc-lb-close {
+      position: absolute;
+      top: 8px;
+      right: 12px;
+      background: none;
+      border: 0;
+      font-size: 26px;
+      line-height: 1;
+      color: inherit;
+      opacity: 0.6;
+      cursor: pointer;
+      padding: 2px 6px;
+    }
+    .cyc-lb-close:hover {
+      opacity: 1;
+    }
+    .cyc-lb-close:focus-visible {
+      outline: 2px solid var(--color-focus-ring);
+      outline-offset: 2px;
+    }
+    @media (max-width: 680px) {
+      .cyc-lightbox {
+        padding: 10px;
+      }
+      .cyc-lb-panel {
+        padding: 22px 12px 12px;
+      }
+      /* Wider than the column the chart sits in, so the enlarged view is
+         larger; the panel scrolls sideways. */
+      .cyc-lb-panel svg {
+        width: max(88vw, 640px);
+      }
+    }
+  </style>
+
+  <script>
+    const lb = document.getElementById('cyc-lightbox');
+    if (lb) {
+      const body = lb.querySelector('.cyc-lb-body');
+      const closeBtn = lb.querySelector<HTMLButtonElement>('.cyc-lb-close');
+      let lastFocus: Element | null = null;
+      const openLB = (svg: SVGElement) => {
+        // The inline chart carries style="width:100%", which inside the
+        // shrink-to-fit panel collapses it to the SVG default size; clear it
+        // so the lightbox width rules apply.
+        const clone = svg.cloneNode(true) as SVGElement;
+        clone.style.width = '';
+        body?.replaceChildren(clone);
+        lastFocus = document.activeElement;
+        lb.hidden = false;
+        document.body.style.overflow = 'hidden';
+        // Marks the page as hosting a modal overlay: the floating message
+        // widget hides while this attribute is set, and closes if it is open.
+        document.documentElement.setAttribute('data-dialog-open', '');
+        window.dispatchEvent(new CustomEvent('weamp:fab-open', { detail: { source: 'lightbox' } }));
+        closeBtn?.focus();
+      };
+      const closeLB = () => {
+        if (lb.hidden) return;
+        lb.hidden = true;
+        body?.replaceChildren();
+        document.body.style.overflow = '';
+        document.documentElement.removeAttribute('data-dialog-open');
+        if (lastFocus instanceof HTMLElement) lastFocus.focus();
+      };
+      closeBtn?.addEventListener('click', closeLB);
+      lb.addEventListener('click', (e) => {
+        if (e.target === lb) closeLB();
+      });
+      document.addEventListener('keydown', (e) => {
+        if (lb.hidden) return;
+        if (e.key === 'Escape') {
+          closeLB();
+          return;
+        }
+        // aria-modal="true": Tab and Shift+Tab wrap between the dialog's
+        // first and last focusable element instead of leaving it.
+        if (e.key !== 'Tab') return;
+        const items = Array.from(
+          lb.querySelectorAll<HTMLElement>('button, [href], [tabindex]:not([tabindex="-1"])'),
+        ).filter((el) => el.offsetParent !== null);
+        if (items.length === 0) {
+          e.preventDefault();
+          return;
+        }
+        const first = items[0];
+        const last = items[items.length - 1];
+        const active = document.activeElement;
+        if (e.shiftKey && (active === first || !lb.contains(active))) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && (active === last || !lb.contains(active))) {
+          e.preventDefault();
+          first.focus();
+        }
+      });
+      document.querySelectorAll<SVGElement>('article figure svg[aria-label]').forEach((svg) => {
+        const fig = svg.closest('figure');
+        if (!fig || fig.querySelector('.cyc-zoom')) return;
+        fig.classList.add('cyc-zoomable');
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'cyc-zoom';
+        btn.setAttribute('aria-label', 'Enlarge chart');
+        btn.title = 'Enlarge';
+        btn.innerHTML = '⛶';
+        fig.appendChild(btn);
+        btn.addEventListener('click', () => openLB(svg));
+      });
+    }
+  </script>
+</BaseLayout>

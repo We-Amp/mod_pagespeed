@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
+# Package-install verification image: Ubuntu 24.04 (deb flavor).
+# See Dockerfile.debian12 for why this base is not digest-pinned and why the
+# image carries full systemd.
+FROM ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852
+# The official Ubuntu image ships /etc/dpkg/dpkg.cfg.d/excludes, which sets
+# path-exclude=/usr/share/doc/* (keeping only copyright and changelog). Left
+# in place, dpkg silently discards the drop-in examples this package installs
+# under /usr/share/doc, and the rig would be asserting the BASE IMAGE's
+# doc-stripping rather than the package's payload -- which is how the H6 legs
+# first failed here with "cannot stat .../10-syscall-filter-enforce.conf.example".
+# Debian's image carries no such config, which is why only this lane saw it.
+# A real Ubuntu host has no such config either, so removing it makes this
+# container behave like the machine the package actually targets.
+RUN rm -f /etc/dpkg/dpkg.cfg.d/excludes
+# strace + curl are for the H6 lanes; see Dockerfile.debian12.
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get -qq update \
+    && apt-get -qq -y install --no-install-recommends \
+        systemd systemd-sysv procps python3 binutils passwd util-linux \
+        strace curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# A booted systemd inside a --privileged container shares the HOST kernel's
+# binfmt_misc table. Stock systemd-binfmt.service registers /usr/lib/binfmt.d/*
+# into it at boot and runs `systemd-binfmt --unregister` on stop, which removes
+# EVERY entry on the host -- including the amd64 emulation handler an Apple
+# Silicon runner needs for its other containers. A guest must never manage the
+# host's binfmt table: mask the service and the binfmt_misc mount units.
+RUN for u in systemd-binfmt.service proc-sys-fs-binfmt_misc.automount proc-sys-fs-binfmt_misc.mount; do \
+        ln -sf /dev/null "/etc/systemd/system/$u"; done
+# A real Chromium for the h6-browser-analysis leg, provisioned by the SAME
+# script the product images use (noble only offers the snap, which cannot
+# run under the unit; the script pins Debian bookworm's package). The driver
+# copies it into the build context and folds it into the image tag.
+COPY install-chromium.sh /tmp/install-chromium.sh
+RUN /tmp/install-chromium.sh && rm -f /tmp/install-chromium.sh

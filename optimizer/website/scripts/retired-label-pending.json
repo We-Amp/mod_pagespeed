@@ -1,0 +1,27 @@
+{
+  "about": [
+    "The copy that still carries the retired \"2.1\" product label, as of the change that retired it",
+    "(owner ruling 2026-10-20: the product is \"mod_pagespeed\"). Two lists, two checks:",
+    "\"pages\" is {urlPath: uses} for scripts/check-built-content.mjs (rule retired-product-label),",
+    "counting every use on a built page: visible text, title, description, social metas, alt and",
+    "aria-label values, and JSON-LD strings. \"sources\" is {file: hits} for",
+    "test/content-accuracy.test.ts (rule k-retired-2.1-product-label), one hit per matching line.",
+    "Both are exact-count ratchets: a count above the entry fails (new text), a count below it fails",
+    "until the entry is lowered, and an entry with nothing left fails until it is removed.",
+    "The counts are per page and per file, not per occurrence: removing one use and adding another",
+    "in the same file or page keeps the count and passes, so a review of the diff still matters.",
+    "What remains is the dated announcement post \"mod_pagespeed 2.1: one product again\", which keeps",
+    "the title it was published under (a record, exempt by file in both checks), and the pages that",
+    "show that title: the blog index and the related-post cards of three posts. The generated",
+    "public/llms.txt lists the same title. Delete this file if the title is ever retired."
+  ],
+  "pages": {
+    "/blog/": 1,
+    "/blog/aspnet-core-middleware/": 1,
+    "/blog/mod-pagespeed-2-8-release/": 1,
+    "/blog/why-i-rebuilt-mod-pagespeed/": 1
+  },
+  "sources": {
+    "public/llms.txt": 1
+  }
+}

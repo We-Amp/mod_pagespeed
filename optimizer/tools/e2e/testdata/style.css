@@ -1,0 +1,124 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Copyright (c) 2024-2026 We-Amp B.V. */
+
+/*
+ * PageSpeed E2E Test Stylesheet
+ *
+ * This stylesheet is intentionally unminified and verbose.
+ * It contains extra whitespace, comments, and redundant formatting
+ * to verify that the PageSpeed CSS minifier produces a smaller output.
+ *
+ * DO NOT MINIFY THIS FILE - it is test content that exercises the
+ * optimization pipeline.
+ */
+
+/* === Reset / Base Styles === */
+
+body {
+  margin:   0;
+  padding:  0;
+  font-family:  Arial,  Helvetica,  sans-serif;
+  line-height:  1.6;
+  color:  #212529;
+  background-color:  #ffffff;
+}
+
+/* === Header === */
+
+header {
+  background-color:  #f8f9fa;
+  padding:  10px  20px;
+  border-bottom:  1px  solid  #dee2e6;
+  display:  flex;
+  align-items:  center;
+  justify-content:  space-between;
+}
+
+/* === Navigation Links === */
+
+nav  a {
+  color:  #007bff;
+  text-decoration:  none;
+  margin-right:  15px;
+  font-weight:  500;
+  transition:  color  0.2s  ease;
+}
+
+nav  a:hover {
+  text-decoration:  underline;
+  color:  #0056b3;
+}
+
+/* === Hero Section === */
+
+.hero {
+  background:  linear-gradient( 135deg,  #0066cc,  #0052a3 );
+  color:  white;
+  padding:  60px  40px;
+  text-align:  center;
+}
+
+.hero  h1 {
+  font-size:  2.5rem;
+  margin-bottom:  10px;
+  font-weight:  700;
+  letter-spacing:  -0.02em;
+}
+
+.hero  p {
+  font-size:  1.2rem;
+  opacity:  0.9;
+  max-width:  600px;
+  margin-left:  auto;
+  margin-right:  auto;
+}
+
+/* === Main Content Area === */
+
+main {
+  max-width:  960px;
+  margin:  0  auto;
+  padding:  40px  20px;
+}
+
+/* === Content Images === */
+
+main  img {
+  max-width:  100%;
+  height:  auto;
+  display:  block;
+  margin:  20px  0;
+  border-radius:  4px;
+  box-shadow:  0  2px  8px  rgba( 0,  0,  0,  0.1 );
+}
+
+/* === Footer === */
+
+footer {
+  background-color:  #343a40;
+  color:  white;
+  padding:  20px;
+  text-align:  center;
+  margin-top:  40px;
+  font-size:  0.875rem;
+}
+
+/* === Utility Classes === */
+
+.text-center {
+  text-align:  center;
+}
+
+.text-muted {
+  color:  #6c757d;
+}
+
+.mt-4 {
+  margin-top:  2rem;
+}
+
+.mb-4 {
+  margin-bottom:  2rem;
+}
+
+/* End of stylesheet */

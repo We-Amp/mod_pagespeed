@@ -1,0 +1,100 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
+# Runtime-only image for integration tests.
+# Uses pre-built binaries instead of building from source.
+#
+# Requires build context to contain:
+#   .ci-artifacts/factory_worker
+#   .ci-artifacts/ngx_pagespeed_module.so
+#   .ci-artifacts/ngx_http_brotli_filter_module.so
+#   .ci-artifacts/nginx-version
+#   .ci-artifacts/seed_test_cache
+#   .ci-artifacts/libpagespeed.so
+# (libc++/libc++abi/libunwind are statically linked into factory_worker and
+# ngx_pagespeed_module.so since v2.0.2 — no separate shared libs needed.)
+#
+# The brotli module used to be compiled from source in a `brotli-builder` stage
+# here, which made every cold-cache build recompile it (~100s — the recurring
+# HTTP Compliance slow build in CI). It is now pre-built once on a
+# warm producer host and shipped as a CI artifact; stage-artifacts.sh ensures
+# .ci-artifacts/ngx_http_brotli_filter_module.so exists (installing the shipped
+# one, or building it via tools/ci/build-brotli-module.sh as a fallback). See
+# Dockerfile.brotli.
+#
+# Usage:
+#   docker build -f tools/e2e/Dockerfile.prebuilt -t pagespeed-test .
+
+# ---- Runtime image ----
+# nginx is provided by pagespeed2-base-runtime (installed from nginx.org). The
+# base image tracks nginx.org's current release, so when a new point release
+# ships between cached builds its nginx can be a step ahead of the prebuilt
+# pagespeed module. Pin the runtime nginx here to the exact version the module
+# was built against (recorded by CI) so the module loads. This is scoped to the
+# prebuilt TEST image only — the shared base-runtime is left untouched.
+FROM pagespeed2-base-runtime
+
+COPY .ci-artifacts/nginx-version /tmp/nginx-version
+RUN apt-get update \
+    && NV="$(cat /tmp/nginx-version)" \
+    && echo "Pinning runtime nginx to ${NV}" \
+    && apt-get install -y --allow-downgrades --no-install-recommends \
+       "nginx=${NV}-1~noble" \
+       python3 \
+    && rm -rf /var/lib/apt/lists/* /tmp/nginx-version
+
+# Install Chromium from Debian bookworm (with fonts for headed tests).
+COPY docker/install-chromium.sh /tmp/install-chromium.sh
+RUN /tmp/install-chromium.sh --with-fonts && rm /tmp/install-chromium.sh
+
+# Copy pre-built binaries from CI artifacts
+COPY .ci-artifacts/factory_worker /usr/local/bin/factory_worker
+# Test-only cache tool: the compliance suite runs it inside the nginx
+# container to remove one stored alternate behind the running server's back
+# (test_headers_sidecar.py). The source-built e2e image ships it from
+# bazel-bin; here it rides the CI artifact bundle instead.
+COPY .ci-artifacts/seed_test_cache /usr/local/bin/seed_test_cache
+RUN chmod +x /usr/local/bin/factory_worker /usr/local/bin/seed_test_cache
+# The C API library, for the compliance suite's module stand-in
+# (tools/http-compliance/module_standin.py), which loads it with ctypes.
+COPY .ci-artifacts/libpagespeed.so /usr/local/lib/libpagespeed.so
+COPY .ci-artifacts/ngx_pagespeed_module.so /usr/lib/nginx/modules/ngx_pagespeed_module.so
+
+# Copy pre-built brotli module (staged by stage-artifacts.sh; see Dockerfile.brotli)
+COPY .ci-artifacts/ngx_http_brotli_filter_module.so \
+     /usr/lib/nginx/modules/ngx_http_brotli_filter_module.so
+
+# ABI-skew assertion. The module embeds NGINX_VERSION_NUM at
+# build time and the runtime nginx refuses to load a module built against a
+# different version ("module ... version 1030002 instead of 1030003" — [emerg],
+# process exits). Load the prebuilt module into THIS image's pinned nginx at
+# BUILD time so a skew fails the image build fast and self-describes with both
+# versions, instead of surfacing later as a container that dies at stack
+# startup — where the [emerg] line went uncaptured for three scheduled runs.
+RUN printf 'load_module /usr/lib/nginx/modules/ngx_pagespeed_module.so;\nevents {}\nhttp {}\n' \
+      > /tmp/abi-check.conf \
+    && if ! err="$(nginx -t -c /tmp/abi-check.conf 2>&1)"; then \
+         echo "$err" >&2; \
+         if echo "$err" | grep -q 'module.*version'; then \
+           RUNTIME_V="$(nginx -v 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"; \
+           echo "::error::nginx ABI skew: the prebuilt ngx_pagespeed_module.so was built against a different nginx than this image's runtime nginx/${RUNTIME_V} (pinned from .ci-artifacts/nginx-version). Rebuild the module against the runtime nginx, or correct nginx-version." >&2; \
+         fi; \
+         exit 1; \
+       fi \
+    && echo "nginx ABI check passed: ngx_pagespeed_module.so loads into $(nginx -v 2>&1)" \
+    && rm -f /tmp/abi-check.conf
+
+# libc++/libc++abi/libunwind statically linked into factory_worker
+# (and the nginx module) since v2.0.2 — no shared-lib runtime deps.
+
+# Copy test content, nginx configuration, and worker entrypoint
+COPY tools/e2e/testdata/ /var/www/html/
+COPY tools/e2e/nginx-e2e.conf /etc/nginx/nginx.conf
+COPY docker/entrypoint-worker.sh /docker/entrypoint-worker.sh
+COPY tools/e2e/entrypoint-worker.sh /entrypoint-worker.sh
+RUN chmod +x /docker/entrypoint-worker.sh /entrypoint-worker.sh
+
+# Shared volume for cache and worker socket
+VOLUME /shared
+
+EXPOSE 8080

@@ -1,0 +1,117 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// /go/nuget — first-party redirect to the WeAmp.PageSpeed nuget.org listing.
+// Lets Umami capture the click (nuget.org does not surface referrer to package
+// owners). Tag inbound links with
+// `?from=<slug>` so the Umami event payload identifies the source surface.
+//
+//   ?pkg=aspnetcore  -> WeAmp.PageSpeed.AspNetCore (default; front-door)
+//   ?pkg=sidecar     -> WeAmp.PageSpeed.Sidecar    (the sidecar)
+//   ?pkg=bindings    -> WeAmp.PageSpeed            (low-level managed)
+//   ?from=<slug>     -> propagated as utm_campaign + Umami event data
+//
+// Statically prerendered: modpagespeed.com is rsync'd as plain files behind
+// nginx — no Node SSR on the VM. All URL parsing happens client-side.
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Redirecting to nuget.org…</title>
+    <meta name="robots" content="noindex,nofollow" />
+    <meta
+      http-equiv="refresh"
+      content="2;url=https://www.nuget.org/packages/WeAmp.PageSpeed.AspNetCore"
+    />
+    <link rel="canonical" href="https://www.nuget.org/packages/WeAmp.PageSpeed.AspNetCore" />
+    <!-- Umami pageview fires automatically when script.js loads. -->
+    <script
+      is:inline
+      defer
+      src="https://umami.we-amp.com/script.js"
+      data-website-id="d32585a5-6610-4a11-8e5b-ef093fabbd20"
+      data-domains="modpagespeed.com,www.modpagespeed.com"
+    ></script>
+    <script is:inline>
+      (function () {
+        var TARGETS = {
+          aspnetcore: 'https://www.nuget.org/packages/WeAmp.PageSpeed.AspNetCore',
+          sidecar: 'https://www.nuget.org/packages/WeAmp.PageSpeed.Sidecar',
+          bindings: 'https://www.nuget.org/packages/WeAmp.PageSpeed',
+        };
+        var ALLOWED_FROM = /^[A-Za-z0-9_.\-]{1,64}$/;
+
+        var params = new URLSearchParams(window.location.search);
+        var pkg = params.get('pkg') || 'aspnetcore';
+        var base = TARGETS[pkg] || TARGETS.aspnetcore;
+        var rawFrom = params.get('from') || '';
+        var from = ALLOWED_FROM.test(rawFrom) ? rawFrom : '';
+
+        var dest = new URL(base);
+        if (from) {
+          dest.searchParams.set('utm_source', 'modpagespeed.com');
+          dest.searchParams.set('utm_medium', 'go-redirect');
+          dest.searchParams.set('utm_campaign', from);
+        }
+        var destUrl = dest.toString();
+
+        // Keep the meta-refresh, canonical link, and visible anchor in sync
+        // with the parsed params so no-JS clients still reach the same place.
+        var refresh = document.querySelector('meta[http-equiv="refresh"]');
+        if (refresh) refresh.setAttribute('content', '2;url=' + destUrl);
+        var canonical = document.querySelector('link[rel="canonical"]');
+        if (canonical) canonical.setAttribute('href', base);
+        document.addEventListener('DOMContentLoaded', function () {
+          var anchor = document.getElementById('manual-link');
+          if (anchor) anchor.setAttribute('href', destUrl);
+        });
+
+        // Give Umami's async script ~250 ms to register the pageview + fire a
+        // custom event before we navigate away. The meta-refresh and the
+        // anchor below are the fallbacks for no-JS / blocked-script clients.
+        var fire = function () {
+          if (typeof window.umami !== 'undefined' && window.umami.track) {
+            try {
+              window.umami.track('go-nuget', {
+                pkg: pkg,
+                from: from || 'direct',
+                target: base,
+              });
+            } catch (_) {
+              /* swallow */
+            }
+          }
+        };
+        fire();
+        setTimeout(function () {
+          fire();
+          window.location.replace(destUrl);
+        }, 250);
+      })();
+    </script>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 4rem auto;
+        max-width: 32rem;
+        padding: 0 1rem;
+        color: #333;
+      }
+      a {
+        color: #5eb1c9;
+      }
+    </style>
+  </head>
+  <body>
+    <p>
+      Taking you to the WeAmp.PageSpeed package on{' '}
+      <a id="manual-link" href="https://www.nuget.org/packages/WeAmp.PageSpeed.AspNetCore">
+        nuget.org
+      </a>
+      . If the page doesn't load, use that link.
+    </p>
+  </body>
+</html>

@@ -1,0 +1,255 @@
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+<html>
+  <head>
+    <link rel="canonical" href="https://modpagespeed.com/1.0/doc/filter-insert-ga" />
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Insert Google Analytics</title>
+    <link rel="stylesheet" href="doc.css">
+  </head>
+  <body>
+<div id="archive-banner" style="background-color:#e1f5fe;padding:12px 24px;text-align:center;font-family:sans-serif;font-size:14px;line-height:1.6;position:relative;border-bottom:1px solid #b3e5fc;">
+  <span style="display:inline-block;padding:0 20px 0 0;">This is the archived documentation for the original mod_pagespeed releases, 1.14.36.1 and earlier. Those releases receive no security fixes: see the <a href="/docs/end-of-life-releases/" style="color:#0277bd;font-weight:bold;">end-of-life advisory</a>. The current mod_pagespeed is at <a href="https://modpagespeed.com" style="color:#0277bd;font-weight:bold;">modpagespeed.com</a>.</span>
+  <button onclick="this.parentElement.style.display='none'" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;font-size:18px;cursor:pointer;color:#0277bd;padding:0 4px;" aria-label="Dismiss">&times;</button>
+</div>
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+<div id=header>
+  <div id=logoline>
+    <div id=logo>
+      <a href="https://www.we-amp.com/"><img src="/1.0/we-amp.jpg"
+        srcset="/1.0/we-amp.jpg"
+        width=32 height=32 alt="We-Amp logo"></a>
+      <img src="https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png"
+           srcset="https://www.gstatic.com/images/branding/product/2x/pagespeed_32dp.png"
+           width=32 height=32 alt="pagespeed logo">
+    </div>
+    <div id=logotext>PageSpeed</div>
+  </div>
+  <div id=navline>
+    <a href="/1.0/doc/">&larr; documentation index</a>
+  </div>
+</div>
+<div id=toc></div>
+
+
+
+  <div id=content>
+<h1>Insert Google Analytics</h1>
+
+
+
+<h2>Configuration</h2>
+<p>
+The 'Insert Google Analytics' filter is enabled by specifying:
+<dl>
+  <dt>Apache:<dd><pre class="prettyprint">
+ModPagespeedEnableFilters insert_ga
+ModPagespeedAnalyticsID &lt;Analytics ID&gt;</pre>
+  <dt>Nginx:<dd><pre class="prettyprint">
+pagespeed EnableFilters insert_ga;
+pagespeed AnalyticsID &lt;Analytics ID&gt;;</pre>
+</dl>
+<p>
+in the configuration file.  As of 1.10.33.0 the default snippet is
+now <code>analytics.js</code>.  To insert <code>ga.js</code> instead, set:
+<dl>
+  <dt>Apache:<dd><pre class="prettyprint">
+ModPagespeedUseAnalyticsJs false</pre>
+  <dt>Nginx:<dd><pre class="prettyprint">
+pagespeed UseAnalyticsJs false;</pre>
+</dl>
+</p>
+
+<h2>Description</h2>
+<p>
+The 'Insert Google Analytics' filter adds the basic Google Analytics javascript
+snippet to each HTML page.  If the page already has a Google Analytics snippet
+inside <code>&lt;head&gt;</code> with the specified ID, then no additional
+snippet will be added.  If another Google Analytics snippet is on the page with
+a <em>different</em> ID, then an additional snippet will be added with the ID
+specified in with <code>AnalyticsID</code>.  In order to avoid any
+strange Google Analytics reporting, make sure that the ID specified in the
+configuration file matches the one used on your site.
+</p>
+<p>
+This filter does <em>not</em> require
+the <code>make_google_analytics_async</code> filter.  The Google Analytics
+snippets inserted by <code>insert_ga</code> are already asynchronous.
+</p>
+<p>
+See <a href="http://modpagespeed.com/insert_ga.html">this example</a> of this
+filter in action.
+</p>
+
+  </div>
+  <!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+<div id=footer>
+  <!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+<div id=navline>
+  <a href="/1.0/doc/">&larr; documentation index</a>
+</div>
+
+</div>
+
+<script>
+function buildTocHelper(node, headers) {
+  if (node.nodeType == 1) {
+    // Element node.
+    var nodeName = node.nodeName.toLowerCase();
+    if (nodeName == "h2" || nodeName == "h3" || nodeName == "h4" ||
+        nodeName == "h5" || nodeName == "h6") {
+      if (node.id) {
+        headers.push([nodeName, node.innerHTML, node.id]);
+	node.appendChild(document.createTextNode("\u00A0"));  // nbsp
+	var a = document.createElement("a");
+	a.class = "header-link";
+	a.href = "#" + node.id;
+	a.textContent = "\uD83D\uDD17";  // link symbol
+	node.appendChild(a);
+      }
+    } else {
+      for (var i = 0; i < node.childNodes.length; i++) {
+        buildTocHelper(node.childNodes[i], headers);
+      }
+    }
+  }
+}
+
+function buildToc() {
+  var headers = [];
+  buildTocHelper(document.body, headers);
+  if (headers.length == 0) {
+    return;
+  }
+
+  var toc = document.getElementById("toc");
+  var tocContents = document.createElement("div");
+  tocContents.id = "toc-contents";
+  tocContents.textContent = "Contents";
+  toc.appendChild(tocContents);
+
+  var level = 1;
+  var currentUl = null;
+  for (var i = 0; i < headers.length; i++) {
+    var header = headers[i];
+    var headerLevel = header[0];
+    var headerValue = header[1];
+    var headerId = header[2];
+
+    var newLevel = parseInt(headerLevel.substring(1));
+    while (newLevel > level) {
+      // We loop here to handle the case where we have h2 ... h4.  This
+      // isn't a good way to write html, but someone may still do it.
+
+      var newUl = document.createElement("ul");
+      if (currentUl == null) {
+        toc.appendChild(newUl);
+      } else {
+        currentUl.appendChild(newUl);
+      }
+      currentUl = newUl;
+      level++;
+    }
+    while (newLevel < level) {
+      currentUl = currentUl.parentNode;
+      level--;
+    }
+    var li = document.createElement("li");
+    var a = document.createElement("a");
+    a.href = "#" + headerId;
+    a.textContent = headerValue;
+    li.appendChild(a);
+    currentUl.appendChild(li);
+  }
+}
+
+function wrapTables() {
+  var tables = document.getElementsByTagName("table");
+  for (var i = 0; i < tables.length; i++) {
+    var table = tables[i];
+    var parent = table.parentNode;
+    var div = document.createElement('div');
+    div.className = "table-wrapper";
+    parent.insertBefore(div, table);
+    div.appendChild(table);
+  }
+}
+
+buildToc();
+wrapTables();
+</script>
+
+  </body>
+</html>

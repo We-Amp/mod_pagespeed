@@ -1,0 +1,9 @@
+# LeakSanitizer suppressions for mod_pagespeed
+#
+# There are currently no suppressions. The HTML parser's node arena runs
+# destructors via Arena<HtmlNode>::DestroyObjects() at ClearElements(), so
+# the HtmlNode family (HtmlLeafNode, HtmlCharactersNode, HtmlElement) no
+# longer leaks and needs no suppression.
+#
+# Format: leak:<function_or_source_pattern>
+# See: https://github.com/google/sanitizers/wiki/AddressSanitizerLeakSanitizer

@@ -1,0 +1,103 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
+# Base runtime image for all mod_pagespeed ubuntu-based containers.
+# Provides the minimal runtime dependencies shared across worker, nginx,
+# and test images. Individual Dockerfiles extend this with their specific
+# packages (e.g. Chromium, nginx, python3).
+#
+# Build:
+#   docker build -f docker/Dockerfile.base-runtime -t pagespeed2-base-runtime .
+#
+# Used as FROM in: Dockerfile.worker, Dockerfile.nginx, e2e/Dockerfile.*,
+# production-tests/Dockerfile.*
+
+FROM ubuntu:24.04@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Common runtime packages needed by all mod_pagespeed containers:
+#   libc++1-20  — C++ standard library (all binaries compiled with clang-20)
+#   curl        — healthchecks, HTTP utilities
+#   ca-certificates — TLS for operator-configured outbound fetches (origin
+#                 content, Web Bot Auth / RSL-CAP key directories)
+#   nginx       — installed from nginx.org (NOT distro). nginx dynamic modules
+#                 (ngx_pagespeed_module.so, ngx_http_brotli_filter_module.so)
+#                 embed NGINX_VERSION_NUM at build time, and the runtime nginx
+#                 refuses to load any module whose embedded version differs
+#                 ("module … version X instead of Y"). Both the builder
+#                 (docker/Dockerfile) and this image must therefore install
+#                 nginx from the same nginx.org channel; Ubuntu's distro
+#                 nginx (1.24.0 on Noble) is too old. The apt preferences
+#                 pin keeps the distro nginx from shadowing nginx.org.
+# clang-20 / libc++1-20 require the LLVM apt repo (not in Ubuntu 24.04 standard repos).
+# dist-upgrade: the digest pin freezes package state; without an upgrade pass
+# every rebuild re-freezes whatever CVEs the base carried.
+# wget/gnupg are needed only for the apt key setup in this same RUN — runtime
+# HTTP is curl — so they are purged at the end, dropping the gnupg/libgcrypt
+# CVE surface from every downstream image.
+# APT_REFRESH: bump (build-release.sh passes today's UTC date) to bust only this
+# apt layer so a scheduled rebuild always pulls current security updates even when
+# the base digest is unchanged and the layer cache is warm.
+ARG APT_REFRESH=2026-07-23
+# apt retries transient fetch failures; the apt.llvm.org key is fetched with
+# retries and only the key with the pinned fingerprint (the one
+# https://apt.llvm.org/ publishes) is trusted, so a failed fetch stops the
+# build instead of leaving an empty key behind.
+ARG LLVM_APT_KEY_FPR=6084F3CF814B57C1CF12EFD515CF4D18AF4F7421
+# The nginx.org signing key file holds several keys (the repository metadata
+# is signed by one of them). Only the keys in this pinned set are exported
+# into the apt keyring, and the build fails if none is present, so a swapped
+# file stops the build while a key nginx.org adds later does not. Fingerprints
+# from https://nginx.org/en/linux_packages.html and the published
+# https://nginx.org/keys/nginx_signing.key.
+ARG NGINX_KEY_FPR="573BFD6B3D8FBC641079A6ABABF5BD827BD9BF62 8540A6F18833A80E9C1653A42FD21310B49F6B46 9E9BE90EACBCDE69FE9B204CBCDCD8A38D88A2B3"
+RUN retry() { "$@" && return 0; for d in 30 90 180; do echo "WARN: '$*' failed; retrying in ${d}s" >&2; sleep "$d"; "$@" && return 0; done; echo "ERROR: '$*' failed after 4 attempts" >&2; return 1; } \
+    && echo "apt refresh ${APT_REFRESH}" \
+    && echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries \
+    && apt-get update && apt-get -y dist-upgrade \
+    && apt-get install -y --no-install-recommends wget gnupg ca-certificates \
+    && keytmp="$(mktemp -d)" \
+    && retry wget -qO "${keytmp}/key.asc" --timeout=20 --tries=1 https://apt.llvm.org/llvm-snapshot.gpg.key \
+    && { [ -s "${keytmp}/key.asc" ] \
+         || { echo "ERROR: could not fetch https://apt.llvm.org/llvm-snapshot.gpg.key" >&2; exit 1; }; } \
+    && { GNUPGHOME="${keytmp}" gpg --batch --quiet --import "${keytmp}/key.asc"; \
+         GNUPGHOME="${keytmp}" gpg --batch --with-colons --list-keys "${LLVM_APT_KEY_FPR}" 2>/dev/null \
+           | awk -F: -v fpr="${LLVM_APT_KEY_FPR}" '$1=="fpr" && $10==fpr { ok=1 } END { exit !ok }' \
+         || { echo "ERROR: the apt.llvm.org key file does not hold the pinned key ${LLVM_APT_KEY_FPR}" >&2; exit 1; }; } \
+    && GNUPGHOME="${keytmp}" gpg --batch --export "${LLVM_APT_KEY_FPR}" > /usr/share/keyrings/llvm-snapshot.gpg \
+    && rm -rf "${keytmp}" \
+    && [ -s /usr/share/keyrings/llvm-snapshot.gpg ] \
+    && echo "deb [signed-by=/usr/share/keyrings/llvm-snapshot.gpg] http://apt.llvm.org/noble/ llvm-toolchain-noble-20 main" \
+       | tee /etc/apt/sources.list.d/llvm-toolchain-noble-20.list \
+    && nkey="$(mktemp -d)" \
+    && for i in 1 2 3 4 5; do \
+         wget -qO "${nkey}/nginx.asc" --timeout=20 --tries=1 https://nginx.org/keys/nginx_signing.key \
+           && [ -s "${nkey}/nginx.asc" ] && break; \
+         echo "nginx.org key fetch attempt ${i} failed" >&2; if [ "$i" -lt 5 ]; then sleep $((i * 5)); fi; \
+       done \
+    && { [ -s "${nkey}/nginx.asc" ] \
+         || { echo "ERROR: could not fetch https://nginx.org/keys/nginx_signing.key" >&2; exit 1; }; } \
+    && { GNUPGHOME="${nkey}" gpg --batch --quiet --import "${nkey}/nginx.asc"; have=""; \
+         for f in ${NGINX_KEY_FPR}; do \
+           GNUPGHOME="${nkey}" gpg --batch --with-colons --list-keys "${f}" 2>/dev/null \
+             | awk -F: -v fpr="${f}" '$1=="fpr" && $10==fpr { ok=1 } END { exit !ok }' \
+             && have="${have} ${f}"; \
+         done; \
+         [ -n "${have}" ] || { echo "ERROR: no pinned key in the nginx.org key file" >&2; exit 1; }; } \
+    && GNUPGHOME="${nkey}" gpg --batch --export ${have} > /usr/share/keyrings/nginx-archive-keyring.gpg \
+    && [ -s /usr/share/keyrings/nginx-archive-keyring.gpg ] \
+    && rm -rf "${nkey}" \
+    && echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] http://nginx.org/packages/ubuntu noble nginx" \
+       > /etc/apt/sources.list.d/nginx.list \
+    && printf 'Package: *\nPin: origin nginx.org\nPin-Priority: 900\n' \
+       > /etc/apt/preferences.d/99nginx \
+    && retry apt-get update \
+    && retry apt-get install -y --no-install-recommends \
+       libc++1-20 \
+       curl \
+       ca-certificates \
+       nginx \
+    && apt-get purge -y wget gnupg \
+    && apt-get autoremove -y --purge \
+    && rm -rf /var/lib/apt/lists/*

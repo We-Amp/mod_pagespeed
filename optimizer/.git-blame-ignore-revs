@@ -1,0 +1,8 @@
+# Bulk mechanical commits to skip in blame:
+#   git blame --ignore-revs-file .git-blame-ignore-revs <file>
+# or once per clone:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# Relicense to Apache-2.0: license header sweep, audit headers and the kernel
+# re-sync at the relicensed 1.15 pin (squash-merged 2026-09-05)
+2025e520e7797fef7746e7a54e968751e3791318

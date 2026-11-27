@@ -1,0 +1,95 @@
+<!-- SPDX-License-Identifier: Apache-2.0
+     Copyright (c) 2024-2026 We-Amp B.V. -->
+
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <!-- Pinned, not floated. A package family that must move in lockstep is not
+       published atomically: on 2026-09-08, Microsoft.AspNetCore.Mvc.Testing
+       8.0.31 was on nuget.org 76 minutes before Microsoft.AspNetCore.TestHost
+       8.0.31, the dependency it declares. A restore inside that window floated
+       TestHost forward to 9.0.0, which net8.0 rejects (NU1202), and the build
+       failed on an input nobody had changed. Bump these deliberately. -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.31" Condition="'$(TargetFramework)' == 'net8.0'" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.11" Condition="'$(TargetFramework)' == 'net10.0'" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="NSubstitute" Version="5.3.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/WeAmp.PageSpeed/WeAmp.PageSpeed.csproj" />
+    <ProjectReference Include="../../src/WeAmp.PageSpeed.AspNetCore/WeAmp.PageSpeed.AspNetCore.csproj" />
+  </ItemGroup>
+
+  <!-- JPEG fixture for ImageVariantContentNegotiationTests. -->
+  <ItemGroup>
+    <None Include="TestFixtures/test-image.jpg" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!--
+    Native assets (libpagespeed + factory_worker) for the full-stack
+    integration tests (ImageVariantContentNegotiationTests and the
+    worker-subprocess tests). The NativeAssets.* ProjectReferences
+    do NOT copy binaries into the test output because the in-source
+    runtimes/<rid>/native/ dirs hold only .gitkeep — the real binaries are
+    pulled from the published NuGet packages at pack time.
+
+    So copy them into bin/.../runtimes/<rid>/native/ from (in priority):
+      1. $(PageSpeedNativeAssetsDir)         (explicit override; CI sets this)
+      2. PAGESPEED_E2E_NATIVE_DIR env        (matches the test's own resolver)
+      3. the restored NuGet cache for WeAmp.PageSpeed.NativeAssets.<os>
+    This makes the library's own [ModuleInitializer] DllImport resolver
+    (AppContext.BaseDirectory/runtimes/<rid>/native/) succeed exactly as it
+    does in a published app. The target no-ops when no source dir is found,
+    so the integration tests simply SKIP rather than fail the build.
+  -->
+  <PropertyGroup>
+    <_PsRid Condition="'$(_PsRid)' == ''">$([System.Runtime.InteropServices.RuntimeInformation]::RuntimeIdentifier)</_PsRid>
+    <_PsNativePkg Condition="$([MSBuild]::IsOSPlatform('Windows'))">weamp.pagespeed.nativeassets.windows</_PsNativePkg>
+    <_PsNativePkg Condition="$([MSBuild]::IsOSPlatform('OSX'))">weamp.pagespeed.nativeassets.macos</_PsNativePkg>
+    <_PsNativePkg Condition="$([MSBuild]::IsOSPlatform('Linux'))">weamp.pagespeed.nativeassets.linux</_PsNativePkg>
+    <_PsNuGetRoot Condition="'$(NUGET_PACKAGES)' != ''">$(NUGET_PACKAGES)</_PsNuGetRoot>
+    <_PsNuGetRoot Condition="'$(_PsNuGetRoot)' == ''">$([System.IO.Path]::Combine('$(USERPROFILE)$(HOME)', '.nuget', 'packages'))</_PsNuGetRoot>
+    <_PsNativeSrc Condition="'$(PageSpeedNativeAssetsDir)' != ''">$(PageSpeedNativeAssetsDir)</_PsNativeSrc>
+    <_PsNativeSrc Condition="'$(_PsNativeSrc)' == '' AND '$(PAGESPEED_E2E_NATIVE_DIR)' != ''">$(PAGESPEED_E2E_NATIVE_DIR)</_PsNativeSrc>
+    <!-- NuGet-cache package root (version glob resolved in the target below). -->
+    <_PsNativePkgRoot Condition="'$(_PsNativeSrc)' == ''">$([System.IO.Path]::Combine('$(_PsNuGetRoot)', '$(_PsNativePkg)'))</_PsNativePkgRoot>
+  </PropertyGroup>
+
+  <Target Name="CopyPageSpeedNativeAssetsForTests" AfterTargets="Build">
+    <!-- When no explicit/env dir was supplied, pick the highest installed
+         NativeAssets version from the NuGet cache (avoids hardcoding a
+         release number that goes stale each bump). MSBuild's GetDirectories
+         returns paths in sorted order; the last is the lexically-greatest
+         version, which for x.y.z releases is the newest. -->
+    <ItemGroup Condition="'$(_PsNativeSrc)' == '' AND '$(_PsNativePkgRoot)' != '' AND Exists('$(_PsNativePkgRoot)')">
+      <_PsNativeVerDir Include="$([System.IO.Directory]::GetDirectories('$(_PsNativePkgRoot)'))" />
+    </ItemGroup>
+    <PropertyGroup Condition="'$(_PsNativeSrc)' == '' AND '@(_PsNativeVerDir)' != ''">
+      <_PsNativeSrc>$([System.IO.Path]::Combine('%(_PsNativeVerDir.Identity)', 'runtimes', '$(_PsRid)', 'native'))</_PsNativeSrc>
+    </PropertyGroup>
+
+    <ItemGroup Condition="'$(_PsNativeSrc)' != '' AND Exists('$(_PsNativeSrc)')">
+      <_PsNativeFiles Include="$(_PsNativeSrc)/**/*" />
+    </ItemGroup>
+    <Message Importance="high"
+             Condition="'@(_PsNativeFiles)' != ''"
+             Text="Copying PageSpeed native assets from $(_PsNativeSrc) -> $(OutDir)runtimes/$(_PsRid)/native/" />
+    <Copy SourceFiles="@(_PsNativeFiles)"
+          DestinationFiles="@(_PsNativeFiles->'$(OutDir)runtimes/$(_PsRid)/native/%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true"
+          Condition="'@(_PsNativeFiles)' != ''" />
+  </Target>
+
+</Project>

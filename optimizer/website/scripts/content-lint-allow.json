@@ -1,0 +1,33 @@
+{
+  "/blog/mod-pagespeed-2-1-one-product-again/": {
+    "retired-product-label": "the dated announcement of the 2.1.0 convergence, published under the label it announced"
+  },
+  "/demos/blog/": {
+    "h1-count": "static demo fixture site (public/demos/, noindex): its fixture markup has no h1 by design"
+  },
+  "/docs/admin-console/": {
+    "term-drift-daemon": "quotes the serving module's admin-console UI label (the Overview card heading \"Optimizer daemon\"), verified in the public mod_pagespeed repo"
+  },
+  "/docs/configuration/": {
+    "term-drift-daemon": "names the module's real /v1/daemon/* management endpoints and Daemon* directives (generated reference region)"
+  },
+  "/docs/release-notes-1-15/": {
+    "term-drift-daemon": "\"time daemon\" is ntpd, not the optimizer worker"
+  },
+  "/docs/release-notes-2-1/": {
+    "term-drift-daemon": "\"daemon paths\" refers to the DaemonSocketPath/DaemonVolumePath directive names",
+    "retired-product-label": "the 2.1.0 release notes: a record of what shipped under the \"2.1\" label, on the date it shipped"
+  },
+  "/docs/release-notes-2-3/": {
+    "term-drift-daemon": "the release note for the packaged unit description names the compatibility names that keep the word daemon (pagespeed_daemon.conf, command-line flags, API paths, metric names)"
+  },
+  "/docs/release-notes-2-10/": {
+    "term-drift-daemon": "the 2.10.0 release note uses the published wording \"optimizer daemon\" for in-place resource serving, as in the module's own notes"
+  },
+  "/docs/release-notes-2-6/": {
+    "term-drift-daemon": "the release note quotes the module's old log wording (\"daemon\") that 2.6.0 renames to \"optimizer\", and names the compatibility names that keep the word (ipro_daemon_served statistics, /v1/daemon/* endpoints, daemon-unavailable)"
+  },
+  "/privacy/": {
+    "canonical": "pointer page to the one We-Amp privacy notice: its canonical is https://we-amp.com/privacy/ by design, and production answers /privacy/ with a 301 there"
+  }
+}

@@ -1,0 +1,158 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// /platform/ — the planned-packs hub for transform packs: one card per
+// direction, each with its own interest form, so interest is recorded per
+// direction (the structured field on the form) rather than per page. The
+// edge-SEO pack is free and available now and the others are planned, and
+// the copy says so; no prices beyond "free", no dates. The social card is rendered at build time by scripts/generate-title-cards.mjs (PAGE_CARDS).
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PageHero from '../../components/PageHero.astro';
+import Icon from '../../components/Icon.astro';
+import PlatformInterestForm from '../../components/PlatformInterestForm.astro';
+import type { ComponentProps } from 'astro/types';
+
+type IconName = ComponentProps<typeof Icon>['name'];
+
+const packs: Array<{
+  wedge: string;
+  icon: IconName;
+  title: string;
+  body: string;
+  more?: { href: string; label: string };
+  docs?: { href: string; label: string };
+}> = [
+  {
+    wedge: 'page-integrity',
+    icon: 'badge-check',
+    title: 'Payment-page script integrity',
+    body: 'Inventory every script on checkout and payment pages, add integrity hashes and per-response nonces, and enforce an allowlist, all in the HTML stream. The aim is evidence that helps with PCI DSS 4.0 requirements 6.4.3 and 11.6.1.',
+  },
+  {
+    wedge: 'third-party-freeze',
+    icon: 'lock',
+    title: 'Third-party freeze and front-end SBOM',
+    body: 'The pack would pin every external script to a reviewed copy served from your own domain, hold upstream changes until someone approves them, and export a CycloneDX bill of materials of the front end.',
+  },
+  {
+    wedge: 'consent-enforcement',
+    icon: 'split',
+    title: 'Consent enforcement at the origin',
+    body: 'The pack would keep third-party tags inert until the consent cookie grants them, and set Consent Mode defaults at the origin before page scripts run. Its inventory would list the third parties that actually fire.',
+    more: { href: '/platform/consent/', label: 'How origin-side enforcement differs' },
+  },
+  {
+    wedge: 'edge-seo',
+    icon: 'route',
+    title: 'Edge SEO at the origin',
+    body: 'Canonicals, hreflang, titles and structured data set at serve time, with no CMS change and no CDN. The pack applies the rules you write to the HTML stream in the interceptor, so once enforced a fix reaches every page the rule matches.',
+    more: { href: '/platform/edge-seo/', label: 'What it fixes and who it is for' },
+    docs: { href: '/docs/rule-packs/', label: 'Rule packs reference' },
+  },
+  {
+    wedge: 'response-firewall',
+    icon: 'shield-check',
+    title: 'Response firewall for legacy sites',
+    body: 'Mask leaked stack traces and personal data, strip version tells and add missing security headers in the response. For sites on software that no longer gets updates, the response is the layer you can still change.',
+  },
+  {
+    wedge: 'rewriter-sdk',
+    icon: 'braces',
+    title: 'Write your own',
+    body: "A pack is a declarative JSON file: you can write your own edge-SEO rules in the same format and run them in report mode first. The server can check a pack's signature against keys you trust. Tell us if you would write custom filters.",
+  },
+];
+
+const description =
+  'Transform packs for mod_pagespeed: SEO rules in the HTML stream on your server today, compliance and privacy packs planned. The edge-SEO pack is free.';
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'WebPage',
+  name: 'Transform packs for mod_pagespeed',
+  url: 'https://modpagespeed.com/platform/',
+  description,
+};
+---
+
+<BaseLayout
+  title="Transform packs for mod_pagespeed"
+  description={description}
+  ogImage="/og-cards/platform.png?v=3"
+  jsonLd={jsonLd}
+>
+  <PageHero id="platform-title" eyebrow="Transform packs" title="One interceptor, many packs">
+    <Fragment slot="lede">
+      mod_pagespeed parses and rewrites HTML responses on your own server, as a stream. Transform
+      packs add declarative rules to that pipeline. The edge-SEO pack is available now; compliance
+      and privacy packs are planned. Tell us which pack you need.
+    </Fragment>
+  </PageHero>
+
+  <section class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 pb-16">
+    <p class="readout-plate max-w-2xl px-4 py-3 text-sm text-text-muted">
+      <span class="font-mono text-xs text-interactive">Status</span>
+      <br />
+      The edge-SEO pack is free and available now. The other packs are planned.
+      <a href="/packs/" class="text-interactive hover:text-interactive-hover underline">
+        See the pack catalogue.
+      </a>
+    </p>
+
+    <div class="mt-12 grid grid-cols-1 gap-6 md:grid-cols-2">
+      {packs.map((pack) => (
+        <article class="card flex flex-col" aria-labelledby={`pack-${pack.wedge}`}>
+          <div class="h-10 w-10 rounded-lg bg-interactive/10 flex items-center justify-center">
+            <Icon name={pack.icon} class="h-5 w-5 text-interactive" />
+          </div>
+          <h2 id={`pack-${pack.wedge}`} class="mt-4 text-lg font-semibold text-text-body">
+            {pack.title}
+          </h2>
+          <p class="mt-2 text-sm text-text-muted">{pack.body}</p>
+          {pack.more && (
+            <p class="mt-2 text-sm">
+              <a
+                href={pack.more.href}
+                class="text-interactive hover:text-interactive-hover underline"
+              >
+                {pack.more.label}
+              </a>
+            </p>
+          )}
+          {pack.docs && (
+            <p class="mt-2 text-sm">
+              <a
+                href={pack.docs.href}
+                class="text-interactive hover:text-interactive-hover underline"
+              >
+                {pack.docs.label}
+              </a>
+            </p>
+          )}
+          <PlatformInterestForm wedge={pack.wedge} pack={pack.title} />
+        </article>
+      ))}
+
+      <article class="card flex flex-col md:col-span-2" aria-labelledby="pack-request-a-pack">
+        <div class="h-10 w-10 rounded-lg bg-interactive/10 flex items-center justify-center">
+          <Icon name="message-square" class="h-5 w-5 text-interactive" />
+        </div>
+        <h2 id="pack-request-a-pack" class="mt-4 text-lg font-semibold text-text-body">
+          Request a pack
+        </h2>
+        <p class="mt-2 text-sm text-text-muted">
+          Something else the pipeline should do for your site? Describe the job.
+        </p>
+        <PlatformInterestForm
+          wedge="request-a-pack"
+          pack="Request a pack"
+          messageLabel="What should the pipeline do for you?"
+          messageRequired={true}
+          messageHint="The response you serve today, and what it should look like instead."
+          submitLabel="Send the request"
+        />
+      </article>
+    </div>
+  </section>
+</BaseLayout>

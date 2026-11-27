@@ -1,0 +1,78 @@
+# mod_pagespeed - E2E Test Environment
+#
+# Three services sharing a named volume:
+#   origin  - Python HTTP server serving testdata on port 8081
+#   worker  - PageSpeed factory worker daemon
+#   nginx   - Nginx with pagespeed module on port 8083
+#
+# Usage:
+#   docker compose -f tools/e2e/docker-compose.yml up -d
+#   curl http://localhost:8083/
+#   docker compose -f tools/e2e/docker-compose.yml down
+
+services:
+  # Origin server: serves raw unoptimized test content.
+  origin:
+    image: python:3.12-slim
+    working_dir: /var/www
+    command: python3 -m http.server 8081 --bind 0.0.0.0
+    volumes:
+      - ./testdata:/var/www
+    ports:
+      - "${E2E_ORIGIN_PORT:-8082}:8081"
+
+  # Compressed origin: nginx with gzip enabled, used to test the
+  # Content-Encoding guard (Phase 1.1).  No port exposure needed
+  # (only accessed by the nginx service internally).
+  compressed-origin:
+    image: nginx:1.26-alpine
+    volumes:
+      - ./testdata:/usr/share/nginx/html:ro
+      - ./nginx-compressed-origin.conf:/etc/nginx/conf.d/default.conf:ro
+
+  # Mutable origin: nginx serving a writable named volume with a short
+  # Cache-Control max-age.  Tests rewrite files here to check that stored
+  # copies converge after the origin changes.  Reached through the
+  # /mutable/ location of the front end.
+  mutable-origin:
+    image: nginx:1.26-alpine
+    volumes:
+      - mutable:/var/www
+      - ./nginx-mutable-origin.conf:/etc/nginx/conf.d/default.conf:ro
+
+  # PageSpeed factory worker: processes cache notifications and
+  # writes optimized variants back to cache.
+  worker:
+    build:
+      context: ../../
+      dockerfile: tools/e2e/Dockerfile.e2e
+    entrypoint: ["/entrypoint-worker.sh"]
+    ports:
+      - "${E2E_WORKER_PORT:-9881}:9881"
+    volumes:
+      - shared:/shared
+      - ./entrypoint-worker.sh:/entrypoint-worker.sh:ro
+    depends_on:
+      - origin
+
+  # Nginx with pagespeed module: intercepts requests, serves from
+  # cache on hit, proxies to origin on miss.
+  nginx:
+    build:
+      context: ../../
+      dockerfile: tools/e2e/Dockerfile.e2e
+    command: ["nginx", "-g", "daemon off;"]
+    ports:
+      - "${E2E_NGINX_PORT:-8083}:8080"
+    volumes:
+      - shared:/shared
+      - ./nginx-e2e.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - origin
+      - compressed-origin
+      - mutable-origin
+      - worker
+
+volumes:
+  shared:
+  mutable:

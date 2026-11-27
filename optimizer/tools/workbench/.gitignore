@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.svelte-kit/
+*.vsix
+.vite/
+coverage/

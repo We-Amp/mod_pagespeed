@@ -1,0 +1,237 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// /packs/ — the rule-pack catalogue: what a pack is (a JSON file of head
+// rules, report first, enforce per site and per rule), one card per pack and
+// a "write your own" card. The edge-SEO pack is free and available now, as a
+// template in this repository's packs/ directory; the two planned packs (under their own sub-heading) reuse the framing of the /ai-readability/
+// script card verbatim ("We are building ...", "Tell us what you run.") and
+// its two wedges, through the same interest form /platform/ uses. No prices,
+// no dates. The #pack-format section summarises the format and links to the
+// full reference at /docs/rule-packs/#pack-format.
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PageHero from '../../components/PageHero.astro';
+import Icon from '../../components/Icon.astro';
+import PlatformInterestForm from '../../components/PlatformInterestForm.astro';
+
+const REPO = 'https://github.com/We-Amp/pagespeed-optimizer';
+const PACKS_DIR = `${REPO}/tree/main/packs`;
+const EXAMPLE_PACK = `${REPO}/blob/main/packs/edge-seo/pack.example.json`;
+const DOCS_RULE_PACKS = '/docs/rule-packs/';
+const DOCS_PACK_FORMAT = '/docs/rule-packs/#pack-format';
+const LINK = 'text-interactive hover:text-interactive-hover underline';
+
+const levels = [
+  {
+    what: 'The server',
+    how: 'turns the rule_packs filter on and names the pack file. It is off by default.',
+  },
+  {
+    what: 'The site',
+    how: 'is listed in the pack in report mode or in enforce mode.',
+  },
+  {
+    what: 'The rule',
+    how: 'is set to enforce. A rule that is not stays in report mode.',
+  },
+];
+
+const formatPoints = [
+  'One JSON file: the pack name, version and publisher, the sites it applies to, lookup tables and the rules.',
+  'Each rule names a kind (canonical, title, description, hreflang or JSON-LD), the paths it matches and the value it sets, from a table or a template.',
+  'Each rule says what to do when the page already has the element: keep it, repair it or replace it.',
+  'Your own packs use the same format, the same report mode and the same opt-in as the packs we publish.',
+];
+
+const description =
+  'Rule packs for mod_pagespeed: JSON files of head rules the server applies to your HTML, in report mode first. The edge-SEO pack is free.';
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'WebPage',
+  name: 'Rule packs for mod_pagespeed',
+  url: 'https://modpagespeed.com/packs/',
+  description,
+};
+---
+
+<BaseLayout title="Rule packs for mod_pagespeed" description={description} jsonLd={jsonLd}>
+  <PageHero id="packs-title" eyebrow="Rule packs" title="Head fixes as rules, on your own server">
+    <Fragment slot="lede">
+      A rule pack is a JSON file of rules for the head of your pages: canonical, title, description,
+      hreflang and JSON-LD. mod_pagespeed applies them to the HTML it serves, with no CMS change. A
+      pack starts in report mode: the server logs what each rule would change and changes nothing.
+      You switch to enforce mode per site and per rule when the log shows what you expect.
+    </Fragment>
+  </PageHero>
+
+  <section class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 pb-16">
+    <div class="max-w-3xl">
+      <h2 class="text-lg font-semibold text-text-body">
+        Three switches before a pack changes HTML
+      </h2>
+      <ul class="mt-3 space-y-2 text-sm text-text-muted">
+        {levels.map((l) => (
+          <li class="flex gap-2">
+            <span class="mt-2 h-1 w-1 flex-none rounded-full bg-interactive" aria-hidden="true" />
+            <span>
+              <span class="font-semibold text-text-body">{l.what}</span> {l.how}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <p class="mt-4 text-sm text-text-muted">
+        Each pack names its publisher and version. When the server loads a pack it logs the pack's
+        id, version and SHA-256 hash, so you can see which pack, and which version of it, is
+        running.
+      </p>
+    </div>
+
+    <div class="mt-12 grid grid-cols-1 gap-6 md:grid-cols-2">
+      <article class="card flex flex-col" aria-labelledby="pack-edge-seo">
+        <div class="h-10 w-10 rounded-lg bg-interactive/10 flex items-center justify-center">
+          <Icon name="route" class="h-5 w-5 text-interactive" />
+        </div>
+        <p class="mt-4 font-mono text-xs text-interactive">Free</p>
+        <h2 id="pack-edge-seo" class="mt-1 text-lg font-semibold text-text-body">
+          Edge SEO
+        </h2>
+        <p class="mt-2 text-sm text-text-muted">
+          Canonical, title, description, hreflang and JSON-LD hygiene at the origin. Rules match URL
+          paths and set each element from a table or a template, so one rule fixes every page it
+          matches. No CDN and no CMS release needed.
+        </p>
+        <p class="mt-auto pt-4 text-sm">
+          <a href="#download" class="text-interactive hover:text-interactive-hover underline">
+            Where to get it
+          </a>
+        </p>
+      </article>
+
+      <article class="card flex flex-col" aria-labelledby="pack-write-your-own">
+        <div class="h-10 w-10 rounded-lg bg-interactive/10 flex items-center justify-center">
+          <Icon name="braces" class="h-5 w-5 text-interactive" />
+        </div>
+        <p class="mt-4 font-mono text-xs text-interactive">Your rules</p>
+        <h2 id="pack-write-your-own" class="mt-1 text-lg font-semibold text-text-body">
+          Write your own
+        </h2>
+        <p class="mt-2 text-sm text-text-muted">
+          A pack is a plain JSON file. Write one for your own sites in the same format, and run it
+          in report mode until the log shows what you expect.
+        </p>
+        <p class="mt-auto pt-4 text-sm">
+          <a href="#pack-format" class="text-interactive hover:text-interactive-hover underline">
+            The pack format
+          </a>
+        </p>
+      </article>
+    </div>
+
+    <h2 id="planned" class="mt-16 text-lg font-semibold text-text-body">
+      Planned: script control at the origin
+    </h2>
+    <div class="mt-6 grid grid-cols-1 gap-6 md:grid-cols-2">
+      <article class="card flex flex-col" aria-labelledby="pack-page-integrity">
+        <div class="h-10 w-10 rounded-lg bg-interactive/10 flex items-center justify-center">
+          <Icon name="badge-check" class="h-5 w-5 text-interactive" />
+        </div>
+        <p class="mt-4 font-mono text-xs text-interactive">Planned</p>
+        <h3 id="pack-page-integrity" class="mt-1 text-lg font-semibold text-text-body">
+          Payment-page script integrity
+        </h3>
+        <p class="mt-2 text-sm text-text-muted">
+          PCI DSS 4.0 (requirement 6.4.3) asks payment pages to keep an inventory of the scripts
+          they load and to authorise each one; requirement 11.6.1 asks for detection of unauthorised
+          changes to those pages. We are building a server module that keeps a list of approved
+          scripts at your origin.
+        </p>
+        <p class="mt-3 text-sm text-text-body">Tell us what you run.</p>
+        <PlatformInterestForm
+          wedge="page-integrity"
+          pack="Payment-page script integrity"
+          submitLabel="Talk to us about script control"
+        />
+      </article>
+
+      <article class="card flex flex-col" aria-labelledby="pack-third-party-freeze">
+        <div class="h-10 w-10 rounded-lg bg-interactive/10 flex items-center justify-center">
+          <Icon name="lock" class="h-5 w-5 text-interactive" />
+        </div>
+        <p class="mt-4 font-mono text-xs text-interactive">Planned</p>
+        <h3 id="pack-third-party-freeze" class="mt-1 text-lg font-semibold text-text-body">
+          Third-party freeze
+        </h3>
+        <p class="mt-2 text-sm text-text-muted">
+          A third-party script that loads without an integrity hash can change upstream without
+          notice. We are building a way to serve each one at a version you approved until you accept
+          the update.
+        </p>
+        <p class="mt-3 text-sm text-text-body">Tell us what you run.</p>
+        <PlatformInterestForm
+          wedge="third-party-freeze"
+          pack="Third-party freeze"
+          submitLabel="Talk to us about pinning scripts"
+        />
+      </article>
+    </div>
+
+    <div class="mt-16 max-w-3xl">
+      <h2 id="download" class="text-lg font-semibold text-text-body">
+        Get the edge-SEO pack
+      </h2>
+      <p class="mt-2 text-text-muted">
+        The edge-SEO pack is free. Download it from the
+        <a href={PACKS_DIR} class="text-interactive hover:text-interactive-hover underline">
+          packs directory
+        </a>
+        of the pagespeed-optimizer repository; its README and the
+        <a href={DOCS_RULE_PACKS} class={LINK}>
+          rule packs documentation
+        </a>
+        explain how to adapt and enable it. The pack is a template: you list your own hosts and fill
+        in the rules for your pages. It runs in report mode first, on Apache, nginx and IIS. The
+        pack is not signed, because it is a template you edit, and applying it fetches nothing over
+        the network.
+      </p>
+
+      <h2 id="pack-format" class="mt-10 text-lg font-semibold text-text-body">
+        The pack format
+      </h2>
+      <ul class="mt-3 space-y-2 text-sm text-text-muted">
+        {formatPoints.map((p) => (
+          <li class="flex gap-2">
+            <span class="mt-2 h-1 w-1 flex-none rounded-full bg-interactive" aria-hidden="true" />
+            <span>{p}</span>
+          </li>
+        ))}
+      </ul>
+      <p class="mt-3 text-sm text-text-muted">
+        The{' '}
+        <a href={EXAMPLE_PACK} class={LINK}>
+          free template
+        </a>{' '}
+        has one worked rule for each kind. See the{' '}
+        <a href={DOCS_PACK_FORMAT} class={LINK}>
+          rule packs documentation
+        </a>{' '}
+        for the full reference.
+      </p>
+    </div>
+
+    <p class="readout-plate mt-12 max-w-3xl px-4 py-3 text-sm text-text-muted">
+      <span class="font-mono text-xs text-interactive">Updates</span>
+      <br />
+      Packs we curate will come with updates you pull when you choose; the server never phones home.
+    </p>
+
+    <p class="mt-8 text-sm text-text-annotation">
+      Other directions we are exploring are on the
+      <a href="/platform/" class="text-interactive hover:text-interactive-hover underline">
+        transform packs page
+      </a>
+      .
+    </p>
+  </section>
+</BaseLayout>

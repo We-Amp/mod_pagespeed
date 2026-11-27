@@ -1,0 +1,52 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// Home closing call to action: a featured panel on the primary ground. The
+// design allows one cyan fill per viewport, so this is a panel, not a band.
+// The sponsor link is its last line (the s-sponsor id is kept for old links).
+//
+// The markup keeps the indentation it has inside the page layout: the build
+// does not compress HTML, so this indentation is the whitespace of the page.
+// The class names are styled by the page's global style block in
+// src/pages/index.astro. Keep the component imports below in this order: it
+// decides the order of the inline style blocks in <head> (see the note in
+// src/pages/index.astro).
+
+import CTAButton from '../CTAButton.astro';
+import { LICENSE_CLAUSE_CAP } from '../../data/product-facts.mjs';
+---
+
+  <section class="py-13 sm:py-18" aria-labelledby="s-cta">
+    <div class="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8">
+      <div class="card-featured text-center">
+        <h2 id="s-cta" class="h2-section text-text-body">
+          Free to install and run. Start today.
+        </h2>
+        <p class="mt-4 text-text-muted">
+          {LICENSE_CLAUSE_CAP}, on your own servers. No per-request fees. No bandwidth metering.
+        </p>
+        <div class="mt-6 flex flex-wrap justify-center gap-4">
+          <CTAButton event="cta_primary_home_bottom" />
+          <a href="/calculator/" class="btn-secondary">
+            {' '}
+            Run the numbers{' '}
+          </a>
+        </div>
+        <p class="mt-5 text-small text-text-muted">
+          Support from the people who build it is what&rsquo;s for sale.
+        </p>
+        <p id="s-sponsor" class="mt-2 text-small text-text-muted">
+          Sponsorship on GitHub funds the ongoing work.{' '}
+          <a
+            href="https://github.com/sponsors/We-Amp"
+            rel="noopener"
+            data-umami-event="cta_sponsor_home"
+            class="link-arrow"
+          >
+            Sponsor on GitHub</a
+          >
+        </p>
+      </div>
+    </div>
+  </section>

@@ -1,0 +1,36 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// Progressive enhancement for the converged /docs/release-notes/ page only:
+// a deep link, or an in-page link, to a release opens its collapsed
+// <details class="rn-entry"> before scrolling to it. Pure enhancement —
+// without it the reader clicks the summary once; nothing is unreachable
+// without JavaScript.
+//
+// Split out of docs/[slug].astro (which renders this only when
+// doc.id === 'release-notes', so no other docs page pays for it) because
+// prettier-plugin-astro cannot parse a literal <script> tag nested inside a
+// JS expression container ({cond && <script>...}); a conditionally-rendered
+// component sidesteps that parser limitation while keeping the same
+// gating and the same shipped bytes.
+---
+
+<script is:inline>
+  // Open the release entry a deep link points at (and the one an in-page link
+  // scrolls to). Pure enhancement: without it the reader clicks the summary.
+  function openTarget() {
+    const id = decodeURIComponent(location.hash.slice(1));
+    if (!id) return;
+    const t = document.getElementById(id);
+    if (!t) return;
+    const d = t.matches('details.rn-entry')
+      ? t
+      : (t.nextElementSibling?.closest?.('details.rn-entry') ?? t.closest('details.rn-entry'));
+    if (d && !d.open) d.open = true;
+    t.scrollIntoView(); // re-scroll: opening changed the layout
+  }
+  addEventListener('hashchange', openTarget);
+  if (document.readyState !== 'loading') openTarget();
+  else addEventListener('DOMContentLoaded', openTarget);
+</script>

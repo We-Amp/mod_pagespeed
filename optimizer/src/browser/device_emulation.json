@@ -1,0 +1,51 @@
+{
+  "_comment": "Device emulation for the browser-analysis renders and the async-css probe. One source: src/browser/device_emulation.h mirrors these values and device_emulation_test fails when the two differ; tools/async-css-probe/probe_rendered.mjs reads this file. A viewport at most mobile_max_width CSS px wide renders as a mobile device (Emulation.setDeviceMetricsOverride mobile: true; Playwright isMobile); wider, as a desktop window. mobile_has_touch: a mobile device is a touch device (Emulation.setTouchEmulationEnabled enabled: true, maxTouchPoints: max_touch_points; Playwright hasTouch), so hover: none and pointer: coarse match there; a desktop window has no touch. phone_max_width and user_agent_overrides: a mobile viewport at most phone_max_width CSS px wide (the phone class) is sent user_agent_overrides.phone, a wider one (the tablet) user_agent_overrides.tablet, each verbatim as the Emulation.setUserAgentOverride params (Playwright userAgent, plus the same call on the page's CDP session); both classify to their class in the front end's ParseViewport. A desktop window is sent no override and keeps the browser's own UA.",
+  "mobile_max_width": 768,
+  "mobile_has_touch": true,
+  "max_touch_points": 5,
+  "phone_max_width": 479,
+  "user_agent_overrides": {
+    "phone": {
+      "userAgent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Mobile Safari/537.36",
+      "platform": "Linux armv81",
+      "userAgentMetadata": {
+        "brands": [
+          {
+            "brand": "Chromium",
+            "version": "145"
+          },
+          {
+            "brand": "Not:A-Brand",
+            "version": "99"
+          }
+        ],
+        "platform": "Android",
+        "platformVersion": "",
+        "architecture": "",
+        "model": "",
+        "mobile": true
+      }
+    },
+    "tablet": {
+      "userAgent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+      "platform": "Linux armv81",
+      "userAgentMetadata": {
+        "brands": [
+          {
+            "brand": "Chromium",
+            "version": "145"
+          },
+          {
+            "brand": "Not:A-Brand",
+            "version": "99"
+          }
+        ],
+        "platform": "Android",
+        "platformVersion": "",
+        "architecture": "",
+        "model": "",
+        "mobile": false
+      }
+    }
+  }
+}

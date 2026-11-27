@@ -1,0 +1,1349 @@
+---
+title: 'Call the worker HTTP API'
+description: 'Optimizer worker HTTP API for mod_pagespeed: health, stats, Prometheus metrics, cache management, live config and WebSocket streaming, all via curl.'
+order: 66
+group: 'Reference'
+lastUpdated: 2026-10-22
+---
+
+import { getRelease } from '../../lib/release';
+
+export const rel20 = await getRelease('2.0');
+
+The worker exposes an HTTP/1.1 API for monitoring, cache management,
+configuration, and browser-based analysis. The [web console](/docs/workbench/)
+is built on this API, so anything the console shows you can also read or drive
+yourself. Every endpoint documented here works with `curl` or any HTTP client.
+
+## Base URL
+
+The API listens on `127.0.0.1:9880` by default. Configure with `--api-port`.
+Set port to `0` to disable the HTTP API entirely.
+
+```text
+http://127.0.0.1:9880/v1/...
+```
+
+:::note[In-process ASP.NET Core middleware]
+The `:9880` examples throughout this page describe the **standalone worker**.
+With the in-process ASP.NET Core middleware
+([`WeAmp.PageSpeed.AspNetCore`](/docs/aspnet-getting-started/)), the
+`/console/` and `/v1/*` surfaces are served on **your app's own port** — the
+port your ASP.NET Core app listens on (e.g. `http://localhost:5123/console/`)
+— not on `:9880`. The worker's own HTTP API stays bound to `127.0.0.1` on an
+ephemeral loopback port unless you set `Worker.ApiPort` explicitly. Substitute
+your app's origin for `localhost:9880` in the examples below. There is no
+authentication on these paths by default and the worker API token does not
+apply; see [Console](/docs/aspnet-configuration/#console-pagespeedconsole) to
+turn them off or gate them.
+:::
+
+All endpoints are prefixed with `/v1/`. The server supports HTTP/1.1 only
+(no HTTP/2). Keep-alive connections are supported.
+
+### Server limits
+
+| Parameter        | Default | Flag                |
+| ---------------- | ------- | ------------------- |
+| Max connections  | 128     | `--max-connections` |
+| Request timeout  | 10s     | -                   |
+| Max request body | 64 KB   | -                   |
+| Max URL length   | 8192    | -                   |
+| Max header bytes | 64 KB   | -                   |
+
+## Transports
+
+The API is off until you enable a transport, and there are two.
+
+`--api-socket [PATH]` serves HTTP/1.1 over a unix socket (default
+`/run/pagespeed-optimizer/api.sock`, mode 0660 `pagespeed:pagespeed`). This is
+the recommended local transport: filesystem permission is the credential, so a
+peer in group `pagespeed` needs no token — for reads and for cache purge
+alike — and the worker binds no TCP port at all. A connection accepted on the
+socket is an authenticated peer; a token configured alongside it does not
+reimpose a bearer requirement.
+
+Peers on the socket must still send `X-Requested-With: XMLHttpRequest` on
+mutating requests (POST/PATCH). Reverse-proxying the console onto this socket
+is a supported topology, and through such a proxy a browser can reach it
+cross-origin — with no credential in the chain — so that header is the control
+that keeps a cross-origin POST from purging your cache. Reads need nothing.
+
+```bash
+curl --unix-socket /run/pagespeed-optimizer/api.sock http://localhost/v1/stats
+```
+
+The `--api-socket` transport is also the surface the web server module's
+unified console reads: its worker panels proxy `GET /v1/health`,
+`GET /v1/stats`, and `GET /v1/cache/cooldowns` over this socket. The console
+panels require a 2.1.0 worker or later; against an older or unreachable worker
+the panel reports it as such instead of failing the console.
+
+`--api-port PORT` binds TCP, `127.0.0.1` by default.
+
+## Authentication
+
+A token is set with the `PAGESPEED_API_TOKEN` environment variable (preferred —
+`--api-token` puts the credential on the command line, where any local user can
+read it out of `/proc/<pid>/cmdline`). With a token configured, every endpoint
+except `/v1/health` and the `/console/` static bundle (GET/HEAD only) requires
+a Bearer header.
+
+```bash
+curl -H "Authorization: Bearer <your-token>" http://localhost:9880/v1/stats
+```
+
+### The invariant
+
+**Remote is never unauthenticated, and unauthenticated is never remote.** The
+worker checks this while parsing its configuration and refuses to start rather
+than serve a combination that breaks it. Each refusal names the flag that would
+make the requested posture legal.
+
+| Transport        | Token   | Extra flag           | Result                             |
+| ---------------- | ------- | -------------------- | ---------------------------------- |
+| unix socket      | either  | —                    | normal — no token is asked for     |
+| TCP loopback     | present | —                    | normal                             |
+| TCP loopback     | absent  | `--api-no-auth`      | allowed, warning banner at startup |
+| TCP loopback     | absent  | —                    | **refuses to start**               |
+| TCP non-loopback | present | `--api-allow-remote` | allowed, warning banner            |
+| TCP non-loopback | present | —                    | **refuses to start**               |
+| TCP non-loopback | absent  | any                  | **refuses to start**               |
+
+Also refused at startup: `--api-socket` together with `--api-port` (one
+transport only), and an `--api-bind` that is not an IPv4 literal (`localhost`
+and `::1` included — the API binds IPv4 only).
+
+### Authentication modes
+
+| Mode                       | Behavior                                          |
+| -------------------------- | ------------------------------------------------- |
+| Unix socket                | All endpoints open to peers in group `pagespeed`  |
+| Token configured (TCP)     | All endpoints require auth (except `/v1/health` and the `/console/` static bundle) |
+| Token + `--api-read-open`  | An explicit allow-list of GET routes + the `stats`/`events` WebSocket streams open (except the log: `GET /v1/logs`, `/v1/ws/logs`), POST/PATCH require auth |
+| No token + `--api-no-auth` | All endpoints open — TCP loopback only            |
+
+In read-open mode (`--api-read-open`), an explicit allow-list of GET
+endpoints and WebSocket streams is accessible without authentication.
+Concretely: the cached-URL inventory (`GET /v1/cache/urls`), per-URL variant
+detail and content (`GET /v1/cache/alternates`, `/select`, `/content`) —
+which is also where the origin hosts and content types behind each cached
+URL are visible — the active cooldown table (`GET /v1/cache/cooldowns`),
+overall stats/metrics/config (`GET /v1/stats`, `/v1/metrics`, `/v1/config`),
+and the live `/v1/ws/stats` and `/v1/ws/events` WebSocket streams. This
+enables exposing the console publicly as a read-only dashboard while keeping
+mutating operations (config changes, cache purge) behind the token. Auth for
+WebSocket is sent as the first message (see
+[WebSocket Endpoints](#websocket-endpoints)). The one exception is the optimizer
+log: log lines carry the URLs, origin hosts and error text of every site the
+optimizer serves, so `GET /v1/logs` still requires the token on TCP, and the
+`/v1/ws/logs` stream requires it too — send it as the first message after the
+handshake (see [WebSocket Endpoints](#websocket-endpoints)), since a browser
+cannot carry the token on the handshake itself.
+
+`--api-read-open` is an explicit allow-list, not an opt-out. In earlier
+releases an *absent* token opened reads as a side effect; it no longer does,
+and an unset token now fails closed on every endpoint that is not
+`/v1/health` or the `/console/` static bundle. The allow-list is also
+closed by default for anything new: a GET route added in a later release
+stays behind the token under read-open unless it is deliberately added to
+the list, so the read-only surface never grows silently.
+
+Because read-open still exposes real operational data about your sites,
+only enable it behind a reverse proxy that performs its own
+authentication (IP allow-listing, a login prompt, etc.) — never expose it
+directly to the open internet.
+
+### Error responses
+
+When auth fails, the API returns:
+
+- **401** `UNAUTHORIZED` -- Missing `Authorization` header or wrong scheme
+- **403** `FORBIDDEN` -- Invalid token
+
+```json
+{
+  "error": {
+    "code": "UNAUTHORIZED",
+    "message": "Authentication required"
+  }
+}
+```
+
+## CORS
+
+The API sends no CORS headers, and no flag or config key turns them on, so a
+browser page on another origin cannot call it. Use the web console at
+`/console/`, call the API from a server-side client, or put a reverse proxy in
+front that serves your page and the API from one origin.
+
+---
+
+## Health and status
+
+### GET /v1/health
+
+Health check and readiness probe. **No authentication required.** Designed for
+Kubernetes liveness probes, Docker HEALTHCHECK, and load balancer health checks.
+
+```bash
+curl http://localhost:9880/v1/health
+```
+
+**Response:**
+
+<pre>
+  <code class="language-json">{`{
+  "status": "ok",
+  "version": "${rel20.display.header_version}",
+  "uptime_seconds": 3421,
+  "connections": {
+    "active": 2,
+    "max": 32
+  },
+  "inflight": 3,
+  "ready": true
+}`}</code>
+</pre>
+
+| Field                | Description                                               |
+| -------------------- | --------------------------------------------------------- |
+| `status`             | Always `"ok"` when the server is running                  |
+| `version`            | Worker build version                                      |
+| `uptime_seconds`     | Seconds since worker start                                |
+| `connections.active` | Current HTTP connections                                  |
+| `connections.max`    | Configured maximum                                        |
+| `inflight`           | Thread pool tasks in progress                             |
+| `ready`              | `true` when `inflight < num_threads` (capacity available) |
+
+### GET /v1/stats
+
+Full worker statistics as JSON. Covers notifications, variant generation,
+errors, cache state, processing times, content analysis, and more.
+
+```bash
+curl http://localhost:9880/v1/stats
+```
+
+**Response:**
+
+```json
+{
+  "notifications": {
+    "received": 4821,
+    "skipped_dedup": 1200,
+    "skipped_inflight": 42
+  },
+  "variants": {
+    "written": 2106,
+    "proactive": 1580,
+    "gzip": 840,
+    "brotli": 840
+  },
+  "errors": {
+    "total": 7,
+    "origin_misconfiguration": 2
+  },
+  "cache": {
+    "entries": 3412,
+    "size_bytes": 268435456
+  },
+  "by_type": {
+    "html": { "count": 120, "time_us": 450000 },
+    "css": { "count": 340, "time_us": 180000 },
+    "js": { "count": 280, "time_us": 150000 },
+    "image": { "count": 1366, "time_us": 28500000 }
+  },
+  "by_format": {
+    "webp": 580,
+    "avif": 490,
+    "jpeg": 180,
+    "png": 116
+  },
+  "content_analysis": {
+    "photo": 800,
+    "screenshot": 120,
+    "illustration": 300,
+    "noisy": 50,
+    "denoised": 0
+  },
+  "ssimulacra2": {
+    "checks": 1200,
+    "reencodes": 45,
+    "avg_score_x100": 7200
+  },
+  "learned_quality": {
+    "predictions": 1100,
+    "fallbacks": 15
+  },
+  "html_assembly": {
+    "complete": 110,
+    "skipped": 10,
+    "css_aborted": 3
+  },
+  "alternates": {
+    "writes": 5000,
+    "write_failures": 2
+  },
+  "selector_invocations": 12000,
+  "cache_read_retries": 5,
+  "cache_read_failures": 1,
+  "started_at_ms": 1759230000000, "uptime_seconds": 3600,
+  "svg": {
+    "candidates_evaluated": 500,
+    "candidates_rejected": 350,
+    "vectorized": 120,
+    "fidelity_rejected": 10,
+    "size_rejected": 15,
+    "path_count_rejected": 5,
+    "written": 90,
+    "bytes_saved": 2048000,
+    "vectorize_time_us": 450000,
+    "served": 75
+  },
+  "policy": {
+    "computed": 85,
+    "async_css_enabled": 60,
+    "script_deferral_enabled": 45
+  },
+  "thread_pool": {
+    "inflight": 3,
+    "size": 8
+  },
+  "connections": {
+    "active": 2,
+    "max": 32
+  },
+  "serve_savings": {
+    "html": { "original_bytes": 4200000, "optimized_bytes": 3990000, "hits": 120,
+              "by_encoding": { "identity": { "hits": 120, "bytes": 3990000 },
+                               "gzip": { "hits": 0, "bytes": 0 },
+                               "br": { "hits": 0, "bytes": 0 } } },
+    "css": { "original_bytes": 880000, "optimized_bytes": 540000, "hits": 340,
+             "by_encoding": { "identity": { "hits": 340, "bytes": 540000 },
+                              "gzip": { "hits": 0, "bytes": 0 },
+                              "br": { "hits": 0, "bytes": 0 } } },
+    "js": { "original_bytes": 1300000, "optimized_bytes": 910000, "hits": 280,
+            "by_encoding": { "identity": { "hits": 280, "bytes": 910000 },
+                             "gzip": { "hits": 0, "bytes": 0 },
+                             "br": { "hits": 0, "bytes": 0 } } },
+    "image": { "original_bytes": 52000000, "optimized_bytes": 7800000, "hits": 1366,
+               "by_encoding": { "identity": { "hits": 1366, "bytes": 7800000 },
+                                "gzip": { "hits": 0, "bytes": 0 },
+                                "br": { "hits": 0, "bytes": 0 } } }
+  },
+  "serve_savings_by_host": {
+    "hosts": [
+      { "host": "www.example.com", "hits": 1200,
+        "original_bytes": 41000000, "optimized_bytes": 9000000 },
+      { "host": "static.example.com", "hits": 900,
+        "original_bytes": 17000000, "optimized_bytes": 3300000 }
+    ],
+    "limit": 32,
+    "other": { "hits": 6, "original_bytes": 180000, "optimized_bytes": 60000 }
+  },
+  "verdicts": {
+    "css": { "already_optimal": { "count": 4, "bytes": 210000 } },
+    "js": { "already_optimal": { "count": 1, "bytes": 88000 } },
+    "image": { "already_optimal": { "count": 40, "bytes": 3100000 } }
+  },
+  "serve_classes": {
+    "optimized": 1366,
+    "original_cold": 40,
+    "original_pending": 12,
+    "original_declined": 0,
+    "original_skew": 0,
+    "notify_suppressed": 3,
+    "class_unrecognized": 0,
+    "flags_unrecognized": 0
+  }
+}
+```
+
+The `content_analysis.denoised` field is deprecated and always `0`; the worker no longer smooths images before encoding.
+
+Key fields:
+
+| Field                            | Description                                                   |
+| -------------------------------- | ------------------------------------------------------------- |
+| `notifications.received`         | Total notifications from nginx                                |
+| `notifications.skipped_dedup`    | Skipped because variant already exists                        |
+| `notifications.skipped_inflight` | Skipped because URL is already being processed                |
+| `notifications.dedup_healed` | Already processed URLs with nothing servable left in the cache; processed again |
+| `notifications.missing_copy_healed` | Already optimized stylesheets and scripts whose optimized copy was gone from the cache while their other copies remained; processed again, counted when the re-processing starts |
+| `notifications.dedup_heal_rate_limited` | Skipped because the URL was processed again by one of the two heals above less than 10 seconds before (per URL and client class) |
+| `variants.written`               | Total optimized variants written to cache                     |
+| `variants.proactive`             | Sibling variants (other format/viewport/density combinations) |
+| `variants.gzip` / `brotli`       | Pre-compressed text variants                                  |
+| `errors.origin_misconfiguration` | Origin responses that prevent optimization (e.g., no-store)   |
+| `by_type.*.time_us`              | Cumulative processing time in microseconds                    |
+| `ssimulacra2.avg_score_x100`     | Average visual quality score (7200 = 72.00)                   |
+| `image_savedata_refused` | Save-Data images that were not smaller than the same image without Save-Data and so were not stored; clients with and without Save-Data are then served the same image |
+| `image_size_refused.webp` / `.avif` | WebP or AVIF images that were not smaller than the original-format image of the same size, including refusals against an already stored image, which get no recovery attempt |
+| `image_budget_rescued.webp` / `.avif` | Of those, the ones a smaller encode at the same quality floor recovered; refused minus rescued is what was dropped |
+| `learned_quality.predictions`    | ML model quality predictions made                             |
+| `learned_quality.fallbacks`      | Times ML prediction was overridden by binary search           |
+| `svg.bytes_saved`                | Cumulative bytes saved by SVG vectorization                   |
+| `policy.computed`                | Optimization policies computed from browser profiles          |
+| `policy.async_css_enabled`       | Times async CSS was enabled by policy                         |
+| `policy.script_deferral_enabled` | Times script deferral was enabled by policy                   |
+| `serve_savings.*.original_bytes`  | Origin bytes for worker-processed HITs of this type     |
+| `serve_savings.*.optimized_bytes` | Bytes served from cache for those HITs                  |
+| `serve_savings.*.hits`            | Optimized HITs served, per content type                 |
+| `serve_savings.*.by_encoding.<enc>.hits` / `.bytes` | The same serves split by the transfer encoding actually served: `identity`, `gzip`, `br` |
+| `serve_savings.*.split.original_bytes` / `.compressed_original_bytes` / `.optimized_bytes` | For the HITs whose entry recorded how large the origin bytes are in the encoding they were served in: the origin bytes, those bytes encoded the same way, and the bytes served. `original_bytes - compressed_original_bytes` is what the encoding saved and `compressed_original_bytes - optimized_bytes` what the rewrite saved (negative when the rewritten response is larger than the encoded origin); the two add up to `original_bytes - optimized_bytes` of those HITs. All three are 0 until entries written by this version are served; `split.original_bytes` divided by `original_bytes` is the share of HITs the split covers |
+| `serve_savings_by_host.hosts[]`  | Up to `limit` (32) hosts, drawn from the first 64 distinct hosts seen since the optimizer started, ordered by optimized HITs (most first): `host`, `hits`, `original_bytes`, `optimized_bytes` |
+| `serve_savings_by_host.other`    | Every other HIT: the remaining hosts, and HITs the front end recorded without a host |
+| `verdicts.*.already_optimal.count` / `.bytes` | Entries judged already optimal (no smaller variant produced) and their original bytes; counted once per entry, per worker restart |
+| `started_at_ms` / `uptime_seconds` | When this worker process started (epoch milliseconds) and how long it has been up |
+| `serve_classes.optimized`         | Serves answered from a worker-produced alternate        |
+| `serve_classes.original_*`        | Serves of origin bytes, split by cause (`cold`, `pending`, `declined`, `skew`) |
+| `serve_classes.notify_suppressed` | Optimizer notifications suppressed by front-end dedup/cooldown |
+| `serve_classes.*_unrecognized`    | Serve-class writes dropped (`class`) or partially ignored (`flags`) |
+
+`serve_savings` and `serve_classes` are present when serve-time statistics are
+available (the shared `.pagespeed-serve-stats` file). The `serve_savings` byte
+counters are measured by the serving front end (nginx, the ASP.NET middleware,
+or the module) as content is served, so they reflect
+realized bandwidth savings and are distinct from the worker-side `by_type`
+counters above. `serve_classes` partitions the serves a front end judged
+optimizable into exactly one class each; today only the module
+classifies serves, so under another front end the block reads all-zero —
+which means "not instrumented", not "nothing happened".
+
+`serve_savings_by_host` attributes the same HITs to the host each response was
+served for, when the front end names one. The optimizer reports a host under
+its host name: ASCII letters are lowercased, and a `:port` (1–5 digits) and one
+trailing `.` are dropped, so `WWW.Example.com:8443` and `www.example.com.` are
+both reported as `www.example.com`. What is left must be 1–127 bytes with at
+least one letter or digit, made of letters, digits, `.`, `-` and `_` (a DNS
+name or an IPv4 address such as `10.1.2.3`), or an IPv6 literal in brackets of
+hexadecimal digits, `:` and `.` (`[2001:db8::1]`; an IPv6 address without
+brackets is not accepted). Any other value — empty, longer, containing any
+other character, with a malformed bracket, or still ending in `.`
+(`www.example.com..`) — is never stored or reported: that HIT counts under
+`other`. The optimizer keeps a row for each of the first 64 distinct hosts it
+sees after it starts and reports up to 32 of them, ordered by HITs; a host seen
+after those 64 counts under `other` until the optimizer restarts. The hosts and
+`other` together add up to the `serve_savings` totals.
+
+### GET /v1/metrics
+
+Worker statistics in Prometheus text exposition format. Suitable for direct
+Prometheus scraping.
+
+```bash
+curl http://localhost:9880/v1/metrics
+```
+
+**Response** (`Content-Type: text/plain; version=0.0.4; charset=utf-8`):
+
+```text
+# HELP pagespeed_notifications_total Total notifications received.
+# TYPE pagespeed_notifications_total counter
+pagespeed_notifications_total 4821
+# HELP pagespeed_variants_written_total Total variants written to cache.
+# TYPE pagespeed_variants_written_total counter
+pagespeed_variants_written_total 2106
+# HELP pagespeed_cache_entries Current number of cache entries.
+# TYPE pagespeed_cache_entries gauge
+pagespeed_cache_entries 3412
+...
+```
+
+All counters and gauges from `/v1/stats` are exposed as Prometheus metrics,
+including SVG stats, learned quality, content analysis, and browser analysis
+counters.
+
+Serve savings per host are `pagespeed_host_hits_served_total`,
+`pagespeed_host_original_bytes_served_total` and
+`pagespeed_host_optimized_bytes_served_total`, labelled `host` with the host
+names `serve_savings_by_host` reports (the same host-name rule); the rest is
+`host="(other)"`, a value no host name can take.
+
+---
+
+## Configuration
+
+### GET /v1/config
+
+Returns the full worker configuration.
+
+```bash
+curl http://localhost:9880/v1/config
+```
+
+**Response:**
+
+```json
+{
+  "jpeg_quality": 85,
+  "webp_quality": 75,
+  "avif_quality": 60,
+  "mobile_width": 480,
+  "tablet_width": 768,
+  "desktop_width": 0,
+  "gzip_level": 6,
+  "brotli_level": 6,
+  "disable_async_css": false,
+  "disable_script_deferral": false,
+  "svg_mode": "detect",
+  "svg_candidacy_threshold": 50,
+  "svg_max_pixels": 65536,
+  ...
+}
+```
+
+All worker configuration fields are included. See the
+[Configuration Reference](/docs/configuration/) for field descriptions.
+
+### PATCH /v1/config
+
+Update hot-reloadable configuration fields at runtime. Only fields included in
+the request body are changed. Changes are persisted to disk alongside the cache
+volume. The response is sent once the change is saved; if saving fails, the
+change stays in force until the next restart and `warnings` says so.
+
+While the save runs, the worker keeps serving other requests. If the save takes
+longer than the request timeout, the request is answered `504` and the
+connection is closed, but the change is already in force and is written to disk
+when the save finishes; a failed save is reported in the worker log. Read `GET /v1/config` to confirm the current values.
+
+```bash
+curl -X PATCH http://localhost:9880/v1/config \
+  -H "Content-Type: application/json" \
+  -H "X-Requested-With: XMLHttpRequest" \
+  -d '{"jpeg_quality": 80, "svg_mode": "auto"}'
+```
+
+**Request body:** JSON object with one or more config fields to update.
+
+**Response:**
+
+```json
+{
+  "applied": {
+    "jpeg_quality": 80,
+    "svg_mode": "auto"
+  },
+  "rejected": {},
+  "warnings": [],
+  "config": { ... }
+}
+```
+
+| Field      | Description                                        |
+| ---------- | -------------------------------------------------- |
+| `applied`  | Fields that were accepted and applied              |
+| `rejected` | Fields that failed validation, with error messages |
+| `warnings` | Non-fatal warnings about the applied configuration |
+| `config`   | Full configuration after applying changes          |
+
+Fields that fail validation are rejected individually. Valid fields in the same
+request are still applied. All boolean toggle fields (`disable_async_css`,
+`disable_script_deferral`, etc.) are hot-reloadable via `PATCH /v1/config`.
+
+```json
+{
+  "applied": {
+    "jpeg_quality": 80
+  },
+  "rejected": {
+    "jpeg_quality_invalid": "unknown field"
+  },
+  "warnings": [],
+  "config": { ... }
+}
+```
+
+---
+
+## Cache operations
+
+### GET /v1/cache/urls
+
+Paginated list of all cached URLs. The worker tracks URLs in memory as they are
+processed.
+
+```bash
+curl "http://localhost:9880/v1/cache/urls?offset=0&limit=50"
+```
+
+**Query parameters:**
+
+| Parameter  | Type   | Default | Description                            |
+| ---------- | ------ | ------- | -------------------------------------- |
+| `offset`   | int    | 0       | Skip this many entries                 |
+| `limit`    | int    | 100     | Max entries to return (capped at 1000) |
+| `hostname` | string | -       | Filter by hostname                     |
+
+**Response:**
+
+```json
+{
+  "urls": [
+    {
+      "url": "/images/hero.jpg",
+      "hostname": "example.com",
+      "alternate_count": 12
+    },
+    {
+      "url": "/style.css",
+      "hostname": "example.com",
+      "alternate_count": 4
+    }
+  ],
+  "offset": 0,
+  "limit": 50,
+  "next_offset": 50,
+  "has_more": true,
+  "total": 342
+}
+```
+
+### GET /v1/cache/alternates
+
+List all stored variants (alternates) for a URL. Each alternate represents one
+optimized version: a specific combination of image format, viewport, pixel
+density, Save-Data preference, and transfer encoding.
+
+```bash
+curl "http://localhost:9880/v1/cache/alternates?url=/images/hero.jpg&hostname=example.com"
+```
+
+**Query parameters:**
+
+| Parameter  | Type   | Required | Description            |
+| ---------- | ------ | -------- | ---------------------- |
+| `url`      | string | Yes      | The URL path           |
+| `hostname` | string | No       | Hostname for cache key |
+| `site`     | string | No       | Site id (64 lowercase hex characters) as listed by `GET /v1/cache/urls`; required to find an entry stored per site. A malformed id returns 400, an id this instance never served returns 403 |
+
+**Response:**
+
+```json
+{
+  "url": "/images/hero.jpg",
+  "hostname": "example.com",
+  "count": 5,
+  "alternates": [
+    {
+      "alternate_id": 8,
+      "size": 145200,
+      "hit_count": 42,
+      "is_sentinel": false,
+      "mask": {
+        "raw": 8,
+        "format": "original",
+        "viewport": "desktop",
+        "density": "1x",
+        "save_data": false,
+        "encoding": "identity"
+      },
+      "format": "original",
+      "viewport": "desktop",
+      "density": "1x",
+      "save_data": false,
+      "encoding": "identity",
+      "content_type": "image",
+      "origin_content_type": "image/jpeg",
+      "flags": 0,
+      "needs_revalidation": false,
+      "last_access": 1700000000000,
+      "cache_inserted_at": 1699999000,
+      "origin_max_age": 86400,
+      "origin_s_maxage": 0,
+      "origin_cc_flags": 0,
+      "version": 5,
+      "ssimulacra2_score": 82.5,
+      "content_class": "photo"
+    },
+    {
+      "alternate_id": 9,
+      "size": 58400,
+      "hit_count": 120,
+      "is_sentinel": false,
+      "mask": {
+        "raw": 9,
+        "format": "webp",
+        "viewport": "desktop",
+        "density": "1x",
+        "save_data": false,
+        "encoding": "identity"
+      },
+      "format": "webp",
+      "viewport": "desktop",
+      "content_type": "image",
+      "origin_content_type": "image/jpeg",
+      "ssimulacra2_score": 75.2,
+      "content_class": "photo",
+      "..."
+    }
+  ],
+  "cooldown": {
+    "reason": "revalidation",
+    "remaining_seconds": 2,
+    "duration_seconds": 3
+  }
+}
+```
+
+Sentinel entries (Early Hints, warmup, browser profile) are included with
+`is_sentinel: true` and a `sentinel_name` field.
+
+The optional `cooldown` object appears when the URL is in a processing cooldown
+period. See [Cooldowns](#get-v1cachecooldowns) for details.
+
+### GET /v1/cache/select
+
+Simulate variant selection for a given capability mask. Shows how the selector
+scores each alternate and which one wins. Useful for debugging why a client
+receives a particular variant.
+
+```bash
+curl "http://localhost:9880/v1/cache/select?url=/images/hero.jpg&hostname=example.com&mask=9"
+```
+
+**Query parameters:**
+
+| Parameter  | Type   | Required | Description                      |
+| ---------- | ------ | -------- | -------------------------------- |
+| `url`      | string | Yes      | The URL path                     |
+| `hostname` | string | No       | Hostname for cache key           |
+| `mask`     | int    | Yes      | 32-bit capability mask (decimal) |
+
+| Parameter  | Type   | Required | Description                      |
+| ---------- | ------ | -------- | -------------------------------- |
+| `site`     | string | No       | Site id as listed by `GET /v1/cache/urls`; required to find an entry stored per site |
+
+The `mask` parameter is the decimal representation of the
+[capability bitmask](/docs/api-reference/#capability-mask-encoding). Common
+values: `8` (Desktop/Original), `9` (Desktop/WebP), `10` (Desktop/AVIF).
+
+**Response:**
+
+```json
+{
+  "url": "/images/hero.jpg",
+  "hostname": "example.com",
+  "client_mask": {
+    "raw": 9,
+    "format": "webp",
+    "viewport": "desktop",
+    "density": "1x",
+    "save_data": false,
+    "encoding": "identity"
+  },
+  "selected": {
+    "alternate_id": 9,
+    "score": 1280,
+    "size": 58400,
+    "content_type": "image"
+  },
+  "all_scores": [
+    {
+      "alternate_id": 8,
+      "score": 100,
+      "mask": { "format": "original", "..." },
+      "content_type": "image"
+    },
+    {
+      "alternate_id": 9,
+      "score": 1280,
+      "mask": { "format": "webp", "..." },
+      "content_type": "image"
+    }
+  ]
+}
+```
+
+### GET /v1/cache/content
+
+Retrieve the raw binary content of a specific alternate. Returns the actual
+optimized content (image bytes, minified CSS, etc.) as a binary blob.
+
+```bash
+curl "http://localhost:9880/v1/cache/content?url=/images/hero.jpg&hostname=example.com&alternate_id=9" \
+  -o hero.webp
+```
+
+**Query parameters:**
+
+| Parameter      | Type   | Required | Description                                  |
+| -------------- | ------ | -------- | -------------------------------------------- |
+| `url`          | string | Yes      | The URL path                                 |
+| `hostname`     | string | No       | Hostname for cache key                       |
+| `alternate_id` | int    | Yes      | Alternate ID (low 8 bits of capability mask) |
+
+**Response:** Raw binary content with appropriate `Content-Type` header. The
+response includes `Content-Disposition: attachment` and security headers. SVG
+content includes a restrictive `Content-Security-Policy`.
+
+**Response headers:**
+
+```http
+Content-Type: image/webp
+Content-Disposition: attachment
+X-Content-Type-Options: nosniff
+X-Alternate-Id: 9
+X-Capability-Mask: 9
+```
+
+### POST /v1/cache/purge
+
+Delete cached variants for a URL, or purge the entire cache. Like every
+`POST` or `PATCH` under `/v1/`, a purge sent over the unix socket, or to a TCP
+API without a token, must carry `X-Requested-With: XMLHttpRequest`; without it
+the optimizer answers 400. The examples on this page send it, which does no
+harm when a token is configured.
+
+**Single URL purge:**
+
+```bash
+curl -X POST http://localhost:9880/v1/cache/purge \
+  -H "Content-Type: application/json" \
+  -H "X-Requested-With: XMLHttpRequest" \
+  -d '{"url": "/images/hero.jpg", "hostname": "example.com"}'
+```
+
+**Response:**
+
+```json
+{
+  "url": "/images/hero.jpg",
+  "hostname": "example.com",
+  "deleted": 12
+}
+```
+
+When `deleted` is `0`, the response includes a note explaining the URL was not
+found in cache.
+
+A purge without a `site` reaches the URL's entries for every site (nginx
+server block) the optimizer has received a request notification from; an
+entry stored by a server block it has not heard from stays until it expires
+or a full purge removes it.
+
+**Full cache purge:**
+
+Purge all cached content. This stops the cache, deletes the volume file, and
+recreates it from scratch. Requires explicit confirmation.
+
+```bash
+curl -X POST http://localhost:9880/v1/cache/purge \
+  -H "Content-Type: application/json" \
+  -H "X-Requested-With: XMLHttpRequest" \
+  -d '{"scope": "all", "confirm": "purge-all"}'
+```
+
+**Response:**
+
+```json
+{
+  "scope": "all",
+  "urls_cleared": 342,
+  "volume_reset": true
+}
+```
+
+Omitting the `confirm` field or providing the wrong value returns a 400 error.
+
+### POST /v1/cache/reprocess
+
+Clear the dedup set and cooldown for a URL, then enqueue it for reprocessing.
+Unlike purge, this does not delete the cached content. The worker re-reads the
+original from cache and regenerates all optimized variants.
+
+```bash
+curl -X POST http://localhost:9880/v1/cache/reprocess \
+  -H "Content-Type: application/json" \
+  -H "X-Requested-With: XMLHttpRequest" \
+  -d '{"url": "/style.css", "hostname": "example.com"}'
+```
+
+**Response:**
+
+```json
+{
+  "url": "/style.css",
+  "hostname": "example.com",
+  "reprocess_enqueued": true
+}
+```
+
+### GET /v1/cache/cooldowns
+
+List all URLs currently in a processing cooldown. Cooldowns prevent tight
+re-processing loops for the same URL.
+
+```bash
+curl http://localhost:9880/v1/cache/cooldowns
+```
+
+**Query parameters:**
+
+| Parameter  | Type   | Required | Description        |
+| ---------- | ------ | -------- | ------------------ |
+| `hostname` | string | No       | Filter by hostname |
+
+**Response:**
+
+```json
+{
+  "cooldowns": [
+    {
+      "url": "/index.html",
+      "hostname": "example.com",
+      "reason": "revalidation",
+      "remaining_seconds": 2,
+      "duration_seconds": 3
+    },
+    {
+      "url": "/about.html",
+      "hostname": "example.com",
+      "reason": "tentative",
+      "remaining_seconds": 45,
+      "duration_seconds": 60
+    }
+  ],
+  "count": 2,
+  "enabled": true
+}
+```
+
+**Cooldown reasons:**
+
+| Reason          | Duration | Description                                                                |
+| --------------- | -------- | -------------------------------------------------------------------------- |
+| `tentative`     | 60s      | Processing in progress; prevents concurrent threads from duplicating work  |
+| `write_failure` | 60s      | Cache write failed (reader contention on mmap handles)                     |
+| `revalidation`  | 3s       | HTML written with `kFlagNeedsRevalidation`; throttles CSS convergence loop |
+
+---
+
+## Browser capture
+
+These endpoints require `--enable-browser-analysis` and a running Chrome
+instance. If Chrome is unavailable, the API returns 503.
+
+### POST /v1/capture/waterfall
+
+Capture a network waterfall (HAR-like timing data) for a URL using headless
+Chrome.
+
+```bash
+curl -X POST http://localhost:9880/v1/capture/waterfall \
+  -H "Content-Type: application/json" \
+  -H "X-Requested-With: XMLHttpRequest" \
+  -d '{"url": "https://example.com", "viewport_width": 1280}'
+```
+
+**Request body:**
+
+| Field            | Type   | Default    | Description                       |
+| ---------------- | ------ | ---------- | --------------------------------- |
+| `url`            | string | (required) | Target URL (http or https)        |
+| `viewport_width` | int    | 1280       | Browser viewport width (320-3840) |
+
+**Response:**
+
+```json
+{
+  "entries": [
+    {
+      "url": "https://example.com/",
+      "resource_type": "document",
+      "status": 200,
+      "transfer_size": 12400,
+      "decoded_size": 45000,
+      "timing": { "..." }
+    }
+  ],
+  "navigation_timing": { "..." },
+  "total_transfer_size": 580000,
+  "total_decoded_size": 1200000
+}
+```
+
+### POST /v1/capture/screenshot
+
+Capture a PNG screenshot of a URL using headless Chrome.
+
+```bash
+curl -X POST http://localhost:9880/v1/capture/screenshot \
+  -H "Content-Type: application/json" \
+  -H "X-Requested-With: XMLHttpRequest" \
+  -d '{"url": "https://example.com", "viewport_width": 1440, "full_page": true}'
+```
+
+**Request body:**
+
+| Field             | Type   | Default    | Description                             |
+| ----------------- | ------ | ---------- | --------------------------------------- |
+| `url`             | string | (required) | Target URL (http or https)              |
+| `viewport_width`  | int    | 1280       | Browser viewport width (320-3840)       |
+| `viewport_height` | int    | 800        | Browser viewport height (200-10000)     |
+| `full_page`       | bool   | false      | Capture entire page (not just viewport) |
+
+**Response:**
+
+```json
+{
+  "png_base64": "iVBORw0KGgoAAAANSUhEUgAA..."
+}
+```
+
+The `png_base64` field contains the screenshot as a base64-encoded PNG image.
+
+### Browser capture errors
+
+| Status | Condition                                               |
+| ------ | ------------------------------------------------------- |
+| 400    | Invalid URL, missing `url` field, viewport out of range |
+| 400    | URL targets private/loopback address (unless allowed)   |
+| 502    | Browser renderer crashed during the capture             |
+| 503    | `--enable-browser-analysis` not set                     |
+| 503    | Chrome not running (crashed or still starting)          |
+| 504    | Navigation timed out                                    |
+
+---
+
+## Logs
+
+### GET /v1/logs
+
+Recent log entries from the optimizer's in-memory log (the same 2,000-entry
+ring the [`/v1/ws/logs`](#get-v1wslogs) stream starts from), for clients that
+poll over plain HTTP.
+
+Over TCP this endpoint requires the API token even in read-open mode (see
+[Authentication Modes](#authentication-modes)); over the unix socket it is
+open to peers in group `pagespeed` like every endpoint.
+
+```bash
+curl "http://localhost:9880/v1/logs?limit=100"
+curl "http://localhost:9880/v1/logs?since=1841"
+```
+
+**Query parameters:**
+
+| Parameter | Type | Default | Description |
+| --------- | ---- | ------- | ----------- |
+| `since`   | int  | -       | Return entries with a `seq` above this, oldest first. Without it, the newest entries. |
+| `limit`   | int  | 500     | Max entries to return (capped at 500; `0` means the default) |
+
+A page is also at most 512 KiB of JSON: a page of long lines holds fewer
+entries, and `more` says when to read again.
+
+**Response:**
+
+```json
+{
+  "entries": [
+    {
+      "level": "info",
+      "message": "cache flush complete",
+      "module": "worker",
+      "seq": 1842,
+      "source": "worker",
+      "timestamp": 1759230000000,
+      "type": "log"
+    }
+  ],
+  "gap": false,
+  "more": false,
+  "newest_seq": 1842,
+  "next_since": 1842,
+  "oldest_seq": 1,
+  "shed_total": 0,
+  "stream_id": "9f2c4e1a7b3d5c80"
+}
+```
+
+| Field        | Description |
+| ------------ | ----------- |
+| `entries`    | Log entries, ascending by `seq`. The entry fields are the ones [`/v1/ws/logs`](#get-v1wslogs) sends. |
+| `next_since` | Pass this as `since` on the next read. |
+| `more`       | Newer entries are waiting beyond this page: read again now. |
+| `gap`        | Entries between your `since` and `oldest_seq` were dropped from the ring before you read them. |
+| `oldest_seq` / `newest_seq` | The oldest and newest entry the ring still holds. |
+| `shed_total` | Entries not recorded because the optimizer was logging faster than it could keep; increases over the process's life. |
+| `stream_id`  | Identifies this optimizer process. When it changes, the optimizer restarted and `seq` started again at 1: drop your `since` and read the newest entries. |
+
+A `since` or `limit` that is not a whole number is a 400.
+
+---
+
+## WebSocket endpoints
+
+WebSocket endpoints provide real-time streaming data. All three endpoints follow
+the same connection lifecycle:
+
+1. Client connects via HTTP upgrade to the WebSocket path
+2. If auth is configured, client sends `{"auth": "my-token"}` as first message
+3. Server sends initial snapshot
+4. Server pushes updates at regular intervals
+
+### Connection limits
+
+| Parameter                                  | Value |
+| ------------------------------------------- | ----- |
+| Max WebSocket connections (all streams)     | 8     |
+| Max connections awaiting authentication     | 16    |
+| … of which from any one remote address      | 4     |
+| Ping interval                               | 30s   |
+| Pong timeout                                | 10s   |
+| Auth timeout                                | 2s    |
+
+The "max connections awaiting authentication" limit is counted separately
+from the overall connection cap above (which counts every stream
+together, not per endpoint): at most 16 WebSocket connections may be
+simultaneously holding a slot while waiting for the in-band
+`{"auth": "..."}` message (see [Authentication Modes](#authentication-modes)),
+and at most 4 of those may share one remote address — enough for a client
+to open several streams at once (the bundled web console opens two per
+browser tab, statistics and log) while it authenticates, without a single
+never-authenticating address being able to take every slot for everyone
+else. Connections waiting to authenticate also count toward the overall cap
+of 8, which is reached first: in practice at most 8 can be waiting at once,
+and the limit of 16 applies only where the overall cap is higher than 16.
+From one address the limit of 4 is the one that applies. Clients that reach
+the optimizer through the same proxy or address share those 4 slots; an
+honest client holds one only until its token arrives. Connections on the
+unix socket need no token, so they never wait to authenticate and never
+count against these limits.
+A connection that is already authenticated — including one pre-authenticated
+under `--api-read-open` on an allow-listed stream — never counts against
+this budget, so it only bounds the number of handshakes that have completed
+but not yet proven a token. An upgrade that would exceed it is refused the
+same way exceeding the overall connection cap is. A well-behaved client
+does not keep retrying a stream the server has rejected for a missing or
+wrong token: the shipped web console opens every stream immediately
+(correct for the common case, since most deployments serve at least some
+streams with no token at all) and, if a stream it opened this way is
+closed for an authentication reason, waits for a new token rather than
+reconnecting into the same rejection.
+
+### GET /v1/ws/stats
+
+Live server statistics with delta compression. Sends a full snapshot on connect,
+then periodic deltas containing only changed fields.
+
+```javascript
+const ws = new WebSocket('ws://localhost:9880/v1/ws/stats');
+
+// If auth is configured:
+ws.onopen = () => ws.send(JSON.stringify({ auth: 'my-token' }));
+
+ws.onmessage = (event) => {
+  const msg = JSON.parse(event.data);
+  if (msg.type === 'snapshot') {
+    // Full stats object (same schema as GET /v1/stats)
+    console.log('Full stats:', msg.data);
+  } else if (msg.type === 'delta') {
+    // Only fields that changed since last message
+    console.log('Changed:', msg.data);
+  }
+};
+```
+
+**Server messages:**
+
+| Type       | Description                                                                       |
+| ---------- | --------------------------------------------------------------------------------- |
+| `snapshot` | Full stats on connect: `{type: "snapshot", sequence: N, data: StatsResponse}`     |
+| `delta`    | Changed fields only: `{type: "delta", sequence: N, data: Partial<StatsResponse>}` |
+
+**Client messages:**
+
+| Message                  | Description                                            |
+| ------------------------ | ------------------------------------------------------ |
+| `{"auth": "token"}`      | Authenticate (required when auth is configured)        |
+| `{"set_interval_ms": N}` | Change push interval (100ms - 60000ms, default 1000ms) |
+
+Sequence numbers increment per message for loss detection. Delta compression
+reduces typical message size from ~50 KB to ~1 KB.
+
+### GET /v1/ws/events
+
+Real-time optimization events. Events are batched at 100ms intervals.
+
+```javascript
+const ws = new WebSocket('ws://localhost:9880/v1/ws/events');
+ws.onmessage = (event) => {
+  const msg = JSON.parse(event.data);
+  if (msg.type === 'event') {
+    console.log(msg.event_type, msg.detail);
+  } else if (msg.type === 'overflow') {
+    console.log('Dropped', msg.dropped_count, 'events');
+  }
+};
+```
+
+**Server messages:**
+
+| Type       | Description                                                                               |
+| ---------- | ----------------------------------------------------------------------------------------- |
+| `event`    | `{type: "event", sequence: N, timestamp: MS, event_type: "...", detail: {...}}`           |
+| `overflow` | `{type: "overflow", dropped_count: N}` -- oldest events dropped when buffer exceeds 64 KB |
+
+**Event types:**
+
+| Event            | Description                           |
+| ---------------- | ------------------------------------- |
+| `svg_candidacy`  | Image evaluated for SVG vectorization |
+| `svg_vectorized` | SVG vectorization completed           |
+| `svg_written`    | SVG variant written to cache          |
+
+### GET /v1/ws/logs
+
+Real-time log streaming. Sends the ring buffer contents (up to 2000 entries) on
+connect, then streams new log entries as they occur.
+
+```javascript
+const ws = new WebSocket('ws://localhost:9880/v1/ws/logs');
+ws.onmessage = (event) => {
+  const msg = JSON.parse(event.data);
+  if (msg.type === 'snapshot') {
+    console.log('History:', msg.entries.length, 'entries');
+  } else if (msg.type === 'log') {
+    console.log(`[${msg.level}] ${msg.module}: ${msg.message}`);
+  }
+};
+```
+
+**Server messages:**
+
+| Type       | Description                                                                                                                           |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `snapshot` | Ring buffer on connect: `{type: "snapshot", entries: LogEntry[], total: N}`                                                              |
+| `log`      | Single log entry: `{type: "log", seq: N, timestamp: MS, source: "...", level: "...", module: "...", message: "...", details?: {...}}` |
+| `overflow` | Entries this client was not sent: `{type: "overflow", dropped_count: N, first_seq: A, last_seq: B}`                                      |
+
+Every entry carries `seq`, a sequence number that increases by one per entry
+for as long as the optimizer process runs (the first entry is `seq` 1, and
+numbering starts again at 1 after a restart, so `since=0` always reads from
+the beginning). `message` is always valid UTF-8 — bytes that are not are shown as
+U+FFFD — and its content is capped at 4 KiB: a longer message keeps its first
+4 KiB (cut on a character boundary) followed by a `…[truncated N bytes]`
+suffix, so a truncated message is slightly longer than 4 KiB overall.
+
+New entries are sent in batches (about every 100 ms), one `log` message per
+entry, in `seq` order, and as fast as the client reads them. Every entry the
+optimizer still holds reaches the client: the stream reads from the same ring
+of the most recent 2000 entries that the snapshot and
+[`GET /v1/logs`](#get-v1logs) read from. A client only misses entries that
+left that ring before it could be sent them — it reads too slowly, or more
+than 2000 entries arrived at once. It then receives one `overflow` message in
+their place: `dropped_count` entries, `seq` `first_seq` through `last_seq`,
+were not sent, and the next `log` message is `last_seq + 1`. Those entries are
+gone from `GET /v1/logs` as well, which reports them as a `gap`. A client
+that does not need the exact range can read `dropped_count` alone.
+
+Under `--api-read-open` with a token configured, this stream still requires
+it: the handshake succeeds, but the connection is closed unless the token
+arrives as the first message within the auth timeout — the same step every
+client already uses to authenticate (see
+[Authentication Modes](#authentication-modes)). Over the unix socket, and on
+a tokenless API opened with `--api-no-auth`, the stream is open.
+
+**Log sources:** `worker`, `cache`, `chrome`
+
+**Log levels:** `debug`, `info`, `warning`, `error`
+
+---
+
+## Static files
+
+### GET /console/\*
+
+Serves the web console SPA (SvelteKit build). Content-Type is auto-detected
+from the file extension. Configure the console directory with `--console-dir`.
+
+```bash
+curl http://localhost:9880/console/
+```
+
+This endpoint is not under the `/v1/` prefix. It serves static files and does
+not return JSON.
+
+---
+
+## Error response format
+
+All API errors follow a consistent JSON structure:
+
+```json
+{
+  "error": {
+    "code": "BAD_REQUEST",
+    "message": "Missing 'url' query parameter"
+  }
+}
+```
+
+Some errors include a `details` field with additional context:
+
+```json
+{
+  "error": {
+    "code": "BAD_REQUEST",
+    "message": "Validation failed",
+    "details": { "..." }
+  }
+}
+```
+
+### Error codes
+
+| HTTP Status | Code                  | Description                                          |
+| ----------- | --------------------- | ---------------------------------------------------- |
+| 400         | `BAD_REQUEST`         | Invalid request (missing parameters, malformed JSON) |
+| 401         | `UNAUTHORIZED`        | Missing or invalid auth scheme                       |
+| 403         | `FORBIDDEN`           | Invalid token                                        |
+| 404         | `NOT_FOUND`           | Endpoint or resource not found                       |
+| 405         | `METHOD_NOT_ALLOWED`  | Wrong HTTP method for endpoint                       |
+| 413         | `PAYLOAD_TOO_LARGE`   | Request body exceeds 64 KB                           |
+| 429         | `TOO_MANY_REQUESTS`   | Connection limit reached                             |
+| 500         | `INTERNAL_ERROR`      | Server-side failure                                  |
+| 502         | `BAD_GATEWAY`         | Upstream (browser) failed while handling the request |
+| 503         | `SERVICE_UNAVAILABLE` | Feature not enabled or dependency unavailable        |
+| 504         | `GATEWAY_TIMEOUT`     | Request timed out                                    |
+
+---
+
+## Endpoint summary
+
+| Method | Path                     | Auth | Description                    |
+| ------ | ------------------------ | ---- | ------------------------------ |
+| GET    | `/v1/health`             | No   | Health check and readiness     |
+| GET    | `/v1/stats`              | Yes  | Full statistics (JSON)         |
+| GET    | `/v1/metrics`            | Yes  | Statistics (Prometheus format) |
+| GET    | `/v1/config`             | Yes  | Current configuration          |
+| PATCH  | `/v1/config`             | Yes  | Update configuration           |
+| GET    | `/v1/cache/urls`         | Yes  | Paginated cached URL list      |
+| GET    | `/v1/cache/alternates`   | Yes  | List variants for a URL        |
+| GET    | `/v1/cache/select`       | Yes  | Simulate variant selection     |
+| GET    | `/v1/cache/content`      | Yes  | Raw alternate content          |
+| POST   | `/v1/cache/purge`        | Yes  | Purge URL or full cache        |
+| POST   | `/v1/cache/reprocess`    | Yes  | Re-optimize a URL              |
+| GET    | `/v1/cache/cooldowns`    | Yes  | List active cooldowns          |
+| POST   | `/v1/capture/waterfall`  | Yes  | Network waterfall capture      |
+| POST   | `/v1/capture/screenshot` | Yes  | Page screenshot capture        |
+| WS     | `/v1/ws/stats`           | Yes  | Live stats streaming           |
+| WS     | `/v1/ws/events`          | Yes  | Real-time optimization events  |
+| WS     | `/v1/ws/logs`            | Yes  | Real-time log streaming        |
+| GET    | `/console/*`             | No   | Web console static files       |
+
+## Next steps
+
+- [Web Console](/docs/workbench/) -- The console is built on this API — see it
+  in action
+- [Configuration Reference](/docs/configuration/) -- Worker flags and nginx
+  directives
+- [API reference](/docs/api-reference/) -- IPC wire format, management socket,
+  capability mask encoding, and C API
+- [Browser Analysis](/docs/browser-analysis/) -- How the capture endpoints
+  use headless Chrome
+- [Troubleshooting](/docs/troubleshooting/) -- Common issues and diagnostic
+  techniques

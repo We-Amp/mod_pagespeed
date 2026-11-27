@@ -1,0 +1,90 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright (c) 2024-2026 We-Amp B.V. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lumen Analytics</title>
+<link rel="stylesheet" href="/tailwind.css">
+</head>
+<body class="bg-white text-gray-900 antialiased">
+<header class="sticky top-0 z-40 border-b border-gray-200 bg-white/90 backdrop-blur">
+  <nav class="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6 lg:px-8">
+    <a href="#" class="flex items-center gap-2 text-lg font-semibold tracking-tight">
+      <span class="inline-block h-8 w-8 rounded-lg bg-indigo-600"></span>Lumen
+    </a>
+    <div class="hidden md:flex md:items-center md:gap-8">
+      <a href="#" class="text-sm font-medium text-gray-700 hover:text-indigo-600">Product</a>
+      <a href="#" class="text-sm font-medium text-gray-700 hover:text-indigo-600">Pricing</a>
+      <a href="#" class="text-sm font-medium text-gray-700 hover:text-indigo-600">Docs</a>
+      <a href="#" class="text-sm font-medium text-gray-700 hover:text-indigo-600">Blog</a>
+    </div>
+    <div class="flex items-center gap-3">
+      <a href="#" class="hidden text-sm font-medium text-gray-700 sm:block">Sign in</a>
+      <a href="#" class="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600">Start free</a>
+      <button type="button" class="inline-flex items-center justify-center rounded-md p-2 text-gray-700 md:hidden" aria-label="Open menu">
+        <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"/></svg>
+      </button>
+    </div>
+  </nav>
+</header>
+
+<main>
+  <section class="relative isolate overflow-hidden">
+    <div class="mx-auto max-w-7xl px-4 pb-16 pt-10 sm:px-6 sm:pb-24 lg:flex lg:items-center lg:gap-x-10 lg:px-8 lg:py-32">
+      <div class="mx-auto max-w-2xl lg:mx-0 lg:flex-auto">
+        <p class="inline-flex items-center gap-x-2 rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700 ring-1 ring-inset ring-indigo-600/20 sm:text-sm">New: realtime funnels</p>
+        <h1 class="mt-6 text-4xl font-bold tracking-tight text-gray-900 sm:text-5xl lg:text-6xl">Know what your users did, not what you guessed</h1>
+        <p class="mt-4 text-base leading-7 text-gray-600 sm:mt-6 sm:text-lg sm:leading-8">Event analytics that answers product questions in seconds. No sampling, no SQL, and no cookie banner.</p>
+        <div class="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-x-6">
+          <a href="#" class="rounded-md bg-indigo-600 px-4 py-2.5 text-center text-sm font-semibold text-white shadow-sm hover:bg-indigo-500">Get started</a>
+          <a href="#" class="text-center text-sm font-semibold leading-6 text-gray-900 sm:text-left">Live demo <span aria-hidden="true">&rarr;</span></a>
+        </div>
+      </div>
+      <div class="mt-12 sm:mt-16 lg:mt-0 lg:flex-shrink-0 lg:flex-grow">
+        <div class="mx-auto aspect-[4/3] w-full max-w-md rounded-2xl bg-gradient-to-br from-indigo-500 to-sky-400 shadow-xl sm:max-w-lg lg:max-w-none xl:aspect-[16/10]"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-gray-50 py-12 sm:py-20">
+    <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+      <div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:gap-8">
+        <div class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200">
+          <h3 class="text-base font-semibold text-gray-900 md:text-lg">Funnels</h3>
+          <p class="mt-2 text-sm text-gray-600 md:text-base">See where people drop off, broken down by any property.</p>
+        </div>
+        <div class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200">
+          <h3 class="text-base font-semibold text-gray-900 md:text-lg">Retention</h3>
+          <p class="mt-2 text-sm text-gray-600 md:text-base">Cohorts by signup week, feature use or plan.</p>
+        </div>
+        <div class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:col-span-2 lg:col-span-1">
+          <h3 class="text-base font-semibold text-gray-900 md:text-lg">Paths</h3>
+          <p class="mt-2 text-sm text-gray-600 md:text-base">The routes users actually take, not the ones you drew.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="py-12 sm:py-20">
+    <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+      <h2 class="text-2xl font-bold tracking-tight sm:text-3xl lg:text-4xl">Pricing</h2>
+      <div class="mt-8 grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
+        <div class="rounded-2xl p-6 ring-1 ring-gray-200 2xl:p-8"><p class="text-sm font-semibold">Hobby</p><p class="mt-4 text-3xl font-bold">$0</p></div>
+        <div class="rounded-2xl p-6 ring-1 ring-gray-200 2xl:p-8"><p class="text-sm font-semibold">Team</p><p class="mt-4 text-3xl font-bold">$49</p></div>
+        <div class="rounded-2xl p-6 ring-2 ring-indigo-600 2xl:p-8"><p class="text-sm font-semibold text-indigo-600">Growth</p><p class="mt-4 text-3xl font-bold">$199</p></div>
+        <div class="rounded-2xl p-6 ring-1 ring-gray-200 2xl:p-8"><p class="text-sm font-semibold">Enterprise</p><p class="mt-4 text-3xl font-bold">Talk to us</p></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="border-t border-gray-200">
+  <div class="mx-auto max-w-7xl px-4 py-10 sm:px-6 md:flex md:items-center md:justify-between lg:px-8">
+    <p class="text-center text-xs leading-5 text-gray-500 md:order-1 md:mt-0">&copy; 2026 Lumen Analytics</p>
+    <div class="mt-6 flex justify-center gap-x-6 md:order-2 md:mt-0"><a href="#" class="text-gray-400 hover:text-gray-500">GitHub</a><a href="#" class="text-gray-400 hover:text-gray-500">Mastodon</a></div>
+  </div>
+</footer>
+</body>
+</html>

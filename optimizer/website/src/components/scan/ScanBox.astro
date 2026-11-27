@@ -1,0 +1,89 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// The shared scan box: one URL field, one submit button, one combined note.
+// Identical on /analyze/ and /ai-readability/; `surface` only selects which
+// page it sits on (for event names), never any copy. Each page wraps it in a
+// data-scan-needs-js element, which the layout hides when scripts are off.
+
+interface Props {
+  idPrefix?: string;
+  surface: 'analyze' | 'airead';
+}
+
+const { idPrefix = 'scan', surface } = Astro.props;
+
+// One string so the formatter cannot split the link from its full stop.
+const privacyLink =
+  '<a href="https://we-amp.com/privacy/" class="text-interactive hover:text-interactive-hover underline">Privacy policy</a>.';
+---
+
+<form
+  id={`${idPrefix}-form`}
+  class:list={['mt-10 max-w-2xl text-left', surface === 'analyze' && 'mx-auto']}
+  action={surface === 'airead' ? '/ai-readability/' : '/analyze/'}
+  method="get"
+  novalidate
+  autocomplete="off"
+  data-scan-box
+  data-scan-surface={surface}
+  aria-describedby={`${idPrefix}-form-error`}
+>
+  <label for={`${idPrefix}-url`} class="block text-sm font-medium text-text-body">
+    Page URL
+  </label>
+  <div class="mt-2 flex flex-col sm:flex-row gap-3">
+    <input
+      id={`${idPrefix}-url`}
+      name="url"
+      type="url"
+      inputmode="url"
+      autocomplete="url"
+      spellcheck="false"
+      autocapitalize="off"
+      placeholder="https://example.com"
+      aria-invalid="false"
+      aria-describedby={`${idPrefix}-form-error`}
+      class="flex-1 min-h-11 rounded-md border border-control-border px-4 py-3 text-text-body bg-bg-elevated focus:border-interactive focus:ring-2 focus:ring-interactive aria-[invalid=true]:border-accent aria-[invalid=true]:ring-1 aria-[invalid=true]:ring-accent sm:text-sm"
+    />
+    <button
+      id={`${idPrefix}-submit`}
+      type="submit"
+      class="btn-primary min-h-11 whitespace-nowrap scan-submit aria-disabled:cursor-wait"
+    >
+      <span data-scan-submit-label>Check page</span>
+    </button>
+  </div>
+  <p id={`${idPrefix}-form-error`} role="alert" class="mt-2 hidden text-sm text-accent"></p>
+  <p class="mt-3 text-sm text-text-annotation">
+    Free &middot; no signup &middot; one page at a time &middot; usually takes 20 to 40 seconds.
+  </p>
+  <p class="mt-3 text-xs text-text-annotation leading-relaxed">
+    Only check sites you own or are authorized to test. Our scanner (in the US) requests the page a
+    few times: once in a headless browser and as plain requests, one of them identifying as an AI
+    crawler (GPTBot). Results and the share link are kept for at most 24 hours. For up to 30 days we
+    keep a pseudonymous record per site, without the address or page content, of whether an AI
+    crawler gets the page's text and which platform and server software it runs on; our request logs
+    also hold the scanned address for 30 days. URLs are sent to Google PageSpeed Insights (in the
+    US) for the speed panel. If you send the form under a result, we keep your email address, your
+    note, the scanned address and the scan findings. We log your IP address and rate-limit requests
+    per address to prevent abuse. See our
+    <span set:html={privacyLink} />
+  </p>
+  <p class="mt-3 text-xs text-text-annotation leading-relaxed">
+    This tool calls Google's public PageSpeed Insights API. mod_pagespeed is developed by We-Amp
+    B.V. and is not affiliated with or endorsed by Google. PageSpeed Insights is a trademark of
+    Google LLC.
+  </p>
+</form>
+
+<style is:global>
+  /* Busy: keep the label at full contrast (the dimmed primary fill failed AA). */
+  .scan-submit[aria-disabled='true'],
+  .scan-submit[aria-disabled='true']:hover {
+    background-color: var(--color-bg-secondary);
+    color: var(--color-text-body);
+    border: 1px solid var(--color-control-border);
+  }
+</style>

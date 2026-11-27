@@ -1,0 +1,191 @@
+---
+/**
+ * DocsSidebar: the navigation of a documentation page, in its two forms.
+ *
+ *   - from lg up, a left rail. It stays in view while the page scrolls and
+ *     scrolls on its own when it is taller than the window;
+ *   - below lg, the same navigation in a "Docs menu" disclosure above the
+ *     content (plain links: nothing navigates on a change of input).
+ *
+ * The page provides the grid: this component is its first cell, the content
+ * column the second (`lg:grid lg:grid-cols-[240px_minmax(0,1fr)] lg:gap-12`).
+ */
+import Icon from '../Icon.astro';
+import DocsNav from './DocsNav.astro';
+import { FREE_TO_RUN_LINE } from '../../data/product-facts.mjs';
+
+interface Props {
+  /** The page being shown: a docs slug, `filters`, or `filters/<name>`. */
+  current: string;
+}
+
+const { current } = Astro.props;
+---
+
+<!-- Sidebar navigation -->
+<nav
+  id="docs-rail"
+  class="docs-rail hidden lg:block"
+  aria-label="Documentation"
+  data-pagefind-ignore
+>
+  <DocsNav current={current} idPrefix="docs-rail" />
+
+  {/* Sidebar install CTA — quietly persistent on every docs page */}
+  <a
+    href="/download/"
+    data-umami-event="cta_docs_sidebar_install"
+    class="mt-3 block rounded-md border border-interactive/45 bg-interactive-wash px-3 py-3 text-sm font-medium text-interactive hover:border-interactive transition-colors text-center"
+  >
+    Download &amp; run
+  </a>
+  <p class="mt-2 px-1 text-xs text-text-annotation text-center">{FREE_TO_RUN_LINE}</p>
+</nav>
+{/* Fit the rail to where it is now, before it paints (see the styles below),
+    and keep a focused entry clear of the rail's edges. Inline and right after
+    the markup so the first paint already has the fitted height. Without
+    JavaScript the rail keeps its pinned height. The focus correction acts
+    only on keyboard focus (a mouse press must not move the entry away from
+    the pointer) and runs in the next frame, after the engine's own scroll,
+    so it changes nothing where that scroll already honours the padding. */}
+<script is:inline>
+  (function () {
+    var rail = document.getElementById('docs-rail');
+    if (!rail) return;
+    var set = '';
+    var queued = false;
+    function fit() {
+      queued = false;
+      var style = getComputedStyle(rail);
+      var top = '';
+      if (style.position === 'sticky') {
+        var pin = parseFloat(style.top) || 0;
+        var at = Math.min(rail.getBoundingClientRect().top, window.innerHeight);
+        top = Math.ceil(Math.max(pin, at)) + 'px';
+      }
+      if (top === set) return;
+      set = top;
+      if (top) rail.style.setProperty('--docs-rail-top', top);
+      else rail.style.removeProperty('--docs-rail-top');
+    }
+    function queue() {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(fit);
+    }
+    fit();
+    window.addEventListener('scroll', queue, { passive: true });
+    window.addEventListener('resize', queue);
+    window.addEventListener('load', queue);
+    rail.addEventListener('focusin', function (event) {
+      var target = event.target;
+      if (!target.matches(':focus-visible')) return;
+      requestAnimationFrame(function () {
+        if (document.activeElement !== target) return;
+        if (rail.scrollHeight <= rail.clientHeight) return;
+        var style = getComputedStyle(rail);
+        var box = rail.getBoundingClientRect();
+        var item = target.getBoundingClientRect();
+        var above = box.top + (parseFloat(style.scrollPaddingTop) || 0) - item.top;
+        var below = item.bottom - box.bottom + (parseFloat(style.scrollPaddingBottom) || 0);
+        if (above > 0) rail.scrollTop -= above;
+        else if (below > 0) rail.scrollTop += below;
+      });
+    });
+  })();
+</script>
+
+<!-- Mobile navigation: a disclosure listing the same groups as the
+     sidebar. Plain links, so nothing navigates on a change of input
+     (WCAG 3.2.2). -->
+<details
+  id="docs-menu"
+  class="lg:hidden mb-8 rounded-lg border border-border bg-bg-elevated"
+  data-pagefind-ignore
+>
+  <summary class="flex cursor-pointer items-center justify-between gap-4 px-4 py-3 text-sm font-semibold text-text-body">
+    Docs menu
+    <Icon name="chevron-down" class="docs-menu-chevron h-4 w-4 shrink-0 text-text-annotation" />
+  </summary>
+  <nav aria-label="Documentation menu" class="border-t border-border px-2 pb-1 pt-2">
+    <DocsNav current={current} idPrefix="docs-menu" variant="menu" />
+  </nav>
+</details>
+
+<script>
+  // Bring the current page's entry into the rail's own view on load. Only the
+  // rail scrolls: the page position (an anchor, a restored scroll) is left
+  // alone.
+  const rail = document.getElementById('docs-rail');
+  const here = rail?.querySelector<HTMLElement>('a[aria-current="page"]');
+  if (rail && here && rail.scrollHeight > rail.clientHeight) {
+    const box = rail.getBoundingClientRect();
+    const link = here.getBoundingClientRect();
+    if (link.top < box.top || link.bottom > box.bottom) {
+      rail.scrollTop += link.top - box.top - rail.clientHeight / 2 + link.height / 2;
+    }
+  }
+</script>
+
+<style>
+  /* The "Docs menu" disclosure uses native <details>/<summary>; hide the
+     default marker so the chevron is the only affordance. The chevron is
+     rendered by the Icon component, hence :global(). */
+  #docs-menu > summary {
+    list-style: none;
+  }
+  #docs-menu > summary::-webkit-details-marker {
+    display: none;
+  }
+  #docs-menu[open] > summary :global(.docs-menu-chevron) {
+    transform: rotate(180deg);
+  }
+
+  /* The rail is pinned under the sticky header (4rem) with 1rem of air, and is
+     its own scroller once it is taller than the window. The negative margin
+     and matching padding give focus rings room inside the clipped box without
+     moving the links. Scroll padding keeps a focused entry clear of the
+     scroller's edges (WCAG 2.4.11 Focus Not Obscured).
+     The height leaves 5rem free at the bottom of the window as well as the
+     5rem at the top: the page scroller may reserve that much at its bottom
+     edge (scroll padding for a pinned control), and an entry focused inside
+     such a band would scroll the page along with the rail.
+     Until it pins, the rail sits lower than its sticky top: the script after
+     the markup sets --docs-rail-top to where its top is, so the bottom keeps
+     that 5rem clear at every scroll position, not only once pinned. Firefox
+     scrolls a focused entry only partly into a scroller and ignores the
+     scroll padding; the same script scrolls the rail the rest of the way. */
+  @media (width >= 64rem) {
+    .docs-rail {
+      position: sticky;
+      top: 5rem;
+      align-self: start;
+      max-height: calc(100vh - var(--docs-rail-top, 5rem) - 5rem);
+      overflow-y: auto;
+      margin: -0.25rem -0.5rem 0;
+      padding: 0.25rem 0.5rem 1rem;
+      scroll-padding-block: 1rem;
+    }
+  }
+  /* Pages with the platform selector reserve 8.5rem at the top of the page
+     scroller (global.css), not 5rem. The rail starts below that band there,
+     for the same reason it ends above the bottom one: an entry focused
+     inside the band would scroll the page. Not on short viewports: this
+     selector outweighs the rule below, which must win there. */
+  @media (width >= 64rem) and (min-height: 481px) {
+    :global(html:has(#platform-selector)) .docs-rail {
+      top: 8.5rem;
+      max-height: calc(100vh - var(--docs-rail-top, 8.5rem) - 5rem);
+    }
+  }
+  /* Short viewports (a phone in landscape, a desktop window at 400% zoom): the
+     header scrolls away there, and a pinned rail would be a sliver, so the
+     rail scrolls with the page as well. */
+  @media (max-height: 480px) {
+    .docs-rail {
+      position: static;
+      max-height: none;
+      overflow-y: visible;
+    }
+  }
+</style>

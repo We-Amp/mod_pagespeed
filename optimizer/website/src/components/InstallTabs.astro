@@ -1,0 +1,306 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// InstallTabs — a platform picker over one install command per platform, with
+// a copy button. The picker is a radio group: the checked radio decides which
+// panel shows through :has(), so the first command is in the server-rendered
+// page, nothing moves when scripts load, and switching works without
+// JavaScript. Only the copy button needs a script; until it runs the button
+// keeps its space but stays hidden.
+//
+// Every string (labels, commands, accessible names) arrives as a prop from the
+// page, which is where the content gate reads copy. The command is plain text
+// in a <code> outside any <pre>, so the layout's generic copy button does not
+// attach a second one. Up to four platforms (the panel rules are per index).
+
+interface Platform {
+  id: string;
+  label: string;
+  command: string;
+  // Analytics event recorded when this platform's copy button is used.
+  copyEvent: string;
+}
+
+interface Props {
+  // Unique per page: prefixes the element ids and names the radio group.
+  name: string;
+  groupLabel: string;
+  copyLabel: string;
+  // No longer shown: the button keeps its name and the page's live region
+  // reports the copy. Accepted so existing callers keep compiling.
+  copiedLabel?: string;
+  platforms: Platform[];
+}
+
+const { name, groupLabel, copyLabel, platforms } = Astro.props;
+---
+
+<div class="install-tabs" data-install-tabs>
+  <div class="install-picker" role="radiogroup" aria-label={groupLabel}>
+    {platforms.map((platform, index) => (
+      <>
+        <input
+          type="radio"
+          class="install-radio"
+          name={name}
+          id={`${name}-tab-${platform.id}`}
+          value={platform.id}
+          data-index={index}
+          checked={index === 0}
+        />
+        <label class="install-tab" for={`${name}-tab-${platform.id}`}>
+          {platform.label}
+        </label>
+      </>
+    ))}
+  </div>
+  {platforms.map((platform, index) => (
+    <div class="install-panel" data-index={index} data-install-panel={platform.id}>
+      <code class="install-command">{platform.command}</code>
+      <button
+        type="button"
+        class="install-copy"
+        aria-label={copyLabel}
+        title={copyLabel}
+        data-install-copy
+        data-umami-event={platform.copyEvent}
+      >
+        <svg
+          class="install-copy-idle"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+        </svg>
+        <svg
+          class="install-copy-done"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.5"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
+      </button>
+    </div>
+  ))}
+</div>
+
+<script>
+  // Copy buttons. The button is revealed only where the clipboard API exists;
+  // the command stays selectable text either way.
+  const roots = document.querySelectorAll<HTMLElement>('[data-install-tabs]');
+  // The outcome is spoken through the layout's live region, by its one writer
+  // (window.siteAnnounce in BaseLayout), the same one the code-block copy
+  // buttons use. The button's own name never changes, so it is not spoken twice.
+  const announce = (message: string) =>
+    (window as { siteAnnounce?: (_message: string) => void }).siteAnnounce?.(message);
+  if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+    roots.forEach((root) => {
+      root.dataset.copyReady = '';
+      root.querySelectorAll<HTMLButtonElement>('[data-install-copy]').forEach((button) => {
+        let timer: number | undefined;
+        button.addEventListener('click', () => {
+          const command = button.parentElement?.querySelector('.install-command');
+          const text = command?.textContent ?? '';
+          navigator.clipboard.writeText(text).then(
+            () => {
+              button.dataset.copied = 'true';
+              window.clearTimeout(timer);
+              timer = window.setTimeout(() => {
+                delete button.dataset.copied;
+              }, 1500);
+              announce('Copied to clipboard');
+            },
+            () => {
+              // Permission denied: the command is still selectable by hand.
+              announce('Copy failed, select the text to copy');
+            },
+          );
+        });
+      });
+    });
+  }
+</script>
+
+<style>
+  .install-picker {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+  }
+  /* The radio stays in the accessibility tree and in the tab order; only its
+     box is hidden, the label is what the pointer hits. */
+  .install-radio {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+    opacity: 0;
+  }
+  .install-tab {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 2.75rem;
+    padding: 0 1rem;
+    border: 1px solid transparent;
+    border-radius: var(--radius-chip);
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--color-text-muted);
+    cursor: pointer;
+    transition:
+      background-color 150ms ease,
+      color 150ms ease;
+  }
+  .install-tab:hover,
+  .install-radio:checked + .install-tab {
+    background-color: var(--color-interactive-wash);
+    color: var(--color-interactive);
+  }
+  .install-radio:focus-visible + .install-tab {
+    outline: 2px solid var(--color-focus-ring);
+    outline-offset: 2px;
+  }
+
+  .install-panel {
+    display: none;
+    align-items: flex-start;
+    gap: 0.75rem;
+    margin-top: 0.75rem;
+    padding: 0.5rem 0.5rem 0.5rem 1rem;
+    background-color: var(--color-bg-recessed);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-card);
+  }
+  .install-tabs:has(.install-radio[data-index='0']:checked) .install-panel[data-index='0'],
+  .install-tabs:has(.install-radio[data-index='1']:checked) .install-panel[data-index='1'],
+  .install-tabs:has(.install-radio[data-index='2']:checked) .install-panel[data-index='2'],
+  .install-tabs:has(.install-radio[data-index='3']:checked) .install-panel[data-index='3'] {
+    display: flex;
+  }
+  .install-command {
+    flex: 1;
+    min-width: 0;
+    /* Centers a one-line command on the 44px button beside it. */
+    padding: 0.6875rem 0;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 1.65;
+    color: var(--color-text-body);
+    text-align: left;
+    /* Wrap instead of scrolling: the copied text is the element's text, so a
+       visual wrap never changes what lands on the clipboard. */
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  /* Shell prompt: decoration only, outside the copied and selected text. */
+  .install-command::before {
+    content: '$ ';
+    color: var(--color-text-annotation);
+    user-select: none;
+  }
+
+  .install-copy {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    padding: 0.5rem;
+    background-color: var(--color-bg-elevated);
+    color: var(--color-text-muted);
+    border: 1px solid var(--color-control-border);
+    border-radius: var(--radius-chip);
+    cursor: pointer;
+    /* Space is reserved from the first paint; the script reveals the button. */
+    visibility: hidden;
+    transition:
+      background-color 150ms ease,
+      color 150ms ease,
+      border-color 150ms ease;
+  }
+  .install-tabs[data-copy-ready] .install-copy {
+    visibility: visible;
+  }
+  .install-copy:hover {
+    background-color: var(--color-bg-secondary);
+    color: var(--color-text-body);
+    border-color: var(--color-border-strong);
+  }
+  .install-copy:focus-visible {
+    outline: 2px solid var(--color-focus-ring);
+    outline-offset: 2px;
+  }
+  .install-copy svg {
+    width: 1rem;
+    height: 1rem;
+  }
+  .install-copy-done,
+  .install-copy[data-copied='true'] .install-copy-idle {
+    display: none;
+  }
+  .install-copy[data-copied='true'] .install-copy-done {
+    display: block;
+  }
+  .install-copy[data-copied='true'] {
+    background-color: var(--color-success-wash);
+    color: var(--color-success);
+    border-color: var(--color-success);
+  }
+
+  /* Narrow screens: the command gets the full width, so a package URL stays on
+     one line, and the copy button moves up beside the platform choices. */
+  @media (max-width: 480px) {
+    .install-tabs {
+      position: relative;
+    }
+    .install-picker {
+      padding-inline-end: 3.25rem;
+    }
+    .install-panel {
+      padding: 0.25rem 0.75rem;
+    }
+    .install-command {
+      font-size: 0.75rem;
+    }
+    .install-copy {
+      position: absolute;
+      top: 0;
+      right: 0;
+    }
+  }
+
+  /* Forced colors drop the wash that marks the chosen platform, so the chosen
+     tab keeps a fill in the system's selection colours: a filled shape, not a
+     border colour alone, marks it. The focus ring then uses the text colour so
+     it stands out from that fill. */
+  @media (forced-colors: active) {
+    .install-radio:checked + .install-tab {
+      forced-color-adjust: none;
+      background: SelectedItem;
+      color: SelectedItemText;
+      border-color: SelectedItem;
+    }
+    .install-radio:checked:focus-visible + .install-tab {
+      outline-color: CanvasText;
+    }
+  }
+</style>

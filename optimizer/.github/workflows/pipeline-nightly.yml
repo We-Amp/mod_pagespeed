@@ -1,0 +1,3131 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# pipeline-nightly.yml -- the nightly tier, as a reusable workflow, called
+# by nightly.yml (schedule 04:17 UTC + workflow_dispatch). See
+# docs/ci/pipelines.md. The caller serializes nightlies (one group, never
+# cancelled); this file carries no concurrency block.
+#
+# Jobs by class:
+#   macOS (hosted macos-15, arm64)
+#                 macos-build, macos-unit-tests, macos-pkg-smoke
+#   fleet-heavy   periodic-vendor, periodic-build-x64, test-nginx-x64,
+#                 css-fuzz-nightly, css-fuzz-shadow (dispatch with css_fuzz_shadow),
+#                 the x64 legs (fleet only, they mount the container
+#                 socket or run privileged containers):
+#                 stress-x64, production-tests-x64, realworld-tests-x64,
+#                 e2e-tests-x64, daemon-rig-soak-x64
+#   fleet-light   async-css-probe-rendered, dotnet-tests-x64
+#   hosted arm64  periodic-build-arm64 and the arm64 legs: stress,
+#                 production-tests, realworld-tests, e2e-tests,
+#                 workbench-playwright
+#   hosted        dep-scan-images (pulls and scans images from the x64 bundle,
+#                 no C++ compile), and the report jobs (dep-scan-report,
+#                 async-css-probe-report, css-fuzz-report), the only jobs
+#                 that write to GitHub; dep-scan-published (scans the
+#                 images published on ghcr.io, builds nothing) and its
+#                 report job dep-scan-published-report
+#
+# Left out:
+#   * frozen-scan (the weekly scan of the frozen 2.0 release line): it scans
+#     a tag of a repository that is not this one. It moves to the repository
+#     that owns that tag.
+#   * the whole-tree lint: nightly.yml also calls the full tier (job
+#     `full`) on every scheduled night, and its `lint-full` is that lint.
+#
+# Findings never reach GitHub from a fleet runner. A fleet job uploads a
+# small artifact (findings text, plus a marker that the lane ran); a hosted
+# report job holding `issues: write` downloads it and files or closes the
+# one tracking issue. The caller grants `issues: write` and `actions: read`;
+# this file narrows them to the jobs that need them.
+#
+# Routing expression and guards are copied verbatim from docs/ci/pipelines.md;
+# tools/ci/check-workflow-shape.sh enforces both. Artifacts carry a
+# `nightly-` prefix.
+
+name: pipeline-nightly
+
+on:
+  workflow_call:
+    inputs:
+      fuzz_seconds:
+        description: libFuzzer time budget in seconds
+        required: false
+        type: string
+        default: "600"
+      css_fuzz_shadow:
+        description: Also run the manual CSS oracle shadow lane (dispatch only)
+        required: false
+        type: boolean
+        default: false
+
+permissions: {}
+
+jobs:
+  event-guard:
+    name: Event guard (refuses merge_group, unexpected events, refs and actors)
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Refuse events, refs and actors this pipeline must never run on
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          ACTOR: ${{ github.actor }}
+          PR_FORK: ${{ github.event.pull_request.head.repo.fork }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+          ALLOWED: "schedule workflow_dispatch"
+          ALLOWED_REFS: "refs/heads/main"
+        run: |
+          set -euo pipefail
+          set -f
+          case " ${ALLOWED} " in *" ${EVENT} "*) ;; *) echo "::error::event ${EVENT} is not allowed in this pipeline"; exit 1;; esac
+          case "${REF}" in refs/heads/gh-readonly-queue/*) echo "::error::merge queue refs never run this pipeline"; exit 1;; esac
+          ok=no
+          # shellcheck disable=SC2254  # the allowed refs are globs on purpose
+          for r in ${ALLOWED_REFS}; do case "${REF}" in ${r}) ok=yes;; esac; done
+          [ "${ok}" = yes ] || { echo "::error::ref ${REF} is not allowed in this pipeline"; exit 1; }
+          if [ "${EVENT}" = workflow_dispatch ] && [ "${ACTOR}" = "github-actions[bot]" ]; then echo "::error::dispatches made with a workflow token are not allowed"; exit 1; fi
+          if [ "${EVENT}" = pull_request ] && { [ "${PR_FORK}" = true ] || [ "${PR_HEAD_REPO}" != "${REPOSITORY}" ]; }; then echo "::error::pull requests from forks are not allowed in this pipeline"; exit 1; fi
+          echo "event ${EVENT} on ${REF} accepted"
+
+  # ---------------------------------------------------------------------
+  # macOS, daily (hosted macos-15, arm64). The hosted runner has no remote
+  # cache and no hub, so builds restore a Bazel disk cache by prefix and
+  # save it even when a step runs out of time: a cold first night converges
+  # over the next ones. Each job keeps one entry per ISO week, capped before
+  # the save (build 256M, unit tests 512M); a run that did not succeed saves
+  # under a per-run suffix instead, so a partial cache never takes the
+  # week's key and the next night still saves it. The build and pkg-smoke
+  # jobs stay under 30 minutes; macos-unit-tests gets 50 (test step 40)
+  # because the worker_test shards run uncached at 200 to 575 s each on
+  # three slots. Each step carries its own, shorter timeout so the cache
+  # save can still run. At most five macOS jobs run at once across the
+  # organization.
+  # ---------------------------------------------------------------------
+  macos-build:
+    permissions:
+      contents: read
+    name: macOS Build
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Stamp GIT_COMMIT
+        run: echo -n "$GITHUB_SHA" > GIT_COMMIT
+
+      - name: Ensure bazel
+        run: |
+          if ! command -v bazel >/dev/null 2>&1; then
+            brew install bazelisk
+          fi
+          bazel --version
+
+      - name: Name the disk cache week
+        id: week
+        run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the Bazel disk cache
+        id: disk-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/optimizer-bazel-disk-macos
+          key: optimizer-bazel-disk-macos-build-${{ steps.week.outputs.week }}
+          restore-keys: |
+            optimizer-bazel-disk-macos-build-
+            optimizer-bazel-disk-macos-
+
+      # Only the two shipped targets: the unit-test job below builds the
+      # rest of the tree as part of its tests.
+      - name: Build the shipped binaries
+        timeout-minutes: 22
+        run: |
+          mkdir -p "${HOME}/.cache/optimizer-bazel-disk-macos"
+          bazel build \
+            --config=macos --jobs=3 --nostamp \
+            --disk_cache="${HOME}/.cache/optimizer-bazel-disk-macos" \
+            --experimental_disk_cache_gc_max_size=3G \
+            //lib/pagespeed:libpagespeed.so //src/worker:factory_worker
+
+      # Bazel never collects this cache, so cap it before the save. The prune
+      # never fails the job.
+      - name: Cap the Bazel disk cache
+        if: always() && steps.disk-cache.outputs.cache-hit != 'true'
+        run: bash tools/ci/prune-bazel-disk-cache.sh "${HOME}/.cache/optimizer-bazel-disk-macos" 7d 256M || true
+
+      - name: Save the Bazel disk cache
+        if: always() && steps.disk-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/optimizer-bazel-disk-macos
+          key: optimizer-bazel-disk-macos-build-${{ steps.week.outputs.week }}${{ job.status != 'success' && format('-partial-{0}-{1}', github.run_id, github.run_attempt) || '' }}
+
+      - name: Stage the build bundle
+        run: |
+          STAGING=".ci-artifacts"
+          rm -rf "$STAGING"; mkdir -p "$STAGING"
+          # Bazel names the target .so; the macOS output is a dylib.
+          cp -f bazel-bin/lib/pagespeed/libpagespeed.so "$STAGING/libpagespeed.dylib"
+          cp -f bazel-bin/src/worker/factory_worker "$STAGING/factory_worker"
+          cat > "$STAGING/metadata.json" <<EOF
+          {"commit":"${GITHUB_SHA}","branch":"${GITHUB_REF_NAME}","run":"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}","platform":"osx-arm64","config":"macos","timestamp":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+          EOF
+          cd "$STAGING"
+          files=()
+          for f in *; do
+            [ "$f" = checksums.sha256 ] || files+=("$f")
+          done
+          shasum -a 256 -- "${files[@]}" > checksums.sha256
+          echo "CI artifacts (osx-arm64):"
+          ls -lh
+
+      - name: Upload the build bundle
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: nightly-ci-artifacts-osx-arm64
+          path: .ci-artifacts
+          retention-days: 3
+          include-hidden-files: true
+
+  macos-unit-tests:
+    permissions:
+      contents: read
+    name: macOS Unit Tests
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Stamp GIT_COMMIT
+        run: echo -n "$GITHUB_SHA" > GIT_COMMIT
+
+      - name: Ensure bazel
+        run: |
+          if ! command -v bazel >/dev/null 2>&1; then
+            brew install bazelisk
+          fi
+          bazel --version
+
+      - name: Name the disk cache week
+        id: week
+        run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the Bazel disk cache
+        id: disk-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/optimizer-bazel-disk-macos
+          key: optimizer-bazel-disk-macos-test-${{ steps.week.outputs.week }}
+          restore-keys: |
+            optimizer-bazel-disk-macos-test-
+            optimizer-bazel-disk-macos-
+
+      - name: Run unit tests
+        timeout-minutes: 75
+        run: |
+          mkdir -p "${HOME}/.cache/optimizer-bazel-disk-macos"
+          FLAGS=(--config=macos --jobs=3 --nostamp
+                 "--disk_cache=${HOME}/.cache/optimizer-bazel-disk-macos"
+                 --experimental_disk_cache_gc_max_size=3G)
+          rc=0
+          bazel test "${FLAGS[@]}" --nocache_test_results //test/... || rc=$?
+          # Exit 37 is a crashed Bazel server: retry once.
+          if [ "$rc" -eq 37 ]; then
+            echo "Bazel server crashed (exit 37), retrying..."
+            sleep 5
+            rc=0
+            bazel test "${FLAGS[@]}" --nocache_test_results //test/... || rc=$?
+          fi
+          exit "$rc"
+
+      # Bazel never collects this cache, so cap it before the save. The prune
+      # never fails the job.
+      - name: Cap the Bazel disk cache
+        if: always() && steps.disk-cache.outputs.cache-hit != 'true'
+        run: bash tools/ci/prune-bazel-disk-cache.sh "${HOME}/.cache/optimizer-bazel-disk-macos" 7d 512M || true
+
+      - name: Save the Bazel disk cache
+        if: always() && steps.disk-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/optimizer-bazel-disk-macos
+          key: optimizer-bazel-disk-macos-test-${{ steps.week.outputs.week }}${{ job.status != 'success' && format('-partial-{0}-{1}', github.run_id, github.run_attempt) || '' }}
+
+  macos-pkg-smoke:
+    permissions:
+      contents: read
+    name: macOS Pkg Smoke
+    needs: macos-build
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download the build bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: nightly-ci-artifacts-osx-arm64
+          path: .ci-artifacts
+
+      - name: Stage the native assets
+        run: |
+          chmod +x .ci-artifacts/factory_worker
+          NATIVE_DIR="samples/aspnetcore/src/WeAmp.PageSpeed.NativeAssets.macOS/runtimes/osx-arm64/native"
+          mkdir -p "$NATIVE_DIR/console"
+          cp -f .ci-artifacts/libpagespeed.dylib "$NATIVE_DIR/libpagespeed.dylib"
+          cp -f .ci-artifacts/factory_worker "$NATIVE_DIR/factory_worker"
+          echo "<html><body>CI placeholder</body></html>" > "$NATIVE_DIR/console/index.html"
+          ls -lh "$NATIVE_DIR/"
+
+      - name: Verify factory_worker and libpagespeed.dylib
+        run: |
+          tools/ci/verify-artifacts.sh "$GITHUB_SHA" \
+            "binary:${GITHUB_WORKSPACE}/.ci-artifacts/factory_worker" \
+            "sharedlib:${GITHUB_WORKSPACE}/.ci-artifacts/libpagespeed.dylib"
+
+      - name: Ensure .NET 10 SDK
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Pack NuGet packages
+        run: |
+          export PATH="$HOME/.dotnet:$PATH"
+          cd samples/aspnetcore
+          WEBSHELL_DIST="${GITHUB_WORKSPACE}/tools/workbench/packages/web-shell/dist"
+          mkdir -p "$WEBSHELL_DIST"
+          [ -s "$WEBSHELL_DIST/index.html" ] || \
+            echo '<!doctype html><html><body>pkg-smoke stub</body></html>' > "$WEBSHELL_DIST/index.html"
+          rm -rf nupkg
+          dotnet restore --source https://api.nuget.org/v3/index.json
+          dotnet pack src/WeAmp.PageSpeed.NativeAssets.macOS/WeAmp.PageSpeed.NativeAssets.macOS.csproj \
+            -o nupkg --no-build --no-restore -c Release
+          dotnet pack src/WeAmp.PageSpeed.NativeAssets.Linux/WeAmp.PageSpeed.NativeAssets.Linux.csproj \
+            -o nupkg --no-restore -c Release
+          dotnet pack src/WeAmp.PageSpeed.NativeAssets.Windows/WeAmp.PageSpeed.NativeAssets.Windows.csproj \
+            -o nupkg --no-restore -c Release
+          dotnet pack src/WeAmp.PageSpeed/WeAmp.PageSpeed.csproj \
+            -o nupkg --no-restore -c Release
+          dotnet pack src/WeAmp.PageSpeed.AspNetCore/WeAmp.PageSpeed.AspNetCore.csproj \
+            -o nupkg --no-restore -c Release
+          ls -lh nupkg/
+
+      - name: Run smoke tests
+        run: |
+          export PATH="$HOME/.dotnet:$PATH"
+          bash samples/aspnetcore/scripts/smoke-test.sh samples/aspnetcore/nupkg
+
+      - name: Upload smoke crash dumps
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: nightly-smoke-crash-dump-macos
+          path: ${{ runner.temp }}/smoke-crash-dumps/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # ---------------------------------------------------------------------
+  # Periodic lanes: build once with the optimized configuration, test
+  # everywhere. The x64 build and legs run on the fleet; the arm64 build and
+  # legs run on hosted arm64 runners.
+  # ---------------------------------------------------------------------
+  periodic-vendor:
+    permissions:
+      contents: read
+    name: Vendor Dependencies (nightly)
+    needs: event-guard
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-24.04' || 'fleet-heavy' }}
+    timeout-minutes: 45
+    outputs:
+      short_sha: ${{ steps.stamp.outputs.short_sha }}
+      channel: ${{ steps.renv.outputs.channel }}
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Detect runner environment
+        id: renv
+        run: |
+          # The vendored tree reaches consumer jobs through a runner-local
+          # vendor dir or the hub when the runner environment provides it,
+          # and through actions/cache otherwise (docs/ci/runner-environment.md).
+          channel=cache
+          if [ -n "${CI_VENDOR_DIR:-}" ] || { [ -n "${CI_HUB_SSH:-}" ] && [ -n "${CI_HUB_VENDOR_DIR:-}" ]; }; then
+            channel=hub
+          fi
+          echo "channel=${channel}" >> "$GITHUB_OUTPUT"
+          echo "vendor distribution channel: ${channel}"
+
+      - name: Ensure bazel
+        run: |
+          if command -v bazel >/dev/null 2>&1; then bazel --version; exit 0; fi
+          if command -v npm >/dev/null 2>&1; then
+            npm install -g @bazel/bazelisk@1.28.1 2>/dev/null || sudo npm install -g @bazel/bazelisk@1.28.1
+          fi
+          command -v bazel >/dev/null 2>&1 || {
+            echo "::error::bazel is not on PATH and could not be installed via npm; see docs/ci/runner-environment.md"
+            exit 1
+          }
+          bazel --version
+
+      # Cache channel (hosted, or a fleet runner without hub configuration):
+      # vendor/ rides actions/cache between jobs, keyed on the vendor
+      # manifest so a dependency bump re-vendors exactly once.
+      - name: Restore vendored dependencies (cache channel)
+        if: steps.renv.outputs.channel == 'cache'
+        id: vendor-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vendor
+          key: optimizer-vendor-${{ hashFiles('MODULE.bazel', '.bazelversion', 'bazel/**', 'third_party/**') }}
+
+      - name: Cache the Bazel repository cache (cache channel)
+        if: steps.renv.outputs.channel == 'cache'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/optimizer-bazel-repo
+          key: optimizer-repo-cache-${{ hashFiles('MODULE.bazel', '.bazelversion', 'bazel/**', 'third_party/**') }}
+          restore-keys: |
+            optimizer-repo-cache-
+
+      - name: Vendor all dependencies
+        if: steps.vendor-cache.outputs.cache-hit != 'true'
+        run: |
+          bazel vendor --vendor_dir=vendor "--repository_cache=${HOME}/.cache/optimizer-bazel-repo" //...
+          if [ -d vendor/cyclone ]; then
+            echo "Cyclone commit: $(git -C vendor/cyclone rev-parse HEAD 2>/dev/null || echo 'not a git repo')"
+          fi
+
+      # Hub channel only: stamp + tar the tree (source, vendor/, GIT_COMMIT)
+      # for the consumer jobs. On the cache channel consumers get the same
+      # tree from their own checkout plus the cached vendor/.
+      - name: Stamp GIT_COMMIT
+        if: steps.renv.outputs.channel == 'hub'
+        run: echo -n "$GITHUB_SHA" > GIT_COMMIT
+
+      - name: Create the source tarball
+        if: steps.renv.outputs.channel == 'hub'
+        id: tarball
+        run: |
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+          LOCAL_DIR="${CI_VENDOR_DIR:-${RUNNER_TEMP}}"
+          mkdir -p "${LOCAL_DIR}"
+          TARBALL="${LOCAL_DIR}/pagespeed-optimizer-${SHORT_SHA}.tar.zst"
+          # Short-circuit re-runs: a complete tarball for this SHA was
+          # published atomically by a prior run. A readable file that fails
+          # `zstd -t` is not trusted and is tarred again. Re-stamp it so the
+          # age-based prunes count from now.
+          if [ -r "$TARBALL" ] && zstd -t -q "$TARBALL" >/dev/null 2>&1; then
+            echo "Tarball for ${SHORT_SHA} present and readable; skipping re-tar"
+            touch "$TARBALL"
+          else
+            # The temp file is runner-private (the runner's own temp dir) and
+            # carries the run id and attempt: the long write never happens in
+            # the vendor dir that sibling runners prune and read, and the
+            # publish step copies it in under a unique name before linking.
+            TMP_TARBALL="${RUNNER_TEMP:-/tmp}/$(basename "$TARBALL").${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tmp"
+            rm -f "${TMP_TARBALL}"
+            # Stop the Bazel server the vendor step left running so nothing
+            # writes to the tree while it is archived.
+            bazel shutdown || true
+            # Status 1 is accepted only when the sole complaint is the workspace
+            # root directory changing (no file contents); a changed file is torn.
+            TAR_ERR="${RUNNER_TEMP:-/tmp}/tar-err-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.txt"
+            set +e
+            tar --zstd --dereference --mode='u+w' -cf "${TMP_TARBALL}" \
+              --exclude='.git' \
+              --exclude='bazel-*' \
+              . 2>"${TAR_ERR}"
+            tar_rc=$?
+            set -e
+            if [ "$tar_rc" -eq 1 ] && ! grep -v -x -e '' -e 'tar: .: file changed as we read it' "${TAR_ERR}" | grep -q .; then
+              echo "::notice::workspace root changed during archiving; archive accepted"
+            elif [ "$tar_rc" -ne 0 ]; then
+              while IFS= read -r line; do echo "::error::${line}"; done < "${TAR_ERR}"
+              echo "::error::tar failed with status ${tar_rc}"
+              exit "$tar_rc"
+            fi
+          fi
+          # Publish create-if-absent and write the digest sidecar
+          # (tools/ci/publish-vendor-tarball.sh): a same-SHA tarball another
+          # writer published first is adopted, never replaced.
+          VENDOR_VERIFY_ZSTD=1 bash tools/ci/publish-vendor-tarball.sh "$TARBALL" ${TMP_TARBALL:+"$TMP_TARBALL"}
+          # Prune other SHAs' tarballs from the shared local dir, but only
+          # past a grace window (a recent tarball may still be extracting in
+          # a concurrent run) and only while file times agree with this
+          # host's clock (tools/ci/prune-vendor-dir.sh). Sidecars go with
+          # their tarball; *.tmp sweeps cancelled runs.
+          if [ -n "${CI_VENDOR_DIR:-}" ]; then
+            bash tools/ci/prune-vendor-dir.sh "${CI_VENDOR_DIR}" pagespeed-optimizer "${SHORT_SHA}" 120
+          fi
+          echo "tarball=${TARBALL}" >> "$GITHUB_OUTPUT"
+          # Name and size only: the directory is a runner-local path.
+          echo "Tarball: $(basename "$TARBALL") ($(du -h "$TARBALL" | cut -f1))"
+
+      - name: Publish the tarball to the hub
+        if: steps.renv.outputs.channel == 'hub'
+        run: |
+          # The ssh remote commands interpolate this runner's environment
+          # client-side on purpose: the values are defined by the runner
+          # environment contract (docs/ci/runner-environment.md), never
+          # logged, and the remote side needs them as literals.
+          if [ -z "${CI_HUB_SSH:-}" ] || [ -z "${CI_HUB_VENDOR_DIR:-}" ]; then
+            echo "::notice::CI_HUB_SSH/CI_HUB_VENDOR_DIR not set: the vendor tarball stays on this runner. Consumers on other runners fail with a recovery hint; configure the runner environment or use the cache channel (docs/ci/runner-environment.md)."
+            exit 0
+          fi
+          TARBALL="${{ steps.tarball.outputs.tarball }}"
+          SSH_OPTS="-o StrictHostKeyChecking=accept-new -o BatchMode=yes -o LogLevel=ERROR"
+          F="$(basename "$TARBALL")"
+          TMP_DEST="${CI_HUB_VENDOR_DIR}/${F}.${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${RUNNER_NAME//[^A-Za-z0-9_.-]/_}.tmp"
+          # The digest of the local tarball (the publish step above wrote its
+          # sidecar): the hub side checks the transferred bytes against it.
+          DIGEST="$(cut -d' ' -f1 "${TARBALL}.sha256")"
+          # Publish ON the hub with the same script the local publish used,
+          # streamed over ssh: create-if-absent (a sound published tarball is
+          # never replaced), flushed before the link, digest checked, sidecar
+          # written through a temp name. The remote commands expand
+          # client-side on purpose.
+          # SSH_OPTS is an intentional multi-token option list.
+          # shellcheck disable=SC2029,SC2086
+          for attempt in 1 2 3; do
+            if ssh ${SSH_OPTS} "${CI_HUB_SSH}" "mkdir -p '${CI_HUB_VENDOR_DIR}'" \
+               && rsync -a -e "ssh ${SSH_OPTS}" "$TARBALL" "${CI_HUB_SSH}:${TMP_DEST}" \
+               && ssh ${SSH_OPTS} "${CI_HUB_SSH}" \
+                    "GITHUB_RUN_ID='${GITHUB_RUN_ID}' GITHUB_RUN_ATTEMPT='${GITHUB_RUN_ATTEMPT}' VENDOR_EXPECT_SHA256='${DIGEST}' VENDOR_VERIFY_ZSTD=1 bash -s -- '${CI_HUB_VENDOR_DIR}/${F}' '${TMP_DEST}'" \
+                    < tools/ci/publish-vendor-tarball.sh; then
+              echo "Published ${F} to the CI hub (attempt ${attempt})"
+              # Prune hub tarballs older than the retention window: the hub
+              # copy is the only one a rerun-failed-jobs consumer can reach
+              # once the local copy is gone.
+              ssh ${SSH_OPTS} "${CI_HUB_SSH}" \
+                "bash -s -- '${CI_HUB_VENDOR_DIR}' pagespeed-optimizer - ${CI_HUB_VENDOR_RETENTION_MIN:-1440}" \
+                < tools/ci/prune-vendor-dir.sh 2>/dev/null || true
+              exit 0
+            fi
+            echo "::warning::hub publish failed (attempt ${attempt}/3)"
+            [ "$attempt" -lt 3 ] && sleep 5
+          done
+          echo "::error::hub publish failed after 3 attempts"
+          exit 1
+
+      - name: Stamp outputs
+        id: stamp
+        run: echo "short_sha=${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
+
+  periodic-build-x64:
+    permissions:
+      contents: read
+    name: Build (x64)
+    needs: periodic-vendor
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-24.04' || 'fleet-heavy' }}
+    timeout-minutes: 60
+    env:
+      DEV_IMAGE: pagespeed2-dev:ci-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Restore vendored dependencies (cache channel)
+        if: needs.periodic-vendor.outputs.channel == 'cache'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vendor
+          key: optimizer-vendor-${{ hashFiles('MODULE.bazel', '.bazelversion', 'bazel/**', 'third_party/**') }}
+          fail-on-cache-miss: true
+
+      - name: Extract the vendored workspace (hub channel)
+        if: needs.periodic-vendor.outputs.channel == 'hub'
+        run: |
+          args=(--sha "${{ needs.periodic-vendor.outputs.short_sha }}" --dest "${GITHUB_WORKSPACE}" --prefix pagespeed-optimizer)
+          if [ -n "${CI_VENDOR_DIR:-}" ]; then
+            args+=(--local "${CI_VENDOR_DIR}/pagespeed-optimizer-${{ needs.periodic-vendor.outputs.short_sha }}.tar.zst")
+          fi
+          bash tools/ci/extract-vendor-tarball.sh "${args[@]}"
+
+      - name: Verify GIT_COMMIT stamp (hub channel)
+        if: needs.periodic-vendor.outputs.channel == 'hub'
+        run: bash tools/ci/verify-artifacts.sh "$GITHUB_SHA" "stamp:${GITHUB_WORKSPACE}/GIT_COMMIT"
+
+      - name: Docker preflight
+        run: tools/ci/docker-preflight.sh
+
+      - name: Ensure the dev image
+        run: |
+          # Content-hashed tag and a per-host flock around the build
+          # (tools/ci/ensure-dev-image.sh). A hosted runner builds it cold.
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh --tag "${DEV_IMAGE}" x64 docker)
+          echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
+
+      - name: Stamp GIT_COMMIT
+        run: echo -n "$GITHUB_SHA" > GIT_COMMIT
+
+      - name: Build optimized test binaries
+        run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB); legacy values when unset.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget 55g || exit 1
+          OUT="${GITHUB_WORKSPACE}/.ci-artifacts"
+          rm -rf "${OUT}"; mkdir -p "${OUT}"
+          EXTRA_DOCKER=()
+          BAZEL_CONFIG="--config=docker --config=opt --jobs=${SLOT_JOBS} --nostamp"
+          if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
+            source "${GITHUB_WORKSPACE}/tools/ci/remote-cache-docker-args.sh"
+            remote_cache_docker_args EXTRA_DOCKER
+            BAZEL_CONFIG="--config=ci --config=opt"
+          else
+            echo "::notice::BAZEL_CACHE_HOST not set: building without the remote cache (docs/ci/runner-environment.md)"
+          fi
+          docker run --rm --init "${EXTRA_DOCKER[@]}" \
+            ${SLOT_CPUS:+--cpus="${SLOT_CPUS}"} \
+            --memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}" \
+            --user "$(id -u):$(id -g)" \
+            -e HOME=/workspace \
+            -e BAZEL_CONFIG="${BAZEL_CONFIG}${SLOT_CPUS:+ --jobs=${SLOT_CPUS}}" \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" \
+            bash -c '
+              set -e
+              # shellcheck disable=SC2086
+              bazel --output_user_root=/tmp/bazel-out \
+                build --vendor_dir=vendor ${BAZEL_CONFIG} \
+                //lib/pagespeed:libpagespeed.so //src/worker:factory_worker \
+                //src/nginx:ngx_pagespeed_module.so //tools:seed_test_cache \
+                //src/crypto/webbotauth:webbotauth_sign_tool
+              ROOT=/tmp/bazel-out
+              SO=$(find "$ROOT" -path "*/bin/lib/pagespeed/libpagespeed.so" -type f | head -1)
+              FW=$(find "$ROOT" -path "*/bin/src/worker/factory_worker" -not -path "*.runfiles*" -type f | head -1)
+              NGX=$(find "$ROOT" -path "*/bin/src/nginx/ngx_pagespeed_module.so" -type f | head -1)
+              STC=$(find "$ROOT" -path "*/bin/tools/seed_test_cache" -not -path "*.runfiles*" -type f | head -1)
+              WST=$(find "$ROOT" -path "*/bin/src/crypto/webbotauth/webbotauth_sign_tool" -not -path "*.runfiles*" -type f | head -1)
+              OUT=/workspace/.ci-artifacts
+              cp "$SO" "$OUT/libpagespeed.so"
+              cp "$FW" "$OUT/factory_worker"
+              cp "$NGX" "$OUT/ngx_pagespeed_module.so"
+              # The prebuilt test image runs it in the nginx container for the
+              # HTTP-compliance sidecar tests; deps are shared with
+              # factory_worker so this is one small link on a warm cache.
+              cp "$STC" "$OUT/seed_test_cache"
+              # The Test::Nginx job mints signatures with it (t/103, t/104).
+              cp "$WST" "$OUT/webbotauth_sign_tool"
+              # Record the exact nginx version this module was built against
+              # so stage-artifacts.sh and the prebuilt runtime image pin their
+              # nginx to it (a module refuses to load into another version).
+              ls -d /nginx-src/nginx-*/ | head -1 | sed "s#.*/nginx-##; s#/##" > "$OUT/nginx-version"
+              echo "Recorded module nginx-version: $(cat "$OUT/nginx-version")"
+            '
+
+      # Distinct platform name: this is the optimized bundle, which the
+      # staging helper must not confuse with the PR tier's fastbuild bundle.
+      - name: Finalize the build bundle
+        run: |
+          STAGING="${GITHUB_WORKSPACE}/.ci-artifacts"
+          cat > "$STAGING/metadata.json" <<EOF
+          {"commit":"${GITHUB_SHA}","branch":"${GITHUB_REF_NAME}","run":"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}","platform":"linux-x64-periodic","config":"periodic+opt","timestamp":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+          EOF
+          cd "$STAGING"
+          files=()
+          for f in *; do
+            [ "$f" = checksums.sha256 ] || files+=("$f")
+          done
+          sha256sum -- "${files[@]}" > checksums.sha256
+          echo "CI artifacts (linux-x64, periodic):"
+          ls -lh "$STAGING/"
+
+      - name: Upload the build bundle
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: nightly-ci-artifacts-linux-x64
+          path: .ci-artifacts
+          retention-days: 3
+          include-hidden-files: true
+
+      - name: Remove this job's dev image tag
+        if: always()
+        run: |
+          # Only the per-run tag; the content-hashed image stays for the next job.
+          docker rmi "${DEV_IMAGE}" >/dev/null 2>&1 || true
+
+  periodic-build-arm64:
+    permissions:
+      contents: read
+    name: Build (arm64)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    env:
+      DEV_IMAGE: pagespeed2-dev:ci-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Stamp GIT_COMMIT
+        run: echo -n "$GITHUB_SHA" > GIT_COMMIT
+
+      # The same weekly entry as the full tier's arm64 jobs (pipeline-full.yml),
+      # by design: the --config=opt build reuses most of their outputs, and a
+      # separate entry would not fit the repository's cache quota.
+      - name: Name the disk cache week
+        id: week
+        run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the Bazel disk cache
+        id: disk-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/optimizer-bazel-disk-arm64
+          key: optimizer-bazel-disk-arm64-${{ steps.week.outputs.week }}
+          restore-keys: |
+            optimizer-bazel-disk-arm64-
+
+      - name: Docker preflight
+        run: tools/ci/docker-preflight.sh
+
+      - name: Ensure the dev image
+        run: |
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh --tag "${DEV_IMAGE}" arm64 docker)
+          echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
+
+      - name: Build optimized test binaries
+        run: |
+          OUT="${GITHUB_WORKSPACE}/.ci-artifacts"
+          rm -rf "${OUT}"; mkdir -p "${OUT}"
+          mkdir -p "${HOME}/.cache/optimizer-bazel-disk-arm64"
+          docker run --rm --init \
+            --user "$(id -u):$(id -g)" -e HOME=/workspace \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -v "${HOME}/.cache/optimizer-bazel-disk-arm64:/cache" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" \
+            bash -c '
+              set -e
+              FLAGS="--vendor_dir=vendor --config=docker --config=opt --jobs=HOST_CPUS*.75 --nostamp --disk_cache=/cache --experimental_disk_cache_gc_max_size=2G"
+              # vendor/ is absent on this hosted job; Bazel then fetches.
+              [ -d vendor ] || FLAGS="${FLAGS/--vendor_dir=vendor /}"
+              # shellcheck disable=SC2086
+              bazel --output_user_root=/tmp/bazel-out build $FLAGS \
+                //lib/pagespeed:libpagespeed.so //src/worker:factory_worker \
+                //src/nginx:ngx_pagespeed_module.so //tools:seed_test_cache
+              ROOT=/tmp/bazel-out
+              SO=$(find "$ROOT" -path "*/bin/lib/pagespeed/libpagespeed.so" -type f | head -1)
+              FW=$(find "$ROOT" -path "*/bin/src/worker/factory_worker" -not -path "*.runfiles*" -type f | head -1)
+              NGX=$(find "$ROOT" -path "*/bin/src/nginx/ngx_pagespeed_module.so" -type f | head -1)
+              STC=$(find "$ROOT" -path "*/bin/tools/seed_test_cache" -not -path "*.runfiles*" -type f | head -1)
+              OUT=/workspace/.ci-artifacts
+              cp "$SO" "$OUT/libpagespeed.so"
+              cp "$FW" "$OUT/factory_worker"
+              cp "$NGX" "$OUT/ngx_pagespeed_module.so"
+              # The prebuilt test image runs it in the nginx container for the
+              # HTTP-compliance sidecar tests; deps are shared with
+              # factory_worker so this is one small link on a warm cache.
+              cp "$STC" "$OUT/seed_test_cache"
+              ls -d /nginx-src/nginx-*/ | head -1 | sed "s#.*/nginx-##; s#/##" > "$OUT/nginx-version"
+              echo "Recorded module nginx-version: $(cat "$OUT/nginx-version")"
+            '
+
+      # Bazel never collects this cache (its container exits right after the
+      # last command), so cap it before actions/cache saves a new entry. The
+      # prune never fails the job.
+      - name: Cap the Bazel disk cache
+        if: steps.disk-cache.outputs.cache-hit != 'true'
+        run: bash tools/ci/prune-bazel-disk-cache.sh "${HOME}/.cache/optimizer-bazel-disk-arm64" 7d 1G || true
+
+      - name: Finalize the build bundle
+        run: |
+          STAGING="${GITHUB_WORKSPACE}/.ci-artifacts"
+          cat > "$STAGING/metadata.json" <<EOF
+          {"commit":"${GITHUB_SHA}","branch":"${GITHUB_REF_NAME}","run":"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}","platform":"linux-arm64-periodic","config":"periodic+opt","timestamp":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+          EOF
+          cd "$STAGING"
+          files=()
+          for f in *; do
+            [ "$f" = checksums.sha256 ] || files+=("$f")
+          done
+          sha256sum -- "${files[@]}" > checksums.sha256
+          echo "CI artifacts (linux-arm64, periodic):"
+          ls -lh "$STAGING/"
+
+      - name: Upload the build bundle
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: nightly-ci-artifacts-linux-arm64
+          path: .ci-artifacts
+          retention-days: 3
+          include-hidden-files: true
+
+      - name: Remove this job's dev image tag
+        if: always()
+        run: |
+          # Only the per-run tag; the content-hashed image stays for the next job.
+          docker rmi "${DEV_IMAGE}" >/dev/null 2>&1 || true
+
+  # ---------------------------------------------------------------------
+  # arm64 legs (hosted arm64). Each runs on its own runner, so the compose
+  # ports and the container socket they use belong to that job alone.
+  # ---------------------------------------------------------------------
+  stress:
+    permissions:
+      contents: read
+    name: Stress Tests
+    needs: periodic-build-arm64
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Several runner slots share one host and every stack publishes fixed
+      # host ports; move this job's ports by a per-runner offset.
+      - name: Per-runner host ports
+        run: |
+          . tools/ci/runner-ports.sh
+          for v in $RUNNER_PORT_VARS; do eval "p=\${$v}"; echo "$v=$p"; done >> "$GITHUB_ENV"
+
+      - name: Download the build bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: nightly-ci-artifacts-linux-arm64
+          path: ${{ runner.temp }}/bundle/.ci-artifacts
+
+      - name: Stage CI artifacts
+        env:
+          CI_ARTIFACTS_PLATFORM: linux-arm64-periodic
+        run: tools/ci/stage-artifacts.sh "${RUNNER_TEMP}/bundle"
+
+      # Two runs on one Docker host (a nightly and a push run) would share the
+      # directory-derived default project name and remove each other's stack.
+      - name: Run-unique compose project
+        run: echo "COMPOSE_PROJECT_NAME=nightly-stress-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_ENV"
+
+      - name: Build Docker images (prebuilt)
+        run: |
+          docker compose -f tools/stress/docker-compose.yml \
+            -f tools/stress/docker-compose.prebuilt.yml build
+
+      - name: Generate test data and start services
+        run: |
+          cd tools/stress
+          docker run --rm --user "$(id -u):$(id -g)" \
+            -e HOME=/tmp -e PIP_USER=1 -e PIP_BREAK_SYSTEM_PACKAGES=1 \
+            -v "$PWD/testdata:/testdata" -w /testdata python:3.12-slim \
+            bash -c "pip install -q Pillow==13.0.0 && python3 generate_testdata.py"
+          docker compose -f docker-compose.yml -f docker-compose.prebuilt.yml up -d
+          STRESS_PORT="${STRESS_NGINX_PORT:-8190}"
+          NGINX_READY=0
+          for i in $(seq 1 60); do
+            if curl -sf "http://localhost:${STRESS_PORT}/" >/dev/null 2>&1; then
+              echo "Nginx ready after ${i}s"; NGINX_READY=1; break
+            fi
+            sleep 1
+          done
+          # Loud failure on startup skew, not a silent fall-through.
+          if [ "$NGINX_READY" -ne 1 ]; then
+            echo "::error::Nginx did not become ready within 60s - dumping nginx logs."
+            docker compose -f docker-compose.yml -f docker-compose.prebuilt.yml ps
+            NGINX_LOG="$(docker compose -f docker-compose.yml -f docker-compose.prebuilt.yml logs --no-color --tail=200 nginx 2>&1)"
+            echo "--- docker compose logs nginx (last 200) ---"
+            echo "$NGINX_LOG"
+            if echo "$NGINX_LOG" | grep -q 'module.*version'; then
+              echo "::error::nginx ABI skew detected (module vs runtime NGINX_VERSION_NUM): $(echo "$NGINX_LOG" | grep -m1 'module.*version')"
+            fi
+            exit 1
+          fi
+          sleep 2
+
+      - name: Run stress tests
+        run: |
+          # Stage a Linux CLI + compose plugin where the DAEMON can bind-mount them
+          # (copies host binaries on Linux, downloads static builds on macOS; see the script).
+          eval "$(tools/ci/stage-docker-cli.sh)"
+          DOCKER_GID="$(stat -c '%g' /var/run/docker.sock 2>/dev/null || stat -f '%g' /var/run/docker.sock 2>/dev/null || echo 0)"
+          case "$DOCKER_GID" in ''|*[!0-9]*) DOCKER_GID=0 ;; esac
+          docker run --rm --network=host \
+            --user "$(id -u):$(id -g)" --group-add "$DOCKER_GID" --group-add 0 \
+            -e HOME=/tmp \
+            -e PIP_USER=1 -e PIP_BREAK_SYSTEM_PACKAGES=1 \
+            -e STRESS_COMPOSE_FILE="/repo/tools/stress/docker-compose.yml:/repo/tools/stress/docker-compose.prebuilt.yml" \
+            -e STRESS_PROACTIVE_DEADLINE=240 \
+            -e "STRESS_NGINX_PORT=${STRESS_NGINX_PORT:-8190}" \
+            -e "STRESS_ORIGIN_PORT=${STRESS_ORIGIN_PORT:-8191}" \
+            -v "$PWD":/repo -w /repo/tools/stress \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$DOCKER_BIN":/usr/bin/docker:ro \
+            -e "COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME}" \
+            -v "$COMPOSE_PLUGIN":/usr/local/lib/docker/cli-plugins/docker-compose:ro \
+            python:3.12-slim \
+            bash -c "export PATH=/tmp/.local/bin:\$PATH && pip install -q -r requirements.txt && python3 -m pytest . -v --tb=short"
+
+      - name: Container logs on failure
+        if: failure()
+        run: |
+          docker compose -f tools/stress/docker-compose.yml -f tools/stress/docker-compose.prebuilt.yml logs --no-color --tail=400 worker nginx 2>/dev/null || docker compose -f tools/stress/docker-compose.yml -f tools/stress/docker-compose.prebuilt.yml logs --no-color --tail=400 || true
+          # The nginx error log is written to a file inside the container, not to stderr.
+          docker compose -f tools/stress/docker-compose.yml -f tools/stress/docker-compose.prebuilt.yml exec -T nginx sh -c 'tail -n 200 /var/log/nginx/error.log' || true
+
+      - name: Teardown
+        if: always()
+        run: |
+          docker compose -f tools/stress/docker-compose.yml \
+            -f tools/stress/docker-compose.prebuilt.yml \
+            down --remove-orphans -v 2>/dev/null || true
+          rm -rf tools/stress/testdata/generated
+
+  production-tests:
+    permissions:
+      contents: read
+    name: Production Readiness
+    needs: periodic-build-arm64
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Several runner slots share one host and every stack publishes fixed
+      # host ports; move this job's ports by a per-runner offset.
+      - name: Per-runner host ports
+        run: |
+          . tools/ci/runner-ports.sh
+          for v in $RUNNER_PORT_VARS; do eval "p=\${$v}"; echo "$v=$p"; done >> "$GITHUB_ENV"
+
+      - name: Download the build bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: nightly-ci-artifacts-linux-arm64
+          path: ${{ runner.temp }}/bundle/.ci-artifacts
+
+      - name: Stage CI artifacts
+        env:
+          CI_ARTIFACTS_PLATFORM: linux-arm64-periodic
+        run: tools/ci/stage-artifacts.sh "${RUNNER_TEMP}/bundle"
+
+      # Two runs on one Docker host (a nightly and a push run) would share the
+      # directory-derived default project name and remove each other's stack.
+      - name: Run-unique compose project
+        run: echo "COMPOSE_PROJECT_NAME=nightly-production-tests-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_ENV"
+
+      - name: Build Docker images (prebuilt)
+        run: |
+          docker compose -f tools/production-tests/docker-compose.yml \
+            -f tools/production-tests/docker-compose.prebuilt.yml build
+
+      - name: Start production stack
+        run: |
+          docker compose -f tools/production-tests/docker-compose.yml \
+            -f tools/production-tests/docker-compose.prebuilt.yml up -d --no-build
+          for i in $(seq 1 60); do
+            if docker compose -f tools/production-tests/docker-compose.yml \
+              -f tools/production-tests/docker-compose.prebuilt.yml ps --format json | python3 -c "
+          import sys, json
+          services = [json.loads(line) for line in sys.stdin if line.strip()]
+          all_healthy = all(s.get('Health','') == 'healthy' for s in services if s.get('Health'))
+          running = all(s.get('State','') == 'running' for s in services)
+          sys.exit(0 if (all_healthy and running) else 1)
+          " 2>/dev/null; then
+                echo "All services healthy after ${i}s"
+                break
+            fi
+            sleep 2
+          done
+
+      - name: Run production readiness tests
+        run: |
+          # Stage a Linux CLI + compose plugin where the DAEMON can bind-mount them
+          # (copies host binaries on Linux, downloads static builds on macOS; see the script).
+          eval "$(tools/ci/stage-docker-cli.sh)"
+          DOCKER_GID="$(stat -c '%g' /var/run/docker.sock 2>/dev/null || stat -f '%g' /var/run/docker.sock 2>/dev/null || echo 0)"
+          case "$DOCKER_GID" in ''|*[!0-9]*) DOCKER_GID=0 ;; esac
+          docker run --rm --network=host \
+            --user "$(id -u):$(id -g)" --group-add "$DOCKER_GID" --group-add 0 \
+            -e HOME=/tmp \
+            -e PIP_USER=1 -e PIP_BREAK_SYSTEM_PACKAGES=1 \
+            -e "PRODTEST_NGINX_PORT=${PRODTEST_NGINX_PORT:-8200}" \
+            -e "PRODTEST_ORIGIN_PORT=${PRODTEST_ORIGIN_PORT:-8201}" \
+            -v "$PWD":/repo -w /repo/tools/production-tests \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$DOCKER_BIN":/usr/bin/docker:ro \
+            -e "COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME}" \
+            -v "$COMPOSE_PLUGIN":/usr/local/lib/docker/cli-plugins/docker-compose:ro \
+            python:3.12-slim \
+            bash -c "export PATH=/tmp/.local/bin:\$PATH && pip install -q pytest==9.1.1 requests==2.34.2 && pytest tests/ -v --tb=short -p no:cacheprovider"
+
+      - name: Container logs on failure
+        if: failure()
+        run: |
+          docker compose -f tools/production-tests/docker-compose.yml -f tools/production-tests/docker-compose.prebuilt.yml logs --no-color --tail=400 worker nginx 2>/dev/null || docker compose -f tools/production-tests/docker-compose.yml -f tools/production-tests/docker-compose.prebuilt.yml logs --no-color --tail=400 || true
+          # The nginx error log is written to a file inside the container, not to stderr.
+          docker compose -f tools/production-tests/docker-compose.yml -f tools/production-tests/docker-compose.prebuilt.yml exec -T nginx sh -c 'tail -n 200 /var/log/nginx/error.log' || true
+
+      - name: Teardown
+        if: always()
+        run: |
+          docker compose -f tools/production-tests/docker-compose.yml \
+            -f tools/production-tests/docker-compose.prebuilt.yml \
+            down --remove-orphans -v 2>/dev/null || true
+
+  realworld-tests:
+    permissions:
+      contents: read
+    name: Real-World Proxy
+    needs: periodic-build-arm64
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Several runner slots share one host and every stack publishes fixed
+      # host ports; move this job's ports by a per-runner offset.
+      - name: Per-runner host ports
+        run: |
+          . tools/ci/runner-ports.sh
+          for v in $RUNNER_PORT_VARS; do eval "p=\${$v}"; echo "$v=$p"; done >> "$GITHUB_ENV"
+
+      - name: Download the build bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: nightly-ci-artifacts-linux-arm64
+          path: ${{ runner.temp }}/bundle/.ci-artifacts
+
+      - name: Stage CI artifacts
+        env:
+          CI_ARTIFACTS_PLATFORM: linux-arm64-periodic
+        run: tools/ci/stage-artifacts.sh "${RUNNER_TEMP}/bundle"
+
+      # Two runs on one Docker host (a nightly and a push run) would share the
+      # directory-derived default project name and remove each other's stack.
+      - name: Run-unique compose project
+        run: echo "COMPOSE_PROJECT_NAME=nightly-realworld-tests-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_ENV"
+
+      - name: Build Docker images (prebuilt)
+        run: |
+          docker compose -f tools/realworld-tests/docker-compose.yml \
+            -f tools/realworld-tests/docker-compose.prebuilt.yml build
+
+      - name: Start real-world stack
+        run: |
+          docker compose -f tools/realworld-tests/docker-compose.yml \
+            -f tools/realworld-tests/docker-compose.prebuilt.yml up -d --no-build
+          # Wait for nginx (local /health, no upstream dependency).
+          for _ in $(seq 1 30); do
+            curl -sf "http://localhost:${REALWORLD_NGINX_PORT:-8083}/health" >/dev/null 2>&1 && break
+            sleep 2
+          done
+          # Wait for go-httpbin to be reachable THROUGH nginx. The go-httpbin
+          # image is distroless (no shell/wget), so it cannot run a container
+          # healthcheck for depends_on: service_healthy; gate readiness here
+          # instead so tests don't start before the upstream is serving.
+          for _ in $(seq 1 30); do
+            curl -sf "http://localhost:${REALWORLD_NGINX_PORT:-8083}/httpbin/status/200" >/dev/null 2>&1 && break
+            sleep 2
+          done
+
+      - name: Run real-world proxy tests
+        run: |
+          docker run --rm --network=host \
+            --user "$(id -u):$(id -g)" \
+            -e HOME=/tmp \
+            -e PIP_USER=1 -e PIP_BREAK_SYSTEM_PACKAGES=1 \
+            -e "NGINX_URL=http://localhost:${REALWORLD_NGINX_PORT:-8083}" \
+            -e "WORKER_API_URL=http://localhost:${REALWORLD_WORKER_PORT:-9882}" \
+            -v "$PWD":/repo -w /repo/tools/realworld-tests \
+            python:3.12-slim \
+            bash -c "export PATH=/tmp/.local/bin:\$PATH && pip install -q pytest==9.1.1 requests==2.34.2 && pytest -v --tb=short -p no:cacheprovider"
+
+      - name: Container logs on failure
+        if: failure()
+        run: |
+          docker compose -f tools/realworld-tests/docker-compose.yml -f tools/realworld-tests/docker-compose.prebuilt.yml logs --no-color --tail=400 worker nginx 2>/dev/null || docker compose -f tools/realworld-tests/docker-compose.yml -f tools/realworld-tests/docker-compose.prebuilt.yml logs --no-color --tail=400 || true
+          # The nginx error log is written to a file inside the container, not to stderr.
+          docker compose -f tools/realworld-tests/docker-compose.yml -f tools/realworld-tests/docker-compose.prebuilt.yml exec -T nginx sh -c 'tail -n 200 /var/log/nginx/error.log' || true
+
+      - name: Teardown
+        if: always()
+        run: |
+          docker compose -f tools/realworld-tests/docker-compose.yml \
+            -f tools/realworld-tests/docker-compose.prebuilt.yml \
+            down --remove-orphans -v 2>/dev/null || true
+
+  e2e-tests:
+    permissions:
+      contents: read
+    name: E2E Tests
+    needs: periodic-build-arm64
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Several runner slots share one host and every stack publishes fixed
+      # host ports; move this job's ports by a per-runner offset.
+      - name: Per-runner host ports
+        run: |
+          . tools/ci/runner-ports.sh
+          for v in $RUNNER_PORT_VARS; do eval "p=\${$v}"; echo "$v=$p"; done >> "$GITHUB_ENV"
+
+      - name: Download the build bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: nightly-ci-artifacts-linux-arm64
+          path: ${{ runner.temp }}/bundle/.ci-artifacts
+
+      - name: Stage CI artifacts
+        env:
+          CI_ARTIFACTS_PLATFORM: linux-arm64-periodic
+        run: tools/ci/stage-artifacts.sh "${RUNNER_TEMP}/bundle"
+
+      - name: Generate test fixtures
+        run: tools/generate-test-fixtures.sh
+
+      # Two runs on one Docker host (a nightly and a push run) would share the
+      # directory-derived default project name and remove each other's stack.
+      - name: Run-unique compose project
+        run: echo "COMPOSE_PROJECT_NAME=nightly-e2e-tests-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_ENV"
+
+      - name: Build Docker images (prebuilt)
+        run: |
+          docker compose -f tools/e2e/docker-compose.yml \
+            -f tools/e2e/docker-compose.prebuilt.yml build
+
+      - name: Ensure no leftover containers
+        run: |
+          docker compose -f tools/e2e/docker-compose.yml \
+            -f tools/e2e/docker-compose.prebuilt.yml \
+            down --remove-orphans -v 2>/dev/null || true
+
+      - name: Start services
+        run: |
+          docker compose -f tools/e2e/docker-compose.yml \
+            -f tools/e2e/docker-compose.prebuilt.yml up -d
+
+      - name: Wait for services
+        run: |
+          echo "Waiting for services (timeout 120s)..."
+          E2E_PORT="${E2E_NGINX_PORT:-8083}"
+          deadline=$((SECONDS + 120))
+          while [ $SECONDS -lt $deadline ]; do
+            HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "http://localhost:${E2E_PORT}/" 2>/dev/null || echo "000")
+            if [ "$HTTP_CODE" != "000" ]; then
+              echo "Nginx ready after $((SECONDS))s (HTTP $HTTP_CODE)"
+              break
+            fi
+            [ $((SECONDS % 10)) -lt 2 ] && echo "Still waiting... (HTTP $HTTP_CODE, ${SECONDS}s elapsed)"
+            sleep 2
+          done
+          if [ "$HTTP_CODE" = "000" ]; then
+            echo "::error::Nginx not ready after 120s - dumping nginx logs."
+            docker compose -f tools/e2e/docker-compose.yml \
+              -f tools/e2e/docker-compose.prebuilt.yml ps
+            NGINX_LOG="$(docker compose -f tools/e2e/docker-compose.yml \
+              -f tools/e2e/docker-compose.prebuilt.yml logs --no-color --tail=200 nginx 2>&1)"
+            echo "--- docker compose logs nginx (last 200) ---"
+            echo "$NGINX_LOG"
+            if echo "$NGINX_LOG" | grep -q 'module.*version'; then
+              echo "::error::nginx ABI skew detected (module vs runtime NGINX_VERSION_NUM): $(echo "$NGINX_LOG" | grep -m1 'module.*version')"
+            fi
+            exit 1
+          fi
+          # Worker readiness gate: poll /v1/health until it answers 200 with
+          # ready=true (a 200 without a `ready` field also counts).
+          deadline=$((SECONDS + 60))
+          WORKER_READY=False
+          while [ $SECONDS -lt $deadline ]; do
+            WORKER_READY=$(curl -sf "http://localhost:${E2E_WORKER_PORT:-9881}/v1/health" 2>/dev/null \
+              | python3 -c "import sys,json; d=json.load(sys.stdin); print(bool(d.get('ready', True)))" 2>/dev/null || echo "False")
+            if [ "$WORKER_READY" = "True" ]; then
+              echo "Worker ready"
+              break
+            fi
+            sleep 1
+          done
+          if [ "$WORKER_READY" != "True" ]; then
+            echo "WARNING: Worker not ready after 60s - E2E HIT tests may fail"
+            echo "--- Worker health endpoint (full response) ---"
+            curl -sf "http://localhost:${E2E_WORKER_PORT:-9881}/v1/health" 2>/dev/null | python3 -m json.tool 2>/dev/null || echo "(no response)"
+            echo "--- Container status ---"
+            docker compose -f tools/e2e/docker-compose.yml \
+              -f tools/e2e/docker-compose.prebuilt.yml ps
+            echo "--- Worker logs (last 100 lines) ---"
+            docker compose -f tools/e2e/docker-compose.yml \
+              -f tools/e2e/docker-compose.prebuilt.yml logs --tail=100 worker
+            echo "--- Nginx logs (last 50 lines) ---"
+            docker compose -f tools/e2e/docker-compose.yml \
+              -f tools/e2e/docker-compose.prebuilt.yml logs --tail=50 nginx
+          fi
+
+      - name: Run E2E tests
+        run: |
+          # Stage a Linux CLI + compose plugin where the DAEMON can bind-mount them
+          # (copies host binaries on Linux, downloads static builds on macOS; see the script).
+          eval "$(tools/ci/stage-docker-cli.sh)"
+          DOCKER_GID="$(stat -c '%g' /var/run/docker.sock 2>/dev/null || stat -f '%g' /var/run/docker.sock 2>/dev/null || echo 0)"
+          case "$DOCKER_GID" in ''|*[!0-9]*) DOCKER_GID=0 ;; esac
+          docker run --rm --network=host \
+            --user "$(id -u):$(id -g)" --group-add "$DOCKER_GID" --group-add 0 -e HOME=/tmp \
+            -e PIP_USER=1 -e PIP_BREAK_SYSTEM_PACKAGES=1 \
+            -v "$PWD":/repo -w /repo/tools/e2e \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$DOCKER_BIN":/usr/bin/docker:ro \
+            -e "COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME}" \
+            -v "$COMPOSE_PLUGIN":/usr/local/lib/docker/cli-plugins/docker-compose:ro \
+            -e E2E_NO_LIFECYCLE=1 \
+            -e "NGINX_URL=http://localhost:${E2E_NGINX_PORT:-8083}" \
+            -e "ORIGIN_URL=http://localhost:${E2E_ORIGIN_PORT:-8082}" \
+            -e "WORKER_API_URL=http://localhost:${E2E_WORKER_PORT:-9881}" \
+            python:3.12-slim \
+            bash -c "export PATH=/tmp/.local/bin:\$PATH && pip install -q -r requirements.txt && \
+              pytest test_user_stories.py test_configuration.py \
+                -v --tb=short --junitxml=results.xml"
+
+      - name: Teardown
+        if: always()
+        run: |
+          docker compose -f tools/e2e/docker-compose.yml \
+            -f tools/e2e/docker-compose.prebuilt.yml \
+            down --remove-orphans -v 2>/dev/null || true
+
+  # Workbench console browser tests (Playwright) against the workbench demo
+  # stack: the website origin and demo origin built from this tree
+  # (tools/workbench-demo/ builds website/ with PRICING_ALLOW_STALE, so no
+  # credentials are needed), the worker and nginx from this run's arm64
+  # bundle. Hosted arm64: nothing here needs the container socket.
+  workbench-playwright:
+    permissions:
+      contents: read
+    name: Workbench Playwright
+    needs: periodic-build-arm64
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Several runner slots share one host and every stack publishes fixed
+      # host ports; move this job's ports by a per-runner offset.
+      - name: Per-runner host ports
+        run: |
+          . tools/ci/runner-ports.sh
+          for v in $RUNNER_PORT_VARS; do eval "p=\${$v}"; echo "$v=$p"; done >> "$GITHUB_ENV"
+
+      - name: Download the build bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: nightly-ci-artifacts-linux-arm64
+          path: ${{ runner.temp }}/bundle/.ci-artifacts
+
+      - name: Stage CI artifacts
+        env:
+          CI_ARTIFACTS_PLATFORM: linux-arm64-periodic
+        run: tools/ci/stage-artifacts.sh "${RUNNER_TEMP}/bundle"
+
+      # Two runs on one Docker host (a nightly and a push run) would share the
+      # directory-derived default project name and remove each other's stack.
+      - name: Run-unique compose project
+        run: echo "COMPOSE_PROJECT_NAME=nightly-workbench-playwright-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_ENV"
+
+      - name: Build Docker images (prebuilt)
+        run: |
+          docker compose -f tools/workbench-demo/docker-compose.yml \
+            -f tools/workbench-demo/docker-compose.prebuilt.yml build
+
+      - name: Ensure no leftover containers
+        run: |
+          docker compose -f tools/workbench-demo/docker-compose.yml \
+            -f tools/workbench-demo/docker-compose.prebuilt.yml \
+            down --remove-orphans -v 2>/dev/null || true
+
+      # The worker container mounts the built console from the checkout.
+      - name: Build console dist (mounted into the worker container)
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" \
+            -e HOME=/tmp -e COREPACK_HOME=/tmp/.corepack \
+            -v "$PWD":/repo -w /repo/tools/workbench \
+            node:22-slim \
+            bash -c "mkdir -p /tmp/bin && corepack enable --install-directory /tmp/bin && export PATH=/tmp/bin:\$PATH && pnpm install --frozen-lockfile && pnpm -r build"
+
+      - name: Start services
+        run: |
+          docker compose -f tools/workbench-demo/docker-compose.yml \
+            -f tools/workbench-demo/docker-compose.prebuilt.yml up -d
+
+      - name: Wait for services
+        run: |
+          COMPOSE=(docker compose -f tools/workbench-demo/docker-compose.yml
+                   -f tools/workbench-demo/docker-compose.prebuilt.yml)
+          echo "Waiting for the worker API (port ${WORKBENCH_API_PORT:-9880}) and nginx (port ${WORKBENCH_NGINX_PORT:-8084})..."
+          deadline=$((SECONDS + 120))
+          while [ $SECONDS -lt $deadline ]; do
+            if curl -sf "http://localhost:${WORKBENCH_API_PORT:-9880}/v1/health" >/dev/null 2>&1; then
+              echo "Worker API ready after ${SECONDS}s"
+              break
+            fi
+            sleep 2
+          done
+          if ! curl -sf "http://localhost:${WORKBENCH_API_PORT:-9880}/v1/health" >/dev/null 2>&1; then
+            echo "::error::worker API not ready after 120s"
+            "${COMPOSE[@]}" ps
+            "${COMPOSE[@]}" logs --tail=50
+            exit 1
+          fi
+          deadline=$((SECONDS + 30))
+          HTTP_CODE=000
+          while [ $SECONDS -lt $deadline ]; do
+            HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "http://localhost:${WORKBENCH_NGINX_PORT:-8084}/" 2>/dev/null || echo "000")
+            if [ "$HTTP_CODE" != "000" ]; then
+              echo "Nginx ready (HTTP $HTTP_CODE)"
+              break
+            fi
+            sleep 2
+          done
+          # nginx failing to start is a loud failure: a module/runtime ABI
+          # skew kills nginx at startup while the worker stays healthy.
+          if [ "$HTTP_CODE" = "000" ]; then
+            echo "::error::nginx did not become ready within 30s; dumping its logs"
+            "${COMPOSE[@]}" ps
+            NGINX_LOG="$("${COMPOSE[@]}" logs --no-color --tail=200 nginx 2>&1)"
+            echo "$NGINX_LOG"
+            if echo "$NGINX_LOG" | grep -q 'module.*version'; then
+              echo "::error::nginx ABI skew detected: $(echo "$NGINX_LOG" | grep -m1 'module.*version')"
+            fi
+            exit 1
+          fi
+          deadline=$((SECONDS + 30))
+          WORKER_READY=False
+          while [ $SECONDS -lt $deadline ]; do
+            WORKER_READY=$(curl -sf "http://localhost:${WORKBENCH_API_PORT:-9880}/v1/health" 2>/dev/null \
+              | python3 -c "import sys,json; d=json.load(sys.stdin); print(bool(d.get('ready', True)))" 2>/dev/null || echo "False")
+            if [ "$WORKER_READY" = "True" ]; then
+              echo "Worker ready"
+              break
+            fi
+            sleep 1
+          done
+          if [ "$WORKER_READY" != "True" ]; then
+            echo "::warning::worker not ready after 30s; some workbench tests may fail"
+          fi
+
+      - name: Resolve compose network name
+        id: net
+        run: |
+          NET=$(docker network ls --filter "name=^${COMPOSE_PROJECT_NAME}_default$" --format '{{.Name}}' | head -1)
+          echo "name=$NET" >> "$GITHUB_OUTPUT"
+          echo "Compose network: $NET"
+
+      - name: Run Playwright tests
+        env:
+          NET_NAME: ${{ steps.net.outputs.name }}
+        run: |
+          docker run --rm --network="${NET_NAME}" \
+            --user "$(id -u):$(id -g)" -e HOME=/tmp -e COREPACK_HOME=/tmp/.corepack \
+            -v "$PWD":/repo -w /repo/tools/workbench \
+            -e CI=true \
+            -e PLAYWRIGHT_BASE_URL=http://nginx:8080 \
+            -e PROXY_BASE=http://nginx:8080 \
+            -e ORIGIN_BASE=http://origin:8081 \
+            -e PLAYWRIGHT_BROWSERS_PATH=0 \
+            mcr.microsoft.com/playwright:v1.58.2-noble \
+            bash -c "mkdir -p /tmp/bin && corepack enable --install-directory /tmp/bin && export PATH=/tmp/bin:\$PATH && pnpm install --frozen-lockfile && pnpm -r build && cd packages/web-shell && pnpm exec playwright install chromium && pnpm exec playwright test"
+
+      - name: Upload Playwright forensics
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: nightly-workbench-playwright-forensics
+          path: |
+            tools/workbench/packages/web-shell/test-results/**
+            tools/workbench/packages/web-shell/playwright-report/**
+          retention-days: 3
+          if-no-files-found: ignore
+
+      - name: Teardown
+        if: always()
+        run: |
+          docker compose -f tools/workbench-demo/docker-compose.yml \
+            -f tools/workbench-demo/docker-compose.prebuilt.yml \
+            down --remove-orphans -v 2>/dev/null || true
+
+  # ---------------------------------------------------------------------
+  # x64 legs (fleet only: they mount the container socket or run privileged
+  # containers). A failure here does not block the other lanes.
+  # ---------------------------------------------------------------------
+  stress-x64:
+    permissions:
+      contents: read
+    name: Stress Tests (x64)
+    needs: periodic-build-x64
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-24.04' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED != 'false' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 120
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Several runner slots share one host and every stack publishes fixed
+      # host ports; move this job's ports by a per-runner offset.
+      - name: Per-runner host ports
+        run: |
+          . tools/ci/runner-ports.sh
+          for v in $RUNNER_PORT_VARS; do eval "p=\${$v}"; echo "$v=$p"; done >> "$GITHUB_ENV"
+
+      - name: Download the build bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: nightly-ci-artifacts-linux-x64
+          path: ${{ runner.temp }}/bundle/.ci-artifacts
+
+      - name: Stage CI artifacts
+        env:
+          CI_ARTIFACTS_PLATFORM: linux-x64-periodic
+        run: tools/ci/stage-artifacts.sh "${RUNNER_TEMP}/bundle"
+
+      # Two runs on one Docker host (a nightly and a push run) would share the
+      # directory-derived default project name and remove each other's stack.
+      - name: Run-unique compose project
+        run: echo "COMPOSE_PROJECT_NAME=nightly-stress-x64-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_ENV"
+
+      - name: Build Docker images (prebuilt)
+        run: |
+          docker compose -f tools/stress/docker-compose.yml \
+            -f tools/stress/docker-compose.prebuilt.yml build
+
+      - name: Generate test data and start services
+        run: |
+          cd tools/stress
+          docker run --rm --user "$(id -u):$(id -g)" \
+            -e HOME=/tmp -e PIP_USER=1 -e PIP_BREAK_SYSTEM_PACKAGES=1 \
+            -v "$PWD/testdata:/testdata" -w /testdata python:3.12-slim \
+            bash -c "pip install -q Pillow==13.0.0 && python3 generate_testdata.py"
+          docker compose -f docker-compose.yml -f docker-compose.prebuilt.yml up -d
+          STRESS_PORT="${STRESS_NGINX_PORT:-8190}"
+          NGINX_READY=0
+          for i in $(seq 1 60); do
+            if curl -sf "http://localhost:${STRESS_PORT}/" >/dev/null 2>&1; then
+              echo "Nginx ready after ${i}s"; NGINX_READY=1; break
+            fi
+            sleep 1
+          done
+          # Loud failure on startup skew, not a silent fall-through.
+          if [ "$NGINX_READY" -ne 1 ]; then
+            echo "::error::Nginx did not become ready within 60s - dumping nginx logs."
+            docker compose -f docker-compose.yml -f docker-compose.prebuilt.yml ps
+            NGINX_LOG="$(docker compose -f docker-compose.yml -f docker-compose.prebuilt.yml logs --no-color --tail=200 nginx 2>&1)"
+            echo "--- docker compose logs nginx (last 200) ---"
+            echo "$NGINX_LOG"
+            if echo "$NGINX_LOG" | grep -q 'module.*version'; then
+              echo "::error::nginx ABI skew detected (module vs runtime NGINX_VERSION_NUM): $(echo "$NGINX_LOG" | grep -m1 'module.*version')"
+            fi
+            exit 1
+          fi
+          sleep 2
+
+      - name: Run stress tests
+        run: |
+          # Stage a Linux CLI + compose plugin where the DAEMON can bind-mount them
+          # (copies host binaries on Linux, downloads static builds on macOS; see the script).
+          eval "$(tools/ci/stage-docker-cli.sh)"
+          DOCKER_GID="$(stat -c '%g' /var/run/docker.sock 2>/dev/null || stat -f '%g' /var/run/docker.sock 2>/dev/null || echo 0)"
+          case "$DOCKER_GID" in ''|*[!0-9]*) DOCKER_GID=0 ;; esac
+          docker run --rm --network=host \
+            --user "$(id -u):$(id -g)" --group-add "$DOCKER_GID" --group-add 0 \
+            -e HOME=/tmp \
+            -e PIP_USER=1 -e PIP_BREAK_SYSTEM_PACKAGES=1 \
+            -e STRESS_COMPOSE_FILE="/repo/tools/stress/docker-compose.yml:/repo/tools/stress/docker-compose.prebuilt.yml" \
+            -e STRESS_LATENCY_FACTOR=2.0 \
+            -e "STRESS_NGINX_PORT=${STRESS_NGINX_PORT:-8190}" \
+            -e "STRESS_ORIGIN_PORT=${STRESS_ORIGIN_PORT:-8191}" \
+            -v "$PWD":/repo -w /repo/tools/stress \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$DOCKER_BIN":/usr/bin/docker:ro \
+            -e "COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME}" \
+            -v "$COMPOSE_PLUGIN":/usr/local/lib/docker/cli-plugins/docker-compose:ro \
+            python:3.12-slim \
+            bash -c "export PATH=/tmp/.local/bin:\$PATH && pip install -q -r requirements.txt && python3 -m pytest . -v --tb=short"
+
+      - name: Container logs on failure
+        if: failure()
+        run: |
+          docker compose -f tools/stress/docker-compose.yml -f tools/stress/docker-compose.prebuilt.yml logs --no-color --tail=400 worker nginx 2>/dev/null || docker compose -f tools/stress/docker-compose.yml -f tools/stress/docker-compose.prebuilt.yml logs --no-color --tail=400 || true
+          # The nginx error log is written to a file inside the container, not to stderr.
+          docker compose -f tools/stress/docker-compose.yml -f tools/stress/docker-compose.prebuilt.yml exec -T nginx sh -c 'tail -n 200 /var/log/nginx/error.log' || true
+
+      - name: Teardown
+        if: always()
+        run: |
+          docker compose -f tools/stress/docker-compose.yml \
+            -f tools/stress/docker-compose.prebuilt.yml \
+            down --remove-orphans -v 2>/dev/null || true
+          rm -rf tools/stress/testdata/generated
+
+  production-tests-x64:
+    permissions:
+      contents: read
+    name: Production Readiness (x64)
+    needs: periodic-build-x64
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-24.04' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED != 'false' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 60
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Several runner slots share one host and every stack publishes fixed
+      # host ports; move this job's ports by a per-runner offset.
+      - name: Per-runner host ports
+        run: |
+          . tools/ci/runner-ports.sh
+          for v in $RUNNER_PORT_VARS; do eval "p=\${$v}"; echo "$v=$p"; done >> "$GITHUB_ENV"
+
+      - name: Download the build bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: nightly-ci-artifacts-linux-x64
+          path: ${{ runner.temp }}/bundle/.ci-artifacts
+
+      - name: Stage CI artifacts
+        env:
+          CI_ARTIFACTS_PLATFORM: linux-x64-periodic
+        run: tools/ci/stage-artifacts.sh "${RUNNER_TEMP}/bundle"
+
+      # Two runs on one Docker host (a nightly and a push run) would share the
+      # directory-derived default project name and remove each other's stack.
+      - name: Run-unique compose project
+        run: echo "COMPOSE_PROJECT_NAME=nightly-production-tests-x64-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_ENV"
+
+      - name: Build Docker images (prebuilt)
+        run: |
+          docker compose -f tools/production-tests/docker-compose.yml \
+            -f tools/production-tests/docker-compose.prebuilt.yml build
+
+      - name: Start production stack
+        run: |
+          docker compose -f tools/production-tests/docker-compose.yml \
+            -f tools/production-tests/docker-compose.prebuilt.yml up -d --no-build
+          for i in $(seq 1 60); do
+            if docker compose -f tools/production-tests/docker-compose.yml \
+              -f tools/production-tests/docker-compose.prebuilt.yml ps --format json | python3 -c "
+          import sys, json
+          services = [json.loads(line) for line in sys.stdin if line.strip()]
+          all_healthy = all(s.get('Health','') == 'healthy' for s in services if s.get('Health'))
+          running = all(s.get('State','') == 'running' for s in services)
+          sys.exit(0 if (all_healthy and running) else 1)
+          " 2>/dev/null; then
+                echo "All services healthy after ${i}s"
+                break
+            fi
+            sleep 2
+          done
+
+      - name: Run production readiness tests
+        run: |
+          # Stage a Linux CLI + compose plugin where the DAEMON can bind-mount them
+          # (copies host binaries on Linux, downloads static builds on macOS; see the script).
+          eval "$(tools/ci/stage-docker-cli.sh)"
+          DOCKER_GID="$(stat -c '%g' /var/run/docker.sock 2>/dev/null || stat -f '%g' /var/run/docker.sock 2>/dev/null || echo 0)"
+          case "$DOCKER_GID" in ''|*[!0-9]*) DOCKER_GID=0 ;; esac
+          docker run --rm --network=host \
+            --user "$(id -u):$(id -g)" --group-add "$DOCKER_GID" --group-add 0 \
+            -e HOME=/tmp \
+            -e PIP_USER=1 -e PIP_BREAK_SYSTEM_PACKAGES=1 \
+            -e "PRODTEST_NGINX_PORT=${PRODTEST_NGINX_PORT:-8200}" \
+            -e "PRODTEST_ORIGIN_PORT=${PRODTEST_ORIGIN_PORT:-8201}" \
+            -v "$PWD":/repo -w /repo/tools/production-tests \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$DOCKER_BIN":/usr/bin/docker:ro \
+            -e "COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME}" \
+            -v "$COMPOSE_PLUGIN":/usr/local/lib/docker/cli-plugins/docker-compose:ro \
+            python:3.12-slim \
+            bash -c "export PATH=/tmp/.local/bin:\$PATH && pip install -q pytest==9.1.1 requests==2.34.2 && pytest tests/ -v --tb=short -p no:cacheprovider"
+
+      - name: Container logs on failure
+        if: failure()
+        run: |
+          docker compose -f tools/production-tests/docker-compose.yml -f tools/production-tests/docker-compose.prebuilt.yml logs --no-color --tail=400 worker nginx 2>/dev/null || docker compose -f tools/production-tests/docker-compose.yml -f tools/production-tests/docker-compose.prebuilt.yml logs --no-color --tail=400 || true
+          # The nginx error log is written to a file inside the container, not to stderr.
+          docker compose -f tools/production-tests/docker-compose.yml -f tools/production-tests/docker-compose.prebuilt.yml exec -T nginx sh -c 'tail -n 200 /var/log/nginx/error.log' || true
+
+      - name: Teardown
+        if: always()
+        run: |
+          docker compose -f tools/production-tests/docker-compose.yml \
+            -f tools/production-tests/docker-compose.prebuilt.yml \
+            down --remove-orphans -v 2>/dev/null || true
+
+  realworld-tests-x64:
+    permissions:
+      contents: read
+    name: Real-World Proxy (x64)
+    needs: periodic-build-x64
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-24.04' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED != 'false' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 60
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Several runner slots share one host and every stack publishes fixed
+      # host ports; move this job's ports by a per-runner offset.
+      - name: Per-runner host ports
+        run: |
+          . tools/ci/runner-ports.sh
+          for v in $RUNNER_PORT_VARS; do eval "p=\${$v}"; echo "$v=$p"; done >> "$GITHUB_ENV"
+
+      - name: Download the build bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: nightly-ci-artifacts-linux-x64
+          path: ${{ runner.temp }}/bundle/.ci-artifacts
+
+      - name: Stage CI artifacts
+        env:
+          CI_ARTIFACTS_PLATFORM: linux-x64-periodic
+        run: tools/ci/stage-artifacts.sh "${RUNNER_TEMP}/bundle"
+
+      # Two runs on one Docker host (a nightly and a push run) would share the
+      # directory-derived default project name and remove each other's stack.
+      - name: Run-unique compose project
+        run: echo "COMPOSE_PROJECT_NAME=nightly-realworld-tests-x64-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_ENV"
+
+      - name: Build Docker images (prebuilt)
+        run: |
+          docker compose -f tools/realworld-tests/docker-compose.yml \
+            -f tools/realworld-tests/docker-compose.prebuilt.yml build
+
+      - name: Start real-world stack
+        run: |
+          docker compose -f tools/realworld-tests/docker-compose.yml \
+            -f tools/realworld-tests/docker-compose.prebuilt.yml up -d --no-build
+          # Wait for nginx (local /health, no upstream dependency).
+          for _ in $(seq 1 30); do
+            curl -sf "http://localhost:${REALWORLD_NGINX_PORT:-8083}/health" >/dev/null 2>&1 && break
+            sleep 2
+          done
+          # Wait for go-httpbin to be reachable THROUGH nginx. The go-httpbin
+          # image is distroless (no shell/wget), so it cannot run a container
+          # healthcheck for depends_on: service_healthy; gate readiness here
+          # instead so tests don't start before the upstream is serving.
+          for _ in $(seq 1 30); do
+            curl -sf "http://localhost:${REALWORLD_NGINX_PORT:-8083}/httpbin/status/200" >/dev/null 2>&1 && break
+            sleep 2
+          done
+
+      - name: Run real-world proxy tests
+        run: |
+          docker run --rm --network=host \
+            --user "$(id -u):$(id -g)" \
+            -e HOME=/tmp \
+            -e PIP_USER=1 -e PIP_BREAK_SYSTEM_PACKAGES=1 \
+            -e "NGINX_URL=http://localhost:${REALWORLD_NGINX_PORT:-8083}" \
+            -e "WORKER_API_URL=http://localhost:${REALWORLD_WORKER_PORT:-9882}" \
+            -v "$PWD":/repo -w /repo/tools/realworld-tests \
+            python:3.12-slim \
+            bash -c "export PATH=/tmp/.local/bin:\$PATH && pip install -q pytest==9.1.1 requests==2.34.2 && pytest -v --tb=short -p no:cacheprovider"
+
+      - name: Container logs on failure
+        if: failure()
+        run: |
+          docker compose -f tools/realworld-tests/docker-compose.yml -f tools/realworld-tests/docker-compose.prebuilt.yml logs --no-color --tail=400 worker nginx 2>/dev/null || docker compose -f tools/realworld-tests/docker-compose.yml -f tools/realworld-tests/docker-compose.prebuilt.yml logs --no-color --tail=400 || true
+          # The nginx error log is written to a file inside the container, not to stderr.
+          docker compose -f tools/realworld-tests/docker-compose.yml -f tools/realworld-tests/docker-compose.prebuilt.yml exec -T nginx sh -c 'tail -n 200 /var/log/nginx/error.log' || true
+
+      - name: Teardown
+        if: always()
+        run: |
+          docker compose -f tools/realworld-tests/docker-compose.yml \
+            -f tools/realworld-tests/docker-compose.prebuilt.yml \
+            down --remove-orphans -v 2>/dev/null || true
+
+  e2e-tests-x64:
+    permissions:
+      contents: read
+    name: E2E Tests (x64)
+    needs: periodic-build-x64
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-24.04' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED != 'false' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 20
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Several runner slots share one host and every stack publishes fixed
+      # host ports; move this job's ports by a per-runner offset.
+      - name: Per-runner host ports
+        run: |
+          . tools/ci/runner-ports.sh
+          for v in $RUNNER_PORT_VARS; do eval "p=\${$v}"; echo "$v=$p"; done >> "$GITHUB_ENV"
+
+      - name: Download the build bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: nightly-ci-artifacts-linux-x64
+          path: ${{ runner.temp }}/bundle/.ci-artifacts
+
+      - name: Stage CI artifacts
+        env:
+          CI_ARTIFACTS_PLATFORM: linux-x64-periodic
+        run: tools/ci/stage-artifacts.sh "${RUNNER_TEMP}/bundle"
+
+      - name: Generate test fixtures
+        run: tools/generate-test-fixtures.sh
+
+      # Two runs on one Docker host (a nightly and a push run) would share the
+      # directory-derived default project name and remove each other's stack.
+      - name: Run-unique compose project
+        run: echo "COMPOSE_PROJECT_NAME=nightly-e2e-tests-x64-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_ENV"
+
+      - name: Build Docker images (prebuilt)
+        run: |
+          docker compose -f tools/e2e/docker-compose.yml \
+            -f tools/e2e/docker-compose.prebuilt.yml build
+
+      - name: Ensure no leftover containers
+        run: |
+          docker compose -f tools/e2e/docker-compose.yml \
+            -f tools/e2e/docker-compose.prebuilt.yml \
+            down --remove-orphans -v 2>/dev/null || true
+
+      - name: Start services
+        run: |
+          docker compose -f tools/e2e/docker-compose.yml \
+            -f tools/e2e/docker-compose.prebuilt.yml up -d
+
+      - name: Wait for services
+        run: |
+          echo "Waiting for services (timeout 120s)..."
+          E2E_PORT="${E2E_NGINX_PORT:-8083}"
+          deadline=$((SECONDS + 120))
+          while [ $SECONDS -lt $deadline ]; do
+            HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "http://localhost:${E2E_PORT}/" 2>/dev/null || echo "000")
+            if [ "$HTTP_CODE" != "000" ]; then
+              echo "Nginx ready after $((SECONDS))s (HTTP $HTTP_CODE)"
+              break
+            fi
+            [ $((SECONDS % 10)) -lt 2 ] && echo "Still waiting... (HTTP $HTTP_CODE, ${SECONDS}s elapsed)"
+            sleep 2
+          done
+          if [ "$HTTP_CODE" = "000" ]; then
+            echo "::error::Nginx not ready after 120s - dumping nginx logs."
+            docker compose -f tools/e2e/docker-compose.yml \
+              -f tools/e2e/docker-compose.prebuilt.yml ps
+            NGINX_LOG="$(docker compose -f tools/e2e/docker-compose.yml \
+              -f tools/e2e/docker-compose.prebuilt.yml logs --no-color --tail=200 nginx 2>&1)"
+            echo "--- docker compose logs nginx (last 200) ---"
+            echo "$NGINX_LOG"
+            if echo "$NGINX_LOG" | grep -q 'module.*version'; then
+              echo "::error::nginx ABI skew detected (module vs runtime NGINX_VERSION_NUM): $(echo "$NGINX_LOG" | grep -m1 'module.*version')"
+            fi
+            exit 1
+          fi
+          # Worker readiness gate: poll /v1/health until it answers 200 with
+          # ready=true (a 200 without a `ready` field also counts).
+          deadline=$((SECONDS + 60))
+          WORKER_READY=False
+          while [ $SECONDS -lt $deadline ]; do
+            WORKER_READY=$(curl -sf "http://localhost:${E2E_WORKER_PORT:-9881}/v1/health" 2>/dev/null \
+              | python3 -c "import sys,json; d=json.load(sys.stdin); print(bool(d.get('ready', True)))" 2>/dev/null || echo "False")
+            if [ "$WORKER_READY" = "True" ]; then
+              echo "Worker ready"
+              break
+            fi
+            sleep 1
+          done
+          if [ "$WORKER_READY" != "True" ]; then
+            echo "WARNING: Worker not ready after 60s - E2E HIT tests may fail"
+            echo "--- Worker health endpoint (full response) ---"
+            curl -sf "http://localhost:${E2E_WORKER_PORT:-9881}/v1/health" 2>/dev/null | python3 -m json.tool 2>/dev/null || echo "(no response)"
+            echo "--- Container status ---"
+            docker compose -f tools/e2e/docker-compose.yml \
+              -f tools/e2e/docker-compose.prebuilt.yml ps
+            echo "--- Worker logs (last 100 lines) ---"
+            docker compose -f tools/e2e/docker-compose.yml \
+              -f tools/e2e/docker-compose.prebuilt.yml logs --tail=100 worker
+            echo "--- Nginx logs (last 50 lines) ---"
+            docker compose -f tools/e2e/docker-compose.yml \
+              -f tools/e2e/docker-compose.prebuilt.yml logs --tail=50 nginx
+          fi
+
+      - name: Run E2E tests
+        run: |
+          # Stage a Linux CLI + compose plugin where the DAEMON can bind-mount them
+          # (copies host binaries on Linux, downloads static builds on macOS; see the script).
+          eval "$(tools/ci/stage-docker-cli.sh)"
+          DOCKER_GID="$(stat -c '%g' /var/run/docker.sock 2>/dev/null || stat -f '%g' /var/run/docker.sock 2>/dev/null || echo 0)"
+          case "$DOCKER_GID" in ''|*[!0-9]*) DOCKER_GID=0 ;; esac
+          docker run --rm --network=host \
+            --user "$(id -u):$(id -g)" --group-add "$DOCKER_GID" --group-add 0 -e HOME=/tmp \
+            -e PIP_USER=1 -e PIP_BREAK_SYSTEM_PACKAGES=1 \
+            -v "$PWD":/repo -w /repo/tools/e2e \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$DOCKER_BIN":/usr/bin/docker:ro \
+            -e "COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME}" \
+            -v "$COMPOSE_PLUGIN":/usr/local/lib/docker/cli-plugins/docker-compose:ro \
+            -e E2E_NO_LIFECYCLE=1 \
+            -e "NGINX_URL=http://localhost:${E2E_NGINX_PORT:-8083}" \
+            -e "ORIGIN_URL=http://localhost:${E2E_ORIGIN_PORT:-8082}" \
+            -e "WORKER_API_URL=http://localhost:${E2E_WORKER_PORT:-9881}" \
+            python:3.12-slim \
+            bash -c "export PATH=/tmp/.local/bin:\$PATH && pip install -q -r requirements.txt && \
+              pytest test_user_stories.py test_configuration.py \
+                -v --tb=short --junitxml=results.xml"
+
+      - name: Teardown
+        if: always()
+        run: |
+          docker compose -f tools/e2e/docker-compose.yml \
+            -f tools/e2e/docker-compose.prebuilt.yml \
+            down --remove-orphans -v 2>/dev/null || true
+
+  # The daemon privilege rig's long-idle browser soak. The per-pull-request
+  # rig matrix cannot catch a syscall with a minutes-scale period (the
+  # browser's memory-info spike fires every few minutes); idling a sandboxed
+  # browser under the enforcing profile for at least two spike periods and
+  # asserting zero kills closes that blind spot, and a window that long is a
+  # nightly cadence. One distro: the question is the profile, not the systemd
+  # matrix.
+  daemon-rig-soak-x64:
+    permissions:
+      contents: read
+    name: Daemon Privilege Rig Soak (debian12, x64)
+    needs: periodic-build-x64
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-24.04' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED != 'false' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 60
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Confirm the checkout is this run's tree
+        run: |
+          set -euo pipefail
+          HEAD_SHA="$(git -C "${GITHUB_WORKSPACE}" rev-parse HEAD)"
+          if [ "$HEAD_SHA" != "$GITHUB_SHA" ]; then
+            echo "::error::checkout is $HEAD_SHA but this run is $GITHUB_SHA"
+            exit 1
+          fi
+          echo "checkout verified at $HEAD_SHA"
+
+      - name: Docker preflight
+        run: tools/ci/docker-preflight.sh
+
+      - name: Download the build bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: nightly-ci-artifacts-linux-x64
+          path: ${{ runner.temp }}/bundle
+
+      - name: Stage the daemon artifacts
+        run: |
+          set -euo pipefail
+          ART="${GITHUB_WORKSPACE}/.rig-artifacts"
+          rm -rf "$ART"; mkdir -p "$ART"
+          install -m 0755 "${RUNNER_TEMP}/bundle/factory_worker" "$ART/factory_worker"
+          install -m 0755 "${RUNNER_TEMP}/bundle/libpagespeed.so" "$ART/libpagespeed.so"
+          ls -lh "$ART"
+
+      - name: Verify the artifacts are this run's build
+        run: |
+          tools/ci/verify-artifacts.sh "$GITHUB_SHA" \
+            "binary:${GITHUB_WORKSPACE}/.rig-artifacts/factory_worker" \
+            "sharedlib:${GITHUB_WORKSPACE}/.rig-artifacts/libpagespeed.so"
+
+      # Two observed spike periods are about 8 minutes (measured spikes are
+      # exactly 240 seconds apart); 570 seconds covers two with margin.
+      - name: Package-install verification with the browser soak (debian12)
+        env:
+          H6_SOAK_SECONDS: "570"
+        run: |
+          bash tools/packaging/daemon-install-rig.sh \
+            --distro debian12 \
+            --binary "${GITHUB_WORKSPACE}/.rig-artifacts/factory_worker" \
+            --library "${GITHUB_WORKSPACE}/.rig-artifacts/libpagespeed.so" \
+            --work "${GITHUB_WORKSPACE}/.rig-work-soak"
+
+      - name: Clean up rig scratch
+        if: always()
+        run: |
+          docker run --rm -v "${GITHUB_WORKSPACE}:/workspace" alpine \
+            rm -rf /workspace/.rig-work-soak /workspace/.rig-artifacts \
+            || rm -rf "${GITHUB_WORKSPACE}/.rig-work-soak" \
+                      "${GITHUB_WORKSPACE}/.rig-artifacts" || true
+
+  # ---------------------------------------------------------------------
+  # Async-CSS rendered probe: the nightly half of the async-CSS lane. The
+  # markup lane proves the optimizer emits the right bytes for a deferred
+  # stylesheet; this one renders the served page in a real browser and
+  # measures the fold. ADVISORY: it never hard-fails on findings. The signal
+  # is one tracking issue (label async-css-probe-finding), opened or
+  # refreshed while findings exist and closed by the next clean run, plus
+  # the evidence artifact. The fleet job only produces the artifact; the
+  # hosted report job below touches the issue.
+  # ---------------------------------------------------------------------
+  # The whole Test::Nginx suite (t/) on the night's optimized x64 build. The
+  # PR tier runs it only when its paths change; this catches what the path
+  # filter cannot see (the suite also reads src/worker/shared_config.h, and
+  # the module links code outside the filtered directories). Same steps as
+  # the test-nginx job of pipeline-pr.yml: the script's prebuilt mode in the
+  # dev image, nothing built here.
+  test-nginx-x64:
+    permissions:
+      contents: read
+    name: nginx integration (Test::Nginx t/, x64)
+    needs: periodic-build-x64
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-24.04' || 'fleet-heavy' }}
+    timeout-minutes: 30
+    env:
+      DEV_IMAGE: pagespeed2-dev:ci-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Docker preflight
+        run: tools/ci/docker-preflight.sh
+
+      - name: Ensure the dev image
+        run: |
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh --tag "${DEV_IMAGE}" x64 docker)
+          echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
+
+      # A per-job directory, never a shared runner path.
+      - name: Download the build bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: nightly-ci-artifacts-linux-x64
+          path: ${{ runner.temp }}/tnginx-bundle
+
+      - name: Verify the build bundle
+        run: |
+          cd "${RUNNER_TEMP}/tnginx-bundle"
+          sha256sum -c --quiet checksums.sha256
+          # The artifact transport drops the executable bits.
+          chmod +x ngx_pagespeed_module.so seed_test_cache webbotauth_sign_tool
+
+      # The script runs as root (it installs Test::Nginx with apt and cpanm),
+      # so the checkout is mounted read-only and copied into the container:
+      # nothing root-owned lands in the runner's workspace. The suite's
+      # ports and cache files stay inside the container's own network and
+      # /tmp, so runner slots on one host do not collide. prove runs without
+      # -v: one line per test file, diagnostics only for a failure.
+      - name: Run the Test::Nginx suite
+        # shell: bash runs the step with -eo pipefail, so the docker exit
+        # code survives the pipe into tee (the default shell has no pipefail).
+        shell: bash
+        run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB); legacy values when unset.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget 8g || exit 1
+          LOG="${RUNNER_TEMP}/test-nginx.log"
+          docker run --rm --init \
+            ${SLOT_CPUS:+--cpus="${SLOT_CPUS}"} \
+            --memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}" \
+            --user 0:0 \
+            -e DEBIAN_FRONTEND=noninteractive \
+            -e PREBUILT_DIR=/bundle \
+            -e PROVE_OPTS=-r \
+            -v "${GITHUB_WORKSPACE}:/src:ro" \
+            -v "${RUNNER_TEMP}/tnginx-bundle:/bundle:ro" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" \
+            bash -c '
+              set -eo pipefail
+              tar --exclude=./.git --exclude=./vendor --exclude=./website -C /src -cf - . | tar -C /workspace -xf -
+              rc=0
+              bash tools/docker-test-nginx.sh || rc=$?
+              if [ "$rc" -ne 0 ] && [ -f t/servroot/logs/error.log ]; then
+                echo "=== nginx error.log (last 100 lines) ==="
+                tail -n 100 t/servroot/logs/error.log
+              fi
+              exit "$rc"
+            ' 2>&1 | tee "${LOG}"
+          {
+            echo "## Test::Nginx suite (nightly, x64)"
+            echo ""
+            echo '```'
+            grep -E '^t/[^ ]+\.t \.+|^Files=|^Result:' "${LOG}" || true
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Remove this job's dev image tag
+        if: always()
+        run: |
+          # Only the per-run tag; the content-hashed image stays for the next job.
+          docker rmi "${DEV_IMAGE}" >/dev/null 2>&1 || true
+
+  # The two .NET test projects (WeAmp.PageSpeed.Tests and
+  # WeAmp.PageSpeed.AspNetCore.Tests) on net8.0 and net10.0 against the
+  # night's optimized x64 libpagespeed.so and factory_worker. The PR tier
+  # runs them only when their paths change; this catches what the path
+  # filter cannot see. Same script as the dotnet-tests job of
+  # pipeline-pr.yml; nothing native is built here.
+  dotnet-tests-x64:
+    permissions:
+      contents: read
+    name: .NET tests (WeAmp.PageSpeed, AspNetCore, x64)
+    needs: periodic-build-x64
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-24.04' || 'fleet-light' }}
+    timeout-minutes: 30
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Docker preflight
+        run: tools/ci/docker-preflight.sh
+
+      # A per-job directory, never a shared runner path.
+      - name: Download the build bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: nightly-ci-artifacts-linux-x64
+          path: ${{ runner.temp }}/dotnet-bundle
+
+      - name: Verify the build bundle
+        run: |
+          cd "${RUNNER_TEMP}/dotnet-bundle"
+          sha256sum -c --quiet checksums.sha256
+
+      - name: Run the .NET tests
+        run: |
+          set -o pipefail
+          rc=0
+          tools/ci/dotnet-tests.sh "${RUNNER_TEMP}/dotnet-bundle" "${RUNNER_TEMP}/dotnet-results" || rc=$?
+          {
+            echo "## .NET tests (nightly, x64)"
+            echo ""
+            cat "${RUNNER_TEMP}/dotnet-results/summary.md" 2>/dev/null || echo "No summary: the run stopped before the results."
+          } >> "${GITHUB_STEP_SUMMARY}"
+          exit "${rc}"
+
+      - name: Upload the test results
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: nightly-dotnet-test-results-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/dotnet-results/*.trx
+          retention-days: 7
+
+  async-css-probe-rendered:
+    permissions:
+      contents: read
+    name: Async-CSS rendered probe (advisory)
+    needs: periodic-build-x64
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-24.04' || 'fleet-light' }}
+    timeout-minutes: 45
+    env:
+      # A plain name, joined onto RUNNER_TEMP in each step.
+      PROBE_OUT_SUBDIR: async-css-probe-out
+      # The worker configuration this lane measures, recorded in the findings
+      # file so the issue says so. It is not a configuration that ships.
+      PROBE_WORKER_ARGV: "--unsafe-force-async-css --async-css-min-coverage 0.95"
+      # Pinned: a pixel comparison whose browser drifts under it produces
+      # diffs that read as product regressions.
+      PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.58.2-noble
+      PLAYWRIGHT_DEPS: playwright@1.58.2 pngjs@7
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Several runner slots share one host and every stack publishes fixed
+      # host ports; move this job's ports by a per-runner offset.
+      - name: Per-runner host ports
+        run: |
+          . tools/ci/runner-ports.sh
+          for v in $RUNNER_PORT_VARS; do eval "p=\${$v}"; echo "$v=$p"; done >> "$GITHUB_ENV"
+
+      - name: Docker preflight
+        run: tools/ci/docker-preflight.sh
+
+      - name: Download the build bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: nightly-ci-artifacts-linux-x64
+          path: ${{ runner.temp }}/bundle/.ci-artifacts
+
+      - name: Stage CI artifacts
+        env:
+          CI_ARTIFACTS_PLATFORM: linux-x64-periodic
+        run: tools/ci/stage-artifacts.sh "${RUNNER_TEMP}/bundle"
+
+      # Run-unique compose identity so two runs on one docker host cannot
+      # share containers, volumes or ports.
+      - name: Resolve compose identity and scratch dir
+        run: |
+          set -euo pipefail
+          PORT_BASE=$(( 8300 + (GITHUB_RUN_ID % 300) * 2 ))
+          {
+            echo "COMPOSE_PROJECT_NAME=async-css-probe-${GITHUB_RUN_ID}"
+            echo "PROBE_NGINX_PORT=${PORT_BASE}"
+            echo "PROBE_ORIGIN_PORT=$(( PORT_BASE + 1 ))"
+          } >> "$GITHUB_ENV"
+          mkdir -p "${RUNNER_TEMP}/${PROBE_OUT_SUBDIR}"
+
+      # The rendered lane measures the DEFERRED page, so the stack runs in
+      # the forced mode: the fixture's deferral must not depend on whatever
+      # the sufficiency gate decides on the day.
+      - name: Start stack (forced deferral)
+        env:
+          ASYNC_CSS_PROBE_FORCE: "1"
+          PAGESPEED_ASYNC_CSS_MIN_COVERAGE: "0.95"
+        run: |
+          set -euo pipefail
+          COMPOSE="docker compose -f tools/async-css-probe/docker-compose.yml -f tools/async-css-probe/docker-compose.prebuilt.yml"
+          $COMPOSE down --remove-orphans -v 2>/dev/null || true
+          $COMPOSE build
+          $COMPOSE up -d
+          # Readiness gates on nginx still running plus a real HTTP status
+          # from the fixture's stylesheet, never from the page under test.
+          deadline=$((SECONDS + 180))
+          while [ $SECONDS -lt $deadline ]; do
+            NGINX_RUNNING=$($COMPOSE ps --status=running --services 2>/dev/null | grep -c '^nginx$' || true)
+            if [ "$NGINX_RUNNING" = "0" ]; then
+              echo "::error::nginx container is not running."
+              $COMPOSE ps -a
+              $COMPOSE logs --tail=100
+              exit 1
+            fi
+            HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" \
+              "http://localhost:${PROBE_NGINX_PORT}/_astro/BaseLayout.BV5EQjYn.css" 2>/dev/null || true)
+            case "$HTTP_CODE" in
+              [1-5][0-9][0-9]) echo "Stack ready after ${SECONDS}s (HTTP $HTTP_CODE)"; exit 0 ;;
+            esac
+            sleep 2
+          done
+          echo "::error::probe stack not ready after 180s"
+          $COMPOSE ps
+          $COMPOSE logs --tail=50
+          exit 1
+
+      - name: Resolve compose network name
+        id: net
+        run: |
+          NET=$(docker network ls --filter "name=^${COMPOSE_PROJECT_NAME}_default$" --format '{{.Name}}' | head -1)
+          echo "name=$NET" >> "$GITHUB_OUTPUT"
+          echo "Compose network: $NET"
+
+      # The browser runs in a container on the compose network, so it reaches
+      # the services by their compose names. The script is copied into /tmp
+      # and run from there because module resolution of bare imports starts
+      # at the importing file's directory. The probe exits non-zero on
+      # findings; the step is advisory and records that it ran.
+      - name: Run rendered probe
+        id: probe
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          # Container user for this runner's daemon (rootful or rootless):
+          # see tools/ci/container-identity.sh.
+          out="$(tools/ci/container-identity.sh)" || exit 1
+          eval "$out"
+          set +e
+          docker run --rm --network="${{ steps.net.outputs.name }}" \
+            --user "$CONTAINER_USER" -e HOME=/tmp -e npm_config_cache=/tmp/.npm \
+            -v "$PWD/tools/async-css-probe":/probe:ro \
+            -v "$PWD/src/browser/device_emulation.json":/device_emulation.json:ro \
+            -v "${RUNNER_TEMP}/${PROBE_OUT_SUBDIR}":/out \
+            -w /tmp \
+            -e PROBE_BASE_URL=http://nginx:8080 \
+            -e PROBE_GOLDEN_DIR=/probe/goldens \
+            -e PROBE_OUT_DIR=/out \
+            -e PROBE_FINDINGS=/out/findings.md \
+            -e PROBE_PRIMITIVE=/probe/primitive.json \
+            -e PROBE_DEVICE_EMULATION=/device_emulation.json \
+            -e PROBE_WORKER_ARGV="${PROBE_WORKER_ARGV}" \
+            "${PLAYWRIGHT_IMAGE}" \
+            bash -c "npm install --no-save --no-audit --no-fund --silent ${PLAYWRIGHT_DEPS} >/dev/null 2>&1 && cp /probe/probe_rendered.mjs /tmp/ && node /tmp/probe_rendered.mjs" \
+            2>&1 | tee "${RUNNER_TEMP}/probe-console.log"
+          rc=${PIPESTATUS[0]}
+          echo "LANE_RAN=1" >> "$GITHUB_ENV"
+          echo "Rendered probe exit status: ${rc}"
+          exit "$rc"
+
+      # If the probe step ran but LANE_RAN is still unset, the evidence and
+      # the findings issue would be skipped silently every night: fail loudly.
+      - name: Check the probe recorded LANE_RAN
+        if: always() && (steps.probe.outcome == 'success' || steps.probe.outcome == 'failure') && env.LANE_RAN != '1'
+        run: |
+          echo "::error::The rendered probe step ran (outcome: ${{ steps.probe.outcome }}) but did not set LANE_RAN=1, so the evidence upload and the findings issue would be skipped."
+          exit 1
+
+      # A run that produced no findings file did not reach a verdict (a
+      # container, network or startup failure): record that as a finding so
+      # it cannot silently close a live issue.
+      - name: Normalize findings
+        if: always()
+        run: |
+          set -uo pipefail
+          OUT="${RUNNER_TEMP}/${PROBE_OUT_SUBDIR}"
+          FINDINGS="${OUT}/findings.md"
+          mkdir -p "$OUT"
+          if [ ! -f "$FINDINGS" ]; then
+            {
+              echo "### Rendered probe did not reach a verdict (infrastructure)"
+              echo
+              echo "The lane produced no findings file: a startup, container, or"
+              echo "network failure rather than a clean run. This is NOT evidence"
+              echo "about the fold. It also suppresses auto-close for the night."
+              echo "See the run log."
+            } > "$FINDINGS"
+          fi
+          if [ -s "$FINDINGS" ]; then
+            cat "$FINDINGS" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Rendered probe clean: the fold matches the golden at every viewport." \
+              >> "$GITHUB_STEP_SUMMARY"
+          fi
+          cp "${RUNNER_TEMP}/probe-console.log" "$OUT/console.log" 2>/dev/null || true
+          if [ "${LANE_RAN:-}" = "1" ]; then
+            touch "$OUT/lane-ran"
+          fi
+
+      # Evidence for the findings issue, refreshed nightly; also the input of
+      # the report job. A refused upload (artifact storage full) must not
+      # turn the lane red.
+      - name: Upload evidence (screenshots, findings, console)
+        if: always() && env.LANE_RAN == '1'
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: nightly-async-css-probe-evidence
+          path: ${{ runner.temp }}/async-css-probe-out/
+          if-no-files-found: ignore
+          retention-days: 3
+
+      - name: Teardown
+        if: always()
+        run: |
+          docker compose -f tools/async-css-probe/docker-compose.yml \
+            -f tools/async-css-probe/docker-compose.prebuilt.yml \
+            down --remove-orphans -v --rmi local 2>/dev/null || true
+
+  async-css-probe-report:
+    name: Async-CSS probe report
+    needs: async-css-probe-rendered
+    if: ${{ !cancelled() && needs.async-css-probe-rendered.result != 'skipped' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The tools run below hold a write token: take them from main, never
+          # from a dispatched branch.
+          ref: main
+
+      - name: Download the evidence
+        id: evidence
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: nightly-async-css-probe-evidence
+          path: ${{ runner.temp }}/evidence
+
+      # Only a run on the default branch touches the issue; any other branch
+      # is a dry run that prints the gh calls it would make. A run whose lane
+      # never ran leaves the issue alone, so a failure before the probe
+      # cannot close a legitimate open issue.
+      - name: File or close the findings issue
+        if: steps.evidence.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && '0' || '1' }}
+          LABEL_DESC: "Automated async-CSS rendered-probe findings"
+          CLEAN_NOTE: "Above-the-fold render matches the golden at every viewport"
+        run: |
+          set -uo pipefail
+          EVID="${RUNNER_TEMP}/evidence"
+          if [ ! -f "${EVID}/lane-ran" ]; then
+            echo "::notice::the probe did not run to a verdict; leaving the findings issue alone"
+            exit 0
+          fi
+          bash tools/sbom/post-findings-issue.sh \
+            "async-css-probe-finding" \
+            "Async-CSS: deferred stylesheet changes the above-the-fold render" \
+            "${EVID}/findings.md" \
+            "Reproduce locally with \`tools/async-css-probe/run_probe.sh --mode forced\` plus the rendered probe (tools/async-css-probe/README.md); the run's \`nightly-async-css-probe-evidence\` artifact has the per-viewport screenshots. Either the inlined above-the-fold CSS does not cover the fold, or the committed goldens need regenerating in the pinned image. This issue auto-closes on the next clean run."
+
+      - name: Note a missing evidence artifact
+        if: steps.evidence.outcome != 'success'
+        run: echo "::warning::no evidence artifact from the probe job; the findings issue was left alone"
+
+  # ---------------------------------------------------------------------
+  # CSS minifier fuzzing. Two lanes, one harness (lib/css/css_minify_fuzz.cc):
+  # `nightly` is coverage-guided libFuzzer with a bounded budget, a corpus
+  # persisted through actions/cache, and crash artifacts bucketed against the
+  # documented known-find classes; only needs-triage artifacts reach the
+  # findings file. It never hard-fails on findings: the tracking issue (label
+  # css-fuzz-finding) is the signal. `shadow` is a manual lane.
+  #
+  # Findings are carried forward: every needs-triage crash unit is saved
+  # in a second cache (css-fuzz-open-findings-v1-*) and replayed through the
+  # classifier on the next night next to that night's new units. A finding
+  # therefore stays in the findings file, and the issue stays open, until
+  # the unit itself replays clean; a night on which the fuzzer simply does
+  # not rediscover it no longer closes the issue. When that cache is missing
+  # or holds no units (an older entry after a failed save looks the same)
+  # while a tracking issue is open, the earlier units cannot be re-verified:
+  # the lane records that (an "unverified" marker carried in the same cache)
+  # and suppresses auto-close until the issue is closed by hand.
+  # ---------------------------------------------------------------------
+  css-fuzz-nightly:
+    permissions:
+      contents: read
+      issues: read
+    name: CSS fuzz nightly (libFuzzer + corpus + findings)
+    needs: event-guard
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-24.04' || 'fleet-heavy' }}
+    timeout-minutes: 45
+    env:
+      FUZZ_SECONDS: ${{ inputs.fuzz_seconds || '600' }}
+    steps:
+      # libFuzzer reads a non-numeric budget as "no limit" and a budget past
+      # the job timeout loses the lane-ran marker and the corpus save, so
+      # bound it before anything else runs.
+      - name: Validate the fuzz budget
+        run: |
+          case "${FUZZ_SECONDS}" in
+            ''|*[!0-9]*) echo "::error::fuzz_seconds must be a whole number of seconds (1..2400)"; exit 1 ;;
+          esac
+          if [ "${FUZZ_SECONDS}" -lt 1 ] || [ "${FUZZ_SECONDS}" -gt 2400 ]; then
+            echo "::error::fuzz_seconds must be between 1 and 2400 (got ${FUZZ_SECONDS})"
+            exit 1
+          fi
+
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Ensure clang++-20
+        run: |
+          if command -v clang++-20 >/dev/null 2>&1; then
+            clang++-20 --version | head -1
+            exit 0
+          fi
+          echo "::notice::clang++-20 not found: installing it from the LLVM apt repository"
+          bash tools/ci/fetch_retry.sh https://apt.llvm.org/llvm.sh "${RUNNER_TEMP}/llvm.sh"
+          sudo bash "${RUNNER_TEMP}/llvm.sh" 20
+
+      - name: Resolve scratch dirs
+        run: |
+          {
+            echo "BIN_DIR=${RUNNER_TEMP}/css-fuzz-bin"
+            echo "CORPUS_DIR=${RUNNER_TEMP}/css-fuzz-corpus"
+            echo "CRASH_DIR=${RUNNER_TEMP}/css-fuzz-crashes"
+            echo "OPEN_DIR=${RUNNER_TEMP}/css-fuzz-open"
+            echo "FINDINGS=${RUNNER_TEMP}/css-fuzz-findings.md"
+          } >> "$GITHUB_ENV"
+
+      - name: Build replay and libFuzzer binaries
+        run: |
+          set -euo pipefail
+          CXX=clang++-20
+          mkdir -p "$BIN_DIR"
+          "$CXX" -std=c++17 -O1 -fsanitize=address,undefined -I. \
+            lib/css/css_minify_fuzz.cc lib/css/css_minify.cc \
+            -o "$BIN_DIR/replay"
+          "$CXX" -std=c++17 -O1 -fsanitize=fuzzer,address,undefined \
+            -DCSS_MINIFY_LIBFUZZER -I. \
+            lib/css/css_minify_fuzz.cc lib/css/css_minify.cc \
+            -o "$BIN_DIR/fuzzer"
+
+      - name: Restore persisted corpus
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/css-fuzz-corpus
+          key: css-minify-fuzz-corpus-v1-${{ github.run_id }}
+          restore-keys: css-minify-fuzz-corpus-v1-
+
+      # The needs-triage units of earlier nights (see the lane header).
+      - name: Restore open findings
+        id: open_findings
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/css-fuzz-open
+          key: css-fuzz-open-findings-v1-${{ github.run_id }}
+          restore-keys: css-fuzz-open-findings-v1-
+
+      - name: Seed corpus from the harness's embedded seeds
+        run: |
+          set -euo pipefail
+          mkdir -p "$CORPUS_DIR" "$CRASH_DIR" "${RUNNER_TEMP}/css-fuzz-seed"
+          "$BIN_DIR/replay" --dump_corpus="${RUNNER_TEMP}/css-fuzz-seed"
+          # -n: never overwrite what the persisted cache already grew.
+          cp -n "${RUNNER_TEMP}/css-fuzz-seed"/seed-* "$CORPUS_DIR"/
+
+      # The run steps capture rc instead of failing fast so a red replay
+      # floor cannot mask the fuzz campaign (and vice versa); the findings
+      # step reports both.
+      - name: Run deterministic oracle replay (regression floor)
+        run: |
+          set +e
+          export ASAN_OPTIONS="handle_abort=1:allow_addr2line=true:detect_odr_violation=1"
+          export UBSAN_OPTIONS="halt_on_error=true:print_stacktrace=1"
+          "$BIN_DIR/replay" 2>&1 | tail -5
+          echo "REPLAY_RC=${PIPESTATUS[0]}" >> "$GITHUB_ENV"
+
+      - name: Run libFuzzer (bounded budget, fork mode)
+        run: |
+          set +e
+          export ASAN_OPTIONS="handle_abort=1:allow_addr2line=true:detect_odr_violation=1"
+          export UBSAN_OPTIONS="halt_on_error=true:print_stacktrace=1"
+          # -fork=2 -ignore_crashes=1: a known-class crash must not truncate
+          # the campaign; crash units land in CRASH_DIR for the classifier
+          # while coverage keeps growing.
+          "$BIN_DIR/fuzzer" "$CORPUS_DIR" \
+            -fork=2 -ignore_crashes=1 \
+            -max_total_time="${FUZZ_SECONDS}" \
+            -max_len=4096 \
+            -rss_limit_mb=4096 \
+            -artifact_prefix="${CRASH_DIR}/" \
+            -print_final_stats=1
+          echo "FUZZ_RC=$?" >> "$GITHUB_ENV"
+
+      # Carry the earlier nights' needs-triage units into CRASH_DIR, so the
+      # classifier replays them on tonight's binary. Its own step so the
+      # token reaches only the carry's read-only open-issue lookup, not the
+      # replay binary or the classifier. Tonight's own artifact count is
+      # taken first, for the zero-artifact check below; the carry's
+      # findings entry goes to a side file the next step folds in.
+      - name: Carry earlier findings in
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPEN_CACHE_KEY: ${{ steps.open_findings.outputs.cache-matched-key }}
+        run: |
+          set -uo pipefail
+          mkdir -p "$CRASH_DIR"
+          echo "TONIGHT_ARTIFACTS=$(find "$CRASH_DIR" -type f | wc -l | tr -d ' ')" >> "$GITHUB_ENV"
+          : > "${FINDINGS}.carry"
+          bash tools/ci/carry-css-fuzz-findings.sh in \
+            "$OPEN_DIR" "$CRASH_DIR" "${FINDINGS}.carry" "$OPEN_CACHE_KEY" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # Bucket crash artifacts against the documented known-find classes;
+      # only needs-triage items reach the findings file. An empty file means
+      # clean, and the tracking issue closes on it.
+      - name: Classify artifacts and write findings
+        run: |
+          set -uo pipefail
+          echo "LANE_RAN=1" >> "$GITHUB_ENV"
+          : > "$FINDINGS"
+          if [ "${REPLAY_RC:-1}" != "0" ]; then
+            {
+              echo "### deterministic replay floor is RED (rc=${REPLAY_RC})"
+              echo
+              echo "The embedded valid-CSS seed set trips an oracle or a sanitizer on main: a genuine regression, not a fuzz find. See the run log."
+              echo
+            } >> "$FINDINGS"
+          fi
+          # Fork mode exits non-zero when it FOUND crashes (artifacts in
+          # CRASH_DIR): a normal night. Non-zero with ZERO artifacts means the
+          # campaign never ran (bad flag, OOM before the first unit): that
+          # must open or comment the tracking issue, since an empty findings
+          # file would close a live issue on a night nothing ran.
+          # Counted before the carried units were added (previous step).
+          n_artifacts="${TONIGHT_ARTIFACTS:-$(find "$CRASH_DIR" -type f | wc -l | tr -d ' ')}"
+          if [ "${FUZZ_RC:-1}" != "0" ] && [ "$n_artifacts" = "0" ]; then
+            {
+              echo "### libFuzzer campaign failed (rc=${FUZZ_RC}, zero artifacts)"
+              echo
+              echo "The fuzzer exited non-zero without producing a single unit: a startup or campaign failure, not a fuzz find. This entry also suppresses auto-close for the night. See the run log."
+              echo
+            } >> "$FINDINGS"
+          fi
+          # The carry step's entry, if any. A missing side file means the
+          # carry did not run, so the earlier units were not replayed: fail
+          # closed and keep the issue open.
+          if [ -f "${FINDINGS}.carry" ]; then
+            cat "${FINDINGS}.carry" >> "$FINDINGS"
+          else
+            {
+              echo "### earlier findings could not be re-verified (carry step did not run)"
+              echo
+              echo "The step that replays earlier needs-triage units did not run, so this run cannot clear them. This entry suppresses auto-close for the night. See the run log."
+              echo
+            } >> "$FINDINGS"
+          fi
+          bash tools/ci/classify-css-fuzz-artifacts.sh \
+            "$BIN_DIR/replay" "$CRASH_DIR" "$FINDINGS" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+          bash tools/ci/carry-css-fuzz-findings.sh out \
+            "$OPEN_DIR" "$CRASH_DIR" "$FINDINGS" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ -s "$FINDINGS" ]; then
+            cat "$FINDINGS" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload evidence (crash reproducers + corpus)
+        if: always() && env.LANE_RAN == '1'
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: css-fuzz-evidence
+          path: |
+            ${{ runner.temp }}/css-fuzz-crashes/
+            ${{ runner.temp }}/css-fuzz-corpus/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      # Save even on findings: new coverage units are progress regardless.
+      - name: Persist corpus
+        if: always() && env.LANE_RAN == '1'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/css-fuzz-corpus
+          key: css-minify-fuzz-corpus-v1-${{ github.run_id }}
+
+      # Tonight's needs-triage units (and the unverified marker, if set),
+      # replayed by the next run before its issue can close.
+      - name: Persist open findings
+        if: always() && env.LANE_RAN == '1'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/css-fuzz-open
+          key: css-fuzz-open-findings-v1-${{ github.run_id }}-${{ github.run_attempt }}
+
+      # The small input of the report job: the findings text, and a marker
+      # that the lane ran so a build-stage failure cannot close the issue.
+      - name: Prepare the findings artifact
+        if: always() && env.LANE_RAN == '1'
+        run: |
+          mkdir -p "${RUNNER_TEMP}/css-fuzz-report"
+          cp "$FINDINGS" "${RUNNER_TEMP}/css-fuzz-report/findings.md"
+          touch "${RUNNER_TEMP}/css-fuzz-report/lane-ran"
+
+      - name: Upload the findings
+        if: always() && env.LANE_RAN == '1'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: nightly-css-fuzz-findings
+          path: ${{ runner.temp }}/css-fuzz-report/
+          retention-days: 3
+
+  css-fuzz-report:
+    name: CSS fuzz report
+    needs: css-fuzz-nightly
+    if: ${{ !cancelled() && needs.css-fuzz-nightly.result != 'skipped' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The tools run below hold a write token: take them from main, never
+          # from a dispatched branch.
+          ref: main
+
+      - name: Download the findings
+        id: findings
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: nightly-css-fuzz-findings
+          path: ${{ runner.temp }}/findings
+
+      # Live only on the default branch: a dispatch off any other branch is a
+      # dry run that prints what it would do.
+      - name: File or close the findings issue
+        if: steps.findings.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && '0' || '1' }}
+          LABEL_DESC: "Automated CSS minifier fuzz findings (audit lane)"
+          CLEAN_NOTE: "Replay floor green, no needs-triage fuzz artifacts"
+        run: |
+          set -uo pipefail
+          F="${RUNNER_TEMP}/findings"
+          if [ ! -f "${F}/lane-ran" ]; then
+            echo "::notice::the fuzz lane did not run to a verdict; leaving the findings issue alone"
+            exit 0
+          fi
+          bash tools/sbom/post-findings-issue.sh \
+            "css-fuzz-finding" \
+            "CSS minifier fuzz: finding needs triage" \
+            "${F}/findings.md" \
+            "Reproduce with the run's \`css-fuzz-evidence\` artifact (replay: \`bazel run -c opt --config=asan //lib/css:css_minify_fuzz -- <crash-file>\`); fix the minifier bug or record a justified known-find class in tools/ci/classify-css-fuzz-artifacts.sh. Reported units are replayed on every scheduled run; this issue auto-closes once all of them replay clean and no new unit needs triage."
+
+      - name: Note a missing findings artifact
+        if: steps.findings.outcome != 'success'
+        run: echo "::warning::no findings artifact from the fuzz job; the findings issue was left alone"
+
+  # The glue-normalization cutover gate. Manual only: it replays the previous
+  # nightly's evidence plus a fresh dump of the embedded seeds through a
+  # comparator built from a pinned baseline revision and from this checkout,
+  # and requires 100% per-input verdict agreement. Unlike the nightly this
+  # lane HARD-fails on any disagreement. The pin tracks the last ratified
+  # comparator revision: bump it in the same change as any intentional
+  # comparator evolution, or the lane fails on every intended divergence.
+  # The pin is 335c9f2d, the first commit of this repository's history that
+  # carries the comparator: its css_token_stream.h and css_phases.h are
+  # byte-identical to the previously ratified revision (the files that define
+  # the verdicts), and it is an ancestor of main. A nightly dispatch with css_fuzz_shadow set runs the whole nightly beside this lane.
+  # The fleet guard of a fleet job is pinned verbatim by the workflow-shape
+  # gate, so the css_fuzz_shadow switch is a hosted gate job: it runs (no
+  # work, no fleet slot) only on a dispatch that sets the input, and the
+  # shadow lane needs it, so it is skipped on every other run.
+  css-fuzz-shadow-gate:
+    permissions: {}
+    name: CSS oracle shadow switch
+    needs: event-guard
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.css_fuzz_shadow }}
+    timeout-minutes: 5
+    steps:
+      - run: echo "css_fuzz_shadow is set; running the shadow lane"
+
+  css-fuzz-shadow:
+    name: CSS oracle shadow (baseline vs current agreement)
+    needs: [event-guard, css-fuzz-shadow-gate]
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-24.04' || 'fleet-heavy' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && vars.FLEET_ENABLED == 'true' }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      # Full history: the shadow script extracts the baseline comparator with
+      # `git show <pinned rev>:...`.
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Ensure clang++-20
+        run: |
+          if command -v clang++-20 >/dev/null 2>&1; then
+            clang++-20 --version | head -1
+            exit 0
+          fi
+          echo "::notice::clang++-20 not found: installing it from the LLVM apt repository"
+          bash tools/ci/fetch_retry.sh https://apt.llvm.org/llvm.sh "${RUNNER_TEMP}/llvm.sh"
+          sudo bash "${RUNNER_TEMP}/llvm.sh" 20
+
+      # The evidence base: the previous nightly's crash units and grown
+      # corpus. Fetch the most recent COMPLETED nightly on main, excluding
+      # this run, regardless of conclusion (a shadow-red night still produced
+      # evidence). Fail loudly, never a silent seeds-only comparison, when
+      # there is no prior run, the download fails, or the artifact is empty.
+      - name: Fetch the previous nightly's fuzz evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          EVID="${RUNNER_TEMP}/css-shadow-evidence"
+          mkdir -p "$EVID"
+          run_id="$(gh run list --workflow nightly.yml --branch main \
+            --status completed --limit 5 --json databaseId \
+            --jq 'map(select(.databaseId != (env.RUN_ID | tonumber))) | .[0].databaseId // empty')"
+          if [ -z "$run_id" ]; then
+            echo "::error::no prior completed nightly run found on main: no evidence to shadow-compare"
+            exit 1
+          fi
+          gh run download "$run_id" --name css-fuzz-evidence --dir "$EVID"
+          n="$(find "$EVID" -type f | wc -l | tr -d ' ')"
+          if [ "$n" -eq 0 ]; then
+            echo "::error::css-fuzz-evidence from run $run_id is empty (expired after a gap?): refusing a seeds-only shadow"
+            exit 1
+          fi
+          echo "evidence units: $n (nightly run $run_id)"
+
+      # The embedded seed set, dumped by the current harness (the seeds are
+      # the same for both comparators).
+      - name: Dump embedded seeds
+        run: |
+          set -euo pipefail
+          CXX=clang++-20
+          mkdir -p "${RUNNER_TEMP}/css-shadow-seeds" "${RUNNER_TEMP}/css-shadow-bin"
+          "$CXX" -std=c++17 -O1 -fsanitize=address,undefined -I. \
+            lib/css/css_minify_fuzz.cc lib/css/css_minify.cc \
+            -o "${RUNNER_TEMP}/css-shadow-bin/replay"
+          "${RUNNER_TEMP}/css-shadow-bin/replay" --dump_corpus="${RUNNER_TEMP}/css-shadow-seeds"
+
+      - name: Shadow comparison (baseline vs current verdicts)
+        run: |
+          set -euo pipefail
+          export ASAN_OPTIONS="handle_abort=1:allow_addr2line=true:detect_odr_violation=1"
+          export UBSAN_OPTIONS="halt_on_error=true:print_stacktrace=1"
+          bash tools/ci/shadow-css-oracle.sh . 335c9f2d \
+            "${RUNNER_TEMP}/css-shadow-seeds" \
+            "${RUNNER_TEMP}/css-shadow-evidence" | tee -a "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------
+  # Dependency scan, nightly image leg. The product images are built in this
+  # job from this run's nightly bundle (the prebuilt image Dockerfiles), never
+  # taken from a host's docker cache: a scan of whatever image a runner last
+  # built is a scan of an image nobody ships. BLOCKING on medium and above
+  # across npm, cargo and images (images: findings with a fix available at
+  # medium, High and Critical always). The pull-request and push legs of the
+  # dependency scan belong to the PR tier.
+  # ---------------------------------------------------------------------
+  dep-scan-images:
+    permissions:
+      contents: read
+    name: Dependency Scan (nightly, images)
+    needs: periodic-build-x64
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      SYFT_VERSION: v1.44.0
+      GRYPE_VERSION: v0.121.2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download the build bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: nightly-ci-artifacts-linux-x64
+          path: ${{ runner.temp }}/bundle/.ci-artifacts
+
+      # The product images are FROM pagespeed2-base-runtime. A persistent host
+      # keeps that image between jobs and stage-artifacts.sh reuses it while
+      # the Dockerfile hash matches, so build it here from scratch (fresh base
+      # layers, no layer cache) with the label the staging script checks; the
+      # scan then covers what the Dockerfile produces today, not a host cache.
+      - name: Rebuild the base image from scratch
+        run: |
+          set -euo pipefail
+          HASH="$(sha256sum docker/Dockerfile.base-runtime | awk '{print $1}')"
+          docker build --pull --no-cache -t pagespeed2-base-runtime \
+            --build-arg APT_REFRESH="$(date -u +%F)" \
+            --label "weamp.base-runtime.dockerfile_sha256=${HASH}" \
+            -f docker/Dockerfile.base-runtime .
+
+      - name: Stage CI artifacts
+        env:
+          CI_ARTIFACTS_PLATFORM: linux-x64-periodic
+        run: tools/ci/stage-artifacts.sh "${RUNNER_TEMP}/bundle"
+
+      - name: Build the product images in this job
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          install -m 755 .ci-artifacts/factory_worker artifacts/factory_worker
+          install -m 644 .ci-artifacts/ngx_pagespeed_module.so artifacts/ngx_pagespeed_module.so
+          install -m 644 .ci-artifacts/nginx-version artifacts/nginx-version
+          docker build -f docker/Dockerfile.worker.prebuilt -t modpagespeed/worker:latest .
+          docker build -f docker/Dockerfile.nginx.prebuilt -t modpagespeed/nginx:latest .
+          bash tools/ci/ensure-dev-image.sh --tag-latest x64 docker >/dev/null
+
+      # A malformed VEX statement is silently ignored by the scanner, which
+      # would resurface a triaged finding or let a broken suppression look
+      # active. Exits 0 when sbom/ has no *.vex.json.
+      - name: Validate VEX statements
+        run: python3 tools/ci/validate-vex.py sbom/
+
+      - name: Ensure pinned syft + grype
+        run: bash tools/ci/ensure-syft-grype.sh
+
+      # The staleness ratchet: the blocking npm and cargo gate scans against a
+      # pinned database. Once that pin is older than its limit, this nightly
+      # goes red, so a pin nobody bumps cannot quietly stop working.
+      - name: Enforce grype DB pin age
+        env:
+          GRYPE_DB_CACHE_DIR: ${{ github.workspace }}/.grype-db-pinned
+        run: bash tools/sbom/provision-grype-db.sh --enforce-age
+
+      - name: Run dependency scan (blocking)
+        env:
+          GRYPE_DB_CACHE_DIR: ${{ github.workspace }}/.grype-db-pinned
+          GRYPE_DB_AUTO_UPDATE: "false"
+          GRYPE_DB_VALIDATE_AGE: "false"
+        run: |
+          set -uo pipefail
+          rc=0
+          bash tools/sbom/dep-scan.sh --images --fail-on medium --surfaces npm,cargo,image || rc=$?
+          if [ -f sbom/scan/SUMMARY.md ]; then cat sbom/scan/SUMMARY.md >> "$GITHUB_STEP_SUMMARY"; fi
+          exit "$rc"
+
+      # The small input of the report job, written even when the scan failed.
+      - name: Collect the findings
+        if: always()
+        run: |
+          set -uo pipefail
+          OUT="${RUNNER_TEMP}/dep-scan-report"
+          mkdir -p "$OUT"
+          F="$OUT/findings.md"; : > "$F"
+          for r in sbom/scan/*.grype.json; do
+            [ -f "$r" ] || continue
+            src="$(basename "$r" .grype.json)"
+            n="$(jq '[.matches[]?|select(.vulnerability.severity|test("Critical|High|Medium"))]|length' "$r" 2>/dev/null || echo 0)"
+            [ "${n:-0}" -gt 0 ] || continue
+            {
+              echo "### \`${src}\`: ${n} medium+ finding(s)"
+              jq -r '.matches[]?|select(.vulnerability.severity|test("Critical|High|Medium"))
+                | "- **\(.artifact.name)@\(.artifact.version)**: \(.vulnerability.severity) [\(.vulnerability.id)] fix: \((.vulnerability.fix.versions // []) | join(", ") | if .=="" then "none" else . end)"' "$r"
+              echo ""
+            } >> "$F"
+          done
+          if [ -d sbom/scan ]; then touch "$OUT/lane-ran"; fi
+
+      - name: Upload the findings
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: nightly-dep-scan-findings
+          path: ${{ runner.temp }}/dep-scan-report/
+          if-no-files-found: ignore
+          retention-days: 3
+
+      # SBOMs and grype reports. A refused upload must not turn the scan red.
+      - name: Upload SBOMs and grype reports
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: nightly-dep-scan-reports
+          path: sbom/scan/
+          if-no-files-found: warn
+          retention-days: 3
+
+      - name: Teardown
+        if: always()
+        run: |
+          docker rmi -f modpagespeed/worker:latest modpagespeed/nginx:latest 2>/dev/null || true
+          rm -rf artifacts
+
+  dep-scan-report:
+    name: Dependency scan report
+    needs: dep-scan-images
+    if: ${{ !cancelled() && needs.dep-scan-images.result != 'skipped' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The tools run below hold a write token: take them from main, never
+          # from a dispatched branch.
+          ref: main
+
+      - name: Download the findings
+        id: findings
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: nightly-dep-scan-findings
+          path: ${{ runner.temp }}/findings
+
+      # One auto-managed issue: opened on medium+ findings, closed when clean.
+      # Live only on the default branch.
+      - name: File or close the findings issue
+        if: steps.findings.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && '0' || '1' }}
+        run: |
+          set -uo pipefail
+          F="${RUNNER_TEMP}/findings"
+          if [ ! -f "${F}/lane-ran" ]; then
+            echo "::notice::the scan did not reach a verdict; leaving the findings issue alone"
+            exit 0
+          fi
+          bash tools/sbom/post-findings-issue.sh \
+            "dependencies-cve" "Dependency CVE findings (automated dependency scan)" "${F}/findings.md"
+
+      - name: Note a missing findings artifact
+        if: steps.findings.outcome != 'success'
+        run: echo "::warning::no findings artifact from the scan job; the findings issue was left alone"
+
+  # ---------------------------------------------------------------------
+  # Dependency scan, published image leg. Scans the images customers pull
+  # (ghcr.io, current release, linux/amd64 and linux/arm64), not images built
+  # here, so a CVE disclosed after a release surfaces within a day. Builds
+  # nothing, so it has no needs. Same pinned database, VEX files and image gate
+  # shape as dep-scan-images (fixable medium and above, High and Critical
+  # always). Its own tracking issue, separate from the nightly image scan.
+  # ---------------------------------------------------------------------
+  dep-scan-published:
+    permissions:
+      contents: read
+    name: Dependency Scan (nightly, published images)
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      SYFT_VERSION: v1.44.0
+      GRYPE_VERSION: v0.121.2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate VEX statements
+        run: python3 tools/ci/validate-vex.py sbom/
+
+      - name: Ensure pinned syft + grype
+        run: bash tools/ci/ensure-syft-grype.sh
+
+      - name: Enforce grype DB pin age
+        env:
+          GRYPE_DB_CACHE_DIR: ${{ github.workspace }}/.grype-db-pinned
+        run: bash tools/sbom/provision-grype-db.sh --enforce-age
+
+      # Newest published release: not a draft, not a prerelease, tag v<digits>...
+      - name: Resolve the current release
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=50" \
+            --jq '[.[] | select((.draft|not) and (.prerelease|not) and (.tag_name|test("^v[0-9]")))][0].tag_name // empty')"
+          if [ -z "$tag" ]; then
+            echo "::error::no published release tag matching v[0-9]* found"
+            exit 1
+          fi
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+          echo "Scanning published images at ${tag#v}"
+
+      - name: Run dependency scan (blocking)
+        env:
+          GRYPE_DB_CACHE_DIR: ${{ github.workspace }}/.grype-db-pinned
+          GRYPE_DB_AUTO_UPDATE: "false"
+          GRYPE_DB_VALIDATE_AGE: "false"
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -uo pipefail
+          rc=0
+          bash tools/sbom/dep-scan.sh --published-images "$VERSION" --fail-on medium --surfaces image || rc=$?
+          if [ -f sbom/scan/SUMMARY.md ]; then cat sbom/scan/SUMMARY.md >> "$GITHUB_STEP_SUMMARY"; fi
+          exit "$rc"
+
+      - name: Collect the findings
+        if: always()
+        run: |
+          set -uo pipefail
+          OUT="${RUNNER_TEMP}/dep-scan-report"
+          mkdir -p "$OUT"
+          F="$OUT/findings.md"; : > "$F"
+          # Only what the gate counts: High and Critical, and medium with a fix.
+          SEL='.matches[]?|select((.vulnerability.severity|test("Critical|High")) or (.vulnerability.severity=="Medium" and .vulnerability.fix.state=="fixed"))'
+          for r in sbom/scan/*.grype.json; do
+            [ -f "$r" ] || continue
+            src="$(basename "$r" .grype.json)"
+            n="$(jq "[${SEL}]|length" "$r" 2>/dev/null || echo 0)"
+            [ "${n:-0}" -gt 0 ] || continue
+            {
+              echo "### \`${src}\`: ${n} gating finding(s)"
+              jq -r "${SEL}"'
+                | "- **\(.artifact.name)@\(.artifact.version)**: \(.vulnerability.severity) [\(.vulnerability.id)] fix: \((.vulnerability.fix.versions // []) | join(", ") | if .=="" then "none" else . end)"' "$r"
+              echo ""
+            } >> "$F"
+          done
+          # A verdict needs a report for every image and platform: a missing
+          # report means the scan did not finish, and the issue is left alone.
+          n="$(find sbom/scan -name '*.grype.json' 2>/dev/null | wc -l | tr -d ' ')"
+          if [ "${n:-0}" -ge 6 ] && ! grep -q 'scan failed' sbom/scan/SUMMARY.md 2>/dev/null; then
+            touch "$OUT/lane-ran"
+          fi
+
+      - name: Upload the findings
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: nightly-published-scan-findings
+          path: ${{ runner.temp }}/dep-scan-report/
+          if-no-files-found: ignore
+          retention-days: 3
+
+      - name: Upload SBOMs and grype reports
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: nightly-published-scan-reports
+          path: sbom/scan/
+          if-no-files-found: warn
+          retention-days: 3
+
+  dep-scan-published-report:
+    name: Published image scan report
+    needs: dep-scan-published
+    if: ${{ !cancelled() && needs.dep-scan-published.result != 'skipped' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The tools run below hold a write token: take them from main, never
+          # from a dispatched branch.
+          ref: main
+
+      - name: Download the findings
+        id: findings
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: nightly-published-scan-findings
+          path: ${{ runner.temp }}/findings
+
+      # One auto-managed issue: opened on medium+ findings, closed when clean.
+      # Live only on the default branch.
+      - name: File or close the findings issue
+        if: steps.findings.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && '0' || '1' }}
+        run: |
+          set -uo pipefail
+          F="${RUNNER_TEMP}/findings"
+          if [ ! -f "${F}/lane-ran" ]; then
+            echo "::notice::the scan did not reach a verdict; leaving the findings issue alone"
+            exit 0
+          fi
+          bash tools/sbom/post-findings-issue.sh \
+            "published-images-cve" "Published images: dependency findings" "${F}/findings.md"
+
+      - name: Note a missing findings artifact
+        if: steps.findings.outcome != 'success'
+        run: echo "::warning::no findings artifact from the scan job; the findings issue was left alone"
+
+  # Kill switch notice. While the repository variable FLEET_ENABLED is 'false'
+  # every build runner job here runs on its hosted twin, and the jobs that
+  # have no hosted twin (the privileged and container-socket legs) are
+  # skipped. This job only says so, in an annotation and the job summary, so
+  # a skipped check is never a silent one.
+  fleet-off-notice:
+    permissions: {}
+    name: Shared build runners are switched off
+    if: ${{ vars.FLEET_ENABLED == 'false' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Say what the switch changed
+        run: |
+          echo "::notice::FLEET_ENABLED is 'false': build runner jobs run on hosted runners; jobs that need a build runner host are skipped."
+          {
+            echo "### Shared build runners are switched off"
+            echo
+            echo "The repository variable FLEET_ENABLED is 'false'. Jobs that normally use the"
+            echo "build runners ran on GitHub-hosted runners, slower and without the shared caches."
+            echo "Jobs that need a host only the build runners provide were skipped."
+            echo "Set FLEET_ENABLED back to 'true' to use the build runners again."
+          } >> "$GITHUB_STEP_SUMMARY"

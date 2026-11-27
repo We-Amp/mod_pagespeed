@@ -1,0 +1,402 @@
+// SPDX-License-Identifier: Apache-2.0
+// GENERATED — DO NOT EDIT BY HAND. Synced by tools/sync-js-kernel.sh.
+// Canonical source: mod_pagespeed 1.15, pagespeed/kernel/js/js_tokenizer.h.
+// Synced from the commit pinned in lib/js/JS_KERNEL_PIN.
+// Drift guard: CI re-runs tools/sync-js-kernel.sh and byte-compares.
+// The canonical file's original license header is retained in full below;
+// Apache-2.0 headed files: see lib/js/LICENSE.apache-2.0 for the license text.
+
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ * 
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ * 
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+#ifndef PAGESPEED_KERNEL_JS_JS_TOKENIZER_H_
+#define PAGESPEED_KERNEL_JS_JS_TOKENIZER_H_
+
+#include <cstdint>
+#include <deque>
+#include <initializer_list>
+#include <utility>
+#include <vector>
+
+#include "lib/js/compat/basictypes.h"
+#include "lib/js/compat/string.h"
+#include "lib/js/compat/string_util.h"
+#include "lib/js/js_keywords.h"
+#include "lib/js/compat/re2.h"
+
+namespace pagespeed {
+
+namespace js {
+
+struct JsTokenizerPatterns;
+
+// This class accurately breaks up JavaScript code into a sequence of tokens.
+// This includes tokens for comments and whitespace; every byte of the input is
+// represented in the token stream, so that concatenating the text of each
+// token will perfectly recover the original input, even in error cases (since
+// the final, error token will contain the entire rest of the input).  Also,
+// each whitespace token is classified by the tokenizer as 1) not containing
+// linebreaks, 2) containing linebreaks but not inducing semicolon insertion,
+// or 3) inducing semicolon insertion.
+//
+// To do all this, JsTokenizer keeps track of a minimal amount of parse state
+// to allow it to accurately differentiate between division operators and regex
+// literals, and to determine which linebreaks will result in semicolon
+// insertion and which will not.  If the given JavaScript code is syntactically
+// incorrect such that this differentiation becomes impossible, this class will
+// return an error, but will still tokenize as much as it can up to that point
+// (note however that many other kinds of syntax errors will be ignored; being
+// a complete parser or syntax checker is a non-goal of this class).
+//
+// This class can also be used to tokenize JSON.  Note that a JSON object, such
+// as {"foo":"bar"}, is NOT legal JavaScript code by itself (since, absent any
+// context, the braces will be interpreted as a code block rather than as an
+// object literal); however, JsTokenizer contains special logic to recognize
+// this case and still tokenize it correctly.
+//
+// This separation of tokens and classification of whitespace means that this
+// class can be used to create a robust JavaScript minifier (see js_minify.h).
+// It could also perhaps be used as the basis of a more complete JavaScript
+// parser.
+class JsTokenizer {
+ public:
+  // Creates a tokenizer that will tokenize the given UTF8-encoded input string
+  // (which must outlive the JsTokenizer object).
+  JsTokenizer(const JsTokenizerPatterns* patterns, StringPiece input);
+
+  ~JsTokenizer();
+
+  // Gets the next token type from the input, and stores the relevant substring
+  // of the original input in token_out (which must be non-NULL).  If the end
+  // of input has been reached, returns kEndOfInput and sets token_out to the
+  // empty string.  If an error is encountered, sets has_error() to true,
+  // returns kError, and sets token_out to the remainder of the input.
+  JsKeywords::Type NextToken(StringPiece* token_out);
+
+  // True if an error has been encountered.  All future calls to NextToken()
+  // will return JsKeywords::kError with an empty token string.
+  bool has_error() const { return error_; }
+
+  // True if the most recent significant (non-whitespace/comment) token was
+  // one of the speculatively-classified operator words: "await", "yield", or
+  // a for-of "of" (each of which may, in sloppy-mode code, really be a plain
+  // identifier followed by division).  Consumers that delete whitespace must
+  // not remove a line terminator after such a token (if the word is really an
+  // identifier, the linebreak may be load-bearing for semicolon insertion;
+  // preserving it is always semantics-neutral).  The window survives an
+  // immediately-following "++"/"--": under the identifier reading the pair
+  // is a completed postfix UpdateExpression, after which a linebreak may
+  // likewise insert a semicolon (see the carry in ConsumeOperator).
+  bool LastTokenWasSpeculativeOperator() const { return speculative_operator_; }
+
+  // Return a string representing the current parse stack, for testing only.
+  GoogleString ParseStackForTest() const;
+
+ private:
+  // An entry in the parse stack.  This does not fully capture the grammar of
+  // JavaScript -- far from it -- rather, it is just barely nuanced enough to
+  // determine which linebreaks are important for semicolon insertion, and to
+  // tell whether or not a given slash begins a regex literal.  If it turns out
+  // to insufficiently nuanced (i.e. we find new bugs), it can be refined by
+  // adding more parse states.
+  enum ParseState : std::uint8_t {
+    kStartOfInput,  // For convenience, the bottom of the stack is always this.
+    kExpression,
+    kOperator,  // A prefix or binary operator (including some keywords).
+    kPeriod,
+    kQuestionMark,
+    kOptionalChain,  // The ES2020 `?.` operator.  Like kPeriod, a reserved
+                     // word after it is treated as an identifier, but unlike
+                     // kPeriod an open paren or bracket may follow (a?.(x),
+                     // a?.[i]).
+    kOpenBrace,
+    kOpenBracket,
+    kOpenParen,
+    kTemplateInterp,  // Inside a template literal's ${...} interpolation.
+                      // Acts as an open delimiter whose matching close is
+                      // the '}' that ends the interpolation.
+    kBlockKeyword,    // Keyword that precedes "(...)", e.g. "if" or "for".
+    kBlockHeader,   // Start of block, e.g. "if (...)", "for (...)", or "else".
+    kReturnThrow,   // A return, throw, or yield keyword.
+    kJumpKeyword,   // A break, continue, or debugger keyword.
+    kOtherKeyword,  // A default keyword, or the marker an initializer's `=`
+                    // installs over a declaration keyword.
+    kModuleDecl,    // An import or export declaration is open.  The marker
+                    // sits at the base of the declaration (directly over the
+                    // statement base) so that TryInsertLinebreakSemicolon can
+                    // apply the module-declaration continuation rules when
+                    // the declaration's grammatical end is reached.
+    kFromClause,    // Inside the from-clause of an import/export declaration:
+                    // pushed by the contextual keyword `from` (awaiting the
+                    // module specifier) and by a module specifier string
+                    // directly over kModuleDecl (a bare import), and installed
+                    // under a completed `export [async] function` body.  A
+                    // kExpression directly over it is always the completed
+                    // specifier (or the completed declaration), after which
+                    // nothing can continue, so ASI always fires there.
+    kModuleVarKeyword,  // The let/const/var keyword of a variable
+                        // declaration (a plain one, or the declaration of an
+                        // `export`).  The declared binding lands directly on
+                        // it; after the bare binding only `,` or `=` can
+                        // continue the declaration.
+    kArrow,        // The `=>` of an arrow function (emitted as separate `=` and
+                   // `>` tokens, byte-preserving).  Sits under the arrow body
+                   // like an operator: expression-body continuations keep the
+                   // ordinary rules, and a `{...}` directly over it is a block
+                   // body whose close completes the (terminal) arrow.
+    kObjectValue,  // The `:` of an object-literal property, marking the
+                   // value position of that property; also the spread
+                   // `...` of an object-literal element (`{...f()}`),
+                   // whose argument is likewise not a member name.  Acts
+                   // like an operator, but the expression collapse does
+                   // not eat it, so neither a value nor a spread argument
+                   // ever lands directly on the literal's brace and
+                   // ConsumeOpenParen can tell a member name (method
+                   // shorthand) apart from a value.
+    kClassKeyword,  // The `class` keyword and its heritage span (the name
+                    // is ignored; `extends` pushes an operator and the
+                    // heritage expression collapses back here).  The `{`
+                    // of the body completes the header (see
+                    // ConsumeOpenBrace).
+    kClassBrace,    // The `{` of a class body.  Element names sit directly
+                    // on it (method shorthand gate, static-block brace,
+                    // field initializers); `;` rolls back to it.
+  };
+
+  // Enum for tracking whether the first three tokens in the input are open
+  // brace, string literal, colon.  If so, we're parsing a JSON object,
+  // otherwise we'll assume we're parsing legal JS code.
+  enum JsonStep : std::uint8_t {
+    kJsonStart,
+    kJsonOpenBrace,
+    kJsonOpenBraceStringLiteral,
+    kIsJsonObject,
+    kIsNotJsonObject,
+  };
+
+  // Consumes an appropriate amount of input and return an appropriate token.
+  JsKeywords::Type ConsumeOpenBrace(StringPiece* token_out);
+  JsKeywords::Type ConsumeCloseBrace(StringPiece* token_out);
+  JsKeywords::Type ConsumeOpenBracket(StringPiece* token_out);
+  JsKeywords::Type ConsumeCloseBracket(StringPiece* token_out);
+  JsKeywords::Type ConsumeOpenParen(StringPiece* token_out);
+  JsKeywords::Type ConsumeCloseParen(StringPiece* token_out);
+  JsKeywords::Type ConsumeBlockComment(StringPiece* token_out);
+  JsKeywords::Type ConsumeLineComment(StringPiece* token_out);
+  JsKeywords::Type ConsumeColon(StringPiece* token_out);
+  JsKeywords::Type ConsumeComma(StringPiece* token_out);
+  JsKeywords::Type ConsumeNumber(StringPiece* token_out);
+  JsKeywords::Type ConsumeOperator(StringPiece* token_out);
+  JsKeywords::Type ConsumePeriod(StringPiece* token_out);
+  JsKeywords::Type ConsumeQuestionMark(StringPiece* token_out);
+  JsKeywords::Type ConsumeRegex(StringPiece* token_out);
+  JsKeywords::Type ConsumeSemicolon(StringPiece* token_out);
+  JsKeywords::Type ConsumeSlash(StringPiece* token_out);
+  JsKeywords::Type ConsumeString(StringPiece* token_out);
+  // Consumes one chunk of an ES6 template literal, starting at the current
+  // input character which must be either a backtick (start of a template)
+  // or a '}' (resuming a template after an interpolation).  Emits a single
+  // kTemplateLiteral token for the chunk.  If the chunk ends with '${',
+  // pushes kTemplateInterp so that the interpolation is tokenized as JS;
+  // if it ends with a backtick, pushes an expression.  Returns kError on an
+  // unterminated template.
+  JsKeywords::Type ConsumeTemplateChunk(StringPiece* token_out);
+  // Returns true if the nearest enclosing open delimiter on the parse stack
+  // (skipping expression/operator states) is a kTemplateInterp, meaning a
+  // '}' at the current position resumes a template literal rather than
+  // closing a brace.
+  bool NearestOpenDelimiterIsTemplateInterp() const;
+  // Returns true if the nearest enclosing open delimiter on the parse stack
+  // (skipping expression/operator states) is a kClassBrace, meaning a '}'
+  // at the current position closes a class body.
+  bool NearestOpenDelimiterIsClassBrace() const;
+
+  // For each of these methods, if the start of the input is that kind of
+  // token, consumes the token and returns true, otherwise returns false
+  // without making changes.
+  bool TryConsumeComment(JsKeywords::Type* type_out, StringPiece* token_out);
+  bool TryConsumeIdentifierOrKeyword(JsKeywords::Type* type_out,
+                                     StringPiece* token_out);
+  // Consumes a private name (`#x`) as a single identifier token.
+  bool TryConsumePrivateName(JsKeywords::Type* type_out,
+                             StringPiece* token_out);
+  bool TryConsumeWhitespace(bool allow_semicolon_insertion,
+                            JsKeywords::Type* type_out, StringPiece* token_out);
+
+  // Pops the parse stack until target is found, returning true on success.
+  // On error (an incompatible state is encountered), calls Error() and returns
+  // false.
+  bool PopToMatchingOpen(ParseState target,
+                         std::initializer_list<ParseState> error_states,
+                         StringPiece* token_out);
+
+  // Sets error_ to true and returns an error token.
+  JsKeywords::Type Error(StringPiece* token_out);
+
+  // Stores the next num_chars characters of the input into *token_out, and
+  // then increment the start of input_ by num_chars characters.  If the token
+  // type is not comment or whitespace, sets start_of_line_ to false.  Also
+  // updates json_step_ based on the token type.  Returns the token type passed
+  // in, for convenience.
+  JsKeywords::Type Emit(JsKeywords::Type type, int num_chars,
+                        StringPiece* token_out);
+
+  // Pushes a new state onto the parse_stack_, merging states as needed.
+  void PushBlockHeader();
+  void PushExpression();
+  void PushOperator();
+
+  // If a semicolon will be inserted between the previous token and the next
+  // token (assuming there was a linebreak in between) that _wouldn't_ be
+  // inserted if the linebreak weren't there, update the parse stack to reflect
+  // the semicolon insertion and return true; otherwise do nothing and return
+  // false.
+  bool TryInsertLinebreakSemicolon();
+
+  // Returns true if an open brace at this parse state begins an object
+  // literal, or false if it begins a block.
+  static bool CanPreceedObjectLiteral(ParseState state);
+
+  // Returns true if parse_stack_[index] is a brace whose direct contents are
+  // member names: the `{` of an object literal (or of an
+  // object-literal-shaped clause or binding pattern) or of a class body.
+  bool IsMemberNameBrace(size_t index) const;
+
+  // Returns true if the parse stack sits at a member-name position that a
+  // modifier keyword has already opened: a single kExpression (the `get`,
+  // `set`, or `async` of `{ get x(){} }`) directly on a member-name brace.
+  // A name directly ON the brace does not need this -- the property-name
+  // early return in TryConsumeIdentifierOrKeyword already handles it -- and
+  // neither does a name after a generator `*`, which ConsumeOperator turns
+  // into a kBlockKeyword (see the `function*` precedent there).
+  bool AtMemberNameAfterModifier() const;
+
+  // Returns true if the next non-whitespace, non-comment character of the
+  // remaining input is an ASCII identifier-start character.  A lookahead miss
+  // (a non-ASCII byte, an unterminated comment, EOF) answers false, which
+  // every caller treats as "keep the old path" -- the same
+  // degrade-to-previous-behavior rule the `let` binding lookahead uses.
+  bool NextCharStartsIdentifier() const;
+
+  const JsTokenizerPatterns* patterns_;
+  std::vector<ParseState> parse_stack_;
+  std::deque<std::pair<JsKeywords::Type, StringPiece> > lookahead_queue_;
+  StringPiece input_;  // The portion of input that has yet to be consumed.
+  // If non-null, no "*/" starts at or after this address.  Lets repeated
+  // regex-literal checks skip searches already known to fail.
+  const char* no_block_end_from_ = nullptr;
+  JsonStep json_step_;
+  bool start_of_line_;  // No non-whitespace/comment tokens on this line yet.
+  // See LastTokenWasSpeculativeOperator().  Survives whitespace, comments,
+  // inserted semicolons, and an immediately-following "++"/"--" (see
+  // ConsumeOperator); cleared by any other token.
+  bool speculative_operator_ = false;
+  // True when a line terminator has been consumed while the speculative
+  // window is open -- including one INSIDE a block comment, which the
+  // spec treats as a line terminator for ASI.  Only with a terminator is
+  // the identifier reading of the speculative word live at a following
+  // "{" (an ASI-separated block statement); on the same line "expr {" is
+  // a SyntaxError, so the "{" is provably the operand's object literal.
+  // Maintained by Emit(): cleared by every significant token (alongside
+  // speculative_operator_, so window-open sites need no extra reset),
+  // set by whitespace/comment tokens that carry a terminator.
+  bool speculative_linebreak_ = false;
+  bool error_;
+  // Parse-stack index the kOpenParen of the most recent `for` header will
+  // occupy (or kNoForParen).  Lets `let` right after that paren be read as a
+  // declaration, so `for (let {a} of xs)` / `for (let [a] of xs)` tokenize.
+  static constexpr size_t kNoForParen = static_cast<size_t>(-1);
+  size_t for_paren_index_ = kNoForParen;
+  // One-shot flag armed when a block-bodied arrow completes: nothing can
+  // continue it, so the next linebreak inserts a semicolon regardless of
+  // the continuation set.  Cleared on the next non-whitespace/comment
+  // token (or when it drives the insertion).
+  bool arrow_body_asi_pending_;
+  // One-shot flag armed when a postfix `++`/`--` completes an
+  // UpdateExpression: per ECMA-262 no call or member access can attach to
+  // it, so a linebreak before a following `(`, or before a `.`-led numeric
+  // literal, inserts a semicolon even though the generic continuation set
+  // would keep it.  Cleared on the next non-whitespace/comment token (or
+  // when it drives the insertion).
+  bool postfix_update_pending_;
+
+  JsTokenizer(const JsTokenizer&) = delete;
+  JsTokenizer& operator=(const JsTokenizer&) = delete;
+};
+
+// A "speculative" regex literal is one that was read directly after a word
+// which may really have been a plain identifier ("await", "yield", or a
+// for-of "of" -- see JsTokenizer::LastTokenWasSpeculativeOperator).  If it
+// was, the leading slash is a division operator and the "literal" is really a
+// run of ordinary tokens.  The minifier emits the literal's bytes VERBATIM,
+// so every adjacency inside it survives and only its two boundaries can
+// change: the left one joins onto the word's identifier characters, which can
+// never form "//" or "/*", but at the right one the last emitted byte is the
+// closing slash (unless the literal carries flags, in which case it is a flag
+// letter that nothing can weld onto), so deleting the whitespace before the
+// next token can reassemble a comment delimiter that was not in the input.
+//
+// Returns true if that -- or a comment delimiter inside the literal that
+// could swallow code beyond it -- is possible here, in which case the caller
+// must decline: failing is fail-safe, since the caller then serves the
+// original input unmodified.  `input` must start at the literal's opening
+// slash.
+bool SpeculativeRegexCanReassembleComment(
+    StringPiece input, const char** no_block_end_from = nullptr);
+
+// Returns true if the given comment token is a block comment the minifier
+// retains verbatim: an IE conditional compilation comment (/*@ ... @*/) or a
+// licence/preserved comment (/*! ... */, or any block comment containing
+// "@license" or "@preserve"), which many libraries' licences require to stay
+// in redistributed copies.  Line comments are never retained.
+bool IsRetainedBlockComment(StringPiece token);
+
+// Structure to store RE2 patterns that can be shared by instances of
+// JsTokenizer.  These patterns are slightly expensive to compile, so we'd
+// rather not create one for every JsTokenizer instance, but unfortunately C++
+// static initializers can run in non-deterministic order and cause other
+// integration issues.  Instead, you must create a JsTokenizerPatterns object
+// yourself and pass it to the JsTokenizer constructor; ideally, you would just
+// create one and share it for all JsTokenizer instances.
+struct JsTokenizerPatterns {
+ public:
+  JsTokenizerPatterns();
+  ~JsTokenizerPatterns();
+
+  const RE2 identifier_pattern;
+  const RE2 line_comment_pattern;
+  const RE2 numeric_literal_pattern;
+  const RE2 operator_pattern;
+  const RE2 regex_literal_pattern;
+  const RE2 string_literal_pattern;
+  const RE2 whitespace_pattern;
+  const RE2 line_continuation_pattern;
+  const RE2 module_continuation_pattern;
+  const RE2 module_var_continuation_pattern;
+
+ private:
+  JsTokenizerPatterns(const JsTokenizerPatterns&) = delete;
+  JsTokenizerPatterns& operator=(const JsTokenizerPatterns&) = delete;
+};
+
+}  // namespace js
+
+}  // namespace pagespeed
+
+#endif  // PAGESPEED_KERNEL_JS_JS_TOKENIZER_H_

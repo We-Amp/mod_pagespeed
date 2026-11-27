@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 We-Amp B.V.
+
+# osv-scanner reads this file for the SBOM in this directory. The SBOM lists
+# the crates of lib/image/vtracer_ffi/Cargo.lock, so the notice that
+# lib/image/vtracer_ffi/osv-scanner.toml records for adler is repeated here;
+# see that file for the reasoning. Keep the two in step.
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2025-0056"
+ignoreUntil = 2027-05-25
+reason = "adler is unmaintained; pulled in by vtracer 0.6.5 via image 0.23 -> tiff 0.6 -> miniz_oxide 0.4; the FFI does not call vtracer's image-decoding path"

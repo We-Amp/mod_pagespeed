@@ -1,0 +1,378 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// TelemetryStrip — this page's own response measurements, on a thin recessed
+// strip at the very top of the page, directly beneath the skip link. Server-rendered from the dated
+// capture file (src/data/telemetry-capture.json) so the page is complete and
+// honest with JS disabled; a bundled script then upgrades the strip to this
+// view's live values (one same-origin HEAD plus PerformanceNavigationTiming).
+// ttfb means the first response byte of the page's own request, connection
+// setup excluded: live it is the probe's responseStart − requestStart from
+// Resource Timing, captured it is the capture script's equivalent measurement
+// on a warm connection — roughly one round trip plus server time either way.
+// The strip never fakes liveness: captured values always carry their capture
+// date, a missing live header renders as "not present", and a failed probe
+// keeps the captured fallback untouched.
+//
+// CLS discipline: the row is a fixed 32px at every width, each field has a
+// fixed ch-based inline-size, and the script only ever replaces textContent.
+//
+// Sizing, measured not guessed: each field reserves its dt, the 0.375rem
+// dt–dd gap and the field's widest realistic value, plus ~12% slack on the
+// value. The slack covers platforms where the self-hosted Plex Mono (a
+// 0.600em advance, 6.6px per ch at 11px) is not in effect and fallback
+// fonts render wider than the ch unit — measured at ~7px per glyph on
+// Linux. The wire field shows from 480px up and the wide fields (decoded,
+// vary, ttfb) from 1024px up; below those widths a field does not render at
+// all rather than clip. There is no separate "what these headers mean" link:
+// the state label is the link to /pagespeed-markers/ at every width, which
+// frees its ~100px for the fields. The state label reserves the longer of its
+// strings ("captured 2026-10-08", 19ch, vs "this view · live", 16ch, vs the
+// non-2xx form "this view · HTTP 405", 20ch), so the live upgrade never moves
+// the fields sideways.
+//
+// The vary value is three headers ("Save-Data,Accept-Encoding,User-Agent",
+// 36 glyphs, 41 with the dt colon and gap), so its field reserves 45ch.
+// Budget at 7px per glyph (container 1088px, 1024px of content at >=1152px
+// viewports; 960px at 1024): LED 13px + state 21ch + 8px row gap + five
+// fields (26 + 14 + 18.5 + 45 + 12 = 115.5ch, each plus 0.375rem) + four 8px
+// gaps = ~984px: that fits 1024px of content; at 960px the row shrinks the
+// fields by ~24px, which the slack in the x-mod-pagespeed reserve (26ch, its
+// value is ~5 glyphs) and the other reserves absorbs (checked at 7px per
+// glyph at 1024, 1100, 1152, 1280 and 1440px).
+
+import { formatBytes } from '../../lib/instrument';
+import capture from '../../data/telemetry-capture.json';
+
+interface Props {
+  // The page's own URL path (Astro.url.pathname), supplied by the layout.
+  path: string;
+}
+
+interface CaptureEntry {
+  status: number;
+  wireBytes: number;
+  decodedBytes: number;
+  // First response byte of this path on a warm connection, measured by the
+  // capture script (request flushed to first response byte, DNS/TCP/TLS
+  // excluded). Absent in older captures; the field then renders "—".
+  ttfbMs?: number;
+  headers: Record<string, string | null>;
+}
+
+const { path } = Astro.props;
+
+const paths = capture.paths as Record<string, CaptureEntry>;
+const entry = paths[path];
+// Paths the capture does not list still show the site-level fields from the
+// "/" entry (the header value and vary) and "—" in the byte slots.
+const site = paths['/'];
+const header = (name: string): string =>
+  entry?.headers[name] ?? site?.headers[name] ?? 'not present';
+
+const stateText = `captured ${capture.capturedAt.slice(0, 10)}`;
+const fields = [
+  {
+    term: 'x-mod-pagespeed:',
+    value: header('x-mod-pagespeed'),
+    width: '26ch',
+    wide: false,
+    mid: false,
+    t: 'xmps',
+  },
+  {
+    term: 'wire',
+    value: entry ? formatBytes(entry.wireBytes) : '—',
+    width: '14ch',
+    wide: false,
+    mid: true,
+    t: 'wire',
+  },
+  {
+    term: 'decoded',
+    value: entry ? formatBytes(entry.decodedBytes) : '—',
+    width: '18.5ch',
+    wide: true,
+    mid: false,
+    t: 'decoded',
+  },
+  { term: 'vary:', value: header('vary'), width: '45ch', wide: true, mid: false, t: 'vary' },
+  {
+    term: 'ttfb',
+    value: entry?.ttfbMs != null ? `${entry.ttfbMs} ms` : '—',
+    width: '12ch',
+    wide: true,
+    mid: false,
+    t: 'ttfb',
+  },
+];
+---
+
+<aside
+  class="telemetry"
+  data-ui="telemetry-strip"
+  aria-label="Response measurements for this page"
+  data-pagefind-ignore
+>
+  <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 telemetry-row">
+    <span class="t-state">
+      <i class="t-led" aria-hidden="true"></i>
+      {/* The name is the visible state plus the destination: the state text
+          must stay part of the accessible name (WCAG 2.5.3). */}
+      <a
+        class="t-state-link"
+        href="/pagespeed-markers/"
+        aria-labelledby="telemetry-state telemetry-state-hint"
+      >
+        <span id="telemetry-state" data-t="state">
+          {stateText}
+        </span>
+      </a>
+      <span id="telemetry-state-hint" hidden>
+        How to read these response measurements
+      </span>
+    </span>
+    <dl class="t-fields">
+      {fields.map((f) => (
+        <div class:list={['t-f', f.wide && 't-wide', f.mid && 't-mid']} style={`--w:${f.width}`}>
+          <dt>{f.term}</dt>
+          <dd data-t={f.t}>{f.value}</dd>
+        </div>
+      ))}
+    </dl>
+  </div>
+</aside>
+
+<style>
+  .telemetry {
+    background-color: var(--color-bg-recessed);
+    border-bottom: 1px solid var(--color-border);
+    /* Exactly 32px at every width, border included (global border-box): one
+       line, so the client-side upgrade can never move the page. */
+    block-size: 32px;
+    font-family: var(--font-mono);
+    font-weight: 400;
+    font-size: 0.6875rem;
+    line-height: 1.4;
+    color: var(--color-text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .telemetry-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: nowrap;
+    gap: 0.25rem 0.5rem;
+    block-size: 100%;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+  .t-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    flex: none;
+    color: var(--color-text-annotation);
+  }
+  /* Reserve the longest state string ("this view · HTTP 405", 20ch, vs
+     "captured 2026-10-08", 19ch, vs "this view · live", 16ch) so the live
+     upgrade never moves the fields sideways. 21ch also keeps the 19-glyph
+     date inside the reserve where fallback fonts render ~7px per glyph
+     against the 6.6px ch — at 19ch the text would bleed into the row gap
+     there. */
+  .t-state [data-t='state'] {
+    display: inline-block;
+    min-inline-size: 21ch;
+  }
+  .telemetry.is-live .t-state {
+    color: var(--color-interactive);
+  }
+  .t-state a {
+    color: inherit;
+    text-decoration: none;
+    /* >=24px target inside the 32px row (11px text at 1.4 is 15.4px, plus
+       5px above and below). Inline padding: the row does not move. */
+    padding-block: 5px;
+  }
+  /* The state label is the link to /pagespeed-markers/ at every width; there
+     is no separate "what these headers mean" link. */
+  .t-led {
+    inline-size: 7px;
+    block-size: 7px;
+    border-radius: 1px;
+    background-color: var(--color-border-strong);
+    flex: none;
+  }
+  .telemetry.is-live .t-led.led-ok {
+    background-color: var(--color-success);
+  }
+  .telemetry.is-live .t-led.led-warn {
+    background-color: var(--color-accent);
+  }
+  .t-fields {
+    display: flex;
+    flex-wrap: nowrap;
+    /* 8px between fields keeps the state label and all five fields inside
+       the 1088px container from 1024px up. */
+    gap: 0.25rem 0.5rem;
+    margin: 0;
+    min-inline-size: 0;
+    overflow: hidden;
+  }
+  .t-f {
+    display: inline-flex;
+    gap: 0.375rem;
+    /* Fixed field box: --w reserves the dt and the widest realistic value
+       with ~12% slack for wider fallback-font metrics, and the 0.375rem
+       dt–dd gap is added on top. When the row runs out of room the field
+       may shrink and the dd below ellipsizes — a value is either complete
+       or visibly truncated, never hard-clipped mid-glyph. */
+    inline-size: calc(var(--w) + 0.375rem);
+    min-inline-size: 0;
+  }
+  .t-f dt {
+    flex: none;
+    color: var(--color-text-annotation);
+  }
+  .t-f dd {
+    margin: 0;
+    min-inline-size: 0;
+    color: var(--color-text-body);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* Below 480px the wire byte count cannot fit complete next to the state
+     label and the header field, so it does not render at all. The LED makes
+     room instead: it is decoration (the state text says the same in words),
+     and without its 13px the header value would ellipsize in wider fallback
+     fonts at 360px. The wide fields follow from 1024px, where the row can
+     hold them in full. */
+  @media (max-width: 479px) {
+    .t-led {
+      display: none;
+    }
+    .t-mid {
+      display: none;
+    }
+  }
+  @media (max-width: 1023px) {
+    .t-wide {
+      display: none;
+    }
+  }
+  /* A single <=600ms opacity flash when a live value replaces the captured
+     fallback. Opacity only, gated on no-preference; the global reduce rule
+     caps it to a frame regardless. */
+  @media (prefers-reduced-motion: no-preference) {
+    .t-flash {
+      animation: t-flash 500ms ease-out 1;
+    }
+    @keyframes t-flash {
+      from {
+        opacity: 0.2;
+      }
+      to {
+        opacity: 1;
+      }
+    }
+  }
+</style>
+
+<script>
+  import { formatBytes } from '../../lib/instrument';
+
+  const strip = document.querySelector<HTMLElement>('[data-ui="telemetry-strip"]');
+  if (strip) {
+    const upgrade = async () => {
+      // All or nothing: the state label must be true of every field, so a
+      // failed probe leaves the captured fallback (and its date) untouched.
+      const url = location.pathname + location.search;
+      // Wall-clock start of the probe, used only if its Resource Timing entry
+      // never appears (see the ttfb block below).
+      const probeStart = performance.now();
+      let res: Response;
+      try {
+        res = await fetch(url, {
+          method: 'HEAD',
+          cache: 'no-store',
+          credentials: 'same-origin',
+          signal: AbortSignal.timeout(3000),
+        });
+      } catch {
+        return;
+      }
+      // Wall-clock end of the probe (headers received), for the fallback below;
+      // taken now, not after the entry polling, so the fallback stays honest.
+      const probeEnd = performance.now();
+      const set = (key: string, value: string) => {
+        strip.querySelectorAll<HTMLElement>(`[data-t="${key}"]`).forEach((el) => {
+          el.textContent = value;
+          // Skip the flash on a copy that is not rendered, or the class would
+          // sit on it until a breakpoint change runs the fade.
+          if (el.offsetParent === null) return;
+          el.classList.remove('t-flash');
+          void el.offsetWidth;
+          el.classList.add('t-flash');
+          // Drop the class again when the fade ends: left on the element, a
+          // later screenshot or reflow could restart the animation.
+          el.addEventListener('animationend', () => el.classList.remove('t-flash'), {
+            once: true,
+          });
+        });
+      };
+      const nav = performance.getEntriesByType('navigation')[0] as
+        PerformanceNavigationTiming | undefined;
+      if (nav && nav.encodedBodySize > 0) {
+        set(
+          'wire',
+          formatBytes(nav.encodedBodySize) + (nav.transferSize === 0 ? ' (browser cache)' : ''),
+        );
+        set('decoded', formatBytes(nav.decodedBodySize));
+      }
+      // ttfb is the first-byte time of the probe itself: responseStart minus
+      // requestStart from its Resource Timing entry. requestStart is the
+      // moment the request left the browser, so connection setup (DNS/TCP/TLS)
+      // is excluded and the figure is what an already-connected reader pays:
+      // roughly one round trip plus server time. Same-origin entries always
+      // expose that timing (Timing-Allow-Origin is a cross-origin concern),
+      // but the fetch promise resolves on headers while the entry lands in
+      // the buffer on completion, so poll briefly for it; only when it never
+      // appears (the shared 250-entry resource buffer can be full on
+      // resource-heavy pages) fall back to the wall-clock probe duration,
+      // which includes connection setup and can read high on a cold visit.
+      // Entries are named by the absolute URL, resolved the way fetch did, or
+      // a relative path never matches.
+      const entryHref = new URL(url, location.href).href;
+      let entry: PerformanceResourceTiming | undefined;
+      for (let i = 0; i < 10 && !entry; i++) {
+        entry = (performance.getEntriesByName(entryHref, 'resource') as PerformanceResourceTiming[])
+          .filter((e) => e.initiatorType === 'fetch')
+          .reduce<PerformanceResourceTiming | undefined>(
+            (latest, e) => (latest === undefined || e.startTime >= latest.startTime ? e : latest),
+            undefined,
+          );
+        if (!entry) await new Promise((r) => setTimeout(r, 25));
+      }
+      const ttfb = Math.round(
+        entry && entry.requestStart > 0
+          ? entry.responseStart - entry.requestStart
+          : probeEnd - probeStart,
+      );
+      // A measured value always replaces the captured one on a live strip,
+      // 0 ms included; the captured number must never sit under the live label.
+      if (Number.isFinite(ttfb) && ttfb >= 0) set('ttfb', `${ttfb}\u00a0ms`);
+      set('xmps', res.headers.get('x-mod-pagespeed') ?? 'not present');
+      set('vary', res.headers.get('vary') ?? 'not present');
+      // Below 480px the LED does not render, so a non-2xx probe spells its
+      // status in the state text instead of relying on the LED hue alone.
+      set('state', res.ok ? 'this view · live' : `this view · HTTP ${res.status}`);
+      strip.classList.add('is-live');
+      strip.querySelector('.t-led')?.classList.add(res.ok ? 'led-ok' : 'led-warn');
+    };
+    const idle = (window as Window & { requestIdleCallback?: (cb: () => void) => void })
+      .requestIdleCallback;
+    if (idle) idle(upgrade);
+    else setTimeout(upgrade, 1500);
+  }
+</script>

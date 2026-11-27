@@ -1,0 +1,348 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Copyright (c) 2024-2026 We-Amp B.V. */
+
+/*
+ * mod_pagespeed Workbench — Base Component Styles
+ *
+ * Pure CSS utility classes.  No framework dependency.
+ * All values reference --ps-* custom properties from theme.css.
+ *
+ * Import order:
+ *   @import '@pagespeed/ui/common/theme.css';
+ *   @import '@pagespeed/ui/common/base.css';
+ */
+
+/* ═══════════════════════════════════════════════════════════════════
+   Buttons
+   ═══════════════════════════════════════════════════════════════════ */
+
+.ps-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ps-space-xs);
+  padding: var(--ps-space-xs) var(--ps-space-md);
+  min-height: 28px;
+  font-family: var(--ps-font-family);
+  font-size: var(--ps-font-size);
+  line-height: 1.4;
+  border: 1px solid transparent;
+  border-radius: var(--ps-radius-sm);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  transition: background-color 0.1s ease, border-color 0.1s ease;
+}
+
+.ps-btn:focus-visible {
+  outline: 2px solid var(--ps-border-focus);
+  outline-offset: 1px;
+}
+
+.ps-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* Primary — filled accent */
+.ps-btn-primary {
+  background: var(--ps-accent);
+  color: var(--ps-accent-fg);
+  border-color: var(--ps-accent);
+}
+
+.ps-btn-primary:hover {
+  background: var(--ps-accent-hover);
+  border-color: var(--ps-accent-hover);
+}
+
+.ps-btn-primary:active {
+  filter: brightness(0.9);
+}
+
+/* Secondary — outlined */
+.ps-btn-secondary {
+  background: transparent;
+  color: var(--ps-fg-primary);
+  border-color: var(--ps-border-input);
+}
+
+.ps-btn-secondary:hover {
+  background: var(--ps-bg-hover);
+}
+
+.ps-btn-secondary:active {
+  background: var(--ps-bg-secondary);
+}
+
+/* Danger — destructive action */
+.ps-btn-danger {
+  background: var(--ps-error);
+  color: #fff;
+  border-color: var(--ps-error);
+}
+
+.ps-btn-danger:hover {
+  filter: brightness(1.1);
+}
+
+.ps-btn-danger:active {
+  filter: brightness(0.9);
+}
+
+/* Ghost — no border, subtle hover */
+.ps-btn-ghost {
+  background: transparent;
+  color: var(--ps-fg-secondary);
+  border-color: transparent;
+}
+
+.ps-btn-ghost:hover {
+  background: var(--ps-bg-hover);
+  color: var(--ps-fg-primary);
+}
+
+.ps-btn-ghost:active {
+  background: var(--ps-bg-secondary);
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Form Inputs
+   ═══════════════════════════════════════════════════════════════════ */
+
+.ps-input,
+.ps-select {
+  display: block;
+  width: 100%;
+  padding: var(--ps-space-xs) var(--ps-space-sm);
+  min-height: 28px;
+  font-family: var(--ps-font-family);
+  font-size: var(--ps-font-size);
+  color: var(--ps-fg-primary);
+  background: var(--ps-bg-input);
+  border: 1px solid var(--ps-border-input);
+  border-radius: var(--ps-radius-sm);
+  outline: none;
+  transition: border-color 0.1s ease;
+}
+
+.ps-input::placeholder {
+  color: var(--ps-fg-muted);
+}
+
+.ps-input:hover,
+.ps-select:hover {
+  border-color: var(--ps-border-focus);
+}
+
+.ps-input:focus,
+.ps-select:focus {
+  border-color: var(--ps-border-focus);
+  box-shadow: 0 0 0 1px var(--ps-border-focus);
+}
+
+.ps-input:focus-visible,
+.ps-select:focus-visible {
+  outline: none;
+  border-color: var(--ps-border-focus);
+  box-shadow: 0 0 0 1px var(--ps-border-focus);
+}
+
+.ps-input:disabled,
+.ps-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ps-select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23666'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right var(--ps-space-sm) center;
+  padding-right: var(--ps-space-xl);
+}
+
+/* Dark mode: lighter chevron for visibility on dark backgrounds */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-vscode]) .ps-select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23a0a0a0'/%3E%3C/svg%3E");
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Range Slider
+   ═══════════════════════════════════════════════════════════════════ */
+
+.ps-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  background: var(--ps-border);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+.ps-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  background: var(--ps-accent);
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+
+.ps-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  background: var(--ps-accent);
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+
+.ps-slider:hover::-webkit-slider-thumb {
+  transform: scale(1.2);
+}
+
+.ps-slider:hover::-moz-range-thumb {
+  transform: scale(1.2);
+}
+
+.ps-slider:focus-visible {
+  outline: 2px solid var(--ps-border-focus);
+  outline-offset: 2px;
+}
+
+.ps-slider:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Card
+   ═══════════════════════════════════════════════════════════════════ */
+
+.ps-card {
+  background: var(--ps-bg-primary);
+  border: 1px solid var(--ps-border);
+  border-radius: var(--ps-radius-md);
+  padding: var(--ps-space-lg);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Badge
+   ═══════════════════════════════════════════════════════════════════ */
+
+.ps-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px var(--ps-space-sm);
+  font-family: var(--ps-font-family);
+  font-size: var(--ps-font-size-sm);
+  font-weight: 500;
+  line-height: 1.5;
+  border-radius: 10px;
+  white-space: nowrap;
+  /* Default: info variant */
+  background: var(--ps-bg-tertiary);
+  color: var(--ps-fg-secondary);
+}
+
+.ps-badge-info {
+  background: color-mix(in srgb, var(--ps-info) 12%, transparent);
+  color: var(--ps-info);
+}
+
+.ps-badge-warning {
+  background: var(--ps-warning-bg);
+  color: var(--ps-warning);
+}
+
+.ps-badge-error {
+  background: var(--ps-error-bg);
+  color: var(--ps-error);
+}
+
+.ps-badge-success {
+  background: var(--ps-success-bg);
+  color: var(--ps-success);
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Spinner  (CSS-only, respects prefers-reduced-motion)
+   ═══════════════════════════════════════════════════════════════════ */
+
+.ps-spinner {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--ps-border);
+  border-top-color: var(--ps-accent);
+  border-radius: 50%;
+  animation: ps-spin 0.7s linear infinite;
+}
+
+.ps-spinner[aria-label] {
+  /* Accessible: screen readers see the label */
+}
+
+@keyframes ps-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/*
+ * Under prefers-reduced-motion the global rule above sets
+ * animation-duration to ~0ms.  As a secondary measure we also
+ * provide a fully static alternative here.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .ps-spinner {
+    animation: none;
+    border-top-color: var(--ps-accent);
+    opacity: 0.7;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Divider
+   ═══════════════════════════════════════════════════════════════════ */
+
+.ps-divider {
+  border: none;
+  border-top: 1px solid var(--ps-border);
+  margin: var(--ps-space-md) 0;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Status Dot  (connection indicator)
+   ═══════════════════════════════════════════════════════════════════ */
+
+.ps-status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--ps-fg-muted);
+}
+
+.ps-status-dot-green {
+  background: var(--ps-success);
+}
+
+.ps-status-dot-yellow {
+  background: var(--ps-warning);
+}
+
+.ps-status-dot-red {
+  background: var(--ps-error);
+}

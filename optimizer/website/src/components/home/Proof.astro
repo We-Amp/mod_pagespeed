@@ -1,0 +1,134 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// Home section 02: this site runs the binary it sells. The heading and the
+// dogfooding note on the left from 1024px; on the right the captured response
+// headers of this very page, the HIT/MISS header the nginx module adds, and
+// the public admin console.
+//
+// The markup keeps the indentation it has inside the page layout: the build
+// does not compress HTML, so this indentation is the whitespace of the page.
+// The class names are styled by the page's global style block in
+// src/pages/index.astro. Keep the component imports below in this order: it
+// decides the order of the inline style blocks in <head> (see the note in
+// src/pages/index.astro).
+
+import TermPanel from '../instrument/TermPanel.astro';
+import SectionHeader from '../instrument/SectionHeader.astro';
+import HitMissBadge from '../instrument/HitMissBadge.astro';
+import demoMetrics from '../../data/demo-metrics.json';
+import telemetryCapture from '../../data/telemetry-capture.json';
+
+// Section 01 header panel: the captured response headers of this site's
+// homepage, verbatim from src/data/telemetry-capture.json (written by
+// scripts/capture-telemetry.mjs against production). The status line says
+// HTTP/1.1 because the capture client (node:https) speaks HTTP/1.1.
+type TermLine = { text: string; tone?: 'plain' | 'strong' | 'hl' | 'ok' | 'dim' };
+const homeCapture = telemetryCapture.paths['/'];
+const homeCaptureHeaders = homeCapture.headers;
+const capturedDate = telemetryCapture.capturedAt.slice(0, 10);
+const headerPanelLines: TermLine[] = [
+  { text: `HTTP/1.1 ${homeCapture.status}`, tone: 'strong' },
+  { text: `content-type: ${homeCaptureHeaders['content-type']}`, tone: 'plain' },
+  { text: `content-length: ${homeCaptureHeaders['content-length']}`, tone: 'strong' },
+  { text: `x-mod-pagespeed: ${homeCaptureHeaders['x-mod-pagespeed']}`, tone: 'hl' },
+  { text: `vary: ${homeCaptureHeaders.vary}`, tone: 'plain' },
+  { text: `content-encoding: ${homeCaptureHeaders['content-encoding']}`, tone: 'plain' },
+  { text: `cache-control: ${homeCaptureHeaders['cache-control']}`, tone: 'plain' },
+];
+
+// Best AVIF savings across all demo sites — the measured range detail in the
+// dogfooding paragraph ("up to N% smaller pages").
+const bestSavings = Math.max(
+  ...demoMetrics.sites.map((site) => {
+    const before =
+      site.resources.html.before +
+      site.resources.css.before +
+      site.resources.js.before +
+      site.resources.images.totalJpeg;
+    const after =
+      site.resources.html.before +
+      (site.resources.css.minified ?? site.resources.css.before) +
+      (site.resources.js.minified ?? site.resources.js.before) +
+      site.resources.images.totalAvif;
+    return Math.round(((before - after) / before) * 100);
+  }),
+);
+---
+
+  <section class="py-13 sm:py-18" aria-labelledby="s-running" data-live-console>
+    <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 grid grid-cols-1 home-proof-grid lg:grid-cols-2">
+      <div>
+        <SectionHeader
+          id="s-running"
+          index="02"
+          eyebrow="Running on our own sites"
+          title="Running on our own sites"
+        >
+          Our four sites run on mod_pagespeed, and their admin console is public on purpose. Pick a
+          site and watch bytes saved, cache hits, statistics, caches, configuration and the
+          worker&rsquo;s logs auto-refresh; module counters start from zero whenever the web server
+          restarts.
+        </SectionHeader>
+        <div class="mt-8 max-w-2xl border-t border-border pt-6">
+          <p class="text-lg font-semibold text-text-body">We run every We-Amp site through it.</p>
+          <p class="mt-2 text-body text-text-muted">
+            We run our own sites, this page included, through mod_pagespeed &mdash; the binary serving
+            this page is the binary we ship. Same{' '}
+            <a
+              href="/blog/cyclone-cache-vs-file-cache-benchmark/"
+              class="text-interactive hover:text-interactive-hover underline"
+            >
+              Cyclone cache
+            </a>
+            . Check the response headers. On our own demo sites we measure up to {bestSavings}%
+            smaller pages.
+          </p>
+        </div>
+      </div>
+      <div>
+        <div>
+          <TermPanel
+            command="curl -sI --http1.1 --compressed https://modpagespeed.com/ | grep -iE '^(HTTP|content-(type|length|encoding)|x-mod-pagespeed|vary|cache-control)'"
+            label="Captured response headers of the modpagespeed.com homepage"
+            lines={headerPanelLines}
+          />
+          <p class="mt-3 font-mono text-xs text-text-annotation">captured {capturedDate}</p>
+        </div>
+        <p class="mt-6 text-body text-text-muted">
+          In the reverse-proxy deployment, the module adds <HitMissBadge state="HIT" /> or{' '}
+          <HitMissBadge state="MISS" /> to the response.
+        </p>
+        <figure class="mt-8">
+          <img
+            src="/images/live-console-overview.webp"
+            srcset="/images/live-console-overview-480.webp 480w, /images/live-console-overview-768.webp 768w, /images/live-console-overview-1024.webp 1024w, /images/live-console-overview.webp 1196w"
+            sizes="(min-width: 1024px) 544px, (min-width: 768px) 768px, calc(100vw - 2rem)"
+            alt="Admin console Overview. Module: 1.53 MB saved (46% of 3.32 MB); 18 of 24 cacheable resource requests served from the optimizer's cache; 12 resource fetch failures since a web server restart 31 minutes earlier. Optimizer: running, up 2 days 1 hour 55 minutes, 41.5 MB saved on served responses (79% of 52.6 MB)."
+            width="1196"
+            height="306"
+            loading="lazy"
+            decoding="async"
+            class="w-full h-auto rounded-lg border border-border"
+          />
+          <figcaption class="mt-3 text-xs text-text-annotation max-w-2xl">
+            The console on our own servers. A console is normally private; ours is public on purpose.
+          </figcaption>
+        </figure>
+        <div class="mt-6 flex flex-wrap items-center gap-x-6 gap-y-3">
+          <a
+            href="https://we-amp.com/pagespeed_global_admin/"
+            class="btn-secondary"
+            rel="noopener"
+            data-umami-event="cta_live_console_home"
+          >
+            Open the live console
+          </a>
+          <a href="/examples/" class="link-arrow inline-flex min-h-11 items-center text-sm">
+            Browse the examples
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>

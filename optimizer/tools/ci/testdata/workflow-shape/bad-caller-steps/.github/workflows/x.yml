@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+name: x
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  pr:
+    uses: We-Amp/pagespeed-optimizer/.github/workflows/pipeline.yml@main
+    steps:
+      - run: echo caller jobs must not carry steps

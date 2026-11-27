@@ -1,0 +1,67 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 We-Amp B.V.
+
+name: Bug report
+description: Something in pagespeed-optimizer, the nginx module of the container images / Helm chart, the console or the ASP.NET Core middleware does not work as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Security vulnerabilities: do not file them here, see the [security policy](https://github.com/We-Amp/pagespeed-optimizer/security/policy).
+        Bugs in the Apache, IIS and Envoy modules and in the packaged nginx module (`nginx-module-pagespeed`, `ngx_pagespeed` tarballs) belong in [We-Amp/mod_pagespeed](https://github.com/We-Amp/mod_pagespeed/issues).
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `pagespeed-optimizer --version`, or the package / image / NuGet version.
+      placeholder: ModPageSpeed 2.5.0 (abc1234)
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - pagespeed-optimizer worker
+        - nginx module (container image / Helm chart)
+        - Management console / HTTP API
+        - ASP.NET Core middleware
+        - Packages, container images or Helm chart
+        - Website / documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: platform
+    attributes:
+      label: Platform
+      description: OS / distribution and architecture, web server and its version, and how you installed (signed apt/dnf repository, container image, Helm chart, NuGet, built from source).
+      placeholder: Ubuntu 24.04 arm64, pagespeed-optimizer from apt (packages.modpagespeed.com), nginx container image 2.5.0
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+      description: Steps to reproduce, the smaller the better.
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration excerpt
+      description: The relevant `pagespeed` directives and worker flags. Remove secrets and hostnames you do not want public.
+      render: nginx
+  - type: textarea
+    id: headers
+    attributes:
+      label: X-PageSpeed response headers
+      description: From an affected request, e.g. `curl -s -o /dev/null -D - https://example.com/style.css | grep -i x-pagespeed` (use GET, not `curl -I`).
+      render: text
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log lines
+      description: Worker log (`journalctl -u pagespeed-optimizer`) and web-server error log.
+      render: text

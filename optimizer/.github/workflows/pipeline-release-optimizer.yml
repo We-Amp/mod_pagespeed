@@ -1,0 +1,1268 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# pipeline-release-optimizer.yml -- the optimizer host-package release lane,
+# as a reusable workflow. The caller (release.yml) holds the triggers and the
+# concurrency group; this file holds the jobs. See docs/ci/release.md and
+# docs/ci/pipelines.md.
+#
+# Produces, for a tag `optimizer-v<upstream>` (e.g. optimizer-v1.16.0), a
+# GitHub release with exactly this asset set (the serving-module release
+# lane downloads these by name and verifies them against SHA256SUMS):
+#   pagespeed-optimizer-<upstream>-1.x86_64.rpm
+#   pagespeed-optimizer-<upstream>-1.aarch64.rpm
+#   pagespeed-optimizer_<upstream>_amd64.deb
+#   pagespeed-optimizer_<upstream>_arm64.deb
+#   pagespeed-optimizer-<upstream>-win-x64.zip
+#   pagespeed-optimizer-<upstream>.spdx.json   (SBOM, SPDX 2.3)
+#   pagespeed-optimizer-<upstream>.vex.json    (VEX, OpenVEX)
+#   SHA256SUMS                                 (lists the seven files above)
+#   SHA256SUMS.asc   (real runs; the release signing key, see docs/ci/release.md)
+#   SHA256SUMS.sigstore.json   (real runs; keyless cosign bundle on SHA256SUMS)
+#   multiple.intoto.jsonl      (real runs; SLSA provenance of the seven files
+#                               and SHA256SUMS, by the SLSA generator)
+# Real runs also record a build provenance attestation for the five packages,
+# the SBOM and the VEX file, and an SBOM attestation for each package, in the
+# GitHub attestation store (Sigstore, keyless; docs/ci/release.md).
+# Asset NAMES carry the upstream SemVer spelling (`-rc.N`): GitHub sanitizes
+# asset names, replacing '~' with '.', which would break `sha256sum -c` for
+# every downloader. The package-internal Version keeps the dpkg/rpm tilde
+# pre-release form (`1.16.0~rc.1`, derived here, never hand-typed).
+#
+# Runs:
+#   * push of a tag matching optimizer-v*          -> REAL run
+#   * workflow_dispatch { tag, dry_run: true  }    -> build + validate only
+#   * workflow_dispatch { tag, dry_run: false }    -> REAL run
+# A dry run builds all five packages, generates the SBOM and VEX file and
+# runs the grype gate, validates the asset set and SHA256SUMS fail-closed,
+# and uploads them as a workflow artifact; it signs and attests nothing,
+# creates NO release and NO tag and never enters the `release` environment.
+# A real run REQUIRES the tag to already exist on the remote (it never
+# creates the tag itself; cutting the GA tag is the owner's act), passes the
+# ref guard, and publishes the release from inside the `release` environment.
+#
+# Runners: the amd64 package and the Windows zip build on the fleet
+# (fleet-heavy, fleet-windows) when FLEET_ENABLED is 'true', and on a hosted
+# twin job with identical steps otherwise, so the kill switch never blocks a
+# release. arm64 always builds on a hosted arm64 runner (a native build: the
+# packaging scripts take --binary/--library and are arch-agnostic, and no
+# cross toolchain exists for this tree). Everything that writes to GitHub
+# runs hosted.
+#
+# The daemon binary MUST be built in the jammy-based pagespeed2-dev image
+# (docker/Dockerfile), never on the runner host: jammy's static libc++
+# archives keep the binary at a GLIBC_2.34 floor (the RHEL 9 / Debian 12
+# contract; a noble build advertises GLIBC_2.38 and the resulting packages
+# refuse to install there). The build therefore vendors on the host (so the
+# in-container build needs no network), then runs bazel inside the
+# content-hashed dev image with --vendor_dir.
+#
+# The release configs chain build:remote-cache. With BAZEL_CACHE_HOST in the
+# runner environment (docs/ci/runner-environment.md) the build container
+# reaches that cache; without it a trailing empty --remote_cache= disables
+# it (later command-line flags win over the config chain) and hosted runners
+# carry the repository cache and the in-container output base in
+# actions/cache instead.
+#
+# The cyclone pin fetch: MODULE.bazel pins We-Amp/cyclone-cache, which is
+# public, so Bazel's git fetch is anonymous and needs no credentials.
+
+name: pipeline-release-optimizer
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Optimizer tag to build (optimizer-v<version>); empty on a tag push.
+        type: string
+        default: ''
+      dry_run:
+        description: Dispatch only. Build + validate, create no release. Ignored on a tag push.
+        type: boolean
+        default: true
+    # Declared per secret and passed explicitly by the caller. They are
+    # environment secrets of `release`: a job that runs in that environment
+    # reads the environment's value. None is required, so a dry run needs
+    # none of them; only `sign-checksums` reads them.
+    secrets:
+      RELEASE_GPG_KEY:
+        required: false
+      RELEASE_GPG_PASSPHRASE:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  event-guard:
+    name: Event guard (refuses merge_group, unexpected events, refs and actors)
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Refuse events, refs and actors this pipeline must never run on
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          ACTOR: ${{ github.actor }}
+          PR_FORK: ${{ github.event.pull_request.head.repo.fork }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+          ALLOWED: "push workflow_dispatch"
+          ALLOWED_REFS: "refs/tags/* refs/heads/main"
+        run: |
+          set -euo pipefail
+          set -f
+          case " ${ALLOWED} " in *" ${EVENT} "*) ;; *) echo "::error::event ${EVENT} is not allowed in this pipeline"; exit 1;; esac
+          case "${REF}" in refs/heads/gh-readonly-queue/*) echo "::error::merge queue refs never run this pipeline"; exit 1;; esac
+          ok=no
+          # shellcheck disable=SC2254  # the allowed refs are globs on purpose
+          for r in ${ALLOWED_REFS}; do case "${REF}" in ${r}) ok=yes;; esac; done
+          [ "${ok}" = yes ] || { echo "::error::ref ${REF} is not allowed in this pipeline"; exit 1; }
+          if [ "${EVENT}" = workflow_dispatch ] && [ "${ACTOR}" = "github-actions[bot]" ]; then echo "::error::dispatches made with a workflow token are not allowed"; exit 1; fi
+          if [ "${EVENT}" = pull_request ] && { [ "${PR_FORK}" = true ] || [ "${PR_HEAD_REPO}" != "${REPOSITORY}" ]; }; then echo "::error::pull requests from forks are not allowed in this pipeline"; exit 1; fi
+          echo "event ${EVENT} on ${REF} accepted"
+
+  # Hosted, no secrets, read-only token. Every later job chains to it. The
+  # guard code is checked out from main, never from the tree being released.
+  # A real run must pass it; a dry run reports its verdict and continues
+  # (a dry run may name a tag that does not exist yet). Any event other than
+  # a tag push or a dispatch is refused outright.
+  ref-guard:
+    name: Ref guard
+    needs: event-guard
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      guard_sha: ${{ steps.guard.outputs.sha }}
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - name: Checkout main (guard code)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          fetch-tags: true
+          filter: blob:none
+
+      - name: Real run or dry run
+        id: mode
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DRY_RUN_INPUT: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          case "$EVENT_NAME" in
+            push|workflow_dispatch) ;;
+            *) echo "::error::event '$EVENT_NAME' may not run the release lane"; exit 1 ;;
+          esac
+          REAL=false
+          if [ "$EVENT_NAME" = push ] || [ "$DRY_RUN_INPUT" = false ]; then
+            REAL=true
+          fi
+          echo "real=$REAL" >> "$GITHUB_OUTPUT"
+          echo "real run: $REAL"
+
+      - name: Enforce the ref guard (real run)
+        id: guard
+        if: ${{ steps.mode.outputs.real == 'true' }}
+        uses: ./.github/actions/ref-guard
+        with:
+          tag-glob: 'optimizer-v*'
+          dispatch-tag: ${{ inputs.tag }}
+          events: 'push workflow_dispatch'
+
+      - name: Report the ref guard verdict (dry run)
+        if: ${{ steps.mode.outputs.real != 'true' }}
+        env:
+          ALLOWED_TAG_GLOB: 'optimizer-v*'
+          ALLOWED_EVENTS: 'push workflow_dispatch'
+          DISPATCH_TAG: ${{ inputs.tag }}
+        run: |
+          set -uo pipefail
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            export INPUT_TAG="$DISPATCH_TAG"
+          fi
+          git fetch --no-tags --quiet origin '+refs/heads/main:refs/remotes/origin/main'
+          if bash tools/ci/ref_guard.sh check; then
+            echo "::notice::dry run: the ref guard would accept a real run of this tag"
+          else
+            echo "::notice::dry run: the ref guard would refuse a real run of this tag (see above); the dry run continues"
+          fi
+
+  version:
+    name: Derive versions from the tag
+    needs: ref-guard
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.derive.outputs.tag }}
+      upstream: ${{ steps.derive.outputs.upstream }}
+      pkg_version: ${{ steps.derive.outputs.pkg_version }}
+      prerelease: ${{ steps.derive.outputs.prerelease }}
+      dry_run: ${{ steps.derive.outputs.dry_run }}
+      checkout_ref: ${{ steps.derive.outputs.checkout_ref }}
+      tag_sha: ${{ steps.derive.outputs.tag_sha }}
+    steps:
+      - name: Derive
+        id: derive
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+          GUARD_SHA: ${{ needs.ref-guard.outputs.guard_sha }}
+        run: |
+          set -euo pipefail
+          # TAG arrives via the environment, never interpolated into the
+          # script text; validate it before any use.
+          case "$TAG" in
+            optimizer-v[0-9]*) ;;
+            *) echo "::error::tag '$TAG' does not match optimizer-v<version>"; exit 1 ;;
+          esac
+          UPSTREAM="${TAG#optimizer-v}"
+          # SemVer base + optional prerelease; no build metadata.
+          if ! printf '%s' "$UPSTREAM" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.]+)?$'; then
+            echo "::error::upstream version '$UPSTREAM' is not X.Y.Z[-prerelease]"; exit 1
+          fi
+          # A backslash-escaped \~ in the replacement is NOT portable, and a
+          # LITERAL ~ is worse: bash >= 4.4 tilde-expands it in the
+          # replacement of ${var/pat/repl} even inside double quotes. Expand
+          # the tilde from a variable instead; expansion results are never
+          # re-scanned for tilde expansion, in any bash version.
+          TILDE='~'
+          PKG_VERSION="${UPSTREAM/-/$TILDE}"
+          PRERELEASE=false
+          case "$UPSTREAM" in *-*) PRERELEASE=true ;; esac
+          # push of a tag is always a real run; dispatch is real only when
+          # dry_run is explicitly false.
+          DRY_RUN=true
+          if [ "${{ github.event_name }}" = "push" ]; then
+            DRY_RUN=false
+          elif [ "${{ inputs.dry_run }}" = "false" ]; then
+            DRY_RUN=false
+          fi
+          # Resolve the tag on the remote. A REAL run requires it to exist
+          # already; the lane never creates tags (`gh release create
+          # --verify-tag` enforces the same server-side). A dry run may name
+          # a tag that does not exist yet; then it builds the dispatched ref.
+          TAG_SHA=""
+          CHECKOUT_REF="${{ github.ref }}"
+          # Resolve by FULL ref: a branch named like the tag must never win.
+          if TAG_SHA="$(gh api "repos/${{ github.repository }}/commits/refs/tags/$TAG" --jq .sha 2>/dev/null)"; then
+            CHECKOUT_REF="refs/tags/$TAG"
+            if [ -n "$GUARD_SHA" ] && [ "$GUARD_SHA" != "$TAG_SHA" ]; then
+              echo "::error::tag '$TAG' resolves to $TAG_SHA but the ref guard accepted $GUARD_SHA"
+              exit 1
+            fi
+          elif [ "$DRY_RUN" = "false" ]; then
+            echo "::error::real run but tag '$TAG' does not exist on the remote; push the tag first, the lane never creates it"
+            exit 1
+          else
+            echo "::notice::dry run: tag '$TAG' is not on the remote; building the dispatched ref instead"
+            TAG_SHA=""
+          fi
+          {
+            echo "tag=$TAG"
+            echo "upstream=$UPSTREAM"
+            echo "pkg_version=$PKG_VERSION"
+            echo "prerelease=$PRERELEASE"
+            echo "dry_run=$DRY_RUN"
+            echo "checkout_ref=$CHECKOUT_REF"
+            echo "tag_sha=$TAG_SHA"
+          } >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG upstream=$UPSTREAM pkg=$PKG_VERSION prerelease=$PRERELEASE dry_run=$DRY_RUN checkout=$CHECKOUT_REF"
+
+      # From 2.5.0 on the tag must name VERSION.txt of the commit it builds.
+      # The guard comes from main (release.yml calls this lane @main), VERSION.txt
+      # from the build commit, so an older tag without the script still builds.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          sparse-checkout: tools/ci
+          persist-credentials: false
+      - name: Verify VERSION.txt matches the release tag (from 2.5.0 on)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.derive.outputs.tag }}
+          TAG_SHA: ${{ steps.derive.outputs.tag_sha }}
+          DRY_RUN: ${{ steps.derive.outputs.dry_run }}
+        run: |
+          set -euo pipefail
+          gh api -H "Accept: application/vnd.github.raw" \
+            "repos/${GITHUB_REPOSITORY}/contents/VERSION.txt?ref=${TAG_SHA:-$GITHUB_SHA}" > "$RUNNER_TEMP/VERSION.txt"
+          # Only a dry run of a tag that does not exist yet may warn instead of fail.
+          if [ -z "$TAG_SHA" ]; then
+            set -- --dry-run
+          else
+            set --
+            if [ "$DRY_RUN" = true ]; then
+              echo "::notice::dry run of an existing tag: $TAG is on the remote, so a VERSION.txt mismatch fails here as in a real run. To rehearse an unfinished release, dispatch a dry run of a tag that does not exist yet (optimizer-v2.5.0-pre.N) instead."
+            fi
+          fi
+          bash tools/ci/check_optimizer_tag_version.sh "$TAG" "$RUNNER_TEMP/VERSION.txt" "$@"
+
+      # The cut folds changelog.d/ into CHANGELOG.md (RELEASING.md). A
+      # release commit that still holds fragments would ship notes nobody
+      # folded in. A tag from before changelog.d/ existed has no directory
+      # (404) and passes; a prerelease, and a dry run of an unfinished
+      # release, only warn.
+      - name: Verify the release commit holds no unfolded changelog fragments
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_SHA: ${{ steps.derive.outputs.tag_sha }}
+          PRERELEASE: ${{ steps.derive.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          if ! names="$(gh api "repos/${GITHUB_REPOSITORY}/contents/changelog.d?ref=${TAG_SHA:-$GITHUB_SHA}" --jq '.[].name' 2>"$RUNNER_TEMP/frag.err")"; then
+            if grep -q 'HTTP 404' "$RUNNER_TEMP/frag.err"; then
+              echo "::notice::no changelog.d/ at this commit; nothing to check"
+              exit 0
+            fi
+            cat "$RUNNER_TEMP/frag.err" >&2
+            exit 1
+          fi
+          left="$(printf '%s\n' "$names" | grep -vFx 'README.md' || true)"
+          if [ -n "$left" ]; then
+            msg="changelog.d/ still holds fragments the cut did not fold into CHANGELOG.md: $(printf '%s' "$left" | tr '\n' ' ')(run python3 -I tools/changelog/assemble.py in the cut PR)"
+            if [ -z "$TAG_SHA" ] || [ "$PRERELEASE" = true ]; then
+              echo "::warning::$msg"
+            else
+              echo "::error::$msg"
+              exit 1
+            fi
+          fi
+
+  # ---------------------------------------------------------------------
+  # Linux packages. One step list (YAML anchor) for three jobs: amd64 on the
+  # fleet, its hosted twin while the fleet is off, and arm64 hosted. The job
+  # env selects the arch and the bazel config.
+  # ---------------------------------------------------------------------
+  build-amd64:
+    name: Build + package (linux amd64)
+    needs: version
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-24.04' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 120
+    env:
+      ARCH: amd64
+      BAZEL_RELEASE_CONFIG: release
+    steps: &linux-package-steps
+      # A prior run's `bazel vendor` can leave read-only toolchain files in a
+      # persistent workspace that checkout's cleanup cannot remove.
+      - name: Unlock stale vendored files
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.version.outputs.checkout_ref }}
+
+      # The version job resolved the tag to a commit; if the tag moved
+      # between resolution and checkout, refuse rather than package the
+      # wrong tree under the tag's name.
+      - name: Verify the checkout is the resolved tag commit
+        if: ${{ needs.version.outputs.tag_sha != '' }}
+        env:
+          WANT: ${{ needs.version.outputs.tag_sha }}
+        run: |
+          set -euo pipefail
+          GOT="$(git rev-parse HEAD)"
+          [ "$WANT" = "$GOT" ] || { echo "::error::tag moved: resolved $WANT, checked out $GOT"; exit 1; }
+
+      - name: Ensure bazel
+        run: |
+          if command -v bazel >/dev/null 2>&1; then bazel --version; exit 0; fi
+          npm install -g @bazel/bazelisk@1.28.1 2>/dev/null || sudo npm install -g @bazel/bazelisk@1.28.1
+          bazel --version
+
+      # Hosted only: the repository cache (vendor downloads, incl. the
+      # cyclone clone) and the in-container bazel output base
+      # (.ci-cache/bazel-out, bind-mounted to /tmp/bazel-out). Prefixed
+      # per-arch: an output base is arch-specific. Bump the vN salt to
+      # invalidate stale toolchains/outputs deliberately. Fleet runners use
+      # the remote cache from their runner environment instead.
+      - name: Cache Bazel repository cache + container output base (hosted)
+        if: ${{ runner.environment == 'github-hosted' }}
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/bazel-repo
+            ~/.cache/bazelisk
+            .ci-cache
+          key: ${{ runner.os }}-${{ env.ARCH }}-opt-release-bazel-v3-${{ hashFiles('MODULE.bazel', '.bazelrc', '.bazelversion', 'third_party/cyclone.BUILD', 'docker/Dockerfile', 'docker/nginx-version.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ env.ARCH }}-opt-release-bazel-v3-
+
+      # Stamp the source revision into the build, the same mechanism
+      # docker/build-release.sh uses: //src/product_version:build_commit
+      # embeds this file's content, the daemon prints its first 7 chars in
+      # --version, and the packaging scripts' --expect-version tripwire
+      # asserts it. The checked-in file holds the literal "dev".
+      - name: Stamp GIT_COMMIT
+        run: printf '%s' "$(git rev-parse HEAD)" > GIT_COMMIT
+
+      # Content-hashed dev image, the same formula on every runner. Jammy
+      # base on purpose (see the header): it keeps the glibc floor at 2.34.
+      # Inline rather than a tools/ci helper so that a dispatch of an older
+      # tag still builds. Cold on a hosted runner (~15 min).
+      - name: Ensure dev image (content-hashed)
+        id: image
+        run: |
+          set -euo pipefail
+          DIR_HASH=$(find docker/ -type f | sort | xargs -I{} sha256sum {} | sha256sum | cut -c1-12)
+          CONTENT_IMAGE="pagespeed2-dev:${ARCH}-${DIR_HASH}"
+          docker image inspect "$CONTENT_IMAGE" >/dev/null 2>&1 || \
+            docker build -t "$CONTENT_IMAGE" docker/
+          echo "image=$CONTENT_IMAGE" >> "$GITHUB_OUTPUT"
+
+      # Vendor on the host, so the in-container build needs no network.
+      - name: Vendor dependencies (host)
+        run: >
+          bazel vendor --vendor_dir=vendor
+          "--repository_cache=$HOME/.cache/bazel-repo"
+          //src/worker:factory_worker //lib/pagespeed:libpagespeed.so
+
+      # --config=release / --config=release-linux-arm64: opt + thin_lto +
+      # hardening + stamp; thin_lto links against the image's lld-20 via its
+      # ld.lld symlink. HOME=/workspace lets the image's bazelisk find its
+      # bazel download.
+      - name: Build the daemon and client library (release config, in-container)
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+        run: |
+          set -euo pipefail
+          mkdir -p out .ci-cache/bazel-out
+          EXTRA_DOCKER=()
+          CACHE_FLAG="--remote_cache="
+          if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
+            # A tag cut before the helper existed has no such file: the cache alias alone.
+            if [ -f "${GITHUB_WORKSPACE}/tools/ci/remote-cache-docker-args.sh" ]; then
+              source "${GITHUB_WORKSPACE}/tools/ci/remote-cache-docker-args.sh"
+              remote_cache_docker_args EXTRA_DOCKER
+            else
+              EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")  # predates remote-cache-docker-args.sh
+            fi
+            CACHE_FLAG=""
+            echo "using the remote Bazel cache from the runner environment"
+          else
+            echo "::notice::BAZEL_CACHE_HOST not set: building without the remote cache (docs/ci/runner-environment.md)"
+          fi
+          docker run --rm --init ${EXTRA_DOCKER[@]+"${EXTRA_DOCKER[@]}"} \
+            --user "$(id -u):$(id -g)" \
+            -e HOME=/workspace \
+            -e BAZEL_RELEASE_CONFIG \
+            -e CACHE_FLAG="$CACHE_FLAG" \
+            -v "$PWD":/workspace \
+            -v "$PWD/.ci-cache/bazel-out":/tmp/bazel-out \
+            -w /workspace \
+            "$IMAGE" \
+            bash -c 'set -e
+              # CACHE_FLAG is empty or one flag; the guarded expansion keeps
+              # an empty value from becoming an empty argument.
+              bazel --output_user_root=/tmp/bazel-out \
+                build --vendor_dir=vendor "--config=${BAZEL_RELEASE_CONFIG}" ${CACHE_FLAG:+"$CACHE_FLAG"} \
+                //src/worker:factory_worker //lib/pagespeed:libpagespeed.so
+              cp -L bazel-bin/src/worker/factory_worker \
+                    bazel-bin/lib/pagespeed/libpagespeed.so /workspace/out/'
+
+      - name: Assert binary hardening
+        run: |
+          set -euo pipefail
+          bash tools/assert-binary-hardening.sh out/factory_worker
+          bash tools/assert-binary-hardening.sh out/libpagespeed.so
+
+      - name: Ensure packaging image (content-hashed, digest-pinned base)
+        id: pkgimage
+        run: |
+          set -euo pipefail
+          PKG_HASH=$(find tools/packaging/docker/ -type f | sort | xargs cat | sha256sum | cut -c1-12)
+          PKG_IMAGE="optimizer-packaging:${PKG_HASH}"
+          docker image inspect "$PKG_IMAGE" >/dev/null 2>&1 || \
+            docker build -t "$PKG_IMAGE" tools/packaging/docker/
+          echo "image=$PKG_IMAGE" >> "$GITHUB_OUTPUT"
+
+      # The deb/rpm scripts derive the package arch from the container, so
+      # each leg must run on its native runner arch.
+      - name: Package deb + rpm (in packaging container)
+        env:
+          PKG_VERSION: ${{ needs.version.outputs.pkg_version }}
+          PKG_IMAGE: ${{ steps.pkgimage.outputs.image }}
+        run: |
+          set -euo pipefail
+          EXPECT="$(git rev-parse --short=7 HEAD)"
+          rm -rf dist
+          mkdir -p dist
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            -v "$PWD":/w -w /w "$PKG_IMAGE" \
+            bash -c "tools/packaging/build-optimizer-deb.sh --version '$PKG_VERSION' \
+                --binary out/factory_worker --library out/libpagespeed.so \
+                --expect-version '$EXPECT' --out dist/ && \
+              tools/packaging/build-optimizer-rpm.sh --version '$PKG_VERSION' \
+                --binary out/factory_worker --library out/libpagespeed.so \
+                --expect-version '$EXPECT' --out dist/"
+          ls -la dist/
+
+      - name: Upload packages
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: optimizer-linux-${{ env.ARCH }}
+          path: dist/*
+          if-no-files-found: error
+
+  build-amd64-hosted:
+    name: Build + package (linux amd64, hosted)
+    needs: version
+    if: ${{ vars.FLEET_ENABLED != 'true' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    env:
+      ARCH: amd64
+      BAZEL_RELEASE_CONFIG: release
+    steps: *linux-package-steps
+
+  build-arm64:
+    name: Build + package (linux arm64)
+    needs: version
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    env:
+      ARCH: arm64
+      BAZEL_RELEASE_CONFIG: release-linux-arm64
+    steps: *linux-package-steps
+
+  # ---------------------------------------------------------------------
+  # Windows zip. Fleet job plus a hosted twin while the fleet is off; one
+  # step list. Anything a hosted image lacks is installed only when missing.
+  # ---------------------------------------------------------------------
+  build-windows:
+    name: Build + package (windows x64)
+    needs: version
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'windows-2022' || 'fleet-windows' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 180
+    steps: &windows-package-steps
+      # A previous build leaves vendor\bazel-external as a junction into a Bazel
+      # output base full of nested junctions; the checkout clean walks that loop.
+      # Remove only the links (never their targets) before the checkout.
+      - name: Unlink vendor reparse points before checkout (build runner)
+        if: runner.environment != 'github-hosted'
+        shell: powershell
+        run: |
+          $s = Join-Path $env:GITHUB_WORKSPACE 'tools\ci\unlink-vendor-reparse.ps1'
+          if (Test-Path -LiteralPath $s) { & $s -Workspace $env:GITHUB_WORKSPACE } else { Write-Host 'no previous checkout' }
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.version.outputs.checkout_ref }}
+
+      - name: Verify the checkout is the resolved tag commit
+        if: ${{ needs.version.outputs.tag_sha != '' }}
+        shell: bash
+        env:
+          WANT: ${{ needs.version.outputs.tag_sha }}
+        run: |
+          set -euo pipefail
+          GOT="$(git rev-parse HEAD)"
+          [ "$WANT" = "$GOT" ] || { echo "::error::tag moved: resolved $WANT, checked out $GOT"; exit 1; }
+
+      # BAZEL_SH from the runner environment when it names an existing
+      # shell, else MSYS2, else Git for Windows.
+      - name: Locate the build tools
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sh = $env:BAZEL_SH
+          if (-not $sh -or -not (Test-Path $sh)) {
+            $sh = @('C:\msys64\usr\bin\bash.exe', 'C:\Program Files\Git\bin\bash.exe') | Where-Object { Test-Path $_ } | Select-Object -First 1
+          }
+          if (-not $sh) { Write-Error 'no bash for Bazel: set BAZEL_SH in the runner environment'; exit 1 }
+          "BAZEL_SH=$sh" >> $env:GITHUB_ENV
+          if (-not (Get-Command bazelisk -ErrorAction SilentlyContinue)) {
+            npm install -g @bazel/bazelisk@1.28.1
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - name: Install the build tools the image lacks
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # gperf generates the HTML name tables; nasm assembles libaom's
+          # x86 kernels. Installed only when missing (hosted images carry
+          # MSYS2 and Chocolatey).
+          if (-not (Test-Path C:\msys64\usr\bin\gperf.exe) -and -not (Get-Command gperf -ErrorAction SilentlyContinue)) {
+            & C:\msys64\usr\bin\pacman.exe -S --noconfirm --needed gperf
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          if (-not (Test-Path "C:\Program Files\NASM\nasm.exe") -and -not (Get-Command nasm -ErrorAction SilentlyContinue)) {
+            choco install nasm -y --no-progress
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - name: Cache Bazel repository and disk caches (hosted)
+        if: ${{ runner.environment == 'github-hosted' }}
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            C:\bazel-repo
+            C:\bazel-disk
+          key: ${{ runner.os }}-x64-opt-release-bazel-v1-${{ hashFiles('MODULE.bazel', '.bazelrc', '.bazelversion') }}
+          restore-keys: |
+            ${{ runner.os }}-x64-opt-release-bazel-v1-
+
+      - name: Stamp GIT_COMMIT
+        shell: bash
+        run: printf '%s' "$(git rev-parse HEAD)" > GIT_COMMIT
+
+      - name: Build the daemon and client library (release config)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # The build reads PATH, INCLUDE and LIB (.bazelrc action_env), so it
+          # runs inside the MSVC x64 developer environment. The CMake-built
+          # codec also needs the MSYS2 shell tools.
+          # Build Tools installs are products too: without -products * vswhere
+          # reports nothing on a host that has only them, hence the fallback.
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vs = $null
+          if (Test-Path -LiteralPath $vswhere) {
+            $vs = & $vswhere -latest -products * -property installationPath 2>$null
+          }
+          if (-not $vs -or -not (Test-Path -LiteralPath "$vs\VC\Auxiliary\Build\vcvars64.bat")) {
+            $vs = @(
+              (Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\2022\BuildTools'),
+              (Join-Path $env:ProgramFiles 'Microsoft Visual Studio\2022\Community'),
+              (Join-Path $env:ProgramFiles 'Microsoft Visual Studio\2022\Enterprise')
+            ) | Where-Object { Test-Path -LiteralPath "$_\VC\Auxiliary\Build\vcvars64.bat" } | Select-Object -First 1
+          }
+          if (-not $vs) { Write-Host "::error::no Visual Studio installation found"; exit 1 }
+          $vcvars = Join-Path $vs 'VC\Auxiliary\Build\vcvars64.bat'
+          # Call the command interpreter by its full path: a bare `cmd` can
+          # resolve to another program when a POSIX tools directory precedes
+          # the system directory on PATH.
+          & "$env:ComSpec" /c "`"$vcvars`" >nul && set" | ForEach-Object {
+            if ($_ -match '^(PATH|INCLUDE|LIB|LIBPATH|VCToolsInstallDir|WindowsSdkDir|WindowsSDKVersion)=(.*)$') {
+              Set-Item -Path "env:$($Matches[1])" -Value $Matches[2]
+            }
+          }
+          $env:PATH = "C:\msys64\usr\bin;C:\Program Files\NASM;$env:PATH"
+          $cacheArgs = @()
+          if ($env:RUNNER_ENVIRONMENT -eq 'github-hosted') {
+            $cacheArgs += '--repository_cache=C:/bazel-repo', '--disk_cache=C:/bazel-disk'
+          }
+          if ($env:BAZEL_REMOTE_CACHE_URL) {
+            Write-Host 'using the remote Bazel cache from the runner environment'
+            $cacheArgs += "--remote_cache=$env:BAZEL_REMOTE_CACHE_URL"
+          }
+          # A fixed output user root: the default lives under the service
+          # profile, whose name can carry a dollar sign that the generated
+          # ninja files cannot escape. Same rule as the NuGet lane.
+          $outRoot = $(if ($env:CI_WIN_BAZEL_OUTPUT_ROOT) { $env:CI_WIN_BAZEL_OUTPUT_ROOT } else { Join-Path $env:SystemDrive 'b' }) -replace '\\', '/'
+          $startup = @("--output_user_root=$outRoot")
+          bazelisk @startup build --config=windows --config=opt @cacheArgs `
+            //src/worker:factory_worker //lib/pagespeed:libpagespeed.so
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $bin = (bazelisk @startup info --config=windows --config=opt bazel-bin).Trim()
+          if (Test-Path out) { Remove-Item -Recurse -Force out }
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          Copy-Item "$bin\src\worker\factory_worker.exe" out\factory_worker.exe
+          Copy-Item "$bin\lib\pagespeed\libpagespeed.so" out\pagespeed.dll
+
+      - name: The binaries need no Visual C++ runtime
+        shell: powershell
+        run: |
+          & tools\ci\check-no-vc-runtime.ps1 -Binaries out\factory_worker.exe,out\pagespeed.dll
+          exit $LASTEXITCODE
+
+      - name: Package
+        shell: powershell
+        env:
+          UPSTREAM: ${{ needs.version.outputs.upstream }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # The upstream (SemVer) spelling: asset names never carry the
+          # package tilde, which GitHub would rewrite.
+          $name = "pagespeed-optimizer-$env:UPSTREAM-win-x64"
+          $stage = "stage\$name"
+          foreach ($d in @('stage', 'dist')) { if (Test-Path $d) { Remove-Item -Recurse -Force $d } }
+          New-Item -ItemType Directory -Force -Path $stage, dist | Out-Null
+          Copy-Item out\factory_worker.exe, out\pagespeed.dll, LICENSE, NOTICE $stage
+          Compress-Archive -Path "$stage\*" -DestinationPath "dist\$name.zip"
+          Get-ChildItem dist | Format-Table Name, Length
+
+      - name: Upload package
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: optimizer-windows-x64
+          path: dist/*
+          if-no-files-found: error
+
+  build-windows-hosted:
+    name: Build + package (windows x64, hosted)
+    needs: version
+    if: ${{ vars.FLEET_ENABLED != 'true' }}
+    runs-on: windows-2022
+    timeout-minutes: 240
+    steps: *windows-package-steps
+
+  ci-release-gate:
+    name: CI run of the release commit
+    needs: version
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    # Reads the workflow runs of this public repository with the default
+    # read-only token; no extra permission is requested. The script comes
+    # from main, never from the tree being released.
+    env:
+      GH_TOKEN: ${{ github.token }}
+      # A dry run of a tag that is not on the remote yet has no tag_sha; it
+      # builds the dispatched ref, so that commit is the one to check.
+      RELEASE_SHA: ${{ needs.version.outputs.tag_sha || github.sha }}
+      DRY_RUN: ${{ needs.version.outputs.dry_run }}
+    steps:
+      - name: Checkout main (gate script)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          sparse-checkout: tools/ci
+          persist-credentials: false
+
+      - name: Require a green CI run of this commit
+        run: bash tools/ci/ci_release_gate.sh
+
+  # Release security gates, hosted: the SBOM and VEX file that ship with the
+  # release, and grype over the shipped SBOM with the shipped VEX applied.
+  # The SBOM is generated from the sources of the tag (generate-sbom.py reads
+  # MODULE.bazel and the curated tables, never the binaries), so no build is
+  # needed. The grype database is the pinned one (tools/sbom/grype-db-pin.json,
+  # imported with auto-update off), so a release is reproducible; its age is
+  # enforced here as on the nightly. `manifest` waits for this job.
+  security-gates:
+    name: Security gates (SBOM, VEX, grype)
+    needs: version
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      UPSTREAM: ${{ needs.version.outputs.upstream }}
+      SYFT_VERSION: v1.44.0
+      GRYPE_VERSION: v0.121.2
+      # Isolated, job-local grype database cache so the pinned import cannot
+      # be clobbered by a live-database auto-update.
+      GRYPE_DB_CACHE_DIR: ${{ github.workspace }}/.grype-db-pinned
+      GRYPE_DB_AUTO_UPDATE: "false"
+      GRYPE_DB_VALIDATE_AGE: "false"
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.version.outputs.checkout_ref }}
+          persist-credentials: false
+
+      - name: Verify the checkout is the resolved tag commit
+        if: ${{ needs.version.outputs.tag_sha != '' }}
+        env:
+          WANT: ${{ needs.version.outputs.tag_sha }}
+        run: |
+          set -euo pipefail
+          GOT="$(git rev-parse HEAD)"
+          [ "$WANT" = "$GOT" ] || { echo "::error::tag moved: resolved $WANT, checked out $GOT"; exit 1; }
+
+      # generate-sbom.py needs Python 3.11+ (datetime.UTC).
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Generate the SBOM (SPDX 2.3) for this release
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python3 tools/generate-sbom.py --name "pagespeed-optimizer-${UPSTREAM}" \
+            --version "$UPSTREAM" --output "out/pagespeed-optimizer-${UPSTREAM}.spdx.json"
+          python3 tools/sbom/check-spdx-structure.py "out/pagespeed-optimizer-${UPSTREAM}.spdx.json"
+
+      # The VEX statements live in sbom/*.vex.json; the release copy is the
+      # same statements under a release-stamped document id. A malformed
+      # statement is silently ignored by the scanner, so validate before and
+      # after, and fail when there is no VEX file at all (it is a release asset).
+      - name: Validate and stamp the VEX file
+        run: |
+          set -euo pipefail
+          python3 tools/ci/validate-vex.py sbom/
+          shopt -s nullglob
+          vex_files=(sbom/*.vex.json)
+          [ "${#vex_files[@]}" -eq 1 ] || { echo "::error::expected exactly one sbom/*.vex.json, found ${#vex_files[@]}"; exit 1; }
+          jq --arg id "https://we-amp.com/vex/pagespeed-optimizer-${UPSTREAM}" '."@id" = $id' \
+            "${vex_files[0]}" > "out/pagespeed-optimizer-${UPSTREAM}.vex.json"
+          python3 tools/ci/validate-vex.py out/
+
+      - name: Ensure pinned syft + grype
+        run: bash tools/ci/ensure-syft-grype.sh
+
+      - name: Provision the pinned grype DB (age enforced)
+        run: bash tools/sbom/provision-grype-db.sh --enforce-age
+
+      - name: Vulnerability scan (grype on the shipped SBOM, shipped VEX applied)
+        run: |
+          set -uo pipefail
+          rc=0
+          grype "sbom:out/pagespeed-optimizer-${UPSTREAM}.spdx.json" \
+            --vex "out/pagespeed-optimizer-${UPSTREAM}.vex.json" \
+            --fail-on medium -o table > "${RUNNER_TEMP}/grype.txt" || rc=$?
+          cat "${RUNNER_TEMP}/grype.txt"
+          {
+            echo "### grype on the release SBOM (pinned DB, VEX applied, fails on medium and above)"
+            echo ""
+            echo '```'
+            cat "${RUNNER_TEMP}/grype.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
+
+      - name: Upload the SBOM and VEX file
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: release-sbom-vex
+          path: out/*
+          if-no-files-found: error
+
+  manifest:
+    name: Validate asset set + SHA256SUMS
+    needs: [version, ci-release-gate, security-gates, build-amd64, build-amd64-hosted, build-arm64, build-windows, build-windows-hosted]
+    # Exactly one of each fleet/hosted pair runs; the other is skipped.
+    if: >-
+      ${{ !cancelled()
+      && needs.version.result == 'success'
+      && needs.ci-release-gate.result == 'success'
+      && needs.security-gates.result == 'success'
+      && needs.build-arm64.result == 'success'
+      && (needs.build-amd64.result == 'success' || needs.build-amd64-hosted.result == 'success')
+      && (needs.build-windows.result == 'success' || needs.build-windows-hosted.result == 'success') }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # The subjects of the SLSA provenance (the `provenance` job): the seven
+    # files and SHA256SUMS, as `sha256sum` lines, base64 encoded.
+    outputs:
+      provenance_subjects: ${{ steps.contract.outputs.provenance_subjects }}
+    steps:
+      - name: Checkout the apt helper
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: ci-helpers
+          sparse-checkout: tools/ci/apt-robust.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Download packages
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          pattern: optimizer-*
+          merge-multiple: true
+
+      # The SBOM and the VEX file from the security gates join the packages;
+      # they are named for the upstream version and are summed with them.
+      - name: Download the SBOM and VEX file
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-sbom-vex
+          path: dist
+
+      # Rename the tilde package-version spelling to the upstream SemVer
+      # spelling for the asset names (GitHub would sanitize '~' to '.',
+      # breaking sha256sum -c for downloaders), then sum.
+      - name: Manifest
+        env:
+          UPSTREAM: ${{ needs.version.outputs.upstream }}
+          PKG_VERSION: ${{ needs.version.outputs.pkg_version }}
+        run: |
+          set -euo pipefail
+          cd dist
+          if [ "$UPSTREAM" != "$PKG_VERSION" ]; then
+            for f in ./*"$PKG_VERSION"*; do
+              mv "$f" "${f//$PKG_VERSION/$UPSTREAM}"
+            done
+          fi
+          sha256sum -- * > SHA256SUMS
+          cat SHA256SUMS
+
+      # Fail closed on ANY contract deviation: exactly the eight assets (the
+      # five packages, the SBOM, the VEX file and SHA256SUMS; SHA256SUMS.asc
+      # and SHA256SUMS.sigstore.json join in the release job), all present and non-empty, sums verify, and the package-internal
+      # versions carry the tilde package version the serving module's
+      # exact-version dependency will name. The glibc floor must stay at
+      # 2.34 (the RHEL 9 / Debian 12 contract); a noble-built binary would
+      # say 2.38.
+      - name: Fail-closed asset contract validation
+        id: contract
+        env:
+          UBUNTU_MIRROR: ${{ vars.UBUNTU_MIRROR }}
+          UPSTREAM: ${{ needs.version.outputs.upstream }}
+          PKG_VERSION: ${{ needs.version.outputs.pkg_version }}
+        run: |
+          set -euo pipefail
+          cd dist
+          bash "${GITHUB_WORKSPACE}/ci-helpers/tools/ci/apt-robust.sh" update
+          sudo apt-get install -y -qq --no-install-recommends rpm >/dev/null
+          EXPECTED=(
+            "pagespeed-optimizer-${UPSTREAM}-1.x86_64.rpm"
+            "pagespeed-optimizer-${UPSTREAM}-1.aarch64.rpm"
+            "pagespeed-optimizer_${UPSTREAM}_amd64.deb"
+            "pagespeed-optimizer_${UPSTREAM}_arm64.deb"
+            "pagespeed-optimizer-${UPSTREAM}-win-x64.zip"
+            "pagespeed-optimizer-${UPSTREAM}.spdx.json"
+            "pagespeed-optimizer-${UPSTREAM}.vex.json"
+            "SHA256SUMS"
+          )
+          mapfile -t ACTUAL < <(find . -maxdepth 1 -type f -printf '%f\n' | sort)
+          [ "${#ACTUAL[@]}" -eq 8 ] || { echo "::error::asset count ${#ACTUAL[@]} != 8: ${ACTUAL[*]}"; exit 1; }
+          # The Windows zip: exactly the worker, its client library and the
+          # two licence files.
+          unzip -Z1 "pagespeed-optimizer-${UPSTREAM}-win-x64.zip" | sort | tr '\n' ' ' | grep -qx 'LICENSE NOTICE factory_worker.exe pagespeed.dll ' \
+            || { echo "::error::unexpected Windows zip contents: $(unzip -Z1 "pagespeed-optimizer-${UPSTREAM}-win-x64.zip" | tr '\n' ' ')"; exit 1; }
+          for f in "${EXPECTED[@]}"; do
+            [ -f "$f" ] || { echo "::error::missing asset '$f'"; exit 1; }
+            [ -s "$f" ] || { echo "::error::empty asset '$f'"; exit 1; }
+          done
+          sha256sum -c SHA256SUMS
+          # SHA256SUMS lists the seven files it covers, not itself.
+          [ "$(wc -l < SHA256SUMS)" -eq 7 ] || { echo "::error::SHA256SUMS lists $(wc -l < SHA256SUMS) files != 7"; exit 1; }
+          # The SBOM and the VEX file are JSON documents of the right kind.
+          jq -e '.spdxVersion == "SPDX-2.3" and (.packages | length) > 0' "pagespeed-optimizer-${UPSTREAM}.spdx.json" >/dev/null \
+            || { echo "::error::the SBOM is not an SPDX 2.3 document with packages"; exit 1; }
+          jq -e '(."@context" | tostring | contains("openvex.dev")) and (.statements | type) == "array"' "pagespeed-optimizer-${UPSTREAM}.vex.json" >/dev/null \
+            || { echo "::error::the VEX file is not an OpenVEX document with a statements array"; exit 1; }
+          for deb in ./*.deb; do
+            v="$(dpkg-deb -f "$deb" Version)"
+            [ "$v" = "$PKG_VERSION" ] || { echo "::error::$deb Version '$v' != '$PKG_VERSION'"; exit 1; }
+            dep="$(dpkg-deb -f "$deb" Depends)"
+            echo "$deb Depends: $dep"
+            [ "$dep" = "libc6 (>= 2.34)" ] || { echo "::error::$deb Depends '$dep' != 'libc6 (>= 2.34)'; the binary was not built on the jammy dev image"; exit 1; }
+          done
+          for rpmf in ./*.rpm; do
+            v="$(rpm -qp --qf '%{VERSION}-%{RELEASE}' "$rpmf")"
+            [ "$v" = "${PKG_VERSION}-1" ] || { echo "::error::$rpmf version-release '$v' != '${PKG_VERSION}-1'"; exit 1; }
+            rpm -qp --requires "$rpmf" | grep -qx 'glibc >= 2.34' || { echo "::error::$rpmf lacks 'glibc >= 2.34' requires; the binary was not built on the jammy dev image"; exit 1; }
+            if rpm -qp --requires "$rpmf" | grep -qE '^glibc >= 2\.3[5-9]|^glibc >= [3-9]'; then
+              echo "::error::$rpmf requires a glibc above the 2.34 floor"
+              exit 1
+            fi
+          done
+          echo "asset contract: ok"
+          echo "provenance_subjects=$({ cat SHA256SUMS; sha256sum SHA256SUMS; } | base64 -w0)" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Asset contract validated"
+            echo ""
+            echo '```'
+            ls -la
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Always uploaded (dry-run inspection AND real-run audit trail); the
+      # release job re-downloads this exact set.
+      - name: Upload validated dist
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: optimizer-release-dist
+          path: dist/*
+          if-no-files-found: error
+
+  # Real runs only, inside the protected `release` environment. The release
+  # signing key lives in this one job, which holds no write token to the
+  # repository contents: the OIDC token and attestations: write are what the
+  # keyless signature and the attestations need, and the key material is
+  # gone (the keyrings are removed) before either is used. The signing
+  # script and the published public key come from main, never from the tree
+  # being released. Signs with two independent mechanisms: the release key
+  # (SHA256SUMS.asc) and Sigstore (SHA256SUMS.sigstore.json, plus the
+  # attestations), whose identity is this workflow on main.
+  sign-checksums:
+    name: Sign SHA256SUMS (release key, Sigstore) and attest
+    needs: [version, manifest]
+    if: ${{ !cancelled() && needs.manifest.result == 'success' && needs.version.outputs.dry_run == 'false' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout main (signing script, published key)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          path: trust
+          sparse-checkout: |
+            tools/ci/release_checksums_sig.sh
+            RELEASE-SIGNING-KEY.asc
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Download validated dist
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: optimizer-release-dist
+          path: dist
+
+      - name: Verify the set across the job boundary
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum -c SHA256SUMS
+
+      - name: Sign SHA256SUMS (detached, armored)
+        env:
+          RELEASE_GPG_KEY: ${{ secrets.RELEASE_GPG_KEY }}
+          RELEASE_GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
+        run: bash trust/tools/ci/release_checksums_sig.sh sign dist/SHA256SUMS signature/SHA256SUMS.asc
+
+      # A fresh keyring holding only RELEASE-SIGNING-KEY.asc from main.
+      - name: Verify SHA256SUMS.asc against the published release key
+        run: |
+          set -euo pipefail
+          bash trust/tools/ci/release_checksums_sig.sh verify dist/SHA256SUMS signature/SHA256SUMS.asc trust/RELEASE-SIGNING-KEY.asc \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # Belt and braces for the script's EXIT trap: a cancelled or killed
+      # step skips it, and a leftover keyring on a persistent runner would
+      # keep the private key on disk.
+      - name: Remove the temporary keyrings
+        if: always()
+        run: |
+          for h in "${RUNNER_TEMP}"/gnupg.*; do
+            [ -d "$h" ] || continue
+            GNUPGHOME="$h" gpgconf --kill gpg-agent >/dev/null 2>&1 || true
+            rm -rf "$h"
+          done
+
+      # The build provenance attestation covers the five packages, the SBOM
+      # and the VEX file; the SBOM attestation binds the SBOM to each of the
+      # five packages. They prove which workflow run produced these digests
+      # (the amd64 package and the Windows zip build on the project's own
+      # runners, so they do not prove an isolated build).
+      - name: Attest build provenance (packages, SBOM, VEX)
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/*.deb
+            dist/*.rpm
+            dist/*.zip
+            dist/*.spdx.json
+            dist/*.vex.json
+
+      - name: Attest the SBOM for each package
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-path: |
+            dist/*.deb
+            dist/*.rpm
+            dist/*.zip
+          sbom-path: dist/pagespeed-optimizer-${{ needs.version.outputs.upstream }}.spdx.json
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+
+      # Keyless: the certificate names this workflow file on main as the
+      # signer (the SAN is the job workflow ref), not a person or a key.
+      - name: Sign SHA256SUMS with cosign (keyless bundle)
+        run: cosign sign-blob --yes --bundle signature/SHA256SUMS.sigstore.json dist/SHA256SUMS
+
+      - name: Verify the Sigstore signature and one attestation, as a consumer would
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM: ${{ needs.version.outputs.upstream }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # The signer is this workflow on main, and a real run always starts
+          # on the release tag (the release environment admits tag refs only).
+          IDENTITY='https://github.com/We-Amp/pagespeed-optimizer/.github/workflows/pipeline-release-optimizer.yml@refs/heads/main'
+          cosign verify-blob dist/SHA256SUMS --bundle signature/SHA256SUMS.sigstore.json \
+            --certificate-identity "$IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-github-workflow-ref "refs/tags/${TAG}"
+          gh attestation verify "dist/pagespeed-optimizer_${UPSTREAM}_amd64.deb" --repo We-Amp/pagespeed-optimizer \
+            --cert-identity "$IDENTITY" --source-ref "refs/tags/${TAG}"
+          gh attestation verify "dist/pagespeed-optimizer_${UPSTREAM}_amd64.deb" --repo We-Amp/pagespeed-optimizer \
+            --cert-identity "$IDENTITY" --source-ref "refs/tags/${TAG}" \
+            --predicate-type https://spdx.dev/Document/v2.3
+          echo "Sigstore signature and attestations verified against the pinned workflow identity" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the signatures
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: optimizer-release-signature
+          path: |
+            signature/SHA256SUMS.asc
+            signature/SHA256SUMS.sigstore.json
+          if-no-files-found: error
+
+  # Real runs only, inside the protected `release` environment (required
+  # reviewer and tag policy: docs/ci/release.md). A dry run never gets here.
+  # SLSA build provenance (multiple.intoto.jsonl): the generic generator of
+  # the SLSA project signs, keyless, an in-toto statement whose subjects are
+  # the seven files and SHA256SUMS. Real runs only, and only after
+  # `sign-checksums`, so after the `release` environment's approval: a dry
+  # run or a rejected approval signs nothing, and unreleased binaries never
+  # reach the public transparency log. The generator only uploads the statement as a run
+  # artifact (`upload-assets: false`, pinned by the shape gate's slsa rule):
+  # it never touches a release; `release` checks it against the set
+  # (tools/ci/check_slsa_provenance.py --exact, from main) and publishes it
+  # with the assets. The generator keeps the artifact 5 days (v2.1.0): a
+  # `release` re-run after that needs `provenance` re-run too. The generator is referenced by its version tag, not a
+  # commit: it verifies its own ref and refuses a commit SHA. Its jobs run on
+  # GitHub-hosted runners and declare these permissions (the upload job's
+  # `contents: write` included, although `upload-assets: false` skips it); a
+  # called workflow cannot get more than its caller grants, so release.yml
+  # grants them.
+  provenance:
+    name: SLSA build provenance
+    needs: [version, manifest, sign-checksums]
+    if: ${{ !cancelled() && needs.manifest.result == 'success' && needs.sign-checksums.result == 'success' && needs.version.outputs.dry_run == 'false' }}
+    permissions:
+      actions: read
+      id-token: write
+      contents: write
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    with:
+      base64-subjects: ${{ needs.manifest.outputs.provenance_subjects }}
+      provenance-name: multiple.intoto.jsonl
+      upload-assets: false
+
+  release:
+    name: Publish GitHub release
+    needs: [version, manifest, sign-checksums, provenance]
+    if: ${{ !cancelled() && needs.manifest.result == 'success' && needs.sign-checksums.result == 'success' && needs.provenance.result == 'success' && needs.version.outputs.dry_run == 'false' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      # gh release create --verify-tag shells out to git, so the job needs
+      # a checkout of the tag; downloading the dist artifact alone leaves
+      # no .git and the publish fails with "not a git repository".
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - name: Checkout the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ needs.version.outputs.tag }}
+          persist-credentials: false
+
+      - name: Verify the checkout is the resolved tag commit
+        env:
+          WANT: ${{ needs.version.outputs.tag_sha }}
+        run: |
+          set -euo pipefail
+          GOT="$(git rev-parse HEAD)"
+          [ -n "$WANT" ] && [ "$WANT" = "$GOT" ] || { echo "::error::tag moved or unresolved: resolved '$WANT', checked out $GOT"; exit 1; }
+
+      - name: Download validated dist
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: optimizer-release-dist
+          path: dist
+
+      - name: Download the signatures
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: optimizer-release-signature
+          path: dist
+
+      - name: Download the SLSA provenance
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: multiple.intoto.jsonl
+          path: provenance
+
+      - name: Checkout main (provenance check)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          path: provenance-tool
+          sparse-checkout: tools/ci/check_slsa_provenance.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      # The provenance covers exactly the set (the files SHA256SUMS lists and
+      # SHA256SUMS); then the statement joins the assets.
+      - name: Re-verify SHA256SUMS across the job boundary
+        run: |
+          set -euo pipefail
+          ( cd dist && sha256sum -c SHA256SUMS )
+          [ -s dist/SHA256SUMS.asc ] || { echo "::error::SHA256SUMS.asc is missing"; exit 1; }
+          [ -s dist/SHA256SUMS.sigstore.json ] || { echo "::error::SHA256SUMS.sigstore.json is missing"; exit 1; }
+          python3 -I provenance-tool/tools/ci/check_slsa_provenance.py verify provenance/multiple.intoto.jsonl dist --exact
+          cp provenance/multiple.intoto.jsonl dist/multiple.intoto.jsonl
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.version.outputs.tag }}
+          PKG_VERSION: ${{ needs.version.outputs.pkg_version }}
+          PRERELEASE: ${{ needs.version.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          FLAGS=(--verify-tag)
+          [ "$PRERELEASE" = "true" ] && FLAGS+=(--prerelease)
+          # The notes carry the verification commands next to the assets.
+          # The code lines are indented, so no backtick fences are needed.
+          cat > "${RUNNER_TEMP}/notes.md" <<NOTES
+          The pagespeed-optimizer host packages (optimization daemon + the libpagespeed.so client library serving modules bind), version \`$PKG_VERSION\`, for deb and rpm hosts on amd64 and arm64, and a Windows x64 zip (factory_worker.exe + pagespeed.dll). Install alongside the matching serving-module package, which depends on this package at this exact version.
+
+          The release also carries a software bill of materials (\`pagespeed-optimizer-<version>.spdx.json\`) and a VEX file (\`pagespeed-optimizer-<version>.vex.json\`); both are listed in SHA256SUMS.
+
+          Verify downloads against SHA256SUMS, and SHA256SUMS against SHA256SUMS.asc with the release signing key 411D EFDB 5713 51D2 B25A EFCC 9C02 B5BD CCE7 5313 (RELEASE-SIGNING-KEY.asc in this repository):
+
+              sha256sum --check --ignore-missing SHA256SUMS
+              gpg --verify SHA256SUMS.asc SHA256SUMS
+
+          SHA256SUMS also has a Sigstore signature, and every package has a build provenance attestation and an SBOM attestation:
+
+              cosign verify-blob SHA256SUMS --bundle SHA256SUMS.sigstore.json \\
+                --certificate-identity 'https://github.com/We-Amp/pagespeed-optimizer/.github/workflows/pipeline-release-optimizer.yml@refs/heads/main' \\
+                --certificate-oidc-issuer https://token.actions.githubusercontent.com \\
+                --certificate-github-workflow-ref refs/tags/optimizer-v<version>
+              gh attestation verify <package file> --repo We-Amp/pagespeed-optimizer \\
+                --cert-identity 'https://github.com/We-Amp/pagespeed-optimizer/.github/workflows/pipeline-release-optimizer.yml@refs/heads/main' \\
+                --source-ref refs/tags/optimizer-v<version>
+
+          multiple.intoto.jsonl is the SLSA build provenance of the packages, the SBOM, the VEX file and SHA256SUMS:
+
+              slsa-verifier verify-artifact <file> --provenance-path multiple.intoto.jsonl \\
+                --source-uri github.com/We-Amp/pagespeed-optimizer --source-tag optimizer-v<version>
+
+          RELEASING.md in this repository lists all verification commands.
+          NOTES
+          gh release create "$TAG" "${FLAGS[@]}" \
+            --title "pagespeed-optimizer $PKG_VERSION" \
+            --notes-file "${RUNNER_TEMP}/notes.md" \
+            ./dist/*

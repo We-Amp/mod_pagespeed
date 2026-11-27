@@ -1,0 +1,429 @@
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+<html>
+  <head>
+    <link rel="canonical" href="https://modpagespeed.com/1.0/doc/filter-css-rewrite" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Rewrite CSS</title>
+    <link rel="stylesheet" href="doc.css" />
+  </head>
+  <body>
+    <div
+      id="archive-banner"
+      style="
+        background-color: #e1f5fe;
+        padding: 12px 24px;
+        text-align: center;
+        font-family: sans-serif;
+        font-size: 14px;
+        line-height: 1.6;
+        position: relative;
+        border-bottom: 1px solid #b3e5fc;
+      "
+    >
+      <span style="display:inline-block;padding:0 20px 0 0;">This is the archived documentation for the original mod_pagespeed releases, 1.14.36.1 and earlier. Those releases receive no security fixes: see the <a href="/docs/end-of-life-releases/" style="color:#0277bd;font-weight:bold;">end-of-life advisory</a>. The current mod_pagespeed is at <a href="https://modpagespeed.com" style="color:#0277bd;font-weight:bold;">modpagespeed.com</a>.</span>
+      <button
+        onclick="this.parentElement.style.display = 'none'"
+        style="
+          position: absolute;
+          right: 12px;
+          top: 50%;
+          transform: translateY(-50%);
+          background: none;
+          border: none;
+          font-size: 18px;
+          cursor: pointer;
+          color: #0277bd;
+          padding: 0 4px;
+        "
+        aria-label="Dismiss"
+      >
+        &times;
+      </button>
+    </div>
+
+    <!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+    <div id="header">
+      <div id="logoline">
+        <div id="logo">
+          <a href="https://www.we-amp.com/"
+            ><img
+              src="/1.0/we-amp.jpg"
+              srcset="/1.0/we-amp.jpg"
+              width="32"
+              height="32"
+              alt="We-Amp logo"
+          /></a>
+          <img
+            src="https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png"
+            srcset="https://www.gstatic.com/images/branding/product/2x/pagespeed_32dp.png"
+            width="32"
+            height="32"
+            alt="pagespeed logo"
+          />
+        </div>
+        <div id="logotext">PageSpeed</div>
+      </div>
+      <div id="navline">
+        <a href="/1.0/doc/">&larr; documentation index</a>
+      </div>
+    </div>
+    <div id="toc"></div>
+
+    <div id="content">
+      <h1>Rewrite CSS</h1>
+
+      <h2 id="configuration">Configuration</h2>
+      <p>The 'Rewrite CSS' filter is enabled by specifying:</p>
+
+      <dl>
+        <dt>Apache:</dt>
+        <dd><pre class="prettyprint">ModPagespeedEnableFilters rewrite_css</pre></dd>
+
+        <dt>Nginx:</dt>
+        <dd><pre class="prettyprint">pagespeed EnableFilters rewrite_css;</pre></dd>
+      </dl>
+      <p>
+        in the configuration file. To enable fallback rewriting on CSS we cannot parse, also
+        specify:
+      </p>
+      <dl>
+        <dt>Apache:</dt>
+        <dd><pre class="prettyprint">ModPagespeedEnableFilters fallback_rewrite_css_urls</pre></dd>
+
+        <dt>Nginx:</dt>
+        <dd><pre class="prettyprint">pagespeed EnableFilters fallback_rewrite_css_urls;</pre></dd>
+      </dl>
+
+      <h2>Description</h2>
+      <p>
+        This filter parses linked and inline CSS, rewrites the images found and minifies the CSS.
+        The filter works on CSS found in
+        <code>&lt;style&gt;</code> blocks and <code>&lt;link&gt;</code> refs.
+      </p>
+      <p>
+        Many images are referenced from CSS rather than HTML. If
+        <a href="reference-image-optimize#rewrite_images"><code>rewrite_images</code></a
+        >, <a href="reference-image-optimize#recompress_images"><code>recompress_images</code></a
+        >, <a href="reference-image-optimize#recompress_jpeg"><code>recompress_jpeg</code></a
+        >, <a href="reference-image-optimize#recompress_png"><code>recompress_png</code></a
+        >, <a href="reference-image-optimize#recompress_webp"><code>recompress_webp</code></a
+        >, <a href="reference-image-optimize#convert_gif_to_png"><code>convert_gif_to_png</code></a
+        >,
+        <a href="reference-image-optimize#convert_jpeg_to_webp"><code>convert_jpeg_to_webp</code></a
+        >,
+        <a href="reference-image-optimize#convert_png_to_jpeg"><code>convert_png_to_jpeg</code></a
+        >, or <a href="filter-cache-extend"><code>extend_cache</code></a>
+        are enabled this filter finds and rewrites those images, saving bytes and extending cache
+        lifetimes.
+      </p>
+      <p>
+        The CSS parser cannot parse some CSS3 or proprietary CSS extensions. If
+        <code>fallback_rewrite_css_urls</code> is not enabled, these CSS files will not be rewritten
+        at all. If the <code>fallback_rewrite_css_urls</code> filter is enabled, a fallback method
+        will attempt to rewrite the URLs in the CSS file, even if the CSS cannot be successfully
+        parsed and minified.
+      </p>
+      <p>
+        Minification can drastically reduce the byte count in common CSS by stripping all comments
+        and most whitespace and shortening color names. This filter can be used to avoid the extra
+        step of minifying CSS by hand when constructing and maintaining a site. This
+        <a
+          target="_blank"
+          href="https://developers.google.com/speed/docs/best-practices/payload#MinifyCSS"
+          >practice</a
+        >
+        reduces the payload size.
+      </p>
+
+      <h2>Example</h2>
+      <p>For example, if the HTML document looks like this:</p>
+      <pre class="prettyprint">
+&lt;html&gt;
+  &lt;head&gt;
+    &lt;style&gt;
+      body { background-image: url("foo.png"); }
+      /* This comment will be stripped */
+      #iddy, .anotherId {
+        border: solid 1px #cccccc;
+        padding: 1.2em;
+        float: left;
+        color:##ff0000;
+      }
+    &lt;/style&gt;
+    &lt;link rel="stylesheet" type="text/css" href="extStyle.css"&gt;
+  &lt;/head&gt;
+  &lt;body&gt;
+    Wow, &lt;div class="classy" id="iddy"&gt;
+    CSS is &lt;span&gt;stylin'&lt;/span&gt;.&lt;/div&gt;
+  &lt;/body&gt;
+&lt;/html&gt;
+</pre
+      >
+      <p>With the following in <code>extStyle.css</code>:</p>
+      <pre class="prettyprint">
+  div.classy span, div.classy img {
+    display: block;
+    border: none !important;
+    background: none !important;
+  }
+</pre
+      >
+      <p>Then PageSpeed will rewrite it into:</p>
+      <pre class="prettyprint">
+&lt;html&gt;
+  &lt;head&gt;
+    &lt;style&gt;body{background-image:url(xfoo.png.pagespeed.ic.HASH.png}#iddy,#anotherId{border:solid 1px #ccc;padding:1.2em;float:left;color:red}&lt;/style&gt;
+    &lt;link rel="stylesheet" type="text/css" href="I.extStyle.css.pagespeed.cf.HASH.css"&gt;
+  &lt;/head&gt;
+  &lt;body&gt;
+    Wow, &lt;div class="classy" id="iddy"&gt;
+    CSS is &lt;span&gt;stylin'&lt;/span&gt;.&lt;/div&gt;
+  &lt;/body&gt;
+&lt;/html&gt;
+</pre
+      >
+      <p>And the rewritten file <code>I.extStyle.css.pagespeed.cf.HASH.css</code> will contain:</p>
+      <pre class="prettyprint">
+  dif.classy span,div.classy img{display:block;border:none!important;background:none!important}
+</pre
+      >
+
+      <h3>Online Example</h3>
+      <p>
+        You can see the filter in action at <code>www.modpagespeed.com</code> for
+        <a
+          href="https://www.modpagespeed.com/examples/rewrite_css.html?ModPagespeed=on&amp;ModPagespeedFilters=rewrite_css"
+          >CSS minification</a
+        >,
+        <a
+          href="https://www.modpagespeed.com/examples/rewrite_css_images.html?ModPagespeed=on&amp;ModPagespeedFilters=rewrite_css,extend_cache"
+          >cache-extending images in CSS</a
+        >,
+        <a
+          href="https://www.modpagespeed.com/examples/rewrite_css_images.html?ModPagespeed=on&amp;ModPagespeedFilters=rewrite_css,rewrite_images"
+          >rewriting images in CSS</a
+        >
+        and
+        <a
+          href="https://www.modpagespeed.com/examples/fallback_rewrite_css_urls.html?ModPagespeed=on&amp;ModPagespeedFilters=fallback_rewrite_css_urls,rewrite_css,rewrite_images"
+          >fallback rewriting of images in CSS</a
+        >.
+      </p>
+
+      <h2>Requirements</h2>
+      <p>
+        Only CSS referenced by <code>&lt;style&gt;</code> and <code>&lt;link&gt; </code> tags is
+        rewritten. For example, style attributes of HTML elements are not rewritten. Enable
+        <a href="filter-rewrite-style-attributes"> <code>rewrite_style_attributes</code></a> to
+        rewrite these as well.
+      </p>
+      <p>
+        Not all CSS3 or proprietary constructs are parsed. When unhandled syntax is present and the
+        file cannot be parsed completely, the URLs in the CSS can still be rewritten by the
+        <code>fallback_rewrite_css_urls</code> filter. However the CSS will not be minified.
+      </p>
+
+      <h2 id="risks">Risks</h2>
+      <p>CSS minification is considered moderate risk.</p>
+      <p>
+        Specifically, there is an outstanding bug that the CSS parser can silently lose data on
+        malformed CSS. This only applies to malformed CSS or CSS that uses proprietary extensions.
+        All known examples have been fixed, but there may be more examples not discovered yet.
+        Without this the risk would be low.
+      </p>
+      <p>
+        Some JavaScript code depends upon the exact URLs of resources. When we minify CSS we will
+        change the leaf name of the file (although leave it in the same directory). This could break
+        such JavaScript.
+      </p>
+
+      <h2>Troubleshooting</h2>
+      <p>
+        To troubleshoot why CSS is not minified, you can use the standalone binary
+        <code>css_minify_main</code>. It's shipped with mod_pagespeed, so
+        <a href="build_mod_pagespeed_from_source#debug-css">build it from source</a> and then run:
+      </p>
+      <pre>
+  ./out/Release/css_minify_main FILENAME.css > REWRITTEN.css
+</pre
+      >
+      <p>
+        The rewritten version is piped to <code>stdout</code> and the errors encountered are piped
+        to <code>stderr</code>. These error messages should be helpful in figuring out what aspects
+        of the CSS file could not be parsed.
+      </p>
+    </div>
+    <!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+    <div id="footer">
+      <!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+      <div id="navline">
+        <a href="/1.0/doc/">&larr; documentation index</a>
+      </div>
+    </div>
+
+    <script>
+      function buildTocHelper(node, headers) {
+        if (node.nodeType == 1) {
+          // Element node.
+          var nodeName = node.nodeName.toLowerCase();
+          if (
+            nodeName == 'h2' ||
+            nodeName == 'h3' ||
+            nodeName == 'h4' ||
+            nodeName == 'h5' ||
+            nodeName == 'h6'
+          ) {
+            if (node.id) {
+              headers.push([nodeName, node.innerHTML, node.id]);
+              node.appendChild(document.createTextNode('\u00A0')); // nbsp
+              var a = document.createElement('a');
+              a.class = 'header-link';
+              a.href = '#' + node.id;
+              a.textContent = '\uD83D\uDD17'; // link symbol
+              node.appendChild(a);
+            }
+          } else {
+            for (var i = 0; i < node.childNodes.length; i++) {
+              buildTocHelper(node.childNodes[i], headers);
+            }
+          }
+        }
+      }
+
+      function buildToc() {
+        var headers = [];
+        buildTocHelper(document.body, headers);
+        if (headers.length == 0) {
+          return;
+        }
+
+        var toc = document.getElementById('toc');
+        var tocContents = document.createElement('div');
+        tocContents.id = 'toc-contents';
+        tocContents.textContent = 'Contents';
+        toc.appendChild(tocContents);
+
+        var level = 1;
+        var currentUl = null;
+        for (var i = 0; i < headers.length; i++) {
+          var header = headers[i];
+          var headerLevel = header[0];
+          var headerValue = header[1];
+          var headerId = header[2];
+
+          var newLevel = parseInt(headerLevel.substring(1));
+          while (newLevel > level) {
+            // We loop here to handle the case where we have h2 ... h4.  This
+            // isn't a good way to write html, but someone may still do it.
+
+            var newUl = document.createElement('ul');
+            if (currentUl == null) {
+              toc.appendChild(newUl);
+            } else {
+              currentUl.appendChild(newUl);
+            }
+            currentUl = newUl;
+            level++;
+          }
+          while (newLevel < level) {
+            currentUl = currentUl.parentNode;
+            level--;
+          }
+          var li = document.createElement('li');
+          var a = document.createElement('a');
+          a.href = '#' + headerId;
+          a.textContent = headerValue;
+          li.appendChild(a);
+          currentUl.appendChild(li);
+        }
+      }
+
+      function wrapTables() {
+        var tables = document.getElementsByTagName('table');
+        for (var i = 0; i < tables.length; i++) {
+          var table = tables[i];
+          var parent = table.parentNode;
+          var div = document.createElement('div');
+          div.className = 'table-wrapper';
+          parent.insertBefore(div, table);
+          div.appendChild(table);
+        }
+      }
+
+      buildToc();
+      wrapTables();
+    </script>
+  </body>
+</html>

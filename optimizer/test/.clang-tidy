@@ -1,0 +1,23 @@
+InheritParentConfig: true
+# Suppress checks that are false positives from Google Test framework:
+# - bugprone-chained-comparison: EXPECT_*/ASSERT_* expression decomposition.
+# - bugprone-throwing-static-initialization: TEST()/TEST_F() macros register via
+#   static initializers which may throw by design.
+# - bugprone-unused-return-value: Intentionally unchecked in test scaffolding.
+# - readability-implicit-bool-conversion: GTest streaming (<<) uses bool in contexts
+#   where this check fires on string literals and integer expressions.
+#
+# The clang static analyzer (clang-analyzer-*) is off for the test tree. It
+# accounts for about 96% of clang-tidy CPU on the test tree: the largest test
+# unit took 33.6 minutes single-threaded with it and 100 seconds without it,
+# and the test tree is 88% of a whole-tree lint. Tests gain little from
+# path-sensitive analysis (a crash in a test shows up when the test runs), so
+# the analyzer stays on for lib/ and src/ and is off here.
+Checks: >
+  -bugprone-chained-comparison,
+  -bugprone-exception-escape,
+  -bugprone-throwing-static-initialization,
+  -bugprone-unused-return-value,
+  -bugprone-random-generator-seed,
+  -readability-implicit-bool-conversion,
+  -clang-analyzer-*

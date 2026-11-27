@@ -1,0 +1,356 @@
+---
+import { OG_DEFAULT_IMAGE_URL } from '../../data/og-image';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PageHero from '../../components/PageHero.astro';
+import CompareTable from '../../components/vs/CompareTable.astro';
+import { offerJsonLd } from '../../data/offer-jsonld';
+import { productJsonLd } from '../../data/software-jsonld';
+import {
+  editionClause,
+  FREE_TO_RUN_LINE,
+  NGINX_APT_SHORT_NBSP,
+  NGINX_RPM_SHORT,
+} from '../../data/product-facts.mjs';
+
+const rows = [
+  {
+    label: 'Deployment',
+    mps: 'Self-hosted on your origin',
+    other: "Managed at Cloudflare's edge",
+  },
+  {
+    label: 'Scope',
+    mps: 'Full HTML pipeline (images, CSS, JS, HTML)',
+    other: 'Edge HTML caching + asset handling',
+  },
+  {
+    label: 'Platform',
+    mps: 'WordPress, ASP.NET, generic &mdash; nginx/Apache/IIS',
+    other: 'WordPress only (via the Cloudflare for WordPress plugin)',
+  },
+  {
+    label: 'Pricing model',
+    mps: 'Free (Apache-2.0); paid support optional',
+    other: 'Cloudflare plan + APO add-on (see vendor)',
+  },
+  {
+    label: 'Image optimization',
+    mps: `${editionClause(['WebP', 'AVIF'])} &mdash; responsive variants at origin`,
+    other: 'Cloudflare Polish / Mirage / Image Resizing (separate add-ons)',
+  },
+  {
+    label: 'Critical CSS injection',
+    mps: 'yes',
+    other: 'No equivalent feature',
+  },
+  {
+    label: 'JS / CSS minification',
+    mps: 'yes',
+    other: 'No — Auto Minify retired Aug 2024; minify at build time',
+  },
+  {
+    label: 'HTML rewriting',
+    mps: 'Yes &mdash; at the origin response',
+    other: 'Cached HTML served from edge',
+  },
+  {
+    label: 'Caching',
+    mps: 'Local Cyclone cache, zero-copy mmap',
+    other: 'Cloudflare global edge cache',
+  },
+  {
+    label: 'CWV optimization',
+    mps: 'LCP, render-blocking, image bytes; CLS from unsized images',
+    other: 'TTFB improvement from edge cache',
+  },
+  {
+    label: 'Measured page-size reduction',
+    mps: '<span class="font-mono tabular-nums font-semibold text-success">&minus;68%</span> on our own pages (origin pipeline)',
+    other: 'Faster TTFB, but origin bytes unchanged',
+    highlight: true,
+  },
+  {
+    label: 'License',
+    mps: 'Licensed under the Apache License&nbsp;2.0. The software is free. We sell support; the software and its signed packages are the same for everyone. See the <a href="/license/" class="text-interactive hover:text-interactive-hover underline">software license</a>.',
+    other: 'Proprietary SaaS',
+  },
+  {
+    label: 'Control over data',
+    mps: 'Your servers; nothing leaves your origin',
+    other: 'Traffic and cached content sit at Cloudflare',
+  },
+  {
+    label: 'Works without the vendor',
+    mps: 'Yes &mdash; runs on your own servers, no vendor in the request path; your site keeps serving even if we disappear',
+    other: 'No &mdash; APO requires Cloudflare in front',
+  },
+];
+
+const jsonLd = [
+  await productJsonLd({
+    image: OG_DEFAULT_IMAGE_URL,
+    description:
+      'Cloudflare APO is WordPress-only and runs at the Cloudflare edge. mod_pagespeed runs at your origin, supports any CMS, and is free under the Apache License 2.0 — every server behind the site is covered.',
+    offers: offerJsonLd({ url: 'https://modpagespeed.com/pricing/' }),
+  }),
+];
+---
+
+<BaseLayout
+  title="mod_pagespeed vs Cloudflare APO: self-hosted vs the edge"
+  description="A Cloudflare APO alternative: APO caches WordPress HTML at the edge; mod_pagespeed optimizes at your origin on any stack. Self-hosted vs SaaS, in numbers."
+  jsonLd={jsonLd}
+>
+  <PageHero
+    id="cloudflare-apo-title"
+    width="prose"
+    class="max-w-3xl"
+    title="mod_pagespeed vs Cloudflare APO"
+  >
+    <nav slot="before" class="mb-6 text-small text-text-annotation" aria-label="Breadcrumb">
+      <a href="/" class="hover:text-text-body">
+        Home
+      </a>
+      <span class="mx-1">/</span>
+      <a href="/alternatives/" class="hover:text-text-body">
+        Alternatives
+      </a>
+      <span class="mx-1">/</span>
+      <span>vs Cloudflare APO</span>
+    </nav>
+  </PageHero>
+
+  <article class="container-prose max-w-3xl pb-16">
+    <section>
+      <h2 class="h2-section text-text-body">TL;DR</h2>
+      <p class="mt-4 text-text-body">
+        Cloudflare APO caches your WordPress HTML at Cloudflare's edge and serves it from there.
+        mod_pagespeed runs on your origin server and optimizes the response itself &mdash; images,
+        CSS, JS, and HTML. APO is faster to enable if you're on WordPress and already on Cloudflare.
+        mod_pagespeed is the option when you want the optimization to live on your infrastructure
+        and work across platforms.
+      </p>
+    </section>
+
+    <section class="mt-12">
+      <h2 id="at-a-glance" class="h2-section text-text-body">
+        At a glance
+      </h2>
+      <div class="mt-4">
+        <CompareTable competitor="Cloudflare APO" rows={rows} labelledBy="at-a-glance" />
+      </div>
+    </section>
+
+    <section class="mt-12">
+      <h2 class="h2-section text-text-body">When to choose Cloudflare APO</h2>
+      <ul class="mt-4 space-y-2 list-disc pl-6 text-text-body">
+        <li>
+          You're already on Cloudflare and your site is WordPress. The setup is essentially "install
+          the plugin, flip the switch."
+        </li>
+        <li>
+          You want a managed solution with no origin tuning. APO is configured in the Cloudflare
+          dashboard, not on your server.
+        </li>
+        <li>
+          Your origin is geographically distant from most visitors and the dominant performance
+          problem is TTFB. Edge HTML caching addresses that directly.
+        </li>
+        <li>
+          You don't want to maintain a build pipeline or an nginx module &mdash; you'd rather pay
+          Cloudflare to do it.
+        </li>
+        <li>You don't need critical CSS extraction or origin-side image variant generation.</li>
+      </ul>
+    </section>
+
+    <section class="mt-12">
+      <h2 class="h2-section text-text-body">When to choose mod_pagespeed</h2>
+      <ul class="mt-4 space-y-2 list-disc pl-6 text-text-body">
+        <li>
+          You're not on WordPress. APO is WordPress-only; mod_pagespeed works on any stack that runs
+          nginx, Apache, or IIS.
+        </li>
+        <li>
+          You don't want to route your traffic through Cloudflare. APO requires it as a hard
+          dependency.
+        </li>
+        <li>
+          You want the optimization to follow the site, not the CDN &mdash; if you migrate CDNs, the
+          optimization stays.
+        </li>
+        <li>
+          You care about critical CSS for LCP. That's an origin-side rewrite; an edge cache doesn't
+          extract it.
+        </li>
+        <li>
+          You scale horizontally at the origin. mod_pagespeed is free under the Apache License 2.0
+          on however many servers you run behind it; the server count never enters the bill.
+        </li>
+        <li>
+          You need to keep content on your infrastructure for compliance or data-residency reasons.
+        </li>
+      </ul>
+    </section>
+
+    <section class="mt-12">
+      <h2 class="h2-section text-text-body">How they overlap</h2>
+      <p class="mt-4 text-text-body">
+        Both improve Core Web Vitals and ship fewer bytes. Each also composes with the other tools
+        in its ecosystem &mdash; APO with Cloudflare Polish, mod_pagespeed with whatever CDN sits in
+        front of it.
+      </p>
+      <p class="mt-4 text-text-body">
+        The genuine overlap is HTML minification and basic asset handling. Where they diverge is
+        where the optimization runs (edge vs origin) and what's in scope (HTML cache vs the
+        <a href="/features/" class="text-interactive hover:text-interactive-hover underline">
+          full origin pipeline
+        </a>
+        ).
+      </p>
+      <p class="mt-4 text-text-body">
+        You can also run them together: mod_pagespeed at the origin, Cloudflare in front for global
+        caching. The optimization happens once at the origin and benefits from edge distribution.
+      </p>
+    </section>
+
+    <section class="mt-12">
+      <h2 id="migrating-from-cloudflare-apo-to-modpagespeed" class="h2-section text-text-body">
+        Migrating from Cloudflare APO to mod_pagespeed
+      </h2>
+      <p class="mt-4 text-text-body">
+        Migration is reasonable if you've outgrown WordPress, moved off Cloudflare, or need
+        optimization beyond what APO does &mdash; critical CSS, origin-side AVIF encoding, or a
+        single pipeline that follows the site across CDN changes.
+      </p>
+      <p class="mt-4 text-text-body">If you do migrate:</p>
+      <ol class="mt-3 space-y-2 list-decimal pl-6 text-text-body">
+        <li>
+          Keep APO enabled while you stand up mod_pagespeed on the origin. Verify origin-side
+          optimization works in a staging environment.
+        </li>
+        <li>
+          Disable APO before going live so the two tools don't fight over HTML rewriting.
+          (Cloudflare retired its separate Auto Minify feature in August 2024.)
+        </li>
+        <li>
+          Leave Cloudflare in front as a plain CDN if you want global distribution &mdash;
+          mod_pagespeed's cache hits compose cleanly with it.
+        </li>
+      </ol>
+    </section>
+
+    <section class="mt-12">
+      <h2 class="h2-section text-text-body">Code &amp; config side-by-side</h2>
+      <p class="mt-4 text-text-body">
+        <strong>Enabling APO</strong>: install the Cloudflare for WordPress plugin, then toggle APO
+        in the Cloudflare dashboard. No server-side configuration.
+      </p>
+      <p id="config-1" class="mt-4 text-text-body">
+        <strong>Installing mod_pagespeed for nginx</strong> on {NGINX_APT_SHORT_NBSP} (amd64 +
+        arm64), or AlmaLinux/RHEL/Rocky&nbsp;{NGINX_RPM_SHORT}:
+      </p>
+      <pre
+        tabindex="0"
+        role="region"
+        aria-labelledby="config-1"
+        class="mt-3 overflow-x-auto rounded bg-bg-secondary p-4 text-sm sm:text-xs leading-snug text-text-body"
+      ><code>curl -fsSL https://packages.modpagespeed.com/install.sh | sudo sh
+sudo apt install nginx-module-pagespeed   # or: sudo dnf install nginx-module-pagespeed</code></pre>
+      <p id="config-2" class="mt-4 text-text-body">
+        <strong>Then enable the equivalent of APO</strong> (nginx config):
+      </p>
+      <pre
+        tabindex="0"
+        role="region"
+        aria-labelledby="config-2"
+        class="mt-3 overflow-x-auto rounded bg-bg-secondary p-4 text-sm sm:text-xs leading-snug text-text-body"
+      ><code>pagespeed on;
+pagespeed RewriteLevel CoreFilters;
+pagespeed EnableFilters convert_jpeg_to_webp,rewrite_css,rewrite_javascript,prioritize_critical_css;
+pagespeed FileCachePath /var/cache/pagespeed;</code></pre>
+      <p class="mt-4 text-text-body">
+        <code>CoreFilters</code> is the audited default set. The specific filters above show that
+        critical-CSS extraction is in scope on the origin side &mdash; which it isn't in APO.
+      </p>
+    </section>
+
+    <section class="mt-12">
+      <div class="rounded-card border border-border bg-bg-secondary p-6 md:p-7">
+        <h2 class="h2-section text-text-body">Optimization the edge cache can't do</h2>
+        <p class="mt-3 text-text-body">
+          Critical CSS and variant-aware caching run below the CDN, on any stack, and SVG
+          auto-vectorization comes with the Apache module or the reverse-proxy deployment &mdash;
+          keep Cloudflare in front if you like. On our own pages the origin pipeline measures
+          <span class="font-mono tabular-nums font-semibold text-success">&minus;68%</span> page
+          size. Install and run it. {FREE_TO_RUN_LINE}
+        </p>
+        <div class="mt-5 flex flex-wrap gap-3">
+          <a href="/download/" class="btn-primary" data-umami-event="cta_vs_cloudflare_apo_install">
+            Download &amp; run
+          </a>
+          <a
+            href="/pricing/"
+            class="rounded-md border border-border-strong px-4 py-2 text-sm font-medium text-text-body hover:border-border-strong"
+            data-umami-event="cta_vs_cloudflare_apo_buy"
+          >
+            Support pricing
+          </a>
+          <a
+            href="#migrating-from-cloudflare-apo-to-modpagespeed"
+            class="rounded-md border border-border-strong px-4 py-2 text-sm font-medium text-text-body hover:border-border-strong"
+            data-umami-event="cta_vs_cloudflare_apo_migrate"
+          >
+            See the migration steps &rarr;
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <section class="mt-12 border-t border-border pt-8">
+      <p class="text-base font-semibold uppercase tracking-wide text-text-body">See also:</p>
+      <ul class="mt-4 space-y-2 text-sm">
+        <li>
+          <a
+            href="/alternatives/nitropack/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            mod_pagespeed vs NitroPack
+          </a>{' '}
+          &mdash; another managed/SaaS optimization option
+        </li>
+        <li>
+          <a
+            href="/alternatives/wp-rocket/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            mod_pagespeed vs WP Rocket
+          </a>{' '}
+          &mdash; WordPress plugin alternative if you want to stay self-hosted but plugin-based
+        </li>
+        <li>
+          <a
+            href="/alternatives/mod-pagespeed/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            Alternatives to mod_pagespeed
+          </a>{' '}
+          &mdash; for readers searching for a mod_pagespeed replacement
+        </li>
+        <li>
+          <a href="/" class="text-interactive hover:text-interactive-hover underline">
+            mod_pagespeed
+          </a>{' '}
+          &mdash; drop-in continuation with native modules for Apache and nginx. The IIS package
+          ships as a signed installer on the mod_pagespeed GitHub release.
+        </li>
+      </ul>
+    </section>
+
+    <p class="mt-10 text-xs text-text-annotation">
+      Cloudflare and other product names are trademarks of their respective owners. Comparisons
+      reflect publicly available information as of 2026 and are provided for evaluation; We-Amp B.V.
+      is not affiliated with or endorsed by Cloudflare.
+    </p>
+  </article>
+</BaseLayout>

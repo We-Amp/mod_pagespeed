@@ -1,0 +1,95 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// The three support tiers as cards, rendered from SUPPORT_TIERS in
+// product-facts.mjs (the one source the agent files and /api/product.json also
+// read). Used on /support/ and /pricing/. Priority is the emphasized tier.
+// All three cards share one padding and one row order (name, price, fleet
+// size, list, button), so names, prices and buttons line up across the row.
+// The "Recommended" flag sits on the emphasized card's top edge and takes no
+// room inside it; stacked, that card gets a little more space above so the
+// flag stays clear of the card before it. A button label stays on one line
+// wherever the card is wide enough for it, and the arrow never wraps on its own.
+// Each card shows the yearly price, what is included (the last entry is the
+// tier's first-response target) and its own button: Standard and Priority go
+// straight to the hosted checkout page, Enterprise to the contact form.
+//
+// Every card CTA is a paid CTA and carries the cta_commercial event with the
+// tier's offer (buy-standard, buy-priority, enterprise), the page it sits on
+// (surface) and the tier as its position. The line under the cards says the
+// software and its signed packages are the same for everyone.
+
+import Icon from './Icon.astro';
+import Chip from './instrument/Chip.astro';
+import { SUPPORT_TIERS, SAME_SOFTWARE_LINE, formatEur } from '../data/product-facts.mjs';
+
+interface Props {
+  /** Page slug for the umami `surface` property (e.g. "pricing"). */
+  surface: string;
+}
+
+const { surface } = Astro.props;
+const EMPHASIZED = 'priority';
+---
+
+<div class="grid grid-cols-1 gap-6 lg:grid-cols-3" data-tier-cards>
+  {SUPPORT_TIERS.map((tier) => {
+    const featured = tier.id === EMPHASIZED;
+    return (
+      <div
+        class:list={[
+          '@container flex flex-col',
+          featured
+            ? 'card-featured border-t-2 border-t-interactive p-6 max-lg:mt-2'
+            : 'card-product card-product-stone',
+        ]}
+        data-tier={tier.id}
+      >
+        <h3 class="text-lg font-semibold text-text-body">{tier.name}</h3>
+        {featured && (
+          <span
+            class="absolute -top-px left-6 flex -translate-y-1/2 rounded-[var(--radius-chip)] bg-bg-elevated"
+            data-tier-flag
+          >
+            <Chip tone="interactive" label="Recommended" />
+          </span>
+        )}
+        <p class="mt-3 text-text-body" data-tier-price>
+          {tier.prices.from && <span class="text-sm text-text-muted">From </span>}
+          <span class="text-3xl font-semibold">{formatEur(tier.prices.annualEur)}</span>
+          <span class="text-sm text-text-muted"> / year</span>
+        </p>
+        <p class="mt-2 text-micro uppercase tracking-wider text-text-annotation lg:min-h-8">
+          {tier.scope}
+        </p>
+        <ul class="mt-5 flex-1 space-y-2 text-body text-text-muted">
+          {tier.includes.map((item) => (
+            <li class="flex gap-2">
+              <Icon name="check" class="mt-1 h-4 w-4 shrink-0 text-interactive" />
+              <span>{item}</span>
+            </li>
+          ))}
+        </ul>
+        <a
+          href={tier.cta.href}
+          rel={tier.cta.external ? 'noopener' : undefined}
+          class:list={[
+            'mt-6 w-full px-3 @[17.25rem]:whitespace-nowrap',
+            featured ? 'btn-primary border border-transparent' : 'btn-secondary',
+          ]}
+          data-umami-event="cta_commercial"
+          data-umami-event-offer={tier.cta.offer}
+          data-umami-event-surface={surface}
+          data-umami-event-position={`tier_${tier.id}`}
+        >
+          <!-- prettier-ignore -->
+          <span>{tier.cta.label}<span aria-hidden="true">&nbsp;&rarr;</span></span>
+        </a>
+      </div>
+    );
+  })}
+</div>
+<p class="mt-4 text-small text-text-muted" data-same-software>
+  {SAME_SOFTWARE_LINE}
+</p>

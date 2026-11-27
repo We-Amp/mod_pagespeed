@@ -1,0 +1,356 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// Recipe linked from the AI crawler cost meter at /ai-crawler-cost/. Static copy
+// only: nothing on this page runs or sends anything.
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const title = 'Rate-limit traffic that claims to be an AI crawler';
+const description =
+  'An nginx recipe that refuses requests above a limit when they claim to be a known AI crawler but come from outside the operator’s published address ranges.';
+const code0 = [
+  '#!/bin/sh',
+  'set -eu',
+  '',
+  'out=${1:-/etc/nginx/crawler-nets.conf}',
+  'tmp=$(mktemp -d)',
+  'trap \'rm -rf "$tmp"\' EXIT',
+  '',
+  'for pair in \\',
+  '  openai=https://openai.com/gptbot.json \\',
+  '  openai=https://openai.com/searchbot.json \\',
+  '  openai=https://openai.com/chatgpt-user.json \\',
+  '  anthropic=https://claude.com/crawling/bots.json \\',
+  '  perplexity=https://www.perplexity.ai/perplexitybot.json \\',
+  '  perplexity=https://www.perplexity.ai/perplexity-user.json \\',
+  '  google=https://developers.google.com/static/crawling/ipranges/common-crawlers.json \\',
+  '  microsoft=https://www.bing.com/toolbox/bingbot.json',
+  'do',
+  '  label=${pair%%=*}',
+  '  url=${pair#*=}',
+  '  curl -fsSL "$url" -o "$tmp/list.json"',
+  '  jq -e \'(.prefixes | length) > 0\' "$tmp/list.json" > /dev/null',
+  '  jq -r --arg l "$label" \\',
+  '    \'.prefixes[] | "    " + (.ipv4Prefix // .ipv6Prefix) + " " + $l + ";"\' \\',
+  '    "$tmp/list.json" >> "$tmp/lines"',
+  'done',
+  '',
+  '{',
+  "  echo 'geo $crawler_net {'",
+  '  echo \'    default "";\'',
+  '  sort -u "$tmp/lines"',
+  "  echo '}'",
+  '} > "$out.new"',
+  'mv "$out.new" "$out"',
+].join('\n');
+const code1 = [
+  'geo $crawler_net {',
+  '    default "";',
+  '    132.196.86.0/24 openai;',
+  '    # ... one line per prefix',
+  '}',
+].join('\n');
+const code2 = [
+  'include /etc/nginx/crawler-nets.conf;',
+  '',
+  '# Who the request claims to be.',
+  'map $http_user_agent $crawler_claim {',
+  '    default             "";',
+  '    ~*GPTBot            openai;',
+  '    ~*OAI-SearchBot     openai;',
+  '    ~*ChatGPT-User      openai;',
+  '    ~*ClaudeBot         anthropic;',
+  '    ~*Claude-SearchBot  anthropic;',
+  '    ~*Claude-User       anthropic;',
+  '    ~*PerplexityBot     perplexity;',
+  '    ~*Perplexity-User   perplexity;',
+  '    ~*Googlebot         google;',
+  '    ~*bingbot           microsoft;',
+  '}',
+  '',
+  '# Without the mod_pagespeed nginx module, no request counts as signed.',
+  'map $host $signed_ok { default 0; }',
+  '',
+  "# 1 = claims a listed crawler, comes from outside that operator's list, and is not signed.",
+  'map "$signed_ok:$crawler_claim:$crawler_net" $impostor {',
+  '    default                  0;',
+  '    "0:openai:openai"        0;',
+  '    "0:anthropic:anthropic"  0;',
+  '    "0:perplexity:perplexity" 0;',
+  '    "0:google:google"        0;',
+  '    "0:microsoft:microsoft"  0;',
+  '    "~^1:"                   0;',
+  '    "~^0:[a-z]+:"            1;',
+  '}',
+  '',
+  '# Only impostors get a key; requests with an empty key are not counted.',
+  'map $impostor $impostor_key {',
+  '    default  "";',
+  '    1        $binary_remote_addr;',
+  '}',
+  '',
+  'limit_req_zone $impostor_key zone=impostors:10m rate=30r/m;',
+].join('\n');
+const code3 = ['limit_req zone=impostors burst=10 nodelay;', 'limit_req_status 429;'].join('\n');
+const code4 = [
+  'map $x_verified_bot $signed_ok {',
+  '    default                0;',
+  '    "~, ed25519-verified$" 1;',
+  '}',
+].join('\n');
+---
+
+<BaseLayout
+  title={title}
+  description={description}
+  breadcrumbLeafName="Rate-limit impostor crawlers"
+>
+  <article class="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 pt-16 sm:pt-20 pb-16 sm:pb-20">
+    <nav aria-label="Breadcrumb" class="text-sm text-text-annotation">
+      <a href="/ai-crawler-cost/" class="text-interactive hover:text-interactive-hover">
+        AI crawler cost meter
+      </a>
+      <span aria-hidden="true" class="mx-1">
+        /
+      </span>
+      <span aria-current="page">Rate-limit impostor crawlers</span>
+    </nav>
+    <h1 class="mt-6 text-3xl sm:text-4xl font-bold tracking-tight text-text-body text-balance">
+      Rate-limit traffic that claims to be an AI crawler but is not
+    </h1>
+    <p class="mt-4 text-text-muted leading-relaxed">
+      Anyone can send <code class="text-text-body">User-Agent: GPTBot</code>. The big crawler
+      operators publish the address ranges their crawlers use, so nginx can check the claim. This
+      recipe refuses (429) requests above a limit that claim to be a known crawler but come from
+      somewhere else. Requests with a browser user agent are never counted. Crawlers are counted
+      only when they come from outside their operator's published list.
+    </p>
+    <p class="mt-4 text-text-muted leading-relaxed">
+      It uses three stock nginx modules: <code class="text-text-body">geo</code>,{' '}
+      <code class="text-text-body">map</code> and <code class="text-text-body">limit_req</code>. Run
+      Apache httpd? See the{' '}
+      <a
+        href="/ai-crawler-cost/apache-verified-crawlers/"
+        class="text-interactive hover:text-interactive-hover"
+      >
+        Apache recipe
+      </a>
+      .
+    </p>
+    <h2 class="mt-12 text-2xl font-bold tracking-tight text-text-body">
+      1. Build the address list
+    </h2>
+    <p class="mt-4 text-text-muted leading-relaxed">
+      Each operator publishes a JSON file of prefixes. Build the list for every operator in the map
+      below, or delete that operator's lines from the map: an operator that is in the map but
+      missing from this file has all its real traffic counted as impostors. Save this as
+      <code class="text-text-body">build-crawler-nets.sh</code> and run it as root; it needs
+      <code class="text-text-body">curl</code> and <code class="text-text-body">jq</code>. It writes
+      the complete file, or the path you pass as its first argument:
+    </p>
+    <pre
+      tabindex="0"
+      class="mt-4 overflow-x-auto rounded-lg bg-bg-recessed p-4 text-xs text-text-body"
+    ><code>{code0}</code></pre>
+    <p class="mt-4 text-text-muted leading-relaxed">
+      The script stops at the first list that fails to download, is not valid JSON or has no
+      prefixes, and then leaves the old file in place.
+    </p>
+    <p class="mt-4 text-text-muted leading-relaxed">Published lists, as of 2026-11-22:</p>
+    <div class="mt-4 overflow-x-auto">
+      <table class="w-full text-sm text-left text-text-muted">
+        <thead>
+          <tr>
+            <th scope="col" class="py-2 pr-4 font-semibold text-text-body">
+              Operator
+            </th>
+            <th scope="col" class="py-2 pr-4 font-semibold text-text-body">
+              Label
+            </th>
+            <th scope="col" class="py-2 pr-4 font-semibold text-text-body">
+              Lists
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="border-t border-border align-top">
+            <td class="py-2 pr-4">OpenAI</td>
+            <td class="py-2 pr-4">
+              <code class="text-text-body">openai</code>
+            </td>
+            <td class="py-2 pr-4">
+              <code class="text-text-body">https://openai.com/gptbot.json</code>,{' '}
+              <code class="text-text-body">https://openai.com/searchbot.json</code>,{' '}
+              <code class="text-text-body">https://openai.com/chatgpt-user.json</code>
+            </td>
+          </tr>
+          <tr class="border-t border-border align-top">
+            <td class="py-2 pr-4">Anthropic</td>
+            <td class="py-2 pr-4">
+              <code class="text-text-body">anthropic</code>
+            </td>
+            <td class="py-2 pr-4">
+              <code class="text-text-body">https://claude.com/crawling/bots.json</code> (one list
+              for all its crawlers)
+            </td>
+          </tr>
+          <tr class="border-t border-border align-top">
+            <td class="py-2 pr-4">Perplexity</td>
+            <td class="py-2 pr-4">
+              <code class="text-text-body">perplexity</code>
+            </td>
+            <td class="py-2 pr-4">
+              <code class="text-text-body">https://www.perplexity.ai/perplexitybot.json</code>,{' '}
+              <code class="text-text-body">https://www.perplexity.ai/perplexity-user.json</code>
+            </td>
+          </tr>
+          <tr class="border-t border-border align-top">
+            <td class="py-2 pr-4">Google</td>
+            <td class="py-2 pr-4">
+              <code class="text-text-body">google</code>
+            </td>
+            <td class="py-2 pr-4">
+              <code class="text-text-body">
+                https://developers.google.com/static/crawling/ipranges/common-crawlers.json
+              </code>
+            </td>
+          </tr>
+          <tr class="border-t border-border align-top">
+            <td class="py-2 pr-4">Microsoft</td>
+            <td class="py-2 pr-4">
+              <code class="text-text-body">microsoft</code>
+            </td>
+            <td class="py-2 pr-4">
+              <code class="text-text-body">https://www.bing.com/toolbox/bingbot.json</code>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="mt-4 text-text-muted leading-relaxed">
+      The lists change. Rebuild the file on a schedule (weekly is plenty) and reload nginx.
+    </p>
+    <p class="mt-4 text-text-muted leading-relaxed">The file looks like this:</p>
+    <pre
+      tabindex="0"
+      class="mt-4 overflow-x-auto rounded-lg bg-bg-recessed p-4 text-xs text-text-body"
+    ><code>{code1}</code></pre>
+    <h2 class="mt-12 text-2xl font-bold tracking-tight text-text-body">2. Classify and limit</h2>
+    <p class="mt-4 text-text-muted leading-relaxed">
+      In the <code class="text-text-body">http</code> block:
+    </p>
+    <pre
+      tabindex="0"
+      class="mt-4 overflow-x-auto rounded-lg bg-bg-recessed p-4 text-xs text-text-body"
+    ><code>{code2}</code></pre>
+    <p class="mt-4 text-text-muted leading-relaxed">
+      In the <code class="text-text-body">server</code> (or{' '}
+      <code class="text-text-body">location</code>) blocks you want to protect:
+    </p>
+    <pre
+      tabindex="0"
+      class="mt-4 overflow-x-auto rounded-lg bg-bg-recessed p-4 text-xs text-text-body"
+    ><code>{code3}</code></pre>
+    <p class="mt-4 text-text-muted leading-relaxed">
+      Start with <code class="text-text-body">limit_req_dry_run on;</code> next to it and add{' '}
+      <code class="text-text-body">$impostor</code> and{' '}
+      <code class="text-text-body">$limit_req_status</code> to your{' '}
+      <code class="text-text-body">log_format</code>. Lines marked{' '}
+      <code class="text-text-body">REJECTED_DRY_RUN</code> are what would have been limited. Turn
+      dry run off when the log looks right.
+    </p>
+    <p class="mt-4 text-text-muted leading-relaxed">Two things to know:</p>
+    <ul class="mt-4 list-disc space-y-2 pl-5 text-text-muted">
+      <li>
+        <code class="text-text-body">limit_req</code> does not apply to a location that answers with{' '}
+        <code class="text-text-body">return</code>; that runs before the limit is checked.
+      </li>
+      <li>
+        Behind a CDN or load balancer, <code class="text-text-body">$remote_addr</code> is the
+        proxy. Set the real client address with the <code class="text-text-body">realip</code>{' '}
+        module first, or every request looks like an impostor.
+      </li>
+    </ul>
+    <h2 class="mt-12 text-2xl font-bold tracking-tight text-text-body">
+      3. With signed requests: use the verifier's verdict
+    </h2>
+    <p class="mt-4 text-text-muted leading-relaxed">
+      Some agents sign their requests (Web Bot Auth, RFC 9421) instead of, or as well as, using
+      published addresses. If you run the mod_pagespeed nginx module with its experimental,
+      off-by-default{' '}
+      <a
+        href="/blog/verify-ai-crawlers-web-bot-auth/"
+        class="text-interactive hover:text-interactive-hover"
+      >
+        Web Bot Auth verifier
+      </a>{' '}
+      turned on, nginx has the verdict in <code class="text-text-body">$x_verified_bot</code>:
+    </p>
+    <div class="mt-4 overflow-x-auto">
+      <table class="w-full text-sm text-left text-text-muted">
+        <thead>
+          <tr>
+            <th scope="col" class="py-2 pr-4 font-semibold text-text-body">
+              Value
+            </th>
+            <th scope="col" class="py-2 pr-4 font-semibold text-text-body">
+              Meaning
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="border-t border-border align-top">
+            <td class="py-2 pr-4">
+              <code class="text-text-body">human</code>
+            </td>
+            <td class="py-2 pr-4">no Web Bot Auth signature</td>
+          </tr>
+          <tr class="border-t border-border align-top">
+            <td class="py-2 pr-4">
+              <code class="text-text-body">unknown</code>
+            </td>
+            <td class="py-2 pr-4">a signature that did not verify</td>
+          </tr>
+          <tr class="border-t border-border align-top">
+            <td class="py-2 pr-4">
+              <code class="text-text-body">signed-agent</code>
+            </td>
+            <td class="py-2 pr-4">
+              a valid signature from a key that is not in your{' '}
+              <code class="text-text-body">WebBotAuthVerifiedBots</code> list
+            </td>
+          </tr>
+          <tr class="border-t border-border align-top">
+            <td class="py-2 pr-4">
+              <code class="text-text-body">&lt;name&gt;, ed25519-verified</code>
+            </td>
+            <td class="py-2 pr-4">a valid signature from a key you named</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="mt-4 text-text-muted leading-relaxed">
+      Replace the <code class="text-text-body">$signed_ok</code> line above with:
+    </p>
+    <pre
+      tabindex="0"
+      class="mt-4 overflow-x-auto rounded-lg bg-bg-recessed p-4 text-xs text-text-body"
+    ><code>{code4}</code></pre>
+    <p class="mt-4 text-text-muted leading-relaxed">
+      Requests signed by a key you named are then never limited by this rule, from whatever address
+      they come. Add <code class="text-text-body">"signed-agent" 1;</code> only if you also trust
+      every key in the directories you allowed.
+    </p>
+    <h2 class="mt-12 text-2xl font-bold tracking-tight text-text-body">What this does not do</h2>
+    <p class="mt-4 text-text-muted leading-relaxed">
+      It does not block crawlers you have not listed, and it does not stop a scraper that sends a
+      browser user agent. It limits one cheap lie: claiming to be a known crawler. To see how much
+      of that you get, drop your access log on the{' '}
+      <a href="/ai-crawler-cost/" class="text-interactive hover:text-interactive-hover">
+        AI crawler cost meter
+      </a>
+      .
+    </p>
+  </article>
+</BaseLayout>

@@ -1,0 +1,223 @@
+---
+// Reusable comparison table for the /alternatives/<competitor>/ pages.
+//
+// Renders a scannable, accessible "mod_pagespeed vs <competitor>" table:
+//  - shaded, sticky header row
+//  - the mod_pagespeed column is visually emphasized (accent left border + tint)
+//    so the differentiator reads at a glance
+//  - boolean cells ('yes' / 'no' / 'partial') render as semantic glyphs
+//    (✓ success-green / ✗ muted / ◐ partial) with a visually-hidden text label
+//    so screen readers still announce "Yes" / "No" / "Partial"
+//  - on mobile (< sm) it drops the wide table and stacks each row as a small
+//    card with the two values side by side, so there's no raw horizontal scroll
+//
+// Props:
+//   competitor   string   — display name for the right-hand column header
+//   rows         Row[]    — one object per feature row (see Row shape below)
+//   mpsHeader    string?  — left column header (default "mod_pagespeed")
+//   labelledBy   string?  — id of the heading or caption that names the scroll
+//                           region (pages pass the id of their existing
+//                           "At a glance" heading, so no new copy is added)
+//
+// Row shape: { label: string, mps: Cell, other: Cell, highlight?: boolean }
+//   Cell is either:
+//     - 'yes' | 'no' | 'partial'  → rendered as a glyph + sr-only label
+//     - any other string          → rendered as-is (HTML allowed, e.g. links)
+//   highlight: true               → row gets a subtle accent tint (used for the
+//                                   measured-proof row)
+
+import { PRODUCT_DISPLAY_NAME } from '../../data/product-facts.mjs';
+
+interface Row {
+  label: string;
+  mps: string;
+  other: string;
+  highlight?: boolean;
+}
+
+interface Props {
+  competitor: string;
+  rows: Row[];
+  mpsHeader?: string;
+  labelledBy?: string;
+}
+
+const { competitor, rows, mpsHeader = PRODUCT_DISPLAY_NAME, labelledBy } = Astro.props as Props;
+
+const BOOLS = new Set(['yes', 'no', 'partial']);
+const isBool = (v: string) => BOOLS.has(v);
+const boolLabel = (v: string) => (v === 'yes' ? 'Yes' : v === 'no' ? 'No' : 'Partial');
+---
+
+<div class="cmp not-prose">
+  <!-- Wide layout: real table, shown sm and up -->
+  <div
+    class="hidden sm:block overflow-x-auto rounded-card border border-border"
+    tabindex="0"
+    role="region"
+    aria-labelledby={labelledBy}
+  >
+    <table class="w-full text-left text-sm">
+      <thead>
+        <tr class="bg-bg-elevated/80">
+          <th
+            scope="col"
+            class="sticky top-0 z-10 bg-bg-elevated py-3 pl-4 pr-4 font-mono font-semibold text-text-body"
+          >
+            <span class="sr-only">Feature</span>
+          </th>
+          <th
+            scope="col"
+            class="sticky top-0 z-10 border-l-2 border-interactive/40 bg-interactive/10 py-3 px-4 font-mono font-semibold text-text-body"
+          >
+            {mpsHeader}
+          </th>
+          <th
+            scope="col"
+            class="sticky top-0 z-10 bg-bg-elevated py-3 px-4 font-mono font-semibold text-text-body"
+          >
+            {competitor}
+          </th>
+        </tr>
+      </thead>
+      <tbody class="text-text-body">
+        {rows.map((row: Row) => (
+          <tr class={`border-t border-border ${row.highlight ? 'bg-success-wash' : ''}`}>
+            <th scope="row" class="py-3 pl-4 pr-4 text-left align-top font-medium text-text-body">
+              {row.label}
+            </th>
+            <td
+              class={`border-l-2 border-interactive/40 ${
+                row.highlight ? '' : 'bg-interactive/10'
+              } py-3 px-4 align-top`}
+            >
+              {isBool(row.mps) ? (
+                <span class={`cmp-glyph cmp-${row.mps}`} role="img" aria-label={boolLabel(row.mps)}>
+                  <span aria-hidden="true">
+                    {row.mps === 'yes' ? '✓' : row.mps === 'partial' ? '◐' : '✗'}
+                  </span>
+                </span>
+              ) : (
+                <Fragment set:html={row.mps} />
+              )}
+            </td>
+            <td class="py-3 px-4 align-top">
+              {isBool(row.other) ? (
+                <span
+                  class={`cmp-glyph cmp-${row.other}`}
+                  role="img"
+                  aria-label={boolLabel(row.other)}
+                >
+                  <span aria-hidden="true">
+                    {row.other === 'yes' ? '✓' : row.other === 'partial' ? '◐' : '✗'}
+                  </span>
+                </span>
+              ) : (
+                <Fragment set:html={row.other} />
+              )}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Stacked layout: one card per row, shown below sm -->
+  <ul class="sm:hidden space-y-3">
+    {rows.map((row: Row) => (
+      <li
+        class={`rounded-card border border-border p-4 ${
+          row.highlight ? 'bg-success-wash' : 'bg-bg-elevated'
+        }`}
+      >
+        <p class="text-sm font-semibold text-text-body">{row.label}</p>
+        <dl class="mt-3 grid grid-cols-1 gap-3">
+          <div
+            class={`rounded-lg border-l-2 border-interactive/40 ${
+              row.highlight ? '' : 'bg-interactive/10'
+            } px-3 py-2`}
+          >
+            <dt class="text-xs font-semibold uppercase tracking-wide text-interactive">
+              {mpsHeader}
+            </dt>
+            <dd class="mt-1 text-body text-text-body">
+              {isBool(row.mps) ? (
+                <span class={`cmp-glyph cmp-${row.mps}`}>
+                  <span aria-hidden="true">
+                    {row.mps === 'yes' ? '✓' : row.mps === 'partial' ? '◐' : '✗'}
+                  </span>
+                  <span class="ml-1.5 align-middle text-sm">{boolLabel(row.mps)}</span>
+                </span>
+              ) : (
+                <Fragment set:html={row.mps} />
+              )}
+            </dd>
+          </div>
+          <div class="px-3 py-2">
+            <dt class="text-xs font-semibold uppercase tracking-wide text-text-annotation">
+              {competitor}
+            </dt>
+            <dd class="mt-1 text-body text-text-body">
+              {isBool(row.other) ? (
+                <span class={`cmp-glyph cmp-${row.other}`}>
+                  <span aria-hidden="true">
+                    {row.other === 'yes' ? '✓' : row.other === 'partial' ? '◐' : '✗'}
+                  </span>
+                  <span class="ml-1.5 align-middle text-sm">{boolLabel(row.other)}</span>
+                </span>
+              ) : (
+                <Fragment set:html={row.other} />
+              )}
+            </dd>
+          </div>
+        </dl>
+      </li>
+    ))}
+  </ul>
+
+  <!-- Compact CTA: shared across every /alternatives/ page, so keep it
+       generic (no per-product param). -->
+  <div class="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-card border border-border bg-bg-secondary/60 px-4 py-3 text-sm">
+    <span class="font-medium text-text-body">See for yourself:</span>
+    <a
+      href="/download/"
+      data-umami-event="cta_compare_table_download"
+      class="font-semibold text-interactive hover:text-interactive-hover"
+    >
+      Download &amp; run →
+    </a>
+    <a
+      href="/support/"
+      data-umami-event="cta_commercial"
+      data-umami-event-offer="support"
+      data-umami-event-surface="compare"
+      data-umami-event-position="compare_table"
+      class="font-semibold text-text-body hover:text-interactive"
+    >
+      Support plans
+    </a>
+  </div>
+</div>
+
+<style>
+  /* Boolean glyphs share one source of truth with the --color-success token
+     (brand §4.5). "Yes" reads success-green; "no" is muted; "partial" picks up
+     the amber accent token. The glyph carries an accessible label via
+     aria-label / sr-only text in the markup above. */
+  .cmp-glyph {
+    display: inline-flex;
+    align-items: center;
+    font-weight: 700;
+    font-size: 1.05rem;
+    line-height: 1;
+  }
+  .cmp-yes {
+    color: var(--color-success);
+  }
+  .cmp-partial {
+    color: var(--color-accent);
+  }
+  .cmp-no {
+    color: var(--color-text-muted);
+  }
+</style>

@@ -1,0 +1,143 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# mod_pagespeed nginx image — PREBUILT.
+#
+# Assembles the public image from CI-built artifacts (release.yml's
+# `--config=release` Docker-flavored build — PROD key, server=nginx); no
+# in-image Bazel/Chromium compile. Build context = the product repo checkout
+# plus an ./artifacts/ dir populated by the publish workflow. Required:
+#   artifacts/ngx_pagespeed_module.so   (the prebuilt PageSpeed nginx module)
+#   artifacts/nginx-version             (the exact nginx the module links to)
+#
+# nginx refuses to load a dynamic module whose embedded NGINX_VERSION_NUM
+# differs from the running nginx ("module 1030001 vs runtime 1030002" — emerg,
+# process exits). The dev image builds the module against nginx.org's stable
+# channel and CI records that version into nginx-version; both the brotli
+# module (built below) and the runtime nginx are pinned to it. The PageSpeed
+# module statically links libc++/libc++abi/libunwind — no shared deps.
+#
+# Requires the local base image: docker build -f docker/Dockerfile.base-runtime
+# -t pagespeed2-base-runtime . (the publish workflow builds it first).
+
+# --- Brotli builder: build ngx_http_brotli_filter_module against the exact
+#     recorded nginx version (the default config loads only brotli_filter +
+#     pagespeed; brotli_static / geoip2 are not loaded, so not built here). ---
+FROM ubuntu:24.04@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac AS brotli-builder
+ENV DEBIAN_FRONTEND=noninteractive
+COPY artifacts/nginx-version /tmp/nginx-version
+# The nginx.org signing key file holds several keys (the repository metadata
+# is signed by one of them). Only the keys in this pinned set are exported
+# into the apt keyring, and the build fails if none is present, so a swapped
+# file stops the build while a key nginx.org adds later does not. Fingerprints
+# from https://nginx.org/en/linux_packages.html and the published
+# https://nginx.org/keys/nginx_signing.key.
+ARG NGINX_KEY_FPR="573BFD6B3D8FBC641079A6ABABF5BD827BD9BF62 8540A6F18833A80E9C1653A42FD21310B49F6B46 9E9BE90EACBCDE69FE9B204CBCDCD8A38D88A2B3"
+RUN apt-get update && apt-get install -y wget gnupg ca-certificates \
+    && nkey="$(mktemp -d)" \
+    && for i in 1 2 3 4 5; do \
+         wget -qO "${nkey}/nginx.asc" --timeout=20 --tries=1 https://nginx.org/keys/nginx_signing.key \
+           && [ -s "${nkey}/nginx.asc" ] && break; \
+         echo "nginx.org key fetch attempt ${i} failed" >&2; if [ "$i" -lt 5 ]; then sleep $((i * 5)); fi; \
+       done \
+    && { [ -s "${nkey}/nginx.asc" ] \
+         || { echo "ERROR: could not fetch https://nginx.org/keys/nginx_signing.key" >&2; exit 1; }; } \
+    && { GNUPGHOME="${nkey}" gpg --batch --quiet --import "${nkey}/nginx.asc"; have=""; \
+         for f in ${NGINX_KEY_FPR}; do \
+           GNUPGHOME="${nkey}" gpg --batch --with-colons --list-keys "${f}" 2>/dev/null \
+             | awk -F: -v fpr="${f}" '$1=="fpr" && $10==fpr { ok=1 } END { exit !ok }' \
+             && have="${have} ${f}"; \
+         done; \
+         [ -n "${have}" ] || { echo "ERROR: no pinned key in the nginx.org key file" >&2; exit 1; }; } \
+    && GNUPGHOME="${nkey}" gpg --batch --export ${have} > /usr/share/keyrings/nginx-archive-keyring.gpg \
+    && [ -s /usr/share/keyrings/nginx-archive-keyring.gpg ] \
+    && rm -rf "${nkey}" \
+    && echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] http://nginx.org/packages/ubuntu noble nginx" \
+       > /etc/apt/sources.list.d/nginx.list \
+    && echo "deb-src [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] http://nginx.org/packages/ubuntu noble nginx" \
+       >> /etc/apt/sources.list.d/nginx.list \
+    && printf 'Package: *\nPin: origin nginx.org\nPin-Priority: 900\n' \
+       > /etc/apt/preferences.d/99nginx \
+    && apt-get update \
+    && NV="$(cat /tmp/nginx-version)" \
+    && apt-get install -y --allow-downgrades \
+       "nginx=${NV}-1~noble" dpkg-dev cmake git libpcre3-dev zlib1g-dev libssl-dev \
+    && mkdir -p /nginx-src && cd /nginx-src && apt-get source "nginx=${NV}-1~noble" \
+    && rm -rf /var/lib/apt/lists/*
+# ngx_brotli pinned to a71f9312 (2023-10-09) for reproducible builds.
+RUN git clone --recurse-submodules https://github.com/google/ngx_brotli.git /ngx_brotli \
+    && cd /ngx_brotli && git checkout a71f9312c2deb28875acc7bacfdd5695a111aa53
+RUN cd /ngx_brotli/deps/brotli && mkdir -p out && cd out \
+    && cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF .. \
+    && cmake --build . --config Release -j"$(nproc)"
+RUN cd /nginx-src/nginx-* \
+    && ./configure --with-compat --add-dynamic-module=/ngx_brotli \
+    && make -j"$(nproc)" modules \
+    && cp objs/ngx_http_brotli_filter_module.so /tmp/ngx_http_brotli_filter_module.so
+
+# --- Runtime ---
+FROM pagespeed2-base-runtime
+
+ARG VERSION=dev
+ARG BUILD_DATE
+ARG SOURCE_REVISION=unknown
+
+LABEL org.opencontainers.image.title="mod_pagespeed Nginx Module" \
+      org.opencontainers.image.vendor="We-Amp B.V." \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.documentation="https://modpagespeed.com/recipes/docker.md" \
+      org.opencontainers.image.source="https://github.com/We-Amp/modpagespeed-images" \
+      org.opencontainers.image.revision="${SOURCE_REVISION}" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.created="${BUILD_DATE}"
+
+# Pin the runtime nginx to the exact version the module was built against
+# (base-runtime installs nginx.org's current noble nginx; downgrade/pin here).
+# nginx is held BEFORE the dist-upgrade: the upgrade pass patches everything
+# else, but must not move nginx past the module's embedded
+# NGINX_VERSION_NUM or the module refuses to load (emerg at startup).
+COPY artifacts/nginx-version /tmp/nginx-version
+RUN apt-get update \
+    && NV="$(cat /tmp/nginx-version)" \
+    && apt-get install -y --allow-downgrades --no-install-recommends \
+       "nginx=${NV}-1~noble" gettext-base \
+    && apt-mark hold nginx \
+    && apt-get -y dist-upgrade \
+    && rm -rf /var/lib/apt/lists/* /tmp/nginx-version
+
+# Prebuilt modules.
+COPY artifacts/ngx_pagespeed_module.so /usr/lib/nginx/modules/ngx_pagespeed_module.so
+COPY --from=brotli-builder /tmp/ngx_http_brotli_filter_module.so \
+     /usr/lib/nginx/modules/ngx_http_brotli_filter_module.so
+
+# The GeoIP DB is intentionally NOT baked — it was a build-time,
+# monthly-changing, network-dependent fetch (the only non-deterministic step).
+# The default config does not load geoip2; mount a .mmdb + add load_module to
+# use regional features.
+
+COPY LICENSE NOTICE THIRD-PARTY-NOTICES /usr/share/doc/pagespeed/
+
+# --- The shared cache-volume identity contract (issue #1429).
+#
+# The optimizer creates the cyclone volume, its sockets and its shared config
+# 0660/0640 owned by `pagespeed`, so this image's worker processes reach them
+# by GROUP membership -- at the same fixed GID 918 the worker image uses.
+#
+# The join is `usermod -aG`, at image level, rather than `user nginx pagespeed;`
+# in the config: nginx calls initgroups(user, group) when it drops its workers,
+# so the supplementary group is picked up from /etc/group whatever config is in
+# force -- including an operator's own nginx.conf mounted over the packaged one,
+# which is the common deployment shape and would silently lose a config-level
+# directive.
+RUN groupadd -r -g 918 pagespeed && usermod -aG pagespeed nginx
+
+COPY deploy/nginx.conf.example /etc/nginx/nginx.conf.template
+COPY docker/entrypoint-nginx.sh /entrypoint-nginx.sh
+RUN chmod +x /entrypoint-nginx.sh
+
+VOLUME /data
+ENV BACKEND_HOST=host.docker.internal
+ENV BACKEND_PORT=8081
+EXPOSE 80 443
+ENTRYPOINT ["/entrypoint-nginx.sh"]
+CMD ["nginx", "-g", "daemon off;"]

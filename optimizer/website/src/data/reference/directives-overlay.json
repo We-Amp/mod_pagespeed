@@ -1,0 +1,32 @@
+{
+  "_comment": "Hand-maintained descriptions for the directives whose only text in the module source is an argument-shape hint (the Apache command table's help string, e.g. \"name size_kb\") or no text at all. Names, arity, scope and defaults come from the source; see generate-references.mjs. Every entry here is rendered with descriptionSource: docs.",
+  "directives": {
+    "AddResourceHeader": "Adds a custom HTTP header to every optimized resource the module serves. Repeatable, up to 20 headers.",
+    "CustomFetchHeader": "Adds a request header to every fetch the module makes to an origin.",
+    "MapOriginDomain": "Fetches resources for the public domain(s) from the origin domain instead, optionally sending a different Host header.",
+    "MapProxyDomain": "Proxies and optimizes resources from a separate origin domain under a path of this site.",
+    "MapRewriteDomain": "Rewrites optimized resource URLs from the listed domains onto another domain (for example a CDN hostname).",
+    "ShardDomain": "Spreads optimized resource URLs for a domain across the listed shard domains.",
+    "CreateSharedMemoryMetadataCache": "Creates a named shared-memory metadata cache of the given size for the virtual hosts whose FileCachePath is that name.",
+    "LoadFromFile": "Serves resources under a URL prefix straight from the filesystem instead of fetching them over HTTP. Access control: files served through a mapping are read directly from disk, so the web server's own access rules for those paths (Apache `<Directory>`, `<Files>` and `Require`; nginx `location` allow/deny and authentication) are not applied to them. To control access per path, use `LoadFromFileRule Disallow` for a filename prefix or `LoadFromFileRuleMatch Disallow` for a filename pattern; a disallowed file is fetched over HTTP instead, where the web server's rules apply as usual. If a path should not be reachable at all, do not map it.",
+    "LoadFromFileMatch": "LoadFromFile with a regular expression on the URL and a replacement filename prefix.",
+    "LoadFromFileRule": "Allows or disallows loading from file for a filename prefix after a LoadFromFile mapping.",
+    "LoadFromFileRuleMatch": "LoadFromFileRule with a regular expression on the filename.",
+    "StatisticsDomains": "Access control for the per-host statistics page: Allow or Disallow a domain wildcard. Default: Allow *.",
+    "GlobalStatisticsDomains": "Access control for the global statistics page: Allow or Disallow a domain wildcard. Default: Allow *.",
+    "MessagesDomains": "Access control for the message history page: Allow or Disallow a domain wildcard. Default: Allow *.",
+    "ConsoleDomains": "Access control for the console page: Allow or Disallow a domain wildcard. Default: Allow *.",
+    "AdminDomains": "Access control for the per-host admin pages: Allow or Disallow a domain wildcard. Default: Allow *.",
+    "GlobalAdminDomains": "Access control for the global admin pages: Allow or Disallow a domain wildcard. Default: Allow *.",
+    "Allow": "Allows optimization of resources whose URL matches the wildcard. Later Allow and Disallow directives override earlier ones.",
+    "Disallow": "Excludes resources (and pages) whose URL matches the wildcard from optimization.",
+    "Domain": "Authorizes the module to fetch and rewrite resources on this domain.",
+    "UrlValuedAttribute": "Declares an extra element attribute that holds a URL, with the resource category (image, script, stylesheet, otherResource, hyperlink) it should be treated as.",
+    "Library": "Recognizes a JavaScript library by size and hash so canonicalize_javascript_libraries can replace it with the given canonical URL.",
+    "ExperimentalMeasurementProxy": "Experimental measurement proxy mode (Apache only).",
+    "NumRewriteThreads": "Threads per process for short, latency-sensitive optimization work. auto (or 0) sizes the pool from the CPUs the process may use; a positive integer sets it exactly.",
+    "NumExpensiveRewriteThreads": "Threads per process for heavy optimization work such as image transcoding. auto (or 0) sizes the pool from the CPUs the process may use; a positive integer sets it exactly.",
+    "MessageBufferSize": "Size in bytes of the in-memory message history shown on the messages page; 0 disables it.",
+    "ClearInheritedScripts": "Drops the script-variable directive lines inherited from the enclosing block, so this block starts from the non-scripted configuration."
+  }
+}

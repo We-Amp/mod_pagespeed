@@ -1,0 +1,117 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// TermPanel — a terminal capture: a head row (the $ command when given, an
+// optional chip, and the injected copy button) over a scrollable <pre> of
+// plain-data lines. The lines are data, never Shiki output. tabindex=0 makes
+// the scrollable region keyboard-reachable (axe scrollable-region-focusable);
+// name it with `labelledby` pointing at visible lead-in text, or `label` when
+// no such text exists. The head row always renders, even without a command:
+// the global copy-button script docks the button there (BaseLayout), so the
+// button gets its own space instead of covering the transcript. The panel
+// inherits the global pre:has(code) tick strip; the panel's own border is the
+// frame, so the pre's inset bezel is suppressed here to avoid a double ring.
+// `copy={false}` is for a readout nobody would paste anywhere: the pre is
+// marked as already handled, which the copy-button script skips, and with no
+// command and no chip either the then-empty head row is not rendered.
+
+import Chip from './Chip.astro';
+
+interface Props {
+  command?: string;
+  label?: string;
+  labelledby?: string;
+  chip?: { tone: 'success' | 'accent' | 'interactive' | 'neutral'; label: string };
+  lines: Array<{
+    text: string;
+    tone?: 'plain' | 'strong' | 'hl' | 'ok' | 'dim';
+    event?: string;
+    // Decoration before the text (an arrow, a prompt sign) that a screen
+    // reader should not read aloud.
+    marker?: string;
+  }>;
+  copy?: boolean;
+}
+
+const { command, label, labelledby, chip, lines, copy = true } = Astro.props;
+const showHead = copy || Boolean(command) || Boolean(chip);
+---
+
+{/* The head row is a div, not a figcaption: a figcaption names the figure, and
+    once the copy button is docked in the head that name would start with
+    "Copy code to clipboard". The command line is the figure's name instead. */}
+<figure class="term-panel" data-ui="term-panel" aria-label={command ? `$ ${command}` : undefined}>
+  {showHead && (
+    <div class="term-head">
+      {command && <span class="font-mono text-xs text-text-muted">$ {command}</span>}
+      {chip && <Chip tone={chip.tone} label={chip.label} />}
+    </div>
+  )}
+  <pre
+    class="term-body"
+    data-copy-attached={copy ? undefined : '1'}
+    tabindex="0"
+    role="region"
+    aria-label={label}
+    aria-labelledby={labelledby}
+  ><code>{
+        lines.map((line, i) => (
+          <span class={`term-${line.tone ?? 'plain'}`} data-umami-event={line.event}>{line.marker && <span aria-hidden="true">{line.marker}</span>}{line.text + (i < lines.length - 1 ? '\n' : '')}</span>
+        ))
+      }</code></pre>
+</figure>
+
+<style>
+  .term-panel {
+    margin: 0;
+    background-color: var(--color-bg-recessed);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-card);
+    overflow: hidden;
+  }
+  .term-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.25rem 1rem;
+    /* The row is the copy button's dock: it reserves the button's 44px target
+       (plus the vertical padding and the bottom hairline) whether or not the
+       script has run, so the button's arrival never shifts the transcript. */
+    min-block-size: 3.375rem;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .term-body {
+    margin: 0;
+    padding: 1rem;
+    overflow-x: auto;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 1.65;
+    color: var(--color-text-muted);
+    /* The figure border is the frame; suppress the global pre bezel (the tick
+       strip and the copy button stay). */
+    box-shadow: none;
+    border-radius: 0;
+  }
+  /* The panel's overflow:hidden clips an outward focus ring; draw it inside. */
+  .term-body:focus-visible {
+    outline-offset: -2px;
+  }
+  .term-plain {
+    color: var(--color-text-muted);
+  }
+  .term-strong {
+    color: var(--color-text-body);
+  }
+  .term-hl {
+    color: var(--color-interactive);
+  }
+  .term-ok {
+    color: var(--color-success);
+  }
+  .term-dim {
+    color: var(--color-text-annotation);
+  }
+</style>

@@ -1,0 +1,672 @@
+---
+import { PRODUCT_DISPLAY_NAME, LICENSE_CLAUSE_CAP } from '../data/product-facts.mjs';
+import HeadMeta from './parts/HeadMeta.astro';
+import QuickMessage from '../components/QuickMessage.astro';
+import SearchDialog from '../components/SearchDialog.astro';
+import Icon from '../components/Icon.astro';
+import TelemetryStrip from '../components/instrument/TelemetryStrip.astro';
+import SiteHeader from './parts/SiteHeader.astro';
+import SiteFooter from './parts/SiteFooter.astro';
+import RelatedLinks from './parts/RelatedLinks.astro';
+import { searchTitle, searchWeight } from '../lib/search-index';
+
+// The page shell. The pieces live next to this file: parts/HeadMeta.astro
+// (document metadata), parts/SiteHeader.astro and parts/SiteFooter.astro
+// (navigation, with its data in src/data/nav.ts).
+// What stays here is what must: the inline critical styles and pre-paint
+// script, the global stylesheet import, the banner, <main>, and the scripts.
+//
+// The import order above is deliberate. Astro orders the stylesheets of a
+// page by each import's position in its importer's whole import list, styled
+// or not, so moving any import above QuickMessage, or QuickMessage itself,
+// changes whether the site sheet loads before or after a page's own inline
+// styles. test/layout-import-order.test.ts pins the built result.
+
+interface Props {
+  title: string;
+  description?: string;
+  ogImage?: string;
+  // Single schema object, or an array when a page needs to emit multiple
+  // top-level JSON-LD nodes (e.g. /1.1/ emits Product + FAQPage as separate
+  // <script> tags so each is a first-class schema for Google's parsers and
+  // so seo.spec.ts can assert against the first script's @type directly,
+  // rather than drilling into a wrapping @graph).
+  jsonLd?: Record<string, unknown> | Record<string, unknown>[];
+  // Emit <meta name="robots" content="noindex,follow"> — for error pages and
+  // any utility route that should not be indexed.
+  noindex?: boolean;
+  // Optional page-level Content-Security-Policy meta, rendered in production
+  // builds only (the dev server's websocket needs connect-src on localhost).
+  // A page passes it to tighten the site-wide header for itself; both policies
+  // then apply.
+  csp?: string;
+  // Override the auto BreadcrumbList's final ListItem.name so the emitted
+  // JSON-LD leaf matches the page's visible breadcrumb leaf (the human title)
+  // rather than formatSegment(slug). Slug pages pass their human title here.
+  breadcrumbLeafName?: string;
+  // Omit these raw URL path segments from the auto BreadcrumbList — for an
+  // intermediate segment that has no page of its own (the /1.1/docs/[slug]
+  // route this covered is retired; kept for any future segment-less page).
+  breadcrumbSkipSegments?: string[];
+  // The page's Markdown twin (/docs/<slug>.md), advertised with
+  // <link rel="alternate" type="text/markdown"> so agents can ask for the text.
+  alternateMarkdown?: string;
+  // Keep a noindex page in site search anyway (Pagefind is separate from
+  // search-engine indexing): the thin filter topic pages use this.
+  searchable?: boolean;
+  // Open Graph object type. Blog posts pass 'article' together with the two
+  // timestamps below, which render as article:published_time / modified_time.
+  ogType?: 'website' | 'article';
+  articlePublished?: Date;
+  articleModified?: Date;
+  // Absolute canonical URL for a page whose content lives on another origin
+  // (/privacy/ points at the one We-Amp privacy notice on we-amp.com).
+  // false omits the canonical link (the error pages: their own URL is not
+  // the page a visitor asked for, so it must not be declared canonical).
+  canonical?: string | false;
+  // Id of the element the skip link moves to. Pages whose <main> opens with a
+  // navigation column (the docs sidebar) point it at their content column, so
+  // the skip link lands past that navigation.
+  skipTarget?: string;
+  // The wider 80rem header box, for the docs pages whose body is three
+  // columns at that width (see parts/SiteHeader.astro).
+  wideHeader?: boolean;
+}
+
+const {
+  title,
+  description = `${PRODUCT_DISPLAY_NAME} — automatic web performance optimization for Apache and nginx. ${LICENSE_CLAUSE_CAP}. Your servers, your rules.`,
+  ogImage,
+  jsonLd,
+  noindex = false,
+  csp,
+  breadcrumbLeafName,
+  breadcrumbSkipSegments = [],
+  alternateMarkdown,
+  searchable = false,
+  ogType = 'website',
+  articlePublished,
+  articleModified,
+  canonical,
+  skipTarget = 'main-content',
+  wideHeader = false,
+} = Astro.props;
+
+const is11Section = Astro.url.pathname.startsWith('/1.1/');
+
+// Sitewide banner. Empty text renders no banner (the 2.1 launch banner was
+// retired after general availability). When a banner returns, keep it off
+// /1.1/* (is11Section) and bump the dismissal key suffix whenever the copy or
+// link changes, so previously-dismissed users see the new banner.
+const bannerText: string = '';
+const bannerHref = '/docs/getting-started/';
+const bannerDismissKey = 'banner-dismissed:mps21-ga-2026a';
+
+const rawPath = Astro.url.pathname;
+const pathSegments = rawPath
+  .replace(/^\/|\/$/g, '')
+  .split('/')
+  .filter(Boolean);
+
+// Site search (Pagefind; see SearchDialog.astro and scripts/build-search-index.mjs).
+// The index is built from exactly the pages whose <main> carries
+// `data-pagefind-body`, so this flag is the whole inclusion rule: noindex
+// pages and the utility routes stay out, and so does the static /1.0/
+// archive, which never carries the attribute. The section meta is shown on
+// every result as a tag ("Section: Docs").
+const searchExcluded =
+  (noindex && !searchable) ||
+  /^\/(api|go|buy|error|1\.0)(\/|$)/.test(rawPath) ||
+  /^\/(404|500)\/?$/.test(rawPath);
+
+// Telemetry strip exclusion: the archived product sections, utility and error
+// routes, any noindex page that is not kept in site search, and the crawler
+// cost meter, whose own code must make no request after load (the strip issues
+// a HEAD).
+const telemetryExcluded =
+  (noindex && !searchable) ||
+  /^\/(1\.1|1\.0|api|go|error|ai-crawler-cost)(\/|$)/.test(rawPath) ||
+  /^\/(404|500)(\/|$)/.test(rawPath);
+const sectionNames: Record<string, string> = {
+  docs: 'Docs',
+  blog: 'Blog',
+  'how-it-works': 'How it works',
+  examples: 'Examples',
+  alternatives: 'Compare',
+  'core-web-vitals': 'Compare',
+};
+const searchSection = sectionNames[pathSegments[0] ?? ''] ?? 'Site';
+---
+
+<!doctype html>
+<html lang="en" class="scroll-smooth dark" id="html-root">
+  <head>
+    <HeadMeta
+      title={title}
+      description={description}
+      ogImage={ogImage}
+      jsonLd={jsonLd}
+      noindex={noindex}
+      csp={csp}
+      breadcrumbLeafName={breadcrumbLeafName}
+      breadcrumbSkipSegments={breadcrumbSkipSegments}
+      alternateMarkdown={alternateMarkdown}
+      ogType={ogType}
+      articlePublished={articlePublished}
+      articleModified={articleModified}
+      canonical={canonical}
+    >
+    <style is:inline>
+      /* Critical-CSS flash guard: the production module inlines critical CSS
+         extracted without the .dark class, so token-based utilities on
+         above-the-fold elements would resolve to the light :root values until
+         the full sheet loads. This block repeats the complete dark token list
+         (copied value for value from .dark in global.css; guarded against
+         drift by test/sync/dark-tokens-inline.test.ts) at specificity (0,1,1),
+         which beats :root. */
+      html.dark {
+        --color-bg-primary: #0b0c0e;
+        --color-bg-secondary: #121417;
+        --color-bg-elevated: #191c20;
+        --color-bg-recessed: #070809;
+        --color-text-body: #e8eaed;
+        --color-text-muted: #a7aeb6;
+        --color-text-annotation: #8a9099;
+        --color-interactive: #5eb1c9;
+        --color-interactive-hover: #84c7db;
+        --color-on-accent: #07080a;
+        --color-success: #6fbf8f;
+        --color-accent: #e0a24a;
+        --color-promo: #5eb1c9;
+        --color-border: #2a2e34;
+        --color-border-strong: #3a3f47;
+        --color-control-border: #646b73;
+        --color-tick: rgba(255, 255, 255, 0.12);
+        --color-specular: rgba(255, 255, 255, 0.05);
+        --color-grid-line: rgba(255, 255, 255, 0.045);
+        --color-success-wash: #202929;
+        --color-accent-wash: #292723;
+        --color-interactive-wash: #1f282e;
+        --color-bit-clear: #20242a;
+        --color-bit-lit: #5eb1c9;
+        --color-disabled-bg: #1a1d21;
+        --color-disabled-text: #6a7077;
+        --color-disabled-border: #2f343a;
+        --color-focus-ring: #5eb1c9;
+      }
+      /* Telemetry strip layout guard: the strip's scoped rules ship in the
+         deferred sheet, but its box must be exact at first paint or the page
+         shifts when that sheet lands. Keep the row at its fixed 32px, clipped,
+         with the fields on one flex line even while /_astro/*.css is blocked. */
+      [data-ui='telemetry-strip'] {
+        block-size: 32px;
+        overflow: hidden;
+      }
+      [data-ui='telemetry-strip'] .telemetry-row {
+        display: flex;
+      }
+    </style>
+    <script is:inline define:vars={{ bannerDismissKey }}>
+      /* Set dark class before first paint to avoid FOUC on iOS. Must run
+         synchronously in <head> before any rendering occurs. */
+      (function () {
+        /* Dark-only identity: the `.dark` class is ALWAYS applied so
+           every existing `dark:` utility resolves to the instrument-black system.
+           No toggle, no light theme. */
+        document.documentElement.classList.add('dark');
+        /* Set platform preference for the docs platform selector. Storage
+           access can throw (Safari private mode, strict cookie/storage
+           settings) — never let that leave data-active-platform unset, since
+           global.css hides every [data-platform] block until this attribute
+           is set. Fall back to the same 'nginx' default the page scripts use. */
+        var p = 'nginx';
+        try {
+          p = localStorage.getItem('docs-platform') || 'nginx';
+        } catch (e) {
+          /* storage blocked — p stays 'nginx' */
+        }
+        document.documentElement.setAttribute('data-active-platform', p);
+        /* Hide launch banner if previously dismissed — prevents FOUC.
+           INVARIANT: the localStorage key is versioned (passed in as
+           bannerDismissKey). When the banner copy or link changes, bump the
+           key's version suffix in BaseLayout so previously-dismissed users see
+           the new banner. Do not revert to an unversioned key.
+           Wrapped for the same reason as above: a throwing storage backend
+           must not abort this script before the platform attribute is set. */
+        try {
+          if (localStorage.getItem(bannerDismissKey) === '1') {
+            document.documentElement.dataset.bannerDismissed = '1';
+          }
+        } catch (e) {
+          /* storage blocked — banner just shows, same as "never dismissed" */
+        }
+      })();
+    </script>
+    <noscript>
+      <style>
+        html:not([data-active-platform]) [data-platform] {
+          display: block !important;
+        }
+        /* The scan box and its results need JavaScript: without it they
+           are hidden, and the noscript form on the scan pages shows. */
+        [data-scan-needs-js] {
+          display: none;
+        }
+      </style>
+    </noscript>
+    <style is:inline>
+      [data-banner-dismissed='1'] #coming-soon-banner {
+        display: none;
+      }
+    </style>
+    </HeadMeta>
+    <style is:global>
+      @import '../styles/global.css';
+    </style>
+  </head>
+  <body class="min-h-screen flex flex-col bg-bg-primary text-text-body antialiased">
+    <a
+      href={`#${skipTarget}`}
+      data-skip-link
+      class="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[100] focus:rounded-md focus:bg-interactive focus:px-4 focus:py-2 focus:text-on-accent"
+    >
+      Skip to main content
+    </a>
+    {!telemetryExcluded && <TelemetryStrip path={rawPath} />}
+    {bannerText && (
+      <div
+        id="coming-soon-banner"
+        class="bg-bg-secondary text-text-body text-sm text-center py-2 px-4 relative border-b border-border"
+      >
+        <span
+          aria-hidden="true"
+          class="inline-block w-2 h-2 rounded-[1px] bg-interactive mr-2 align-middle"
+        />
+        {bannerHref ? (
+          <a
+            href={bannerHref}
+            class="underline underline-offset-2 hover:text-interactive transition-colors"
+          >
+            {bannerText} <span aria-hidden="true">→</span>
+          </a>
+        ) : (
+          <span>{bannerText}</span>
+        )}
+        <button
+          id="dismiss-banner"
+          type="button"
+          class="absolute right-2 top-1/2 -translate-y-1/2 p-2.5 text-text-muted hover:text-text-body transition-colors"
+          aria-label="Dismiss banner"
+          aria-controls="coming-soon-banner"
+          title="Dismiss banner"
+        >
+          <Icon name="x" class="h-4 w-4" />
+        </button>
+      </div>
+    )}
+    <SiteHeader wide={wideHeader} />
+    <main
+      id="main-content"
+      tabindex="-1"
+      class="flex-1 focus:outline-none"
+      data-pagefind-body={searchExcluded ? undefined : ''}
+      data-pagefind-meta={searchExcluded ? undefined : `section:${searchSection}`}
+      data-pagefind-weight={searchExcluded ? undefined : searchWeight(rawPath)}
+    >
+      {searchTitle(rawPath) && <span hidden data-pagefind-meta={`title:${searchTitle(rawPath)}`} />}
+      <slot />
+      <RelatedLinks />
+    </main>
+
+    <SiteFooter />
+
+    {/* Site-wide low-friction "quick message" widget — fixed bottom-right
+        launcher; sends a one-way message (optional reply email) to the
+        maintainer via the existing contact -> email pipeline. */}
+    <QuickMessage />
+
+    {/* Site search modal (Pagefind). Costs one small inline script per page;
+         the search bundle loads from /pagefind/v<version>/ on first open. */}
+    <SearchDialog />
+
+    {/* One polite live region for the outcome of every copy button on the
+        page (code blocks, term panels, install commands): a changed button
+        label alone is not reliably spoken. Scripts write it through the id. */}
+    <p id="copy-status" class="sr-only" role="status" aria-live="polite"></p>
+    {/* The one writer of #copy-status, shared by every copy script on the page
+        (window.siteAnnounce). One timer covers both steps, so a new message
+        always replaces the previous one and nothing wipes it early: the region
+        is emptied, the message is written a moment later (so a repeat of the
+        same text is spoken again), and it is cleared after a few seconds. */}
+    <script is:inline>
+      (function () {
+        var timer;
+        window.siteAnnounce = function (message) {
+          var status = document.getElementById('copy-status');
+          if (!status) return;
+          clearTimeout(timer);
+          status.textContent = '';
+          timer = setTimeout(function () {
+            status.textContent = message;
+            timer = setTimeout(function () {
+              status.textContent = '';
+            }, 4000);
+          }, 50);
+        };
+      })();
+    </script>
+
+    {/* Handset widths: the fixed message launcher would sit on top of the
+        hero, so it stays hidden until the first viewport has been scrolled
+        past. While the footer is on screen, at any width, the launcher hides
+        so it never sits on top of the footer text. Toggles data attributes;
+        the hide/show itself is pure CSS in global.css. */}
+    <script is:inline>
+      (function () {
+        function update() {
+          var past = window.scrollY > window.innerHeight * 0.9;
+          document.documentElement.toggleAttribute('data-fab-reveal', past);
+        }
+        update();
+        window.addEventListener('scroll', update, { passive: true });
+        window.addEventListener('resize', update, { passive: true });
+        var footer = document.querySelector('[data-site-footer]');
+        if (footer && 'IntersectionObserver' in window) {
+          new IntersectionObserver(function (entries) {
+            document.documentElement.toggleAttribute(
+              'data-footer-in-view',
+              entries[entries.length - 1].isIntersecting,
+            );
+          }).observe(footer);
+        }
+      })();
+    </script>
+
+    <!-- Dark class is now set in <head> to prevent FOUC on iOS -->
+
+    <script>
+      const btn = document.getElementById('mobile-menu-btn');
+      const menu = document.getElementById('mobile-menu');
+      const iconOpen = document.getElementById('menu-icon-open');
+      const iconClose = document.getElementById('menu-icon-close');
+
+      // While the menu is open it is modal: everything outside the header is
+      // inert (no Tab stops, hidden from assistive tech), the page behind does
+      // not scroll, and Tab wraps inside the header.
+      const header = document.querySelector<HTMLElement>('body > header');
+      const behindMenu = () =>
+        Array.from(
+          document.querySelectorAll<HTMLElement>(
+            'main, footer, a[data-skip-link], [data-ui="telemetry-strip"], #coming-soon-banner, .qm-root',
+          ),
+        );
+      const menuOpen = () => btn?.getAttribute('aria-expanded') === 'true';
+      function headerFocusables(): HTMLElement[] {
+        if (!header) return [];
+        return Array.from(
+          header.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), summary'),
+        ).filter(
+          (el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden',
+        );
+      }
+
+      function setMobileMenuOpen(open: boolean) {
+        if (!btn || !menu) return;
+        btn.setAttribute('aria-expanded', String(open));
+        document.documentElement.toggleAttribute('data-menu-open', open);
+        behindMenu().forEach((el) => el.toggleAttribute('inert', open));
+        menu.classList.toggle('hidden', !open);
+        iconOpen?.classList.toggle('hidden', open);
+        iconClose?.classList.toggle('hidden', !open);
+      }
+
+      function closeMobileMenu(returnFocus: boolean) {
+        if (!menu || menu.classList.contains('hidden')) return;
+        setMobileMenuOpen(false);
+        if (returnFocus) btn?.focus();
+      }
+
+      btn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        setMobileMenuOpen(btn.getAttribute('aria-expanded') !== 'true');
+      });
+
+      // Keep clicks inside the open menu from bubbling to the outside-click handler.
+      menu?.addEventListener('click', (e) => {
+        e.stopPropagation();
+      });
+
+      // Outside tap/click closes the menu (no focus return — the user is acting elsewhere).
+      document.addEventListener('click', () => closeMobileMenu(false));
+
+      // Escape closes the menu and returns focus to the toggle. (WCAG 2.1.2)
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeMobileMenu(true);
+        if (e.key === 'Tab' && menuOpen() && !document.querySelector('dialog[open]')) {
+          const items = headerFocusables();
+          if (!items.length) return;
+          const first = items[0];
+          const last = items[items.length - 1];
+          const active = document.activeElement;
+          if (e.shiftKey && (active === first || !header?.contains(active))) {
+            e.preventDefault();
+            last.focus();
+          } else if (!e.shiftKey && (active === last || !header?.contains(active))) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      });
+
+      // Crossing into the desktop layout (lg, 1024px) hides the mobile menu
+      // button, so an open menu would stay expanded with nothing to close it.
+      const desktopMql = window.matchMedia('(min-width: 1024px)');
+      const onDesktopChange = (e: MediaQueryListEvent) => {
+        if (e.matches) closeMobileMenu(false);
+      };
+      if (desktopMql.addEventListener) desktopMql.addEventListener('change', onDesktopChange);
+      else desktopMql.addListener(onDesktopChange);
+
+      // Desktop nav dropdowns (Docs, Tools, Support, Compare) — click + keyboard support.
+      // Each group is independent; aria-expanded is the single source of truth
+      // and visual state mirrors it. Opening one closes the others.
+      const dropdownGroups = Array.from(
+        document.querySelectorAll<HTMLElement>('.nav-dropdown-group'),
+      )
+        .map((group) => ({
+          btn: group.querySelector<HTMLButtonElement>('.nav-dropdown-btn'),
+          panel: group.querySelector<HTMLElement>('.nav-dropdown-panel'),
+        }))
+        .filter((g): g is { btn: HTMLButtonElement; panel: HTMLElement } =>
+          Boolean(g.btn && g.panel),
+        );
+
+      function setGroupOpen(group: { btn: HTMLButtonElement; panel: HTMLElement }, open: boolean) {
+        group.panel.classList.toggle('hidden', !open);
+        group.btn.setAttribute('aria-expanded', String(open));
+      }
+
+      function closeAllDropdowns() {
+        dropdownGroups.forEach((g) => setGroupOpen(g, false));
+      }
+
+      dropdownGroups.forEach((group) => {
+        group.btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const isOpen = !group.panel.classList.contains('hidden');
+          closeAllDropdowns();
+          setGroupOpen(group, !isOpen);
+        });
+
+        group.btn.addEventListener('keydown', (e) => {
+          if ((e.key === 'Enter' || e.key === ' ') && !group.panel.classList.contains('hidden')) {
+            e.preventDefault();
+            setGroupOpen(group, false);
+            return;
+          }
+          if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            closeAllDropdowns();
+            setGroupOpen(group, true);
+            const firstLink = group.panel.querySelector<HTMLAnchorElement>('a');
+            firstLink?.focus();
+          }
+        });
+
+        group.panel.addEventListener('click', (e) => {
+          e.stopPropagation();
+        });
+
+        // Close a stale-open menu when focus leaves the group entirely (Tab-out).
+        // relatedTarget is the element gaining focus; if it's outside this
+        // group's wrapper, collapse the disclosure.
+        const wrapper = group.btn.closest<HTMLElement>('.nav-dropdown-group');
+        wrapper?.addEventListener('focusout', (e) => {
+          const next = e.relatedTarget as Node | null;
+          if (!next || !wrapper.contains(next)) {
+            setGroupOpen(group, false);
+          }
+        });
+      });
+
+      if (dropdownGroups.length > 0) {
+        document.addEventListener('click', closeAllDropdowns);
+
+        document.addEventListener('keydown', (e) => {
+          if (e.key !== 'Escape') return;
+          const openGroup = dropdownGroups.find((g) => !g.panel.classList.contains('hidden'));
+          if (openGroup) {
+            closeAllDropdowns();
+            openGroup.btn.focus();
+          }
+        });
+      }
+    </script>
+    <script is:inline define:vars={{ bannerDismissKey }}>
+      /* Banner dismissal is versioned (and section-scoped) so copy changes
+         reach previously-dismissed users. The key is passed in from BaseLayout
+         (bannerDismissKey); bump its version suffix there when copy changes. */
+      (function () {
+        var BANNER_KEY = bannerDismissKey;
+        var banner = document.getElementById('coming-soon-banner');
+        var dismissBtn = document.getElementById('dismiss-banner');
+        if (!banner) return;
+        // Storage access can throw (Safari private mode, strict cookie/
+        // storage settings) — never let that abort this script before the
+        // dismiss button's click listener attaches.
+        try {
+          if (localStorage.getItem(BANNER_KEY) === '1') {
+            banner.style.display = 'none';
+            return;
+          }
+        } catch (e) {
+          /* storage blocked — banner just shows, same as "never dismissed" */
+        }
+        if (dismissBtn) {
+          dismissBtn.addEventListener('click', function () {
+            banner.style.display = 'none';
+            try {
+              localStorage.setItem(BANNER_KEY, '1');
+            } catch (e) {
+              /* storage blocked — dismissal just doesn't persist */
+            }
+          });
+        }
+      })();
+    </script>
+    <script is:inline>
+      /* Copy-to-clipboard buttons on every <pre><code>...</code></pre>.
+         Initialization gate: only flip <html data-clip-ready> if the
+         clipboard API is actually usable. CSS keeps buttons opacity:0 +
+         visibility:hidden until that flag is set, so we never flash empty
+         buttons on browsers that lack support (older Safari, non-HTTPS dev
+         preview). Inline <code> (not inside <pre>) is skipped by selector. */
+      (function () {
+        if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
+          return;
+        }
+        var COPY_SVG =
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
+        var CHECK_SVG =
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+
+        /* The outcome is spoken through the page's live region, by its one
+           writer (window.siteAnnounce, defined next to #copy-status). The
+           button's own name never changes, so it is not spoken twice. */
+        function announce(message) {
+          if (typeof window.siteAnnounce === 'function') window.siteAnnounce(message);
+        }
+
+        function attach(pre) {
+          if (!pre || pre.dataset.copyAttached === '1') return;
+          var code = pre.querySelector('code');
+          if (!code) return;
+          pre.dataset.copyAttached = '1';
+          /* Ensure absolute child positions against the <pre>. CSS already
+             does this via `pre:has(code)` in browsers that support :has,
+             but set inline for older browsers as a defensive belt. */
+          var computed = window.getComputedStyle(pre);
+          if (computed.position === 'static') {
+            pre.style.position = 'relative';
+          }
+          var btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'code-copy-btn';
+          btn.setAttribute('aria-label', 'Copy code to clipboard');
+          btn.setAttribute('title', 'Copy');
+          btn.innerHTML = COPY_SVG;
+          btn.addEventListener('click', function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            var text = code.textContent || '';
+            navigator.clipboard.writeText(text).then(
+              function () {
+                btn.dataset.copied = 'true';
+                btn.innerHTML = CHECK_SVG;
+                announce('Copied to clipboard');
+                setTimeout(function () {
+                  delete btn.dataset.copied;
+                  btn.innerHTML = COPY_SVG;
+                }, 1500);
+              },
+              function () {
+                /* Permission denied or other failure: the button stays as it
+                   is and the text can still be selected and copied by hand,
+                   which the live region says. */
+                announce('Copy failed, select the text to copy');
+              },
+            );
+          });
+          /* A term panel reserves its head row for the button, so the button
+             never covers the transcript; other code blocks keep the top-right
+             overlay inside the pre. The copied text is the pre's code either
+             way. */
+          var panel = pre.closest('.term-panel');
+          var head = panel ? panel.querySelector('.term-head') : null;
+          (head || pre).appendChild(btn);
+        }
+
+        function attachAll(root) {
+          var scope = root && root.querySelectorAll ? root : document;
+          var codes = scope.querySelectorAll('pre > code');
+          /* No code blocks on this page (most marketing pages) — no-op.
+             Skip the data-clip-ready flag and the per-node getComputedStyle
+             work entirely. */
+          if (codes.length === 0) return;
+          document.documentElement.setAttribute('data-clip-ready', '');
+          for (var i = 0; i < codes.length; i++) {
+            attach(codes[i].parentElement);
+          }
+        }
+
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', function () {
+            attachAll(document);
+          });
+        } else {
+          attachAll(document);
+        }
+      })();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,543 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import CTAButton from '../../components/CTAButton.astro';
+import SectionHeader from '../../components/instrument/SectionHeader.astro';
+import ByteDelta from '../../components/instrument/ByteDelta.astro';
+import { monthYear } from '../../lib/instrument';
+import {
+  EXAMPLES,
+  beforeUrl,
+  afterUrl,
+  DEMO_ORIGIN,
+  MECHANISM,
+  type ExampleCategory,
+} from '../../data/examples';
+import {
+  browserOnlyNote,
+  exampleImpact,
+  growthClause,
+  measuredSentences,
+  notAppliedNote,
+} from '../../lib/example-impact';
+import { topicForExample } from '../../data/filters';
+import { FREE_TO_RUN_LINE } from '../../data/product-facts.mjs';
+import examplesData from '../../data/examples-data.json';
+import { productRef } from '../../data/software-jsonld';
+import { ORGANIZATION_PUBLISHER, ORGANIZATION_REF } from '../../data/organization';
+
+export function getStaticPaths() {
+  return EXAMPLES.map((ex) => ({ params: { slug: ex.slug }, props: { ex } }));
+}
+
+const { ex } = Astro.props;
+
+// How this filter manifests when it isn't a plain HTML rewrite (beacon-gated,
+// header-level, or config-dependent). Drives the no-diff note + iframe caveat.
+const mechanism = MECHANISM[ex.slug];
+
+// "New in <minor>" marker for examples that first shipped in a recent release,
+// derived from `ex.addedIn` (e.g. '1.15.0-r20' → 'New in 1.15').
+const addedMinor = ex.addedIn?.match(/^(\d+\.\d+)/)?.[1];
+const newLabel = ex.addedIn ? (addedMinor ? `New in ${addedMinor}` : 'New') : null;
+
+const impact = exampleImpact(ex.slug)!;
+const { measured, present, hasData, nonSubstantive, substantive, diff, tiles } = impact;
+
+// Byte plates for the ByteDelta figures: the page's byte footprint before and
+// after this filter, from the same measured entry the tiles read. Scope
+// mirrors example-impact.ts: one plate for totals when resources were
+// measured, one for the HTML document when it shrank. Each plate carries the
+// label of the tile it replaces, verbatim.
+const savings = hasData && substantive && !impact.notApplied ? impact.savings : undefined;
+const bytePlates: Array<{ label: string; rows: Array<{ label: string; bytes: number }> }> = [];
+if (
+  savings &&
+  savings.totalBytesPct > 0 &&
+  measured.before.resourcesMeasured > 0 &&
+  !impact.missedResources
+) {
+  bytePlates.push({
+    label: 'Total bytes',
+    rows: [
+      { label: 'original', bytes: measured.before.htmlBytes + measured.before.resourceBytes },
+      { label: 'optimized', bytes: measured.after.htmlBytes + measured.after.resourceBytes },
+    ],
+  });
+}
+if (savings && savings.htmlBytesPct > 0) {
+  bytePlates.push({
+    label: 'HTML size',
+    rows: [
+      { label: 'original', bytes: measured.before.htmlBytes },
+      { label: 'optimized', bytes: measured.after.htmlBytes },
+    ],
+  });
+}
+const requestsTile = tiles.find((t) => t.label === 'HTTP requests');
+// The same result in words, so the page carries its own measured numbers as
+// text, not only in the figures.
+const measuredText = measuredSentences(impact).join(' ');
+
+const generatedAt = (examplesData as { generated_at: string | null }).generated_at;
+// When the latest capture shows the filter did not act, the page says so
+// instead of showing a diff or a saving.
+const notAppliedText = notAppliedNote(
+  impact,
+  generatedAt ? monthYear(generatedAt) : 'the latest run',
+);
+// A settled capture the measurement only got by asking as a browser.
+const browserOnlyText = browserOnlyNote(impact);
+// A settled capture with no reduction that grew: say by how much.
+const grown = growthClause(impact);
+const exampleSource = generatedAt
+  ? `Measured on the demo stack, ${monthYear(generatedAt)}.`
+  : 'Measured on the live demo stack.';
+
+const before = beforeUrl(ex);
+const after = afterUrl(ex);
+
+const DOC_FOR_CATEGORY: Record<ExampleCategory, string> = {
+  CSS: '/docs/css-filters/',
+  JavaScript: '/docs/javascript-filters/',
+  Images: '/docs/image-filters/',
+  HTML: '/docs/html-filters/',
+  Caching: '/docs/cache-control/',
+  Resources: '/docs/filters/',
+};
+const docHref = DOC_FOR_CATEGORY[ex.category];
+// The filter's topic page: the full guide to the technique this demo isolates.
+const guide = topicForExample(ex.slug, ex.filters);
+
+// Examples that name a Google service (Analytics, AdSense, Fonts) carry a
+// non-affiliation note — the /examples/ index disclaims this once, but each
+// detail page is independently crawlable/linkable, so it repeats here.
+const namesGoogle = /google/i.test(`${ex.title} ${ex.blurb} ${ex.note ?? ''}`);
+
+// Kept within the ~155 characters a search snippet shows: the long tail is
+// dropped first, then the short one, before the blurb itself is cut.
+const descriptionTails = [
+  ' Live before and after, with the source diff and measured savings.',
+  ' Live before and after.',
+  '',
+];
+const pageDescription = `${ex.blurb}${descriptionTails.find((tail) => ex.blurb.length + tail.length <= 155) ?? ''}`;
+
+// The title names what the page is, a live before-and-after demo, within the
+// ~60 characters a search result shows: the longest tail that fits wins.
+const titleTails = [
+  ' live demo: before and after — mod_pagespeed',
+  ' live demo — mod_pagespeed',
+  ' live demo',
+];
+const pageTitle = `${ex.title}${titleTails.find((tail) => [...`${ex.title}${tail}`].length <= 60) ?? ''}`;
+
+// TechArticle JSON-LD. Emitted only on indexable pages (settled before/after
+// data from a filter that acted); when the page is noindex, no structured data
+// is passed. `about` is the shared product reference (the site-wide product
+// node's `@id` and the current release), and author and publisher reference the
+// site-wide organization node by its `@id`. No example-specific share
+// image exists, so `image` is omitted (BaseLayout's og:image falls back to the
+// shared default).
+const jsonLd: Record<string, unknown> | undefined = impact.indexable
+  ? {
+      '@context': 'https://schema.org',
+      '@type': 'TechArticle',
+      headline: ex.title,
+      description: pageDescription,
+      author: ORGANIZATION_REF,
+      publisher: ORGANIZATION_PUBLISHER,
+      mainEntityOfPage: `https://modpagespeed.com/examples/${ex.slug}/`,
+      about: await productRef(),
+    }
+  : undefined;
+---
+
+<BaseLayout
+  title={pageTitle}
+  description={pageDescription}
+  breadcrumbLeafName={ex.title}
+  jsonLd={jsonLd}
+  noindex={!impact.indexable}
+>
+  <section class="py-12 sm:py-16">
+    <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+      {/* Breadcrumb */}
+      <nav class="text-sm text-text-annotation" aria-label="Breadcrumb">
+        <a class="hover:text-interactive" href="/examples/">
+          Examples
+        </a>
+        <span class="mx-2">/</span>
+        <span class="text-text-body">{ex.category}</span>
+      </nav>
+
+      <div class="mt-4 max-w-3xl">
+        <SectionHeader id="example" as="h1" eyebrow="A module filter." title={ex.title} />
+        <div class="mt-3 flex flex-wrap items-center gap-2">
+          <span class="rounded-full bg-bg-elevated px-3 py-1 text-xs font-semibold text-text-muted">
+            {ex.category}
+          </span>
+          {newLabel && <span class="badge-interactive">{newLabel}</span>}
+        </div>
+        <p class="lede mt-4">{ex.blurb}</p>
+        <p class="mt-3 text-sm text-text-annotation">
+          Filter
+          <code class="font-mono break-all rounded bg-bg-elevated px-1.5 py-0.5 text-text-body">
+            {ex.filters}
+          </code>
+          ·{' '}
+          <a class="text-interactive hover:underline" href={docHref}>
+            Filter docs
+          </a>
+          {guide && (
+            <>
+              ·{' '}
+              <a class="text-interactive hover:underline" href={guide.topic} data-full-guide>
+                Read the full guide
+              </a>
+            </>
+          )}
+          {ex.note && <span class="ml-1">· {ex.note}</span>}
+        </p>
+        {namesGoogle && (
+          <p class="mt-2 text-xs text-text-annotation">
+            Google Analytics, AdSense and Fonts are Google products. This example shows the filter
+            working on them; We-Amp isn't affiliated with or endorsed by Google.
+          </p>
+        )}
+      </div>
+
+      {/* Live before/after */}
+      {/* Registered BEFORE the frames below are parsed, and in the CAPTURE phase
+          because `load` does not bubble. An eager preview frame is small and often
+          comes off a warm connection: it can finish in ~10 ms, while the settle
+          script under the frames only runs once the parser reaches it -- later
+          still on a hard reload, which re-fetches the page's own blocking
+          resources. The event is then long gone by the time that script attaches
+          its listener, and its timeout would hide a frame that had in fact loaded.
+          This stamps the frame so the script below can see what it missed. */}
+      <script is:inline>
+        document.addEventListener(
+          'load',
+          function (e) {
+            var t = e.target;
+            if (t && t.nodeType === 1 && t.hasAttribute('data-iframe')) {
+              t.setAttribute('data-loaded', '');
+            }
+          },
+          true,
+        );
+      </script>
+      <div class="mt-10 grid grid-cols-1 gap-6 lg:grid-cols-2">
+        {[
+          // Both frames load eagerly so they race in parallel. They sit
+          // side-by-side above the fold on desktop, so lazy-loading the
+          // Optimized one only made the product's hero frame appear to lag
+          // behind the Original — bad optics for the thing we're selling.
+          { kind: 'Original', url: before, eager: true },
+          { kind: 'Optimized', url: after, eager: true },
+        ].map((frame) => (
+          <div class="rounded-lg border border-border bg-bg-elevated overflow-hidden">
+            <div class="flex items-center justify-between px-4 py-2 border-b border-border bg-bg-secondary">
+              <span
+                class:list={[
+                  'text-sm font-semibold',
+                  frame.kind === 'Optimized' ? 'text-success' : 'text-text-muted',
+                ]}
+                id={`frame-${frame.kind.toLowerCase()}-kind`}
+              >
+                {frame.kind}
+              </span>
+              {/* Both frames have an "Open in new tab" link; the frame's own
+                  label leads the link's name ("Original Open in new tab"), so
+                  the two stay apart in a list of links. */}
+              <a
+                href={frame.url}
+                target="_blank"
+                rel="nofollow noopener"
+                class="text-xs text-interactive hover:underline"
+                id={`frame-${frame.kind.toLowerCase()}-open`}
+                aria-labelledby={`frame-${frame.kind.toLowerCase()}-kind frame-${frame.kind.toLowerCase()}-open`}
+              >
+                Open in new tab
+              </a>
+            </div>
+            <div class="relative h-[min(560px,70vh)]" data-frame>
+              {/* Loading skeleton — hidden once the iframe fires `load`, or replaced by the
+                    fallback if it never does (slow / blocked / cross-origin demo host). */}
+              <div
+                class="absolute inset-0 flex items-center justify-center bg-bg-secondary"
+                data-skeleton
+                aria-hidden="true"
+              >
+                <div class="h-6 w-6 rounded-full border-2 border-border-strong" />
+              </div>
+              {/* Timeout fallback — shown only if the preview never loads. */}
+              <div
+                class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-bg-secondary px-6 text-center hidden"
+                data-fallback
+              >
+                <p class="text-sm text-text-muted">
+                  Preview unavailable — the live demo host didn't respond.
+                </p>
+                <a
+                  href={frame.url}
+                  target="_blank"
+                  rel="nofollow noopener"
+                  class="text-sm font-medium text-interactive hover:underline"
+                  id={`frame-${frame.kind.toLowerCase()}-fallback-open`}
+                  aria-labelledby={`frame-${frame.kind.toLowerCase()}-kind frame-${frame.kind.toLowerCase()}-fallback-open`}
+                >
+                  Open in new tab
+                </a>
+              </div>
+              <iframe
+                src={frame.url}
+                class="h-full w-full bg-white"
+                title={`${ex.title} — ${frame.kind.toLowerCase()}`}
+                loading={frame.eager ? 'eager' : 'lazy'}
+                sandbox="allow-scripts allow-same-origin"
+                data-iframe
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Hide the skeleton when each preview iframe loads; if it never does
+          within the timeout, swap in the "Preview unavailable" fallback. The
+          demo host is a separate origin, so a slow/blocked frame would
+          otherwise leave a blank white box with no explanation. */}
+      <script is:inline>
+        (function () {
+          var TIMEOUT_MS = 12000;
+          document.querySelectorAll('[data-frame]').forEach(function (frame) {
+            var iframe = frame.querySelector('[data-iframe]');
+            var skeleton = frame.querySelector('[data-skeleton]');
+            var fallback = frame.querySelector('[data-fallback]');
+            if (!iframe || !skeleton || !fallback) return;
+            var settled = false;
+            var timer = setTimeout(function () {
+              if (settled) return;
+              settled = true;
+              skeleton.classList.add('hidden');
+              iframe.classList.add('hidden');
+              fallback.classList.remove('hidden');
+            }, TIMEOUT_MS);
+            function loaded() {
+              if (settled) return;
+              settled = true;
+              clearTimeout(timer);
+              skeleton.classList.add('hidden');
+            }
+            // The frame may already have loaded before this script ran; the stamp
+            // set above the frames is the only record of it, because the event is
+            // not replayed for a listener attached afterwards.
+            if (iframe.hasAttribute('data-loaded')) {
+              loaded();
+              return;
+            }
+            iframe.addEventListener('load', loaded);
+          });
+        })();
+      </script>
+      <p class="mt-3 text-xs text-text-annotation">
+        Both frames render identically — that's the goal. The win is in the bytes and requests
+        below, not the look. They're served live by the mod_pagespeed module on
+        <code class="font-mono">{DEMO_ORIGIN.replace('https://', '')}</code>; the optimized frame
+        applies only this filter. Right after a cache purge it may briefly match the original while
+        the worker rewrites it — reload to see the result.
+        {browserOnlyText && <span data-browser-only> {browserOnlyText}</span>}
+        {mechanism === 'beacon' && (
+          <span>
+            {' '}
+            This filter is <strong class="font-semibold">beacon-driven</strong>: mod_pagespeed
+            instruments the page, a real browser reports back, then it serves the optimized form and
+            re-measures every few minutes — so the optimized frame can take a reload, or briefly
+            revert to the original, before it reflects the change.
+          </span>
+        )}
+      </p>
+      {notAppliedText && (
+        <p
+          class="mt-4 rounded-md border border-border bg-bg-secondary/60 px-4 py-3 text-sm text-text-muted"
+          data-not-applied
+        >
+          {notAppliedText}
+          {impact.hintHeader && (
+            <code
+              class="mt-2 block font-mono text-xs break-all text-text-annotation"
+              data-hint-header
+            >
+              Link: {impact.hintHeader}
+            </code>
+          )}
+        </p>
+      )}
+      {!notAppliedText && nonSubstantive && (
+        <p class="mt-4 rounded-md border border-border bg-bg-secondary/60 px-4 py-3 text-sm text-text-muted">
+          {mechanism === 'beacon'
+            ? "mod_pagespeed applies this only after a real browser loads the page and reports back (and re-measures periodically), so there's no server-side diff to capture here — the frames above show it live."
+            : mechanism === 'header'
+              ? 'This optimization works at the HTTP response-header or document-head hint level, so it leaves no change in the page body to diff — see it live in the frames above (or in the response headers).'
+              : mechanism === 'config'
+                ? "This filter needs configuration or content the public demo doesn't provide (e.g. an Analytics account id or a recognized JavaScript library), so there's no diff to show here — see the filter docs for what it does."
+                : 'This optimization leaves no change in the HTML source to diff — the frames above show it applied live.'}
+        </p>
+      )}
+      {!notAppliedText && (!present || impact.status === 'unsettled') && (
+        <p class="mt-4 rounded-md border border-border bg-bg-secondary/60 px-4 py-3 text-sm text-text-muted">
+          The source diff and measured savings for this example are generated from the live demo —
+          they'll appear here once the backend has processed it.
+        </p>
+      )}
+
+      {/* Measured impact */}
+      {hasData && substantive && !impact.notApplied && tiles.length === 0 && (
+        <div class="mt-12">
+          <h2 class="h2-section text-text-body">Measured impact</h2>
+          <p class="mt-3 text-sm text-text-muted" data-no-reduction>
+            {grown ? (
+              `In this capture ${grown}, so there's no byte or request reduction to chart. The change shows in the source diff below.`
+            ) : (
+              <>
+                This filter changes how the page is structured or delivered, not its size — so
+                there's no byte or request reduction to chart. The change shows in the source diff
+                below.
+              </>
+            )}
+          </p>
+        </div>
+      )}
+      {(requestsTile || bytePlates.length > 0) && (
+        <div class="mt-12">
+          <h2 class="h2-section text-text-body">Measured impact</h2>
+          {measuredText && (
+            <p class="mt-3 max-w-3xl text-sm text-text-muted" data-measured-text>
+              {measuredText}
+            </p>
+          )}
+          <div class="mt-5 grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,18rem)_minmax(0,1fr)]">
+            {requestsTile && (
+              <div class="rounded-lg border border-border bg-bg-elevated p-6 text-center">
+                <h3 class="text-xs font-semibold uppercase tracking-wider text-text-annotation mb-2">
+                  {requestsTile.label}
+                </h3>
+                {/* The struck-through figure is the original count: the terms
+                    (the byte plates' own row labels) say so to a screen reader. */}
+                <dl class="flex items-baseline justify-center gap-3">
+                  <div>
+                    <dt class="sr-only">original</dt>
+                    <dd class="display-num text-lg text-text-annotation line-through">
+                      {requestsTile.before}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt class="sr-only">optimized</dt>
+                    <dd class="display-num text-3xl font-bold text-text-body">
+                      {requestsTile.after}
+                    </dd>
+                  </div>
+                </dl>
+                <span class="badge-success mt-2">{requestsTile.pill}</span>
+              </div>
+            )}
+            {bytePlates.length > 0 && (
+              /* Plates take their own full-width row: inside the 18rem
+                   requests column the fixed label/number tracks leave no room
+                   for the bar column. */
+              <div class="grid grid-cols-1 gap-6 md:grid-cols-2 lg:col-span-full">
+                {bytePlates.map((plate) => (
+                  <div>
+                    <h3 class="eyebrow mb-3">{plate.label}</h3>
+                    <ByteDelta rows={plate.rows} source={exampleSource} deltaNote="in size" />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Source diff */}
+      {diff && diff.length > 0 && substantive && (
+        <div class="mt-12">
+          <h2 id="source-diff-title" class="h2-section text-text-body">
+            What changed in the source
+          </h2>
+          <p class="mt-2 text-sm text-text-annotation">
+            The page's HTML, before and after this filter.
+            <span class="diff-legend-del">Red</span> lines are removed,
+            <span class="diff-legend-add">green</span> lines are added.
+          </p>
+          <div
+            class="mt-5 overflow-x-auto rounded-lg border border-border bg-bg-secondary"
+            tabindex="0"
+            role="region"
+            aria-labelledby="source-diff-title"
+          >
+            <pre class="text-xs leading-relaxed font-mono py-3" data-copy-attached="1">
+                <code>
+                  {diff.map((line) => (
+                    <div
+                      class:list={[
+                        'px-4 whitespace-pre',
+                        line.t === '+' &&
+                          'diff-add',
+                        line.t === '-' &&
+                          'diff-del',
+                        line.t === '@' && 'text-text-annotation italic',
+                        line.t === ' ' && 'text-text-muted',
+                      ]}
+                    >
+                      {line.t === '@' ? line.s : `${line.t} ${line.s}`}
+                    </div>
+                  ))}
+                </code>
+              </pre>
+          </div>
+        </div>
+      )}
+
+      {/* Convert */}
+      <div class="mt-14 rounded-lg border border-border bg-bg-secondary/60 p-6 sm:p-8 text-center">
+        <h2 class="h2-section text-text-body">Run this on your own site</h2>
+        <p class="mt-3 text-sm text-text-muted max-w-xl mx-auto">
+          This is one of {EXAMPLES.length} filters the mod_pagespeed module applies in place —
+          self-hosted on Apache, nginx, and IIS. Install and run it: it optimizes right away and
+          adds the optimized response headers shown above.
+          {FREE_TO_RUN_LINE}
+        </p>
+        <div class="mt-6 flex justify-center">
+          <CTAButton event="cta_example_detail" showSubtext={false} />
+        </div>
+      </div>
+
+      {/* Footer nav */}
+      <div class="mt-10 border-t border-border pt-6">
+        <a class="tap-area text-sm font-medium text-interactive hover:underline" href="/examples/">
+          <span aria-hidden="true">← </span>All optimization examples
+        </a>
+      </div>
+    </div>
+  </section>
+</BaseLayout>
+
+<style>
+  /* The source diff is the one place the site uses red and green, so the
+     colours live here rather than in the shared tokens. The site is
+     dark-only (print included), so there is one set of values. */
+  .diff-legend-del {
+    color: oklch(70.4% 0.191 22.216);
+  }
+  .diff-legend-add {
+    color: oklch(79.2% 0.209 151.711);
+  }
+  .diff-del {
+    background-color: oklch(39.6% 0.141 25.723 / 0.3);
+    color: oklch(80.8% 0.114 19.571);
+  }
+  .diff-add {
+    background-color: oklch(39.3% 0.095 152.535 / 0.3);
+    color: oklch(87.1% 0.15 154.449);
+  }
+</style>

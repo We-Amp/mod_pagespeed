@@ -1,0 +1,28 @@
+<!-- SPDX-License-Identifier: Apache-2.0
+     Copyright (c) 2024-2026 We-Amp B.V. -->
+
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <Title>WeAmp.PageSpeed Native Binaries — Linux (x64, arm64)</Title>
+    <Description>Native Linux binaries for WeAmp.PageSpeed (libpagespeed.so, factory_worker). Pulled transitively when you install WeAmp.PageSpeed.AspNetCore.</Description>
+    <PackageTags>pagespeed mod-pagespeed mod_pagespeed weamp native linux x64 arm64</PackageTags>
+  </PropertyGroup>
+
+  <!--
+    Exclude console/** for now: the workbench SPA isn't packaged in a way that
+    survives publish-RID extraction (MSBuild flattens runtimes/<rid>/native/<subdir>/*
+    into the publish output root, colliding with customer assets). The /console
+    interface is served from the main assembly's embedded resources instead.
+  -->
+  <ItemGroup>
+    <None Include="runtimes/linux-x64/native/**" Exclude="runtimes/linux-x64/native/console/**" Pack="true" PackagePath="runtimes/linux-x64/native/" />
+    <None Include="runtimes/linux-arm64/native/**" Exclude="runtimes/linux-arm64/native/console/**" Pack="true" PackagePath="runtimes/linux-arm64/native/" Condition="Exists('runtimes/linux-arm64/native')" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="buildTransitive/**" Pack="true" PackagePath="buildTransitive/" />
+  </ItemGroup>
+</Project>

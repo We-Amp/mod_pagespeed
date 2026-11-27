@@ -1,0 +1,29 @@
+{
+  "name": "@pagespeed/ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "svelte": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "svelte": "./src/index.ts"
+    },
+    "./common/theme.css": "./src/common/theme.css",
+    "./common/base.css": "./src/common/base.css"
+  },
+  "scripts": {
+    "test": "echo 'No tests (CSS-only package)'",
+    "lint": "svelte-check --tsconfig ./tsconfig.json"
+  },
+  "dependencies": {
+    "@pagespeed/api-client": "workspace:*",
+    "svelte": "^5.57.1"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.0.0",
+    "svelte-check": "^4.0.0",
+    "typescript": "^6.0.0",
+    "vitest": "^4.1.12"
+  }
+}

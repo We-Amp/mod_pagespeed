@@ -1,0 +1,516 @@
+THIRD-PARTY-NOTICES
+===================
+
+mod_pagespeed 2.1 incorporates third-party software. This file lists each
+dependency, its license, and copyright holders.
+
+This software is based in part on the work of the Independent JPEG Group.
+
+
+===============================================================================
+C++ RUNTIME DEPENDENCIES
+===============================================================================
+
+llvm-project 20 (libc++ / libc++abi / libunwind, statically linked into
+                 libpagespeed.so and factory_worker)
+  License: Apache-2.0 WITH LLVM-exception
+  Copyright (c) The LLVM Project
+  https://github.com/llvm/llvm-project/blob/release/20.x/LICENSE.TXT
+
+abseil-cpp 20260107.1
+  License: Apache-2.0
+  Copyright (c) 2017 The Abseil Authors
+  https://github.com/abseil/abseil-cpp/blob/20260107.1/LICENSE
+
+re2 2025-11-05
+  License: BSD-3-Clause
+  Copyright (c) 2009 The RE2 Authors
+  https://github.com/google/re2/blob/2025-11-05/LICENSE
+
+highway 1.3.0
+  License: Apache-2.0
+  Copyright (c) 2020 Google LLC
+  https://github.com/google/highway/blob/1.3.0/LICENSE
+
+libjpeg-turbo 2.1.5.1
+  License: BSD-3-Clause AND IJG
+  Copyright (c) 2009-2023 D. R. Commander
+  Copyright (c) 2015 Viktor Szathmáry
+  Copyright (c) 1991-2020 Thomas G. Lane, Guido Vollbeding (Independent JPEG Group)
+  https://github.com/libjpeg-turbo/libjpeg-turbo/blob/2.1.5.1/LICENSE.md
+
+jpegli bc19ca2
+  License: BSD-3-Clause
+  Copyright (c) the JPEG XL Project Authors
+  https://github.com/google/jpegli/blob/bc19ca2393f79bfe0a4a9518f77e4ad33ce1ab7a/LICENSE
+
+SSIMULACRA2 (bundled with jpegli)
+  License: BSD-3-Clause
+  Copyright (c) the JPEG XL Project Authors
+  https://github.com/google/jpegli/blob/bc19ca2393f79bfe0a4a9518f77e4ad33ce1ab7a/LICENSE
+
+libpng 1.6.58
+  License: Libpng-2.0
+  Copyright (c) 1995-2026 The PNG Reference Library Authors
+  Copyright (c) 2018-2026 Cosmin Truta
+  Copyright (c) 2000-2002, 2004, 2006-2018 Glenn Randers-Pehrson
+  Copyright (c) 1996-1997 Andreas Dilger
+  Copyright (c) 1995-1996 Guy Eric Schalnat, Group 42, Inc.
+  https://github.com/pnggroup/libpng/blob/v1.6.58/LICENSE
+
+zlib 1.3.2
+  License: Zlib
+  Copyright (c) 1995-2026 Jean-loup Gailly and Mark Adler
+  https://github.com/madler/zlib/blob/v1.3.2/LICENSE
+
+libwebp 1.6.0
+  License: BSD-3-Clause
+  Copyright (c) 2010 Google Inc.
+  https://github.com/webmproject/libwebp/blob/v1.6.0/COPYING
+
+brotli 1.2.0
+  License: MIT
+  Copyright (c) 2009, 2010, 2013-2016 by the Brotli Authors
+  https://github.com/google/brotli/blob/v1.2.0/LICENSE
+
+giflib 5.2.2
+  License: MIT
+  Copyright (c) 1997 Eric S. Raymond
+  https://sourceforge.net/p/giflib/code/ci/5.2.2/tree/COPYING
+
+optipng 0.7.8
+  License: Zlib
+  Copyright (c) 2001-2023 Cosmin Truta and the Contributing Authors
+  https://optipng.sourceforge.net/license.txt
+
+libuv 1.52.0
+  License: MIT
+  Copyright (c) 2015-present libuv project contributors
+  https://github.com/libuv/libuv/blob/v1.52.0/LICENSE
+
+llhttp 9.3.1
+  License: MIT
+  Copyright (c) 2018 Fedor Indutny
+  https://github.com/nodejs/llhttp/blob/release/v9.3.1/LICENSE
+
+libaom 3.13.3
+  License: BSD-2-Clause
+  Copyright (c) 2016 Alliance for Open Media
+  https://aomedia.googlesource.com/aom/+/refs/tags/v3.13.3/LICENSE
+
+libyuv d23308a2a7
+  License: BSD-3-Clause
+  Copyright (c) 2011 The LibYuv Project Authors
+  https://chromium.googlesource.com/libyuv/libyuv/+/d23308a2a7442be8e559b1b471862fd7588d6a57/LICENSE
+
+libavif 1.3.0
+  License: BSD-2-Clause
+  Copyright (c) 2019 Joe Drago
+  Copyright (c) 2018-2019 VideoLAN and dav1d authors (src/obu.c)
+  https://github.com/AOMediaCodec/libavif/blob/v1.3.0/LICENSE
+
+ed25519 b1f19fab
+  License: Zlib
+  Copyright (c) 2015 Orson Peters
+  https://github.com/orlp/ed25519/blob/b1f19fab4aebe607805620d25a5e42566ce46a0e/license.txt
+
+skcms bf2d52b
+  License: BSD-3-Clause
+  Copyright (c) 2018 Google Inc.
+  https://skia.googlesource.com/skcms/+/bf2d52b98a420c59d991ced59fef8b4243b7dc13/LICENSE
+
+nlohmann/json 3.12.0
+  License: MIT
+  Copyright (c) 2013-2025 Niels Lohmann
+  https://github.com/nlohmann/json/blob/v3.12.0/LICENSE.MIT
+
+nanosvg 5cefd98
+  License: Zlib
+  Copyright (c) 2013-14 Mikko Mononen
+  https://github.com/memononen/nanosvg/blob/5cefd9847949af6df13f65027fd43af5a7513633/LICENSE.txt
+
+
+===============================================================================
+RUST DEPENDENCIES (VTracer FFI + transitive)
+===============================================================================
+
+For dual-licensed crates (MIT OR Apache-2.0), MIT is used. The Apache-2.0
+alternative is available at https://www.apache.org/licenses/LICENSE-2.0.
+
+Rust standard library (libstd / libcore / liballoc, statically linked into
+                       the optimizer daemon through the VTracer FFI static
+                       library; rustc 1.93.1)
+  License: MIT (or Apache-2.0)
+  Copyright (c) The Rust Project Contributors
+  https://github.com/rust-lang/rust/blob/master/COPYRIGHT
+
+The standard library bundles the following crates for backtrace, hashing and
+platform support. Versions are those locked by the rustc 1.93.1 standard
+library, each observed in the shipped daemon binary.
+
+addr2line 0.25.1
+  License: MIT (or Apache-2.0)
+  Copyright (c) 2016-2018 The gimli Developers
+  https://github.com/gimli-rs/addr2line/blob/master/LICENSE-MIT
+
+gimli 0.32.3
+  License: MIT (or Apache-2.0)
+  Copyright (c) 2015 The Rust Project Developers
+  https://github.com/gimli-rs/gimli/blob/master/LICENSE-MIT
+
+object 0.37.3
+  License: MIT (or Apache-2.0)
+  Copyright (c) 2015 The Gimli Developers
+  https://github.com/gimli-rs/object/blob/master/LICENSE-MIT
+
+rustc-demangle 0.1.26
+  License: MIT (or Apache-2.0)
+  Copyright (c) 2014 Alex Crichton
+  https://github.com/rust-lang/rustc-demangle/blob/main/LICENSE-MIT
+
+miniz_oxide 0.8.9 (bundled through the standard library; the 0.3.7 and 0.4.4
+                   releases listed further down are linked separately)
+  License: MIT (or Zlib or Apache-2.0)
+  Copyright 2013-2014 RAD Game Tools and Valve Software
+  Copyright 2010-2014 Rich Geldreich and Tenacious Software LLC
+  Copyright (c) 2017 Frommi
+  Copyright (c) 2017-2024 oyvindln
+  https://github.com/Frommi/miniz_oxide/blob/master/LICENSE-MIT.md
+
+hashbrown 0.16.1
+  License: MIT (or Apache-2.0)
+  Copyright (c) 2016 Amanieu d'Antras
+  https://github.com/rust-lang/hashbrown/blob/master/LICENSE-MIT
+
+memchr 2.7.6
+  License: MIT (or Unlicense)
+  Copyright (c) 2015 Andrew Gallant
+  https://github.com/BurntSushi/memchr/blob/master/LICENSE-MIT
+
+libc 0.2.177 (bundled through the standard library; the release listed further
+              down is linked separately through the vectorizer's dependencies)
+  License: MIT (or Apache-2.0)
+  Copyright (c) 2014-2020 The Rust Project Developers
+  https://github.com/rust-lang/libc/blob/main/LICENSE-MIT
+
+vtracer 0.6.5
+  License: MIT (or Apache-2.0)
+  Copyright (c) 2023 Tsang Hao Fung
+  https://github.com/visioncortex/vtracer/blob/8acb6bd911e160a55cd8a5503cfac54550a429f8/cmdapp/LICENSE-MIT
+
+visioncortex 0.8.10
+  License: MIT (or Apache-2.0)
+  Copyright (c) 2026 TSANG, Hao Fung
+  https://github.com/visioncortex/visioncortex/blob/ca6a3a59c32aab641f048a1d4510f2832bc19291/LICENSE-MIT
+
+image 0.23.14
+  License: MIT
+  Copyright (c) 2014 PistonDevelopers
+  https://github.com/image-rs/image/blob/v0.23.14/LICENSE
+
+rayon 1.12.0
+  License: MIT (or Apache-2.0)
+  Copyright (c) 2010 The Rust Project Developers
+  https://github.com/rayon-rs/rayon/blob/v1.12.0/LICENSE-MIT
+
+rayon-core 1.13.0
+  License: MIT (or Apache-2.0)
+  Copyright (c) 2010 The Rust Project Developers
+  https://github.com/rayon-rs/rayon/blob/rayon-core-v1.13.0/LICENSE-MIT
+
+crossbeam-deque 0.8.6
+  License: MIT (or Apache-2.0)
+  Copyright (c) 2019 The Crossbeam Project Developers
+  https://github.com/crossbeam-rs/crossbeam/blob/crossbeam-deque-0.8.6/LICENSE-MIT
+
+crossbeam-epoch 0.9.20
+  License: MIT (or Apache-2.0)
+  Copyright (c) 2019 The Crossbeam Project Developers
+  https://github.com/crossbeam-rs/crossbeam/blob/crossbeam-epoch-0.9.20/LICENSE-MIT
+
+crossbeam-utils 0.8.21
+  License: MIT (or Apache-2.0)
+  Copyright (c) 2019 The Crossbeam Project Developers
+  https://github.com/crossbeam-rs/crossbeam/blob/crossbeam-utils-0.8.21/LICENSE-MIT
+
+num-traits 0.2.19
+  License: MIT (or Apache-2.0)
+  Copyright (c) 2014 The Rust Project Developers
+  https://github.com/rust-num/num-traits/blob/num-traits-0.2.19/LICENSE-MIT
+
+num-integer 0.1.46
+  License: MIT (or Apache-2.0)
+  Copyright (c) 2014 The Rust Project Developers
+  https://github.com/rust-num/num-integer/blob/num-integer-0.1.46/LICENSE-MIT
+
+num-iter 0.1.45
+  License: MIT (or Apache-2.0)
+  Copyright (c) 2014 The Rust Project Developers
+  https://github.com/rust-num/num-iter/blob/num-iter-0.1.45/LICENSE-MIT
+
+num-rational 0.3.2
+  License: MIT (or Apache-2.0)
+  Copyright (c) 2014 The Rust Project Developers
+  https://github.com/rust-num/num-rational/blob/num-rational-0.3.2/LICENSE-MIT
+
+itertools 0.8.2
+  License: MIT (or Apache-2.0)
+  Copyright (c) 2015 bluss
+  https://github.com/rust-itertools/itertools/blob/v0.8.2/LICENSE-MIT
+
+bytemuck 1.25.0
+  License: Zlib (or Apache-2.0 or MIT)
+  Copyright (c) 2019 Daniel "Lokathor" Gee
+  https://github.com/Lokathor/bytemuck/blob/v1.25.0/LICENSE-ZLIB
+
+byteorder 1.5.0
+  License: MIT (or Unlicense)
+  Copyright (c) 2015 Andrew Gallant
+  https://github.com/BurntSushi/byteorder/blob/1.5.0/LICENSE-MIT
+
+bit-vec 0.6.3
+  License: MIT (or Apache-2.0)
+  Copyright (c) 2015 The Rust Project Developers
+  https://github.com/contain-rs/bit-vec/blob/975189772f60f87ee84b77b8cd648beac6b86703/LICENSE-MIT
+
+gif 0.11.4
+  License: MIT (or Apache-2.0)
+  Copyright (c) 2015 nwin
+  https://github.com/image-rs/image-gif/blob/v0.11.4/LICENSE-MIT
+
+png 0.16.8
+  License: MIT (or Apache-2.0)
+  Copyright (c) 2015 nwin
+  https://github.com/image-rs/image-png/blob/v0.16.8/LICENSE-MIT
+
+jpeg-decoder 0.1.22
+  License: MIT (or Apache-2.0)
+  Copyright (c) 2016 The jpeg-decoder Developers
+  https://github.com/image-rs/jpeg-decoder/blob/v0.1.22/LICENSE-MIT
+
+tiff 0.6.1
+  License: MIT
+  Copyright (c) 2018 PistonDevelopers
+  https://github.com/image-rs/image-tiff/blob/v0.6.1/LICENSE
+
+roots 0.0.6
+  License: BSD-2-Clause
+  Copyright (c) 2015 Mikhail Vorotilov
+  https://github.com/vorot/roots/blob/v0.0.6/LICENSE
+
+cfg-if 1.0.4
+  License: MIT (or Apache-2.0)
+  Copyright (c) 2014 Alex Crichton
+  https://github.com/rust-lang/cfg-if/blob/v1.0.4/LICENSE-MIT
+
+libc 0.2.186
+  License: MIT (or Apache-2.0)
+  Copyright (c) The Rust Project Developers
+  https://github.com/rust-lang/libc/blob/0.2.186/LICENSE-MIT
+
+smallvec 1.15.1
+  License: MIT (or Apache-2.0)
+  Copyright (c) 2018 The Servo Project Developers
+  https://github.com/servo/rust-smallvec/blob/v1.15.1/LICENSE-MIT
+
+either 1.16.0
+  License: MIT (or Apache-2.0)
+  Copyright (c) 2015 (the license text names no holder; the crate is by the rayon-rs project)
+  https://github.com/rayon-rs/either/blob/1.16.0/LICENSE-MIT
+
+fastrand 2.4.1
+  License: MIT (or Apache-2.0)
+  Copyright (c) Stjepan Glavina
+  https://github.com/smol-rs/fastrand/blob/v2.4.1/LICENSE-MIT
+
+deflate 0.8.6
+  License: MIT (or Apache-2.0)
+  Copyright (c) 2016 oyvindln
+  https://github.com/image-rs/deflate-rs/blob/0.8.6/LICENSE-MIT
+
+weezl 0.1.12
+  License: MIT (or Apache-2.0)
+  Copyright (c) 2020 HeroicKatora
+  https://github.com/image-rs/lzw/blob/v0.1.12/LICENSE-MIT
+
+adler 1.0.2
+  License: 0BSD (or MIT or Apache-2.0)
+  Copyright (c) Jonas Schievink
+  https://github.com/jonas-schievink/adler/blob/v1.0.2/LICENSE-0BSD
+
+adler32 1.2.0
+  License: Zlib
+  Copyright (c) 2016 Remi Rampin and adler32-rs contributors
+  Copyright (c) 1995-2017 Jean-loup Gailly and Mark Adler
+  https://github.com/remram44/adler32-rs/blob/1.2.0/LICENSE
+
+crc32fast 1.5.0
+  License: MIT (or Apache-2.0)
+  Copyright (c) 2018 Sam Rijs, Alex Crichton and contributors
+  https://github.com/srijs/rust-crc32fast/blob/v1.5.0/LICENSE-MIT
+
+bitflags 1.3.2
+  License: MIT (or Apache-2.0)
+  Copyright (c) 2014 The Rust Project Developers
+  https://github.com/bitflags/bitflags/blob/1.3.2/LICENSE-MIT
+
+autocfg 1.5.1
+  License: MIT (or Apache-2.0)
+  Copyright (c) 2018 Josh Stone
+  https://github.com/cuviper/autocfg/blob/1.5.1/LICENSE-MIT
+
+flo_curves 0.3.1
+  License: Apache-2.0
+  Copyright (c) Andrew Hunter
+  https://github.com/Logicalshift/flo_curves/blob/0.3.1/Cargo.toml
+  (the 0.3.1 release declares its license in the manifest and ships no license
+  file; the project's license text is
+  https://github.com/Logicalshift/flo_curves/blob/master/LICENSE)
+
+color_quant 1.1.0
+  License: MIT
+  Copyright (c) 2016 PistonDevelopers
+  https://github.com/image-rs/color_quant/blob/v1.1.0/LICENSE
+
+scoped_threadpool 0.1.9
+  License: MIT
+  Copyright (c) 2015 Marvin Löbel
+  https://github.com/Kimundi/scoped-threadpool-rs/blob/243eba6862c6cea4449afaba2a4f68f8ea476cd3/LICENSE
+
+miniz_oxide 0.3.7 and 0.4.4
+  License: MIT (0.3.7); MIT (or Zlib or Apache-2.0) (0.4.4)
+  Copyright (c) 2017 Frommi
+  https://github.com/Frommi/miniz_oxide/blob/0.3.7/miniz_oxide/LICENSE
+  https://github.com/Frommi/miniz_oxide/blob/3db0b43dcb320753d37a2693854f5b0af23e1a36/miniz_oxide/LICENSE-MIT.md
+
+
+===============================================================================
+JAVASCRIPT RUNTIME DEPENDENCIES (Console SPA)
+===============================================================================
+
+svelte 5.55.9
+  License: MIT
+  Copyright (c) 2016-2025 Svelte Contributors
+  https://github.com/sveltejs/svelte/blob/svelte%405.55.9/LICENSE.md
+
+uplot 1.6.32
+  License: MIT
+  Copyright (c) 2022 Leon Sorokin
+  https://github.com/leeoniya/uPlot/blob/1.6.32/LICENSE
+
+pixelmatch 7.2.0
+  License: ISC
+  Copyright (c) 2025 Mapbox
+  https://github.com/mapbox/pixelmatch/blob/v7.2.0/LICENSE
+
+pngjs 7.0.0
+  License: MIT
+  Copyright (c) 2015 Luke Page & Original Contributors
+  Copyright (c) 2012 Kuba Niegowski
+  https://github.com/pngjs/pngjs/blob/f1c25f943efa01a00caa4c017b38abcd7ce749c6/LICENSE
+
+d3-axis 3.0.0
+  License: ISC
+  Copyright (c) 2010-2021 Mike Bostock
+  https://github.com/d3/d3-axis/blob/v3.0.0/LICENSE
+
+d3-format 3.1.2
+  License: ISC
+  Copyright (c) 2010-2026 Mike Bostock
+  https://github.com/d3/d3-format/blob/v3.1.2/LICENSE
+
+d3-scale 4.0.2
+  License: ISC
+  Copyright (c) 2010-2021 Mike Bostock
+  https://github.com/d3/d3-scale/blob/v4.0.2/LICENSE
+
+d3-selection 3.0.0
+  License: ISC
+  Copyright (c) 2010-2021 Mike Bostock
+  https://github.com/d3/d3-selection/blob/v3.0.0/LICENSE
+
+d3-array 3.2.4
+  License: ISC
+  Copyright (c) 2010-2023 Mike Bostock
+  https://github.com/d3/d3-array/blob/v3.2.4/LICENSE
+
+d3-interpolate 3.0.1
+  License: ISC
+  Copyright (c) 2010-2021 Mike Bostock
+  https://github.com/d3/d3-interpolate/blob/v3.0.1/LICENSE
+
+d3-time 3.1.0
+  License: ISC
+  Copyright (c) 2010-2022 Mike Bostock
+  https://github.com/d3/d3-time/blob/v3.1.0/LICENSE
+
+d3-time-format 4.1.0
+  License: ISC
+  Copyright (c) 2010-2021 Mike Bostock
+  https://github.com/d3/d3-time-format/blob/v4.1.0/LICENSE
+
+d3-color 3.1.0
+  License: ISC
+  Copyright (c) 2010-2022 Mike Bostock
+  https://github.com/d3/d3-color/blob/v3.1.0/LICENSE
+
+
+===============================================================================
+.NET RUNTIME DEPENDENCIES (WeAmp.PageSpeed.AspNetCore NuGet package)
+===============================================================================
+
+Microsoft.IO.RecyclableMemoryStream 3.0.1 (declared as the floating range
+  "3.*" in WeAmp.PageSpeed.AspNetCore.csproj; 3.0.1 is the version restore
+  resolves and the shipped nupkg pins)
+  License: MIT
+  Copyright (c) 2015-2016 Microsoft
+  https://github.com/microsoft/Microsoft.IO.RecyclableMemoryStream/blob/master/LICENSE
+
+
+===============================================================================
+DOCKER BASE IMAGES
+===============================================================================
+
+nginx 1.30.7
+  License: BSD-2-Clause
+  Copyright (c) 2002-2021 Igor Sysoev
+  Copyright (c) 2011-2026 Nginx, Inc.
+  https://github.com/nginx/nginx/blob/release-1.30.7/LICENSE
+
+ngx_brotli a71f931
+  License: BSD-2-Clause
+  Copyright (c) 2002-2015 Igor Sysoev
+  Copyright (c) 2011-2015 Nginx, Inc.
+  Copyright (c) 2015-2019 Google Inc.
+  https://github.com/google/ngx_brotli/blob/a71f9312c2deb28875acc7bacfdd5695a111aa53/LICENSE
+
+OpenSSL 3.0 (libssl3 on the Ubuntu 24.04 runtime base; the nginx.org nginx
+  package the runtime images install links against it)
+  License: Apache-2.0
+  Copyright (c) 1998-2025 The OpenSSL Project Authors
+  https://www.openssl.org/source/license.html
+
+
+===============================================================================
+INDEPENDENT JPEG GROUP ACKNOWLEDGMENT
+===============================================================================
+
+This software is based in part on the work of the Independent JPEG Group.
+The IJG's original code is distributed with the following notice:
+
+  This software is copyright (C) 1991-2020, Thomas G. Lane, Guido Vollbeding.
+  All Rights Reserved except as specified below.
+
+  Permission is hereby granted to use, copy, modify, and distribute this
+  software (or portions thereof) for any purpose, without fee, subject to
+  these conditions:
+  (1) If any part of the source code for this software is distributed, then
+  this README file must be included, with this copyright and no-warranty
+  notice unaltered; and any additions, deletions, or changes to the original
+  files must be clearly indicated in accompanying documentation.
+  (2) If only executable code is distributed, then the accompanying
+  documentation must state that "this software is based in part on the work
+  of the Independent JPEG Group".
+  (3) Permission for use of this software is granted only if the user accepts
+  full responsibility for any undesirable consequences; the authors accept
+  NO LIABILITY for damages of any kind.

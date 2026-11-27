@@ -1,0 +1,399 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import SectionHeader from '../components/instrument/SectionHeader.astro';
+import Chip from '../components/instrument/Chip.astro';
+import { PSI_MPS_MAPPING } from '../data/psi-mps-mapping';
+import { FREE_TO_RUN_LINE } from '../data/product-facts.mjs';
+import ScanBox from '../components/scan/ScanBox.astro';
+import ResultsView from '../components/scan/ResultsView.astro';
+import NoscriptLead from '../components/scan/NoscriptLead.astro';
+
+const title = 'Free PageSpeed Insights test, with the fix attached';
+const description =
+  'Run a free PageSpeed Insights test, no signup. Each failing audit is mapped to the mod_pagespeed filter that fixes it, or labeled when none can.';
+
+// "What gets fixed" — highest-impact audits, built at build-time from the
+// same mapping table the JS analyzer uses. Render order: image/asset wins
+// first (largest user-visible impact), then markup wins, then the
+// worker-specific HTML-caching card. The card visibility is toggled
+// client-side based on which part the visitor selects.
+const FIXED_HIGHLIGHT_IDS = [
+  'image-delivery-insight',
+  'render-blocking-insight',
+  'cache-insight',
+  'unminified-css',
+  'unminified-javascript',
+  'unsized-images',
+  'modern-image-formats',
+  'uses-responsive-images',
+  'offscreen-images',
+  'uses-optimized-images',
+  // Worker-only: HTML response caching in Cyclone — the load-bearing
+  // difference for slow-origin sites.
+  'document-latency-insight',
+];
+const fixedHighlights = FIXED_HIGHLIGHT_IDS.map((id) =>
+  PSI_MPS_MAPPING.find(
+    (m) => m.auditId === id && (m.coverage === 'full' || m.coverage === 'partial'),
+  ),
+).filter((m): m is NonNullable<typeof m> => Boolean(m));
+
+// FAQ entries — visible HTML and JSON-LD must match (Google penalizes drift).
+// Targeting "pagespeed test", "core web vitals", "lcp", "cls",
+// "lighthouse score", and "pagespeed insights alternative" queries.
+const faqEntries: { q: string; a: string }[] = [
+  {
+    q: 'What is a good PageSpeed Insights score?',
+    a: 'Google grades PageSpeed Insights scores in three buckets: 90–100 is good (green), 50–89 needs improvement (orange), and 0–49 is poor (red). Aim for 90+ on mobile; desktop scores are easier and less correlated with real user experience.',
+  },
+  {
+    q: 'What are Core Web Vitals?',
+    a: 'Core Web Vitals are three field metrics Google uses for ranking signals: Largest Contentful Paint (LCP) for loading, Interaction to Next Paint (INP) for responsiveness, and Cumulative Layout Shift (CLS) for visual stability. A page passes when 75% of real visits hit the "good" threshold on each metric.',
+  },
+  {
+    q: 'How do I improve Largest Contentful Paint (LCP)?',
+    a: 'LCP is usually a hero image or above-the-fold text block. The two highest-impact moves are shrinking the LCP image (WebP or AVIF, resized to its rendered size) and removing render-blocking CSS so the browser can paint sooner. mod_pagespeed does both without markup or build changes (transcoding, resizing, inlining critical CSS). Origin TTFB on the first request and JavaScript-injected backgrounds stay out of reach, though the optimizer worker can mask TTFB on repeat visits by caching HTML in shared memory when the origin allows it.',
+  },
+  {
+    q: 'How do I fix Cumulative Layout Shift (CLS)?',
+    a: 'Most CLS comes from images without width/height attributes: the browser cannot reserve space, so content jumps when the image arrives. mod_pagespeed measures each image and writes the dimensions back into the markup. CLS caused by late-loading fonts, injected ads, or dynamic banners needs application-level fixes.',
+  },
+  {
+    q: 'Is PageSpeed Insights free?',
+    a: 'Yes. PageSpeed Insights is a free Google tool that runs Lighthouse against any public URL and combines it with field data from the Chrome User Experience Report. This page calls the same PSI v5 API and adds a mapping layer so you can see which findings mod_pagespeed will fix on your server.',
+  },
+  {
+    q: "What's the difference between Lighthouse and PageSpeed Insights?",
+    a: 'Lighthouse is the open-source auditing engine. PageSpeed Insights is the public web app that runs Lighthouse in a cloud environment and combines it with Chrome User Experience Report (CrUX) field data. Same audits underneath; PSI adds field metrics and a public API.',
+  },
+  {
+    q: 'How is mod_pagespeed different from PageSpeed Insights?',
+    a: 'PageSpeed Insights diagnoses. mod_pagespeed fixes. Insights tells you "serve images in next-gen formats" and "eliminate render-blocking resources"; mod_pagespeed does the transcoding, inlining, and cache-extension on every request — in the module inside Apache, nginx or IIS, and in the optimizer worker behind it. They are designed to work together.',
+  },
+  {
+    q: 'Can mod_pagespeed fix every PageSpeed Insights issue?',
+    a: 'No. mod_pagespeed handles byte-level work: image transcoding, CSS/JS minification, critical-CSS inlining, cache extension, dimension inference. It cannot reduce DOM size, tree-shake legacy JavaScript bundles, or rewrite third-party scripts. Origin TTFB on the first request stays out of reach too. The optimizer worker caches HTML in shared memory when the origin allows it, so repeat visits skip the origin; the first hit always reaches it. The report from a test labels each audit accordingly.',
+  },
+  {
+    q: 'Is this a PageSpeed Insights API alternative?',
+    a: 'It is a wrapper, not a replacement. We call the official PageSpeed Insights v5 API server-side, cache results per (URL, strategy) for an hour, and overlay a mapping from Lighthouse audit IDs to the mod_pagespeed filters that address them. No account, no upload.',
+  },
+  {
+    q: 'How often should I run a website speed test?',
+    a: 'After anything that changes the page: a deploy, a new CMS theme, a marketing campaign that injects scripts, a CDN swap. Lab scores fluctuate run-to-run by a few points; treat anything inside a 10-point band as noise. For ongoing monitoring, the Chrome User Experience Report (CrUX) gives 28-day rolling field data.',
+  },
+];
+
+const jsonLd = [
+  {
+    '@context': 'https://schema.org',
+    '@type': 'WebApplication',
+    name: 'mod_pagespeed Analyze',
+    applicationCategory: 'DeveloperApplication',
+    operatingSystem: 'Any (web browser)',
+    url: 'https://modpagespeed.com/analyze/',
+    description,
+    offers: { '@type': 'Offer', price: 0, priceCurrency: 'EUR' },
+    publisher: {
+      '@type': 'Organization',
+      name: 'We-Amp B.V.',
+      url: 'https://we-amp.com/',
+    },
+  },
+  {
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: faqEntries.map((entry) => ({
+      '@type': 'Question',
+      name: entry.q,
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: entry.a,
+      },
+    })),
+  },
+];
+---
+
+<BaseLayout title={title} description={description} jsonLd={jsonLd}>
+  <!-- ============================================================ -->
+  <!-- Hero + URL input                                              -->
+  <!-- ============================================================ -->
+  <section
+    class="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 py-20 text-center"
+    aria-labelledby="analyze-title"
+  >
+    <SectionHeader
+      id="analyze-title"
+      eyebrow="Free · no account · no upload"
+      title="PageSpeed Insights, with the fix attached."
+      as="h1"
+      align="center"
+    >
+      Run Google's official PageSpeed Insights against any URL. We score the page on mobile and
+      desktop, then map every failing Lighthouse audit to the filter in mod_pagespeed that fixes it
+      on your server. Audits no optimizer can touch get labeled.
+    </SectionHeader>
+    <div data-scan-needs-js data-pagefind-ignore>
+      <ScanBox surface="analyze" />
+    </div>
+  </section>
+
+  <NoscriptLead topic="consulting" />
+
+  <div data-scan-needs-js data-pagefind-ignore>
+    <ResultsView />
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- How it works — always visible, indexable                      -->
+  <!-- ============================================================ -->
+  <section class="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 py-16 border-t border-border">
+    <h2 class="h2-section text-center text-text-body">
+      From PageSpeed report to nginx config in three steps
+    </h2>
+    <p class="lede mt-3 text-center max-w-2xl mx-auto">
+      No account, no upload. Test a page, get the fixes.
+    </p>
+
+    <ol class="mt-10 grid gap-6 sm:grid-cols-3">
+      <li class="rounded-xl border border-border bg-bg-elevated p-6">
+        <div class="flex h-8 w-8 items-center justify-center rounded-full bg-interactive text-on-accent text-sm font-semibold">
+          1
+        </div>
+        <h3 class="mt-4 text-base font-semibold text-text-body">
+          Score your page on mobile and desktop
+        </h3>
+        <p class="mt-2 text-sm text-text-muted">
+          We call Google's official PageSpeed Insights v5 API for both form factors. Same engine
+          Search Console uses, same Lighthouse audits, same Core Web Vitals. Shown inline instead of
+          in a separate tab.
+        </p>
+      </li>
+      <li class="rounded-xl border border-border bg-bg-elevated p-6">
+        <div class="flex h-8 w-8 items-center justify-center rounded-full bg-interactive text-on-accent text-sm font-semibold">
+          2
+        </div>
+        <h3 class="mt-4 text-base font-semibold text-text-body">
+          See which audits mod_pagespeed will fix
+        </h3>
+        <p class="mt-2 text-sm text-text-muted">
+          Every failing audit is matched against a mapping table of over fifty Lighthouse audit IDs
+          and the mod_pagespeed filter inventory. Audits we cannot fix are labeled, not hidden.
+        </p>
+      </li>
+      <li class="rounded-xl border border-border bg-bg-elevated p-6">
+        <div class="flex h-8 w-8 items-center justify-center rounded-full bg-interactive text-on-accent text-sm font-semibold">
+          3
+        </div>
+        <h3 class="mt-4 text-base font-semibold text-text-body">Copy a working nginx config</h3>
+        <p class="mt-2 text-sm text-text-muted">
+          You get a ready-to-paste <code class="text-xs">pagespeed</code> directive block that
+          enables exactly the filters your page needs. Drop it in, reload nginx, re-run the test.
+        </p>
+      </li>
+    </ol>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- What gets fixed — content marketing for SEO                   -->
+  <!-- ============================================================ -->
+  <section class="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 py-16 border-t border-border">
+    <h2 class="h2-section text-center text-text-body">What mod_pagespeed fixes automatically</h2>
+    <p class="lede mt-3 text-center max-w-2xl mx-auto">
+      These are the PageSpeed Insights findings mod_pagespeed addresses on every request, with no
+      code changes on the origin. Most filters below have been production-tested in the upstream
+      <code class="text-sm">mod_pagespeed</code> codebase since 2010. A few are still marked
+      &ldquo;test first&rdquo;; the report from a test flags those per page.
+    </p>
+
+    {/* Toggle for the highlights cards; it changes only these cards (the
+        script at the end of the page). It needs JavaScript, so the layout's
+        noscript style hides it; without it every card shows, each marked with
+        the part it needs, which is the default (worker) view. The wrapper
+        carries the attribute so the flex class cannot override the hiding. */}
+    <div data-scan-needs-js>
+      <div id="psi-highlights-toggle" class="mt-8 flex flex-col items-center gap-2">
+        <span class="text-xs font-medium uppercase tracking-wide text-text-annotation">
+          Showing cards for
+        </span>
+        <div
+          class="inline-flex gap-1 rounded-lg bg-bg-elevated p-1"
+          role="group"
+          aria-label="Which part you configure"
+        >
+          <button
+            type="button"
+            data-edition="2.0"
+            aria-pressed="true"
+            class="product-tab rounded-md px-3 py-1.5 text-xs font-medium transition-colors"
+            data-umami-event="psi-highlights-edition-toggle"
+            data-umami-event-edition="2.0"
+          >
+            Optimizer worker
+          </button>
+          <button
+            type="button"
+            data-edition="1.1"
+            aria-pressed="false"
+            class="product-tab rounded-md px-3 py-1.5 text-xs font-medium transition-colors"
+            data-umami-event="psi-highlights-edition-toggle"
+            data-umami-event-edition="1.1"
+          >
+            Module
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <ul id="psi-highlights-list" class="mt-10 grid gap-4 sm:grid-cols-2">
+      {fixedHighlights.map((item) => {
+        // Worker-side audits get a "Worker" coverage marker; module-side
+        // audits get a "Module" marker. Both parts ship in mod_pagespeed
+        // 2.1; the marker says where the fix runs, not which product you
+        // need. Cards toggle their hidden state client-side based on the
+        // chosen part.
+        const isTwoOnly = item.availableIn.includes('2.0') && !item.availableIn.includes('1.1');
+        const isOneOnly = item.availableIn.includes('1.1') && !item.availableIn.includes('2.0');
+        // Title overrides — keep the brand-honest framing for cards
+        // whose audit ID is generic (e.g. "Document request latency")
+        // but whose worker-only behaviour is the HTML cache.
+        const displayTitle =
+          isTwoOnly && item.auditId === 'document-latency-insight'
+            ? 'Mask slow origin TTFB with HTML caching'
+            : item.auditTitle;
+        return (
+          <li
+            data-highlight-id={item.auditId}
+            data-available-in={item.availableIn.join(',')}
+            class="rounded-xl border border-border bg-bg-elevated p-5"
+          >
+            <div class="flex items-start justify-between gap-2">
+              <h3 class="text-base font-semibold text-text-body">{displayTitle}</h3>
+              {isTwoOnly && <Chip tone="neutral" label="Worker" />}
+              {isOneOnly && <Chip tone="neutral" label="Module" />}
+            </div>
+            <p class="mt-2 text-sm text-text-muted leading-relaxed">{item.explanation}</p>
+            {item.filters.length > 0 && (
+              <ul class="mt-3 flex flex-wrap gap-1.5 list-none">
+                {item.filters.map((f) => (
+                  <li>
+                    <code class="inline-flex items-center rounded-md border border-border-strong bg-bg-secondary px-2 py-0.5 text-xs font-mono text-text-body">
+                      {f}
+                    </code>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+
+    <div class="mt-10 rounded-xl border border-border bg-bg-secondary p-6">
+      <h3 class="text-base font-semibold text-text-body">What mod_pagespeed will not fix</h3>
+      <p class="mt-2 text-sm text-text-muted leading-relaxed">
+        Trust matters more than coverage claims. mod_pagespeed runs byte-level rewrites on what
+        leaves your server; it does not edit application code. These stay out of reach: excessive
+        DOM size, unused JavaScript and tree-shaking, legacy-JS polyfills served to modern browsers,
+        third-party script impact (analytics, tag managers, ads), Interaction to Next Paint (INP),
+        forced reflows in handler code, and font-display behavior. Origin TTFB on the first request
+        is also out of reach. The optimizer worker can mask it on repeat visits by caching HTML when
+        the origin allows it, but the first hit always reaches the origin. The report from a test
+        labels every one of these. The{' '}
+        <a
+          href="/pagespeed-optimization/"
+          class="text-interactive hover:text-interactive-hover underline"
+        >
+          PageSpeed optimization guide
+        </a>{' '}
+        sets out the split between server and code by resource type.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- FAQ — visible HTML mirrors the FAQPage JSON-LD                -->
+  <!-- ============================================================ -->
+  <section class="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 py-16 border-t border-border">
+    <h2 class="h2-section text-center text-text-body">PageSpeed test FAQ</h2>
+    <p class="lede mt-3 text-center max-w-2xl mx-auto">
+      Questions that come up the first time you open a Lighthouse report.
+    </p>
+
+    <dl class="mt-10 space-y-6">
+      {faqEntries.map((entry) => (
+        <div class="rounded-xl border border-border bg-bg-elevated p-6">
+          <dt class="text-base font-semibold text-text-body">{entry.q}</dt>
+          <dd class="mt-2 text-sm text-text-muted leading-relaxed">{entry.a}</dd>
+        </div>
+      ))}
+    </dl>
+
+    <div class="mt-10 flex flex-col items-center gap-3">
+      <div class="flex flex-wrap items-center justify-center gap-4">
+        <a href="/download/" class="btn-primary" data-umami-event="psi-faq-install-cta">
+          Download &amp; run &rarr;
+        </a>
+        <a href="/features/" class="btn-secondary" data-umami-event="psi-faq-features-cta">
+          See every filter &rarr;
+        </a>
+      </div>
+      <p class="text-xs text-text-annotation">{FREE_TO_RUN_LINE}</p>
+      <!-- prettier-ignore -->
+      <p class="mt-6 text-sm text-text-muted text-center max-w-2xl">
+        Next: read what{' '}
+        <a href="/core-web-vitals/" class="text-interactive hover:text-interactive-hover underline">LCP, CLS, and INP</a>{' '}
+        mean, decode the{' '}
+        <a href="/pagespeed-markers/" class="text-interactive hover:text-interactive-hover underline">.pagespeed. URLs and markers</a>{' '}
+        in your report, dig into{' '}
+        <a href="/self-hosted-image-optimization/" class="text-interactive hover:text-interactive-hover underline">self-hosted image optimization</a>,
+        or see how to{' '}
+        <a href="/blog/reduce-ttfb-server-layer-2026/" class="text-interactive hover:text-interactive-hover underline">cut TTFB at the server layer</a>.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- "What gets fixed" cards: choose which part's cards show       -->
+  <!-- ============================================================ -->
+  <script>
+    import type { Edition } from '../data/psi-mps-mapping';
+
+    // The '2.0' key selects the optimizer worker, '1.1' the module; the
+    // keys are the stored state, not a product name. Defaults to the worker.
+    let edition: Edition = '2.0';
+
+    const buttons = document.querySelectorAll<HTMLButtonElement>(
+      '#psi-highlights-toggle [data-edition]',
+    );
+    const highlightsListEl = document.getElementById('psi-highlights-list');
+
+    function syncEditionUi() {
+      for (const btn of buttons) {
+        btn.setAttribute('aria-pressed', btn.dataset.edition === edition ? 'true' : 'false');
+      }
+      // Hide the cards the chosen part does not cover at all. Cards that
+      // are available in both stay visible.
+      if (highlightsListEl) {
+        const cards = highlightsListEl.querySelectorAll<HTMLLIElement>('[data-available-in]');
+        for (const card of cards) {
+          const editions = (card.dataset.availableIn ?? '').split(',');
+          card.classList.toggle('hidden', !editions.includes(edition));
+        }
+      }
+    }
+
+    for (const btn of buttons) {
+      btn.addEventListener('click', () => {
+        const next = btn.dataset.edition as Edition | undefined;
+        if ((next === '1.1' || next === '2.0') && next !== edition) {
+          edition = next;
+          syncEditionUi();
+        }
+      });
+    }
+    // Initial paint so the cards match the default before any click.
+    syncEditionUi();
+  </script>
+</BaseLayout>

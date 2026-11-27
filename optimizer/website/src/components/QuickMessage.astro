@@ -1,0 +1,856 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// QuickMessage — a site-wide, low-friction "signal key": one textarea to send
+// the maintainer a quick message. A reply email is OPTIONAL but the field is
+// visible from the start, so a visitor who wants an answer does not have to
+// find it. Rendered once near the end of BaseLayout so it appears on every
+// page.
+//
+// BACKEND. Posts SAME-ORIGIN to the existing contact pipeline
+// (/ai-readability/api/contact -> render service -> email notification +
+// server-side log), tagged topic "quick-message". The render service treats
+// `email` as OPTIONAL for this topic (one-way is allowed). No secret ships in
+// this client code; staying same-origin keeps it inside the site CSP
+// (connect-src 'self' https://umami.we-amp.com) — see deploy/nginx.conf.
+//
+// PRIVACY (GDPR). We capture the message text, the page PATH (path only — never
+// the query string, which can carry a third-party URL on /analyze etc.), and an
+// optional email. The inline notice names email as the delivery channel and
+// links the policy. Legal basis: legitimate interest (responding to an inbound
+// message the user chose to send). No consent checkbox — that's the wrong basis
+// here and adds friction for a one-way note.
+//
+// Dark-only panel. The ONE solid cyan fill in the viewport
+// is the Send button (.btn-primary). Everything else is hairlines + mono labels.
+---
+
+<div data-qm class="qm-root" data-state="idle">
+  {/* Launcher — a recessed "signal key", not a chat bubble. */}
+  <button
+    type="button"
+    data-qm-launcher
+    class="qm-launcher"
+    aria-haspopup="dialog"
+    aria-expanded="false"
+    aria-controls="qm-panel"
+    aria-label="Send us a quick message"
+    title="Send us a quick message"
+  >
+    {/* Message plate with one lit cyan transmit arrow — "send us a note". */}
+    <svg class="qm-ico" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none">
+      {/* readout plate */}
+      <rect
+        x="3"
+        y="5.5"
+        width="14"
+        height="11"
+        rx="1.5"
+        stroke="currentColor"
+        stroke-width="1.6"
+      ></rect>
+      {/* two engraved message lines */}
+      <line
+        x1="6"
+        y1="9.5"
+        x2="14"
+        y2="9.5"
+        stroke="currentColor"
+        stroke-width="1.5"
+        opacity="0.5"
+      ></line>
+      <line
+        x1="6"
+        y1="12.5"
+        x2="11"
+        y2="12.5"
+        stroke="currentColor"
+        stroke-width="1.5"
+        opacity="0.5"
+      ></line>
+      {/* the one lit cyan element: a transmit arrow leaving the plate */}
+      <path
+        class="qm-ico-send"
+        d="M16 11h5M19 9l2 2-2 2"
+        stroke-width="1.75"
+        stroke-linecap="square"
+        stroke-linejoin="miter"
+      ></path>
+    </svg>
+  </button>
+
+  {/* Panel — control plate. role=dialog, labelled by its heading. */}
+  <div
+    id="qm-panel"
+    data-qm-panel
+    class="qm-panel"
+    role="dialog"
+    aria-modal="false"
+    aria-labelledby="qm-title"
+    hidden
+  >
+    <div class="qm-tickrule" aria-hidden="true"></div>
+
+    <div class="qm-head">
+      <p id="qm-title" class="qm-eyebrow">
+        // Quick message
+      </p>
+      <button type="button" data-qm-close class="qm-close" aria-label="Close">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none">
+          <path
+            d="M6 6l12 12M18 6 6 18"
+            stroke="currentColor"
+            stroke-width="1.75"
+            stroke-linecap="square"
+          ></path>
+        </svg>
+      </button>
+    </div>
+
+    {/* FORM VIEW */}
+    <form data-qm-form class="qm-form" novalidate>
+      <p class="qm-lede">One line is enough. Leave an email if you want a reply.</p>
+
+      <div class="qm-field">
+        <label for="qm-message" class="sr-only">
+          Your message
+        </label>
+        <textarea
+          id="qm-message"
+          name="message"
+          data-qm-message
+          class="qm-textarea"
+          rows="3"
+          maxlength="1000"
+          required
+          aria-required="true"
+          placeholder="Question, idea, bug — anything."
+        ></textarea>
+        <p class="qm-count" data-qm-count aria-hidden="true">
+          0 / 1000
+        </p>
+      </div>
+
+      {/* Optional email — visible by default, never required. */}
+      <div id="qm-email-wrap" data-qm-email-wrap class="qm-email-wrap">
+        <label for="qm-email" class="qm-label">
+          your email (optional, for a reply)
+        </label>
+        <input
+          id="qm-email"
+          name="email"
+          data-qm-email
+          type="email"
+          inputmode="email"
+          autocomplete="email"
+          class="qm-input"
+          placeholder="you@example.com"
+        />
+      </div>
+
+      {/* Honeypot — off-screen (not display:none; some bots skip those). Bots
+          fill it, humans never see it. A filled value fake-succeeds + no POST. */}
+      <div class="qm-hp" aria-hidden="true">
+        <label for="qm-company">Company</label>
+        <input
+          id="qm-company"
+          name="company"
+          data-qm-hp
+          type="text"
+          tabindex="-1"
+          autocomplete="off"
+        />
+      </div>
+
+      <div class="qm-foot">
+        <span class="qm-note">no account needed</span>
+        <button type="submit" data-qm-submit class="btn-primary qm-send">
+          <span data-qm-send-label>Send</span>
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none">
+            <path
+              d="M4 12h13M11 6l6 6-6 6"
+              stroke="currentColor"
+              stroke-width="1.75"
+              stroke-linecap="square"
+              stroke-linejoin="miter"
+            ></path>
+          </svg>
+        </button>
+      </div>
+
+      {/* aria-live status (validation / sending / error). */}
+      <p id="qm-status" data-qm-status class="qm-status" role="status" aria-live="polite"></p>
+
+      {/* GDPR transparency notice — names email delivery, optionality, privacy link. */}
+      <p class="qm-privacy">
+        Your message and the page you're on go to We-Amp by email. Your email address is optional.{' '}
+        <a href="https://we-amp.com/privacy/">Privacy</a>.
+      </p>
+    </form>
+
+    {/* SUCCESS VIEW — swapped in on a successful POST. */}
+    <div data-qm-success class="qm-success" hidden>
+      <div class="qm-success-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none">
+          <path
+            d="M5 12.5 10 17 19 7"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="square"
+            stroke-linejoin="miter"
+          ></path>
+        </svg>
+      </div>
+      <p class="qm-success-title">Sent — thanks.</p>
+      <p class="qm-success-sub" data-qm-success-sub>
+        We read every message.
+      </p>
+      <button type="button" data-qm-again class="btn-ghost qm-again">
+        Send another
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const ENDPOINT = '/ai-readability/api/contact';
+  const TOPIC = 'quick-message';
+  const DRAFT_KEY = 'qm-draft-v1';
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const loadedAt = Date.now();
+
+  const root = document.querySelector<HTMLElement>('[data-qm]');
+  if (root) {
+    const launcher = root.querySelector<HTMLButtonElement>('[data-qm-launcher]')!;
+    const panel = root.querySelector<HTMLElement>('[data-qm-panel]')!;
+    const form = root.querySelector<HTMLFormElement>('[data-qm-form]')!;
+    const messageEl = root.querySelector<HTMLTextAreaElement>('[data-qm-message]')!;
+    const emailEl = root.querySelector<HTMLInputElement>('[data-qm-email]')!;
+    const hpEl = root.querySelector<HTMLInputElement>('[data-qm-hp]')!;
+    const countEl = root.querySelector<HTMLElement>('[data-qm-count]')!;
+    const statusEl = root.querySelector<HTMLElement>('[data-qm-status]')!;
+    const submitBtn = root.querySelector<HTMLButtonElement>('[data-qm-submit]')!;
+    const sendLabel = root.querySelector<HTMLElement>('[data-qm-send-label]')!;
+    const closeBtn = root.querySelector<HTMLButtonElement>('[data-qm-close]')!;
+    const successView = root.querySelector<HTMLElement>('[data-qm-success]')!;
+    const successSub = root.querySelector<HTMLElement>('[data-qm-success-sub]')!;
+    const againBtn = root.querySelector<HTMLButtonElement>('[data-qm-again]')!;
+
+    let sending = false;
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    // ---- draft persistence (sessionStorage; cleared on success) -------------
+    try {
+      const saved = sessionStorage.getItem(DRAFT_KEY);
+      if (saved) messageEl.value = saved;
+    } catch {
+      /* private mode / storage disabled — drafts just won't persist */
+    }
+    function syncCount() {
+      const n = messageEl.value.length;
+      countEl.textContent = `${n} / 1000`;
+      countEl.classList.toggle('is-near', n > 900);
+    }
+    messageEl.addEventListener('input', () => {
+      try {
+        sessionStorage.setItem(DRAFT_KEY, messageEl.value);
+      } catch {
+        /* ignore */
+      }
+      syncCount();
+      clearStatus();
+    });
+    syncCount();
+
+    // ---- status helpers -----------------------------------------------------
+    // A validation error is tied to the control it is about (aria-invalid plus
+    // aria-describedby to the status line), so the message is read again when
+    // focus returns to that control, not only once by the live region.
+    function clearInvalid() {
+      for (const el of [messageEl, emailEl]) {
+        el.removeAttribute('aria-invalid');
+        el.removeAttribute('aria-describedby');
+      }
+    }
+    function clearStatus() {
+      statusEl.textContent = '';
+      statusEl.classList.remove('is-error', 'is-busy');
+      clearInvalid();
+    }
+    function setStatus(kind: 'error' | 'busy', msg: string, field?: HTMLElement) {
+      statusEl.textContent = msg;
+      statusEl.classList.remove('is-error', 'is-busy');
+      statusEl.classList.add(kind === 'error' ? 'is-error' : 'is-busy');
+      clearInvalid();
+      if (kind === 'error' && field) {
+        field.setAttribute('aria-invalid', 'true');
+        field.setAttribute('aria-describedby', statusEl.id);
+      }
+    }
+    emailEl.addEventListener('input', () => {
+      if (emailEl.hasAttribute('aria-invalid')) clearStatus();
+    });
+
+    // ---- focus trap ---------------------------------------------------------
+    function focusables(): HTMLElement[] {
+      return Array.from(
+        panel.querySelectorAll<HTMLElement>(
+          'button, [href], input, textarea, [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((el) => !el.hasAttribute('hidden') && el.offsetParent !== null);
+    }
+    function onKeydown(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        close();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const items = focusables();
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+    function onPointerDown(e: PointerEvent) {
+      if (!root!.contains(e.target as Node)) close();
+    }
+
+    // ---- open / close -------------------------------------------------------
+    function open() {
+      if (root!.dataset.state === 'open') return;
+      root!.dataset.state = 'open';
+      panel.hidden = false;
+      launcher.setAttribute('aria-expanded', 'true');
+      showForm(); // reset success->form if reopened after a send
+      const focusInput = () => {
+        messageEl.focus();
+        messageEl.setSelectionRange(messageEl.value.length, messageEl.value.length);
+      };
+      if (reduceMotion) {
+        panel.classList.add('is-open');
+        focusInput();
+      } else {
+        requestAnimationFrame(() => {
+          panel.classList.add('is-open');
+          focusInput();
+        });
+      }
+      document.addEventListener('keydown', onKeydown, true);
+      // defer outside-click binding so the opening click doesn't immediately close
+      setTimeout(() => document.addEventListener('pointerdown', onPointerDown, true), 0);
+    }
+    function close() {
+      if (root!.dataset.state !== 'open') return;
+      root!.dataset.state = 'idle';
+      panel.classList.remove('is-open');
+      launcher.setAttribute('aria-expanded', 'false');
+      document.removeEventListener('keydown', onKeydown, true);
+      document.removeEventListener('pointerdown', onPointerDown, true);
+      if (reduceMotion) panel.hidden = true;
+      else setTimeout(() => (panel.hidden = true), 160);
+      launcher.focus(); // return focus to the launcher
+    }
+
+    launcher.addEventListener('click', () => {
+      root!.dataset.state === 'open' ? close() : open();
+    });
+    closeBtn.addEventListener('click', close);
+
+    // External openers anywhere on the page (e.g. the top-nav "Message" entry)
+    // carry `data-qm-open`. Delegated so triggers rendered outside this root
+    // still open the panel. The opening click is excluded from the
+    // outside-click close because open() defers that binding (setTimeout 0).
+    document.addEventListener('click', (e) => {
+      const opener = (e.target as Element | null)?.closest?.('[data-qm-open]');
+      if (opener) {
+        e.preventDefault();
+        open();
+      }
+    });
+
+    // Close when another overlay (the search dialog, the blog chart lightbox)
+    // opens.
+    window.addEventListener('weamp:fab-open', () => close());
+
+    // ---- view swap ----------------------------------------------------------
+    function showForm() {
+      successView.hidden = true;
+      form.hidden = false;
+    }
+    function showSuccess() {
+      form.hidden = true;
+      successView.hidden = false;
+      againBtn.focus();
+    }
+    againBtn.addEventListener('click', () => {
+      showForm();
+      messageEl.focus();
+    });
+
+    // ---- submit -------------------------------------------------------------
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (sending) return;
+
+      // Honeypot: a filled hidden field == bot. Fake-succeed (don't tip them off).
+      if (hpEl.value.trim() !== '') {
+        showSuccess();
+        return;
+      }
+
+      const message = messageEl.value.trim();
+      const email = emailEl.value.trim();
+
+      if (message.length < 2) {
+        setStatus('error', 'Type a message first.', messageEl);
+        messageEl.focus();
+        return;
+      }
+      // Email is optional, but if given it must be valid.
+      if (email !== '' && !EMAIL_RE.test(email)) {
+        setStatus('error', "That email doesn't look right — fix it or clear it.", emailEl);
+        emailEl.focus();
+        return;
+      }
+
+      sending = true;
+      submitBtn.disabled = true;
+      submitBtn.setAttribute('aria-busy', 'true');
+      sendLabel.textContent = 'Sending…';
+      setStatus('busy', 'Sending…');
+
+      try {
+        const res = await fetch(ENDPOINT, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            message,
+            email, // '' when omitted — backend treats as optional for this topic
+            name: '',
+            topic: TOPIC,
+            // PATH ONLY (no query string / no hash): the query can carry a
+            // third-party URL on pages like /analyze. The owner still gets the
+            // originating page without leaking what a visitor was inspecting.
+            url: window.location.pathname,
+            t: loadedAt,
+          }),
+        });
+        if (!res.ok) throw new Error(`status ${res.status}`);
+
+        try {
+          sessionStorage.removeItem(DRAFT_KEY);
+        } catch {
+          /* ignore */
+        }
+        form.reset();
+        clearStatus();
+        syncCount();
+        successSub.textContent = email ? "We'll reply to that address." : 'We read every message.';
+        // Fire on a successful POST only — never on click.
+        const umami = (window as any).umami;
+        umami?.track('quick_message_sent', { with_email: email !== '' });
+        // lead_submit — one event per successful form submit, alongside the
+        // form's own event. Properties: channel (contact | quote | quick | newsletter |
+        // hosting; a contact-form submit on the hosting topic reports hosting), topic
+        // (the topic posted to the capture endpoint), wedge (the scanner wedge, empty
+        // when none) and source_path (the page path, never the query string).
+        umami?.track('lead_submit', {
+          channel: 'quick',
+          topic: TOPIC,
+          wedge: '',
+          source_path: window.location.pathname,
+        });
+        showSuccess();
+      } catch {
+        setStatus('error', "Couldn't send just now — try again, or email info@we-amp.com.");
+      } finally {
+        sending = false;
+        submitBtn.disabled = false;
+        submitBtn.removeAttribute('aria-busy');
+        sendLabel.textContent = 'Send';
+      }
+    });
+  }
+</script>
+
+<script>
+  // Handset widths: a code block's copy button scrolls through the corner the
+  // launcher is pinned to. While one is inside that corner the launcher steps
+  // aside (the CSS rule on data-fab-corner-busy in global.css), so a tap meant
+  // for the copy button lands on it. The corner is the launcher's box plus a
+  // little slack. Nothing runs from 640 px up.
+  const narrow = window.matchMedia('(max-width: 639px)');
+  const html = document.documentElement;
+  const covered = new Set<Element>();
+  let observer: IntersectionObserver | null = null;
+
+  function watchCorner() {
+    observer?.disconnect();
+    observer = null;
+    covered.clear();
+    html.removeAttribute('data-fab-corner-busy');
+    if (!narrow.matches || !('IntersectionObserver' in window)) return;
+    const top = Math.max(0, window.innerHeight - 72);
+    const left = Math.max(0, window.innerWidth - 72);
+    observer = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) covered.add(e.target);
+          else covered.delete(e.target);
+        }
+        html.toggleAttribute('data-fab-corner-busy', covered.size > 0);
+      },
+      { rootMargin: `-${top}px 0px 0px -${left}px` },
+    );
+    document.querySelectorAll('.code-copy-btn, .install-copy').forEach((b) => observer!.observe(b));
+  }
+
+  function start() {
+    narrow.addEventListener('change', watchCorner);
+    window.addEventListener('resize', () => narrow.matches && watchCorner(), { passive: true });
+    watchCorner();
+  }
+  function begin() {
+    if (document.readyState === 'complete') start();
+    else window.addEventListener('load', start, { once: true });
+  }
+  if (narrow.matches) begin();
+  else narrow.addEventListener('change', begin, { once: true });
+</script>
+
+<style>
+  /* ── Root + launcher ─────────────────────────────────────────────────── */
+  .qm-root {
+    position: fixed;
+    right: 1rem;
+    bottom: 1rem;
+    /* above content + sticky header (z-50); below the skip-link (z-[100]). */
+    z-index: 60;
+    font-family: var(--font-sans);
+  }
+  @supports (bottom: env(safe-area-inset-bottom)) {
+    .qm-root {
+      bottom: calc(1rem + env(safe-area-inset-bottom));
+    }
+  }
+  /* A very short viewport (a phone on its side, a heavily zoomed window) has
+     no room to spare for a pinned control: the launcher leaves the corner and
+     sits in the page flow after the footer, so it never covers content or a
+     focused element (WCAG 2.4.11). The rules in global.css that keep a
+     pinned launcher off the hero and the footer are scoped to taller
+     viewports for the same reason. */
+  @media (max-height: 480px) {
+    .qm-root {
+      position: relative;
+      right: auto;
+      bottom: auto;
+      width: fit-content;
+      margin: 0 1rem 1rem auto;
+    }
+  }
+
+  .qm-launcher {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.5rem;
+    height: 2.5rem;
+    border-radius: var(--radius-control);
+    background-color: var(--color-bg-recessed);
+    color: var(--color-text-body);
+    border: 1px solid var(--color-control-border);
+    /* finish, not shadow: inner hairline frame + specular top edge */
+    box-shadow:
+      inset 0 0 0 1px var(--color-border),
+      inset 0 1px 0 0 var(--color-specular),
+      0 2px 10px rgba(0, 0, 0, 0.35);
+    cursor: pointer;
+    transition:
+      color 120ms ease,
+      border-color 120ms ease;
+  }
+  .qm-launcher:hover {
+    border-color: var(--color-interactive);
+    color: var(--color-text-body);
+  }
+  .qm-launcher:focus-visible {
+    outline: 2px solid var(--color-focus-ring);
+    outline-offset: 2px;
+  }
+  .qm-root[data-state='open'] .qm-launcher {
+    border-color: var(--color-interactive);
+    color: var(--color-interactive);
+  }
+  .qm-ico-send {
+    stroke: var(--color-interactive);
+  }
+  .qm-launcher:hover .qm-ico-send {
+    stroke: var(--color-interactive-hover);
+  }
+
+  /* ── Panel ───────────────────────────────────────────────────────────── */
+  .qm-panel {
+    position: absolute;
+    right: 0;
+    bottom: calc(2.5rem + 0.75rem); /* sit above the launcher */
+    width: min(360px, calc(100vw - 2rem));
+    background-color: var(--color-bg-elevated);
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-card);
+    box-shadow:
+      inset 0 1px 0 0 var(--color-specular),
+      0 16px 48px rgba(0, 0, 0, 0.5);
+    padding: 1rem 1rem 0.875rem;
+    opacity: 0;
+    transition: opacity 140ms ease;
+  }
+  .qm-panel.is-open {
+    opacity: 1;
+  }
+
+  /* chemin-de-fer tick rule along the top edge (oscilloscope-capture motif) */
+  .qm-tickrule {
+    position: absolute;
+    top: 0;
+    left: 0.75rem;
+    right: 0.75rem;
+    height: 1px;
+    background-image: repeating-linear-gradient(
+      to right,
+      var(--color-tick) 0,
+      var(--color-tick) 1px,
+      transparent 1px,
+      transparent 6px
+    );
+  }
+
+  .qm-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .qm-eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+    margin: 0;
+  }
+  .qm-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    margin: -0.25rem -0.25rem -0.25rem 0;
+    border-radius: var(--radius-chip);
+    color: var(--color-text-annotation);
+    background: transparent;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition:
+      color 120ms ease,
+      border-color 120ms ease;
+  }
+  .qm-close:hover {
+    color: var(--color-text-body);
+    border-color: var(--color-border-strong);
+  }
+  .qm-close:focus-visible {
+    outline: 2px solid var(--color-focus-ring);
+    outline-offset: 2px;
+  }
+
+  .qm-lede {
+    margin: 0.5rem 0 0.75rem;
+    font-size: 0.8125rem;
+    line-height: 1.4;
+    color: var(--color-text-muted);
+  }
+
+  /* ── Fields — engraved plates ────────────────────────────────────────── */
+  .qm-field {
+    position: relative;
+  }
+  .qm-textarea,
+  .qm-input {
+    width: 100%;
+    background-color: var(--color-bg-recessed);
+    color: var(--color-text-body);
+    border: 1px solid var(--color-control-border);
+    border-radius: var(--radius-control);
+    padding: 0.625rem 0.75rem;
+    font-family: var(--font-sans);
+    font-size: 0.875rem;
+    line-height: 1.45;
+    outline: none;
+    transition: border-color 120ms ease;
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
+  }
+  .qm-textarea {
+    resize: vertical;
+    min-height: 4.5rem;
+  }
+  /* iOS Safari zooms the page into any field set below 16px when it takes
+     focus, and leaves it zoomed. Phones get 16px; larger screens keep 14px. */
+  @media (width < 40rem) {
+    .qm-textarea,
+    .qm-input {
+      font-size: 1rem;
+    }
+  }
+  .qm-textarea::placeholder,
+  .qm-input::placeholder {
+    color: var(--color-text-annotation);
+  }
+  .qm-textarea:focus,
+  .qm-input:focus {
+    border-color: var(--color-interactive);
+    box-shadow:
+      inset 0 1px 2px rgba(0, 0, 0, 0.35),
+      0 0 0 2px color-mix(in srgb, var(--color-interactive) 35%, transparent);
+  }
+  .qm-textarea:focus-visible,
+  .qm-input:focus-visible {
+    outline: 2px solid var(--color-focus-ring);
+    outline-offset: 2px;
+  }
+
+  .qm-count {
+    margin: 0.25rem 0 0;
+    text-align: right;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.04em;
+    color: var(--color-text-annotation);
+  }
+  .qm-count.is-near {
+    color: var(--color-accent);
+  }
+
+  /* ── Optional email ───────────────────────────────────────────────── */
+  .qm-email-wrap {
+    margin-top: 0.5rem;
+  }
+  .qm-label {
+    display: block;
+    margin-bottom: 0.25rem;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+  }
+
+  /* ── Footer ──────────────────────────────────────────────────────────── */
+  .qm-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-top: 0.875rem;
+  }
+  .qm-note {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.04em;
+    color: var(--color-text-annotation);
+  }
+  /* tighten the shared .btn-primary for the compact panel footer */
+  .qm-send {
+    padding-left: 1.25rem;
+    padding-right: 1.25rem;
+  }
+
+  .qm-status {
+    margin: 0.625rem 0 0;
+    min-height: 1rem;
+    font-size: 0.75rem;
+    line-height: 1.4;
+  }
+  .qm-status.is-error {
+    color: var(--color-accent);
+  }
+  .qm-status.is-busy {
+    color: var(--color-text-muted);
+  }
+  .qm-status:empty {
+    margin-top: 0;
+  }
+
+  .qm-privacy {
+    margin: 0.625rem 0 0;
+    font-size: 0.6875rem;
+    line-height: 1.4;
+    color: var(--color-text-annotation);
+  }
+  .qm-privacy a {
+    color: var(--color-interactive);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .qm-privacy a:hover {
+    color: var(--color-interactive-hover);
+  }
+
+  /* ── Success plate ───────────────────────────────────────────────────── */
+  .qm-success {
+    text-align: center;
+    padding: 0.75rem 0.5rem 0.25rem;
+  }
+  .qm-success-mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.5rem;
+    height: 2.5rem;
+    margin-bottom: 0.625rem;
+    border-radius: var(--radius-chip);
+    color: var(--color-success);
+    border: 1px solid color-mix(in srgb, var(--color-success) 45%, transparent);
+    background-color: color-mix(in srgb, var(--color-success) 10%, transparent);
+  }
+  .qm-success-title {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+    letter-spacing: 0.02em;
+    color: var(--color-text-body);
+  }
+  .qm-success-sub {
+    margin: 0.25rem 0 0.75rem;
+    font-size: 0.8125rem;
+    color: var(--color-text-muted);
+  }
+  .qm-again {
+    margin: 0 auto;
+  }
+
+  /* ── Honeypot — off-screen, not display:none (some bots skip those) ───── */
+  .qm-hp {
+    position: absolute;
+    left: -9999px;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+  }
+
+  /* ── Reduced motion ──────────────────────────────────────────────────── */
+  @media (prefers-reduced-motion: reduce) {
+    .qm-panel {
+      transition: none;
+    }
+    .qm-launcher {
+      transition: none;
+    }
+  }
+</style>

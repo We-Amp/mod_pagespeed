@@ -1,0 +1,9 @@
+<svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <!-- Favicon: a capability register on instrument-black.
+       4 cells (a nibble), lit to a real mask value — cyan = bit set / live. -->
+  <rect width="32" height="32" rx="6" fill="#0b0c0e" />
+  <rect x="6"  y="6"  width="9" height="9" rx="1.5" fill="#5eb1c9" />
+  <rect x="17" y="6"  width="9" height="9" rx="1.5" fill="#20242a" />
+  <rect x="6"  y="17" width="9" height="9" rx="1.5" fill="#20242a" />
+  <rect x="17" y="17" width="9" height="9" rx="1.5" fill="#5eb1c9" />
+</svg>

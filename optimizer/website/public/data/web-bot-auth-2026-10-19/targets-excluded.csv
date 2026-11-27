@@ -1,0 +1,21 @@
+name,source,reason
+AgentDataBot,ai.robots.txt,"operator named, but the entry gives no web domain (not guessed)"
+Aranet-SearchBot,ai.robots.txt,no operator named in the entry
+CragCrawler,ai.robots.txt,"operator named, but the entry gives no web domain (not guessed)"
+Crawl4AI,ai.robots.txt,open-source client software run by anyone; no single operator
+Datenbank Crawler,ai.robots.txt,"operator named, but the entry gives no web domain (not guessed)"
+FriendlyCrawler,ai.robots.txt,no operator named in the entry
+GeistHaus-PageFetcher,ai.robots.txt,"operator named, but the entry gives no web domain (not guessed)"
+imageSpider,ai.robots.txt,no operator named in the entry
+img2dataset,ai.robots.txt,open-source client software run by anyone; no single operator
+KunatoCrawler,ai.robots.txt,no operator named in the entry
+LCC,ai.robots.txt,no operator named in the entry
+Lightpanda,ai.robots.txt,open-source client software run by anyone; no single operator
+MyCentralAIScraperBot,ai.robots.txt,no operator named in the entry
+newsai,ai.robots.txt,no operator named in the entry
+opencode,ai.robots.txt,open-source client software run by anyone; no single operator
+Spider,ai.robots.txt,no operator named in the entry
+UseAI,ai.robots.txt,"operator named, but the entry gives no web domain (not guessed)"
+ZanistaBot,ai.robots.txt,no operator named in the entry
+Slow Reader Dev Proxy,radar,no operator domain in Radar entry
+YGS Group Falconer Scraper,radar,no operator domain in Radar entry

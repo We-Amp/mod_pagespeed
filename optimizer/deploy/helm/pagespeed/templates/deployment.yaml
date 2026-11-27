@@ -1,0 +1,146 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "pagespeed.fullname" . }}
+  labels:
+    {{- include "pagespeed.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "pagespeed.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "pagespeed.selectorLabels" . | nindent 8 }}
+    spec:
+      # The worker and nginx containers share one cache volume (a per-pod
+      # emptyDir) and one image tag, so an old and a new build never share it:
+      # an upgrade replaces the pod, and its cache with it. The cache library
+      # is also safe across PID namespaces. The pod shares one anyway: every
+      # process writing the cache sits in one namespace, as in the compose
+      # files (where old and new builds can overlap on a named volume), and
+      # the pause container, as PID 1, reaps orphaned zombies. Not a value.
+      # With it, the kubelet still signals each container's own main process,
+      # and no probe or entrypoint here depends on PID numbers. The cost:
+      # nginx's processes can read the worker's /proc/<pid>/cmdline. The
+      # worker's tokens travel in its environment, not its argv (see
+      # docker/entrypoint-worker.sh), and /proc/<pid>/environ stays private to
+      # the worker's own user; do not put secrets in worker.extraArgs.
+      shareProcessNamespace: true
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      volumes:
+        - name: shared
+          emptyDir:
+            sizeLimit: {{ .Values.cache.sizeLimit }}
+      containers:
+        # Worker container
+        - name: worker
+          image: "{{ .Values.worker.image.repository }}:{{ include "pagespeed.imageTag" . }}"
+          imagePullPolicy: {{ .Values.worker.image.pullPolicy }}
+          env:
+            - name: CACHE_SIZE
+              value: {{ .Values.worker.cacheSize | quote }}
+          volumeMounts:
+            - name: shared
+              mountPath: /data
+          {{- with .Values.worker.extraArgs }}
+          args:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          # All three probes only read: the optimizer writes one status line
+          # on connect and closes. `-T 4` is how long socat waits for that
+          # line, kept one second inside timeoutSeconds so a slow reply fails
+          # the attempt on its own exit status. Do not feed socat an empty
+          # stdin instead: it then gives up 0.5 s after connecting, whatever
+          # timeoutSeconds says. tools/ci/check_health_probe.sh checks these.
+          startupProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "socat -u -T 4 UNIX-CONNECT:/data/pagespeed.sock.health - | grep -q '^OK\\|^DEGRADED'"
+            periodSeconds: 2
+            failureThreshold: 30
+            timeoutSeconds: 5
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "socat -u -T 4 UNIX-CONNECT:/data/pagespeed.sock.health - | grep -q '^OK'"
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "socat -u -T 4 UNIX-CONNECT:/data/pagespeed.sock.health - | grep -q '^OK\\|^DEGRADED'"
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          {{- with .Values.worker.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        # Nginx container
+        - name: nginx
+          image: "{{ .Values.nginx.image.repository }}:{{ include "pagespeed.imageTag" . }}"
+          imagePullPolicy: {{ .Values.nginx.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          env:
+            - name: BACKEND_HOST
+              value: {{ .Values.backend.host | quote }}
+            - name: BACKEND_PORT
+              value: {{ .Values.backend.port | quote }}
+          volumeMounts:
+            - name: shared
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          {{- with .Values.nginx.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

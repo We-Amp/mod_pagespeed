@@ -1,0 +1,502 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// The shared results skeleton: a summary strip (one health line, three
+// tiles, the line that says whether the mod_pagespeed fixes apply), one drill-down
+// panel per tile, the "Ask an engineer" form shell, the
+// next-steps row and the share row. Everything rendered here at build time is
+// a label; every result string is written by the scan controller at run time
+// with textContent. The section is hidden until a scan starts and is kept out
+// of the search index.
+import { AUDIT_PRICE_EUR, FREE_TO_RUN_LINE, formatEur } from '../../data/product-facts.mjs';
+
+interface Props {
+  idPrefix?: string;
+}
+
+const { idPrefix = 'scan' } = Astro.props;
+
+// The guide for owners of a site on a hosted builder is linked from a hosted
+// result only when that page is part of this build. The scan controller adds
+// the link when a result calls for it, so the page itself carries none.
+const hostedGuide =
+  Object.keys(import.meta.glob('../../pages/ai-readability/hosted-builders.astro')).length > 0;
+
+const pillars = [
+  { id: 'speed', name: 'Speed' },
+  { id: 'airead', name: 'AI readability' },
+  { id: 'risk', name: 'Risk & SEO' },
+] as const;
+---
+
+<section
+  id={`${idPrefix}-results`}
+  class="scan-results mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 pb-16"
+  data-server-offers="pending"
+  data-hosted-guide={hostedGuide ? '/ai-readability/hosted-builders/' : undefined}
+  aria-labelledby={`${idPrefix}-summary-heading`}
+  data-scan-results
+  data-pagefind-ignore
+  hidden
+>
+  <p id={`${idPrefix}-live`} role="status" aria-live="polite" class="sr-only" data-scan-live></p>
+
+  <div class="rounded-2xl border border-border bg-bg-elevated p-5 sm:p-6">
+    <p class="eyebrow">Results</p>
+    <h2
+      id={`${idPrefix}-summary-heading`}
+      tabindex="-1"
+      class="mt-2 text-xl sm:text-2xl font-bold tracking-tight text-text-body [overflow-wrap:anywhere]"
+      data-scan-heading
+    >
+      Results for <span data-scan-host></span>
+    </h2>
+    <p
+      class="mt-2 min-h-[3.75rem] text-sm text-text-muted sm:min-h-10 md:min-h-5"
+      data-scan-fit-line
+      data-server-offer
+    >
+    </p>
+    <div
+      class="mt-2 rounded-lg border border-border p-3 text-sm text-text-body"
+      data-scan-fit-notice
+      data-hosted-only
+    >
+      <p data-scan-fit-text></p>
+      <p class="mt-2" data-scan-fit-links hidden></p>
+      <p class="mt-2" data-scan-fit-guide-row hidden></p>
+    </div>
+    <p class="mt-2 min-h-10 text-sm text-text-muted sm:min-h-6">
+      <span data-scan-health>Checking 3 of 3 areas…</span>
+      <span class="tabular-nums" data-scan-elapsed></span>
+    </p>
+    <p class="mt-1 min-h-5 text-sm text-text-muted" data-scan-hint></p>
+    <p class="mt-2 text-sm text-text-muted" data-server-offer>
+      <span class="invisible" data-scan-audit>
+        Agent-readiness audit, {formatEur(AUDIT_PRICE_EUR)} per site, excl. VAT: a written report
+        and one review call. It lists the configuration change for each finding; applying the
+        changes is not included. It does not measure visibility in AI answers.
+        <a
+          href="/contact/?topic=audit"
+          class="ml-1 font-medium text-interactive underline"
+          data-scan-cta="audit"
+          data-umami-event="cta_commercial"
+          data-umami-event-offer="audit"
+          data-umami-event-position="scan_result">Ask for an audit</a
+        >
+      </span>
+    </p>
+  </div>
+
+  <div class="scan-tiles mt-4" data-scan-tiles>
+    {pillars.map((p) => (
+      <>
+        <button
+          type="button"
+          id={`${idPrefix}-tile-${p.id}`}
+          class="scan-tile"
+          data-scan-tile={p.id}
+          data-state="checking"
+          aria-expanded="false"
+          aria-controls={`${idPrefix}-panel-${p.id}`}
+        >
+          <span id={`${idPrefix}-name-${p.id}`} class="scan-tile-name">
+            {p.name}
+          </span>
+          <span
+            id={`${idPrefix}-status-${p.id}`}
+            class="scan-tile-status badge-neutral"
+            data-scan-status
+          >
+            Checking…
+          </span>
+          <span id={`${idPrefix}-value-${p.id}`} class="scan-tile-value" data-scan-value>
+            <span class="scan-skeleton" aria-hidden="true" />
+          </span>
+          <span class="scan-tile-toggle">
+            <span class="scan-toggle-closed">
+              Show details <span aria-hidden="true">&#9662;</span>
+            </span>
+            <span class="scan-toggle-open">
+              Hide details <span aria-hidden="true">&#9652;</span>
+            </span>
+          </span>
+        </button>
+        <div
+          id={`${idPrefix}-panel-${p.id}`}
+          class="scan-panel"
+          role="region"
+          aria-labelledby={`${idPrefix}-name-${p.id}`}
+          data-scan-panel={p.id}
+          hidden
+        />
+      </>
+    ))}
+    <div class="scan-steps" data-scan-steps data-state="pending">
+      <h3 id={`${idPrefix}-steps-heading`} class="text-base font-semibold text-text-body">
+        Your next steps
+      </h3>
+      <p class="mt-2 text-sm text-text-body" data-scan-readable hidden>
+        <span data-scan-readable-text></span>
+        <span data-scan-readable-guide-slot></span>
+      </p>
+      <ol
+        class="scan-steps-list mt-2 text-sm text-text-body"
+        aria-labelledby={`${idPrefix}-steps-heading`}
+        data-scan-steps-list
+        hidden
+      >
+      </ol>
+      <p class="mt-2 text-sm text-text-muted" data-scan-steps-none>
+        <span class="scan-skeleton" aria-hidden="true"></span>
+      </p>
+    </div>
+  </div>
+
+  <form
+    id={`${idPrefix}-lead-form`}
+    class="mt-8 rounded-2xl border border-border bg-bg-elevated p-5 sm:p-6"
+    data-scan-lead
+    aria-labelledby={`${idPrefix}-lead-heading`}
+    novalidate
+    hidden
+  >
+    <h3 id={`${idPrefix}-lead-heading`} class="text-lg font-semibold text-text-body">
+      Ask an engineer
+    </h3>
+    <p id={`${idPrefix}-lead-hint`} class="mt-1 text-sm text-text-muted">
+      Pick what you want to talk about, or leave the topics empty for a general question.
+    </p>
+    <fieldset
+      class="mt-4"
+      data-scan-topics
+      aria-describedby={`${idPrefix}-lead-hint ${idPrefix}-lead-msg`}
+    >
+      <legend class="text-sm font-medium text-text-body">Topics</legend>
+      <div class="mt-2 flex flex-wrap gap-2" data-scan-chips></div>
+      <p class="mt-2 text-xs text-text-muted" data-scan-topics-note hidden></p>
+    </fieldset>
+    <label for={`${idPrefix}-lead-email`} class="mt-4 block text-sm font-medium text-text-body">
+      Your email
+    </label>
+    <input
+      id={`${idPrefix}-lead-email`}
+      name="email"
+      aria-describedby={`${idPrefix}-lead-email-error`}
+      aria-invalid="false"
+      type="email"
+      autocomplete="email"
+      class="mt-1 w-full min-h-11 rounded-md border border-control-border px-4 py-3 text-text-body bg-bg-elevated focus:border-interactive focus:ring-2 focus:ring-interactive aria-[invalid=true]:border-accent aria-[invalid=true]:ring-1 aria-[invalid=true]:ring-accent sm:text-sm"
+    />
+    <p
+      id={`${idPrefix}-lead-email-error`}
+      class="mt-1 text-sm text-accent"
+      data-scan-lead-email-error
+      hidden
+      set:text=""
+    />
+    <label for={`${idPrefix}-lead-sites`} class="mt-4 block text-sm font-medium text-text-body">
+      Sites you run (optional)
+    </label>
+    <input
+      id={`${idPrefix}-lead-sites`}
+      name="sites"
+      type="number"
+      min="1"
+      max="1000000"
+      step="1"
+      inputmode="numeric"
+      class="mt-1 w-full min-h-11 rounded-md border border-control-border px-4 py-3 text-text-body bg-bg-elevated focus:border-interactive focus:ring-2 focus:ring-interactive sm:text-sm"
+      data-scan-sites
+    />
+    <label for={`${idPrefix}-lead-note`} class="mt-4 block text-sm font-medium text-text-body">
+      Anything we should know? (optional)
+    </label>
+    <textarea
+      id={`${idPrefix}-lead-note`}
+      name="note"
+      rows="3"
+      maxlength="1000"
+      class="mt-1 w-full rounded-md border border-control-border px-4 py-3 text-text-body bg-bg-elevated focus:border-interactive focus:ring-2 focus:ring-interactive sm:text-sm"
+      set:text=""
+    />
+
+    <p class="mt-4 text-xs text-text-annotation">
+      Sending this gives We-Amp your email address, your note, the page you scanned and its scan
+      result. We usually reply within one business day (CET). We keep your request to answer
+      it and to see what visitors ask for; the
+      <a href="https://we-amp.com/privacy/" class="underline">privacy policy</a> says for how long.
+    </p>
+    <button type="submit" class="btn-primary scan-lead-submit mt-4 min-h-11">Send request</button>
+    <p id={`${idPrefix}-lead-msg`} class="mt-2 text-sm text-accent" data-scan-lead-msg></p>
+  </form>
+
+  <div class="mt-8 flex flex-col items-center gap-3" data-scan-next data-server-offer hidden>
+    <div class="flex flex-wrap items-center justify-center gap-4">
+      <a href="/download/#install" class="btn-primary min-h-11" data-scan-cta="download">Download &amp; run &rarr;</a>
+      <a href="/pricing/" class="btn-secondary min-h-11" data-scan-cta="support">Support pricing &rarr;</a>
+    </div>
+    <p class="text-xs text-text-annotation">{FREE_TO_RUN_LINE}</p>
+  </div>
+
+  <div class="mt-6 flex flex-col items-center gap-3" data-scan-share hidden>
+    <div class="text-center text-sm text-text-muted" data-scan-permalink-row hidden>
+      <p class="[overflow-wrap:anywhere]">
+        Shareable link: <a href="/" class="underline" data-scan-permalink></a>
+      </p>
+      <p class="mt-1 text-xs text-text-annotation">The link works for up to 24 hours.</p>
+    </div>
+    <div class="flex flex-wrap items-center justify-center gap-3">
+      <button type="button" class="btn-secondary min-h-11" data-scan-copy-link hidden>
+        Copy link to this result
+      </button>
+      <button type="button" class="btn-secondary min-h-11" data-scan-download hidden>
+        Download this report
+      </button>
+    </div>
+  </div>
+</section>
+
+<script>
+  // An earlier version of these pages remembered an interface choice under
+  // this key. Nothing reads it any more; remove a value a visitor still has.
+  try {
+    window.localStorage.removeItem('scan-ui');
+  } catch {
+    /* storage can be blocked; there is nothing to clean up then */
+  }
+  void import('../../scripts/scan/app').then((m) => m.init());
+</script>
+
+<style is:global>
+  /* Sending: the button stays focusable and keeps its label at full contrast. */
+  .scan-lead-submit[aria-disabled='true'],
+  .scan-lead-submit[aria-disabled='true']:hover {
+    background-color: var(--color-bg-secondary);
+    color: var(--color-text-body);
+    border: 1px solid var(--color-control-border);
+    cursor: wait;
+  }
+  /* What needs a server the visitor runs is marked data-server-offer, and
+     what a hosted platform gets in its place data-hosted-only. The scan
+     controller sets data-server-offers on the section from one test on the
+     result: "on" shows the offers, "off" (a hosted platform) the other set.
+     While a scan is on its way ("pending") no offer is shown: the lines of the
+     summary and the next-steps row keep their space, so nothing moves when the
+     result lands, and a panel shows its plain version. */
+  .scan-results[data-server-offers='off'] [data-server-offer],
+  .scan-results[data-server-offers='on'] [data-hosted-only],
+  .scan-results[data-server-offers='pending'] .scan-panel [data-server-offer],
+  .scan-results[data-server-offers='pending'] [data-scan-fit-notice] {
+    display: none;
+  }
+  .scan-results[data-server-offers='pending'] [data-server-offer] {
+    visibility: hidden;
+  }
+  /* The next steps sit under the tiles. From 640 px up the block keeps a
+     modest height from the moment a scan starts; on a phone it holds room only
+     while the scan is on its way and then takes the height of what it says. */
+  .scan-steps {
+    min-width: 0;
+    padding: 1rem;
+    background: var(--color-bg-elevated);
+    border: 1px solid var(--color-border);
+    border-radius: 0.75rem;
+  }
+  .scan-steps[data-state='pending'] {
+    min-height: 12rem;
+  }
+  /* The guide is linked once: beside the statement when it is shown, in the
+     notice otherwise. */
+  .scan-results[data-readable='true'] [data-scan-fit-guide-row] {
+    display: none;
+  }
+  /* A step moves focus to a row or a panel: show where it landed. */
+  .scan-panel:focus,
+  .scan-panel [tabindex='-1']:focus {
+    outline: 2px solid var(--color-interactive);
+    outline-offset: 2px;
+  }
+  .scan-steps-list {
+    list-style: decimal;
+    padding-left: 1.25rem;
+  }
+  .scan-steps-list > li + li {
+    margin-top: 0.625rem;
+  }
+  .scan-step-tag {
+    display: inline-block;
+    margin-left: 0.25rem;
+    padding: 0 0.5rem;
+    border: 1px solid var(--color-border-strong);
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    line-height: 1.25rem;
+    color: var(--color-text-muted);
+    white-space: nowrap;
+  }
+  .scan-step-show {
+    margin-left: 0.25rem;
+    padding: 0.125rem 0;
+    font-weight: 500;
+    color: var(--color-interactive);
+    text-decoration: underline;
+    cursor: pointer;
+  }
+  @media (min-width: 640px) {
+    .scan-steps,
+    .scan-steps[data-state='pending'] {
+      min-height: 18.5rem;
+    }
+  }
+  @media (min-width: 1024px) {
+    .scan-steps,
+    .scan-steps[data-state='pending'] {
+      min-height: 13rem;
+    }
+  }
+  .scan-tiles {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.75rem;
+  }
+  .scan-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+    min-height: 8.75rem;
+    min-width: 0;
+    padding: 1rem;
+    text-align: left;
+    color: var(--color-text-body);
+    background: var(--color-bg-elevated);
+    border: 1px solid var(--color-border);
+    border-radius: 0.75rem;
+    cursor: pointer;
+  }
+  .scan-tile:hover {
+    border-color: var(--color-border-strong);
+  }
+  /* Open: heavier border (1px border + 1px inset ring, no layout change), the
+     colour change, and the toggle word and chevron flip below. */
+  .scan-tile[aria-expanded='true'] {
+    border-color: var(--color-interactive);
+    box-shadow: inset 0 0 0 1px var(--color-interactive);
+  }
+  .scan-tile-toggle {
+    display: inline-flex;
+    align-items: center;
+    align-self: flex-end;
+    margin-top: auto;
+    font-size: 0.875rem;
+    font-weight: 600;
+    line-height: 1.25rem;
+    color: var(--color-text-body);
+  }
+  /* On a phone the toggle sits at the left edge of the tile: the quick-message
+     button is fixed at the right edge of the screen and would cover it. */
+  @media (max-width: 639px) {
+    .scan-tile-toggle {
+      align-self: flex-start;
+    }
+  }
+  .scan-tile-toggle .scan-toggle-open,
+  .scan-tile[aria-expanded='true'] .scan-toggle-closed {
+    display: none;
+  }
+  .scan-tile[aria-expanded='true'] .scan-toggle-open {
+    display: inline;
+  }
+  .scan-tile-reason {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 0.875rem;
+    font-weight: 400;
+    color: var(--color-text-muted);
+  }
+  .scan-tile-name {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--color-text-muted);
+  }
+  .scan-tile-value {
+    display: block;
+    max-width: 100%;
+    min-height: 1.75rem;
+    font-size: 1.125rem;
+    font-weight: 600;
+    line-height: 1.75rem;
+    overflow-wrap: anywhere;
+  }
+  .scan-skeleton {
+    display: block;
+    width: 8rem;
+    max-width: 100%;
+    height: 1.25rem;
+    margin-top: 0.25rem;
+    border-radius: 0.25rem;
+    background: var(--color-bg-secondary);
+  }
+  .scan-panel {
+    min-width: 0;
+    padding: 1rem;
+    background: var(--color-bg-elevated);
+    border: 1px solid var(--color-border);
+    border-radius: 0.75rem;
+    overflow-wrap: anywhere;
+  }
+  .scan-panel[hidden] {
+    display: none;
+  }
+  @media (min-width: 640px) {
+    .scan-tiles {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+    /* DOM order is tile, panel, tile, panel...; the panel of the open tile
+       sits full width under the row of tiles. */
+    .scan-tile {
+      grid-row: 1;
+    }
+    .scan-tile:nth-of-type(1) {
+      grid-column: 1;
+    }
+    .scan-tile:nth-of-type(2) {
+      grid-column: 2;
+    }
+    .scan-tile:nth-of-type(3) {
+      grid-column: 3;
+    }
+    .scan-steps {
+      grid-row: 2;
+      grid-column: 1 / -1;
+    }
+  }
+  /* Three narrow columns: a value such as "4 checks need attention" takes two
+     lines, so the tile keeps room for two from the start. */
+  @media (min-width: 640px) and (max-width: 1023px) {
+    .scan-tile-value {
+      min-height: 3.5rem;
+    }
+  }
+  @media (min-width: 640px) {
+    .scan-panel {
+      grid-row: 3;
+      grid-column: 1 / -1;
+    }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .scan-skeleton {
+      animation: scan-pulse 1.4s ease-in-out infinite;
+    }
+  }
+  @keyframes scan-pulse {
+    50% {
+      opacity: 0.5;
+    }
+  }
+</style>

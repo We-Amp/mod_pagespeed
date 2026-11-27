@@ -1,0 +1,327 @@
+# Host-package unit for the optimizer daemon (the factory worker).
+#
+# The daemon runs UNPRIVILEGED as the static system user
+# `pagespeed` (created by the packaged sysusers.d drop-in), with the cache in
+# a versioned, generationed directory owned by that user (tmpfiles.d), and
+# every socket/file mode set explicitly in code (UMask below is a backstop
+# only, never the mechanism).  The serving module's web-server user reaches
+# the socket and the shared cache through membership in group `pagespeed`;
+# the MODULE packages perform that join in their postinst.
+[Unit]
+Description=PageSpeed Optimizer Worker
+Documentation=https://modpagespeed.com/docs/configuration/
+After=network.target
+# The web server resolves the daemon once at its own start and needs the
+# notify socket (tmpfs, present only while the daemon runs) to answer then;
+# order the daemon ahead of the servers that carry the module directives.
+# Apache is apache2.service on Debian/Ubuntu and httpd.service on the
+# Enterprise Linux packages; nginx is nginx.service on all three distributions
+# we package for.  nginx is a first-class consumer of the volume, not an
+# Apache stand-in -- it opens the cache itself, so a boot that releases it
+# before the daemon has created the volume is the same hazard as upgrading in
+# the wrong order.
+# ORDERING ONLY, deliberately: no Wants= or Requires=.  A host may legitimately
+# run a web server without this daemon or this daemon without a web server, and
+# Before= against a unit that is not installed is inert.
+Before=apache2.service httpd.service nginx.service
+# Start rate limiting lives in [Unit] -- systemd ignores StartLimitBurst= and
+# StartLimitIntervalSec= in [Service] (with a warning).  Without them here a
+# PERMANENT refusal to start (cache directory missing, unwritable, or holding
+# foreign-owned daemon files) would restart every RestartSec forever instead
+# of latching `failed`, which is what makes the refusal visible to an
+# operator and to monitoring.
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+# Before= above orders the web servers after this unit's START, and with
+# Type=simple that is the fork, not readiness: the notify socket is bound
+# only after the cache volume has been opened or created, and the serving
+# module resolves the daemon once, at its own start.  The daemon does not
+# speak the systemd readiness protocol, so wait (bounded) for the socket
+# before the unit counts as started; a slow or failing start still surfaces
+# through the daemon's own exit and Restart= below, never through this hook.
+# The wait ends the moment the daemon is gone ($MAINPID no longer signals):
+# a refusal to start then fails the unit within one tick and is re-attempted
+# after RestartSec, as before this hook existed.  Were the hook to hold the
+# unit for its full 30 s instead, five refusals would never fall inside
+# StartLimitIntervalSec and the start-limit latch above could not trip.
+ExecStartPost=/bin/sh -c 'i=0; while [ ! -S "$SOCKET_PATH" ]; do if [ -n "$MAINPID" ] && ! kill -0 "$MAINPID" 2>/dev/null; then exit 0; fi; i=$((i+1)); if [ "$i" -ge 300 ]; then echo "pagespeed-optimizer: notify socket $SOCKET_PATH not present after 30s; web servers ordered after this unit may start before the daemon answers" >&2; exit 0; fi; sleep 0.1; done'
+# Defaults; /etc/default/pagespeed-optimizer overrides them.  Secrets
+# (PAGESPEED_API_TOKEN, PAGESPEED_PURGE_TOKEN) do NOT belong here or on the
+# command line: they ride /etc/pagespeed-optimizer/daemon.env (0640
+# root:pagespeed) so they stay out of /proc/<pid>/cmdline.
+Environment=CACHE_DIR=/var/cache/pagespeed-optimizer/v3
+Environment=SOCKET_PATH=/run/pagespeed-optimizer/notify.sock
+Environment=CACHE_SIZE=536870912
+Environment=LOG_LEVEL=info
+Environment=OPTIMIZER_OPTS=
+EnvironmentFile=-/etc/default/pagespeed-optimizer
+EnvironmentFile=-/etc/pagespeed-optimizer/daemon.env
+# --cache-dir names the directory; the daemon derives the volume file stem
+# "cache" inside it (deliberately extensionless: it appends
+# -<generation>-<geometry> to form the physical volume filename, and the
+# serving module prefix-matches that stem).  Relocating the cache needs the
+# sandbox extended too -- see /etc/default/pagespeed-optimizer.
+ExecStart=/usr/bin/pagespeed-optimizer \
+    --cache-dir ${CACHE_DIR} \
+    --socket ${SOCKET_PATH} \
+    --cache-size ${CACHE_SIZE} \
+    --log-format json \
+    --log-level ${LOG_LEVEL} \
+    $OPTIMIZER_OPTS
+
+# Reload posture (#1465).  The daemon's settings are fixed at startup (cache
+# location, socket paths, thread pool); the hot-reloadable subset goes
+# through PATCH /v1/config on the management API, not through a signal.  So
+# reload has no honest semantics here, and the two failure modes to fence
+# are systemd's default and a stray signal: without an ExecReload=,
+# `systemctl reload` sends SIGHUP to the main process, and a SIGHUP the
+# daemon does not handle kills it -- with Restart=on-failure that made every
+# "reload" an unannounced restart.  The daemon now IGNORES SIGHUP (see
+# src/worker/main.cc), which by itself would make `reload` a silent no-op
+# that reports success; this ExecReload= makes it fail loudly instead, and
+# say what to do instead.  A failing ExecReload= does not restart or stop
+# the main process -- the reload verb just reports failure.
+ExecReload=/bin/sh -c 'echo "pagespeed-optimizer: reload is not supported (config is fixed at startup; hot-reloadable settings go through PATCH /v1/config) -- use: systemctl restart pagespeed-optimizer" >&2; exit 1'
+
+# Identity (H1).  User/group come from usr/lib/sysusers.d/pagespeed-
+# optimizer.conf; the daemon holds no capabilities and cannot gain any.
+User=pagespeed
+Group=pagespeed
+CapabilityBoundingSet=
+NoNewPrivileges=yes
+
+# Backstop only: every security-relevant mode (sockets 0660, volume 0660,
+# shared config 0640, serve-stats 0660) is set with an explicit
+# chmod/fchmod in the daemon.  Correctness never depends on this umask.
+UMask=0007
+
+# /run/pagespeed-optimizer (notify/health/mgmt sockets), group-scoped.
+# systemd creates it BEFORE the sandbox is built, owned pagespeed:pagespeed.
+RuntimeDirectory=pagespeed-optimizer
+RuntimeDirectoryMode=0750
+
+# Security hardening.  NOTE: PrivateUsers= must stay UNSET — the headless-
+# Chrome sandbox (H4) needs user-namespace clone from this service.
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+# ReadWritePaths does NOT expand ${CACHE_DIR}, and the tmpfiles.d line only
+# manages the DEFAULT location.  Relocating CACHE_DIR (e.g. to a dedicated
+# cache disk) needs the new directory to EXIST FIRST, owned
+# pagespeed:pagespeed mode 2770 (ProtectSystem=strict keeps the rest of the
+# filesystem read-only) plus a drop-in extending this list -- the full
+# procedure is in /etc/default/pagespeed-optimizer.
+ReadWritePaths=/var/cache/pagespeed-optimizer
+
+# ---------------------------------------------------------------------------
+# Kernel and host surface.
+#
+# Nothing in this block is the daemon's syscall ALLOW-LIST.  These are
+# namespace, mount and bit restrictions systemd applies directly; several are
+# implemented as small seccomp filters that return EPERM (ProtectClock,
+# ProtectKernelModules, ProtectKernelLogs, RestrictRealtime, RestrictSUIDSGID,
+# LockPersonality), so a call the daemon does not make cannot kill it.
+#
+# ONE exception, stated because "never SIGSYS" would be wrong:
+# SystemCallArchitectures=native KILLS (SIGSYS) a syscall issued through a
+# non-native ABI -- 32-bit entry on x86_64, compat entry on aarch64.  Nothing
+# in this statically linked binary or in glibc does that, and the rig asserts
+# no SIGSYS across a full cycle on both architectures, so it ships enabled
+# rather than waiting for the soak.  The daemon's own allow-list -- the
+# control that could kill a call it really makes -- is the block further
+# down, enforcing by default since 2.1.0 with a documented opt-out.
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+# No core dumps: a dump of this process contains the cache volume's mapped
+# pages and the management-API and purge tokens.  It also removes the
+# coredumpctl route to attributing a SIGSYS to a syscall name -- the rig
+# reports that detector as unavailable rather than pretending otherwise, and
+# reads the kill from systemd's ExecMainCode/ExecMainStatus instead.
+LimitCORE=0
+
+# Deliberately NOT set, each for a named reason (design §5.2):
+#   MemoryDenyWriteExecute=  Chrome's V8 JIT needs W^X transitions.
+#   ProcSubset=pid           Chrome reads /proc/meminfo, and the daemon reads
+#                            /proc/<chrome pid>/status for the RSS timer.
+#   PrivateUsers=            the Chrome sandbox (H4) clones a user namespace
+#                            from this service (see the note above).
+#   PrivateNetwork=          the management API binds, and the agent_optimize
+#                            fetcher spawns a curl child.
+# RestrictNamespaces=yes IS set, in the syscall block below, because the
+# daemon itself needs no namespace; the browser-analysis drop-in resets it
+# for the Chrome sandbox (see there).
+
+# Address families.  AF_UNIX carries the notify/health/mgmt sockets and the
+# --api-socket transport; AF_NETLINK is glibc's NSS/getaddrinfo path and
+# libuv's interface enumeration; AF_INET/AF_INET6 are the optional TCP
+# management API AND -- the reason this cannot be narrower by default -- the
+# curl child the agent_optimize fetcher spawns, which inherits this
+# restriction.  Design §6.2 concluded the INET families could be dropped once
+# the default transport became a unix socket; that conclusion does not
+# survive the subprocess.  A deployment with
+# agent_optimize off can drop them in a drop-in.
+RestrictAddressFamilies=AF_UNIX AF_NETLINK AF_INET AF_INET6
+
+# ---------------------------------------------------------------------------
+# Syscall filtering -- ENFORCING BY DEFAULT since 2.1.0
+#
+# The allow-list lives HERE, in the unit, and nowhere else.  It is not a
+# drop-in on purpose: a drop-in carrying a bare `SystemCallFilter=` list
+# DEFINES an allow-list when nothing sits underneath it, so any drop-in that
+# only widens this profile (the browser-analysis one) would become a
+# twelve-syscall allow-list the moment this half went missing -- and the
+# daemon would be killed at startup.  With the list in the unit that
+# mis-install cannot be performed: every drop-in is additive to what is
+# here.
+#
+# What it does: the kernel KILLS the process (SIGSYS, exit status 31) on the
+# first system call outside the set.  A denial converted to an errno with
+# SystemCallErrorNumber= would let the daemon limp on with an undiagnosable
+# failure deep inside glibc -- the silent degrade this project's fences
+# forbid -- so there is none.
+#
+# OPT-OUT -- back to the pre-2.1.0 log-only posture, surviving every package
+# upgrade because the package never writes under /etc/systemd:
+#
+#   install -D -m 0644 \
+#     /usr/share/doc/pagespeed-optimizer/90-syscall-filter-off.conf.example \
+#     /etc/systemd/system/pagespeed-optimizer.service.d/90-syscall-filter-off.conf
+#   systemctl daemon-reload && systemctl restart pagespeed-optimizer
+#
+# The file resets SystemCallFilter= and RestrictNamespaces= (an empty
+# assignment clears the directive); the `90-` prefix makes it sort after
+# every vendor drop-in, which is what lets the reset win.  SystemCallLog=
+# below stays in force, so an opted-out host keeps recording what the
+# profile would have killed -- the same soak the flip was decided on.
+#
+# CONFIRM the posture by asking systemd, not the daemon:
+#
+#   systemctl show -p SystemCallFilter pagespeed-optimizer
+#     enforcing -> a long allow-list (no leading `~`)
+#     opted out -> `SystemCallFilter=~`   (an empty deny-list: nothing filtered)
+#   systemd-analyze security pagespeed-optimizer
+#
+# The daemon's own `syscall_filter` field on /v1/health says "filtered" in
+# BOTH postures, because SystemCallLog= is itself a seccomp filter.  It
+# answers "is a filter attached", never "is this profile enforcing".
+#
+# DIAGNOSING A KILL.  A SIGSYS shows up three ways: `systemctl status`
+# reports `code=dumped, status=31/SYS` (LimitCORE=0 writes no dump; the
+# kernel still classifies the signal that way); the journal shows the
+# daemon's own `Chrome exited (status=0, signal=31)` line when the victim
+# was the browser rather than the daemon; and the kernel writes an audit
+# record, type 1326, naming the call by NUMBER (`syscall=N`).  Where that
+# record lands depends on auditd:
+#
+#   systemctl is-active auditd     # decide which read applies
+#   ausearch -m SECCOMP -ts recent -i            # auditd running (-i names it)
+#   journalctl -k | grep 'type=1326'             # auditd not running: the kernel
+#                                                # ring (audit records carry no
+#                                                # unit field; -u finds none)
+#   a KILL reads sig=31 (code=0x8...); sig=0 code=0x7ffc0000 is a log record
+#
+# When auditd runs (the default on RHEL/AlmaLinux/Rocky) it owns the kernel's
+# audit socket and these records NEVER reach the journal, so the journal
+# read is empty there no matter what was killed.  To turn the number into a
+# name where nothing did it for you: `ausyscall <N>` (audit package), or
+# `systemd-analyze syscall-filter` lists every group with its members.
+# Report the name together with the Chrome version if the victim was the
+# browser -- Chrome's sandbox is Chrome's to change.
+#
+# CENSUS (tools/packaging/syscall-census.sh, artefact in
+# deploy/pagespeed-optimizer.syscall-census.md).  Every syscall observed
+# across the measured postures -- cold start, cache create and peer open,
+# the three UDS binds, --api-socket and --api-port WITH REAL REQUESTS
+# DRIVEN OVER THEM, a cache purge, a reload signal, SIGTERM, and the daemon
+# running UNDER THIS UNIT as User=pagespeed with every directive here in
+# force -- on Debian 12, Ubuntu 24.04 and AlmaLinux 9 is already a member
+# of @system-service minus @privileged and @resources.
+#
+# ONE per-name addition, from the cache library rather than the census:
+# mincore(2).  Cyclone (since 2194698) checks whether a range is already in
+# the page cache before it issues a readahead hint, and it now does so on
+# the ordinary path -- once per stripe when it opens an existing mmap
+# directory at start, and on cold reads of 16 KiB and up.  mincore is
+# outside @system-service, so without it the daemon is killed with SIGSYS
+# as soon as it reopens its own cache (the rig's "browser profile masked"
+# leg caught it; the browser drop-in also admits it, which is why the
+# default posture did not).  It only reports residency of the caller's own
+# mappings.
+#
+# Measured rather than assumed: io_uring_setup/io_uring_enter are IN
+# @system-service and are really used by libuv 1.52's Linux backend, so the
+# profile needs no io_uring carve-out and no UV_USE_IO_URING=0 (design §7
+# R1); and unshare is in @system-service too, so it is RestrictNamespaces=
+# -- not the syscall allow-list -- that governs the Chrome sandbox probe.
+#
+# Browser analysis with a real Chrome is measured separately, under this
+# unit, by the rig's h6-browser-analysis and h6-browser-soak legs; the names
+# it needs beyond this set live in 20-browser-analysis.conf and nowhere
+# else.  NOT covered by the census, and named here so the gap is not
+# mistaken for coverage: a fully served optimization, which needs the
+# serving module and is a different CI lane.
+#
+# @system-service is systemd's "what a normal system service does" set,
+# maintained per-architecture upstream, so this unit never names a syscall
+# number.
+SystemCallFilter=@system-service mincore
+# ...minus two groups this daemon has no business in.  It holds no
+# capabilities (CapabilityBoundingSet= is empty) and never adjusts its own
+# scheduling or namespaces, so a call from either group is a bug or an
+# intrusion, and either way a kill is the loudest correct answer.  Members
+# of these groups that are ALSO inside @system-service (setuid, capset,
+# setpriority, sched_setaffinity, ...) are removed by this line, not by the
+# one above -- which is why SystemCallLog= below can never record them.
+SystemCallFilter=~@privileged @resources
+# Namespaces.  The daemon needs none of its own; the only consumer is the
+# headless-Chrome sandbox.  unshare(2) is a member of @system-service, so
+# this -- not the allow-list above -- is what governs the Chrome sandbox
+# probe.  Reset by 20-browser-analysis.conf.
+RestrictNamespaces=yes
+# Kept alongside the enforcing filter: it LOGS (audit record type 1326) any
+# call outside @system-service and lets it proceed.  Under enforcement the
+# kill wins for the calls both cover, so what this adds is (1) a record of
+# the calls a drop-in re-admitted beyond @system-service -- Chrome's
+# seccomp/chroot -- and (2) the pre-2.1.0 soak posture, unchanged,
+# for a host that opted out above.
+#
+# Cost, both halves.  (1) Each directive installs a real seccomp-BPF
+# program, so EVERY system call the daemon makes is evaluated against it --
+# a small constant added to each call, paid whether or not anything matches.
+# (2) An audit record is written per MATCHING call, and THAT is only cheap
+# because the census found nothing outside the set.  If a future change
+# starts making one of these calls in a hot path the log (or the kill) will
+# say so loudly, which is the point -- read it, do not silence it.  The one
+# exception is mincore, admitted above for the cache's readahead check: it
+# runs on cold reads, so logging it would write an audit record per read.
+SystemCallLog=~@system-service mincore
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# Restart behavior.  A refusal-to-start (cache directory missing,
+# unwritable, or holding foreign-owned content) is deliberate and LOUD:
+# backoff + monitoring, never a silent fallback.
+Restart=on-failure
+RestartSec=5
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pagespeed-optimizer
+
+[Install]
+WantedBy=multi-user.target

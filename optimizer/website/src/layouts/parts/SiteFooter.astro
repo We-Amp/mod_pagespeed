@@ -1,0 +1,148 @@
+---
+// The site footer: the ticked rule above it, the link groups from
+// src/data/nav.ts, the newsletter signup, and the company identification and
+// provenance lines.
+//
+// Markup here keeps the layout's indentation: the build does not compress
+// HTML, so whitespace in this file is whitespace in every page.
+import SiteLogo from '../../components/SiteLogo.astro';
+import Icon from '../../components/Icon.astro';
+import NewsletterSignup from '../../components/NewsletterSignup.astro';
+import { PRODUCT_DISPLAY_NAME } from '../../data/product-facts.mjs';
+import { footerGroups, umamiAttrs } from '../../data/nav';
+
+const currentLabel = PRODUCT_DISPLAY_NAME;
+---
+    <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+      <div class="rule-ticked-scale" role="presentation" aria-hidden="true"></div>
+    </div>
+    <footer data-site-footer class="border-t border-border bg-bg-secondary">
+      <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-12">
+        {/* The navigation landmark wraps the whole link grid, so the grid and
+            its cells are unchanged. */}
+        <nav aria-label="Footer">
+        <div class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-8 xl:gap-7">
+          <div class="col-span-full lg:col-span-1">
+            <SiteLogo width={189} height={28} class="h-7 w-auto max-w-full" label={currentLabel} />
+            <p class="mt-3 text-sm text-text-muted">
+              Built by We-Amp &mdash; the team that helped build ngx_pagespeed, maintaining
+              mod_pagespeed today.
+            </p>
+            <div class="mt-4 flex items-center gap-3 max-sm:gap-6">
+              <a
+                href="https://github.com/We-Amp/mod_pagespeed"
+                rel="noopener"
+                aria-label={`${PRODUCT_DISPLAY_NAME} on GitHub`}
+                title="GitHub"
+                class="max-sm:-m-3 max-sm:p-3 text-text-annotation hover:text-text-body transition-colors"
+              >
+                <svg class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path
+                    fill-rule="evenodd"
+                    clip-rule="evenodd"
+                    d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0022 12.017C22 6.484 17.522 2 12 2z"
+                  ></path>
+                </svg>
+              </a>
+              <a
+                href="/blog/rss.xml"
+                aria-label="Blog RSS feed"
+                title="RSS feed"
+                class="max-sm:-m-3 max-sm:p-3 text-text-annotation hover:text-text-body transition-colors"
+              >
+                <svg class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M6.18 15.64a2.18 2.18 0 110 4.36 2.18 2.18 0 010-4.36zM4 4.44A15.56 15.56 0 0119.56 20h-2.83A12.73 12.73 0 004 7.27V4.44zm0 5.66a9.9 9.9 0 019.9 9.9h-2.83A7.07 7.07 0 004 12.93V10.1z"></path>
+                </svg>
+              </a>
+            </div>
+            <a
+              href="https://github.com/sponsors/We-Amp"
+              rel="noopener"
+              aria-label="Sponsor We-Amp on GitHub"
+              data-umami-event="cta_sponsor"
+              class="mt-4 inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm text-text-muted transition-colors hover:text-text-body hover:border-text-annotation"
+            >
+              <Icon name="heart" class="h-4 w-4" />
+              Sponsor
+            </a>
+          </div>
+
+          {/* Legal fills the one short cell: under Guides at lg, under the logo
+              from xl. Tools and Support and company span two rows from lg;
+              Product, Install and docs and Guides do too from xl. Each group
+              title is a heading, so the groups can be reached from a headings
+              list. */}
+          {footerGroups.map((group) => (
+            <div
+              class:list={[
+                {
+                  'lg:row-span-2': ['Tools', 'Support and company'].includes(group.title),
+                  'xl:row-span-2': ['Product', 'Install and docs', 'Guides'].includes(group.title),
+                },
+              ]}
+            >
+              <h2 class="eyebrow uppercase text-text-annotation tracking-[0.08em] sm:whitespace-nowrap [&::before]:hidden">
+                {group.title}
+              </h2>
+              <ul class="mt-3 space-y-2 max-sm:space-y-0.5">
+                {group.links.map((item) => (
+                  <li>
+                    <a
+                      href={item.href}
+                      data-umami-event={item.umamiEvent}
+                      {...umamiAttrs(item.umamiProps)}
+                      rel={item.external ? 'noopener noreferrer' : undefined}
+                      class="text-sm text-text-muted hover:text-text-body max-sm:inline-block max-sm:py-1.5"
+                    >
+                      {item.label}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+        </nav>
+
+        {/* Newsletter signup (compact, full-width row under the link grid).
+            Shared component; captures into the contact pipeline until
+            Buttondown is live — see src/components/NewsletterSignup.astro. */}
+        <div class="mt-10 border-t border-border pt-8">
+          <div class="max-w-md">
+            <NewsletterSignup variant="footer" />
+          </div>
+        </div>
+
+        <div class="mt-8 border-t border-border pt-8">
+          {/* Consolidated legal-identification block (LEGAL-8): legal name,
+              registered address, company registration, VAT number, and contact
+              in one easy-to-find place.
+              TODO(LEGAL-8): confirm the registered street address — the exact
+              street/number is not in the repo, so only the registered city is
+              shown. Fill in the full street address when available. */}
+          <address class="not-italic text-xs leading-relaxed text-text-annotation">
+            <a
+              href="https://we-amp.com/"
+              class="font-medium text-text-annotation hover:text-text-body transition-colors"
+            >
+              We-Amp B.V.
+            </a>
+            &middot; Castricum, The Netherlands &middot; KvK 57898138 &middot; BTW NL852784429B01
+            &middot;
+            <a
+              href="mailto:info@we-amp.com"
+              class="underline underline-offset-2 hover:text-text-muted transition-colors"
+            >
+              info@we-amp.com
+            </a>
+          </address>
+          <p class="mt-3 text-xs text-text-annotation">
+            &copy; {new Date().getFullYear()} We-Amp B.V.
+          </p>
+          <p class="mt-1 text-xs text-text-annotation">
+            mod_pagespeed is an open-source project originally developed at Google. {currentLabel}{' '}
+            is developed by We-Amp B.V. and is not affiliated with or endorsed by Google.
+          </p>
+        </div>
+      </div>
+    </footer>

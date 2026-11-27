@@ -1,0 +1,431 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import DocsSidebar from '../../components/docs/DocsSidebar.astro';
+import { FILTER_REFERENCE } from '../../lib/docs-nav';
+import { PRODUCT_DISPLAY_NAME } from '../../data/product-facts.mjs';
+import { productRef } from '../../data/software-jsonld';
+import {
+  FILTERS,
+  FILTER_SETS,
+  FILTERS_SOURCE,
+  PAGE_BY_CATEGORY,
+  filtersByCategory,
+  type Filter,
+} from '../../data/filters';
+
+// Canonical hub for the head term "PageSpeed filters" (SEO de-cannibalization,
+// 2026-06-18) and, since 2026-10, THE filter reference: the retired
+// filter-reference and filters-overview pages redirect here.
+// The table is rendered from src/data/filters.ts, a typed view of
+// src/data/reference/filters.json that scripts/generate-references.mjs derives
+// from the module source (every name the module accepts, the CoreFilters and
+// OptimizeForBandwidth sets, the dangerous and deprecated flags, the compound
+// names and their members), so the page cannot list a filter the module does
+// not ship or miss one it does. Each row carries the filter name as its id
+// (deep links from /analyze/ and the legacy filter-reference URL land on it)
+// and links to the filter's own section on its group page.
+//
+// The per-filter prose (what it changes, when to use it, risks, the config
+// line, the live example) lives on the group pages /docs/css-filters/,
+// /docs/image-filters/, /docs/javascript-filters/, /docs/html-filters/ and
+// /docs/cache-control/; /docs/filter-selection/ covers RewriteLevel and the
+// enable/disable directives. The optimizer worker (Docker / reverse-proxy
+// shape) runs a different pipeline configured by flags, not by this list:
+// see /docs/worker-configuration/.
+
+const groups = filtersByCategory();
+const rows: Filter[] = FILTERS;
+const shipped = FILTERS.filter((f) => !f.alias && !f.alternateSpellingOf);
+const aliases = FILTERS.filter((f) => f.alias);
+const counts = {
+  shipped: shipped.length,
+  aliases: aliases.length,
+  core: FILTER_SETS.core.length,
+  ofb: FILTER_SETS.optimizeForBandwidth.length,
+  deprecated: FILTERS.filter((f) => f.deprecated).length,
+  dangerous: FILTERS.filter((f) => f.dangerous).length,
+};
+
+const categories = [
+  {
+    slug: PAGE_BY_CATEGORY.Image,
+    title: 'Image filters',
+    description:
+      'Recompression, format conversion (WebP, opt-in AVIF), resizing, inlining, lazy loading and responsive images. The master filter rewrite_images is a CoreFilter and enables its sub-filters by default.',
+  },
+  {
+    slug: PAGE_BY_CATEGORY.CSS,
+    title: 'CSS filters',
+    description:
+      'Minification, combining, inlining, import flattening and critical-CSS extraction. Several CSS filters are CoreFilters and run by default; the rest are enabled by name or through OptimizeForBandwidth.',
+  },
+  {
+    slug: PAGE_BY_CATEGORY.JavaScript,
+    title: 'JavaScript filters',
+    description:
+      'Minification, combining, inlining, deferring execution and source-map preservation. Three JS filters are CoreFilters: rewrite_javascript, combine_javascript and inline_javascript.',
+  },
+  {
+    slug: PAGE_BY_CATEGORY.HTML,
+    title: 'HTML filters',
+    description:
+      'Whitespace removal, comment stripping, attribute elision, DNS prefetch, preload hints and speculation rules. Two HTML filters (add_head, convert_meta_tags) are CoreFilters and run by default.',
+  },
+  {
+    slug: PAGE_BY_CATEGORY.Caching,
+    title: 'Caching and URL filters',
+    description:
+      'Cache extension and URL management. extend_cache rewrites resource URLs so browsers cache them for a year while still receiving updated content when a resource changes.',
+  },
+];
+
+const faq = [
+  {
+    q: 'What is a PageSpeed filter?',
+    a: 'A filter is one named optimization that mod_pagespeed applies to a page or a resource as the web server serves it: recompress an image, minify or combine a stylesheet, inline a small script, extend a cache lifetime. Filters are enabled by name with EnableFilters, or as a set with RewriteLevel.',
+  },
+  {
+    q: 'Which filters are on by default?',
+    a: `RewriteLevel CoreFilters, the default, enables the ${counts.core} filters marked Core in the table. OptimizeForBandwidth enables the ${counts.ofb} filters marked OFB and keeps URLs unchanged. PassThrough enables none, and AllFilters enables every filter outside the dangerous set.`,
+  },
+  {
+    q: 'How do I enable or disable a filter?',
+    a: 'Add it to EnableFilters or DisableFilters: pagespeed EnableFilters rewrite_images,lazyload_images; on nginx, ModPagespeedEnableFilters rewrite_images,lazyload_images on Apache, and the nginx form without the semicolon in pagespeed.config on IIS. A filter can also be forbidden for a whole server with ForbidFilters.',
+  },
+  {
+    q: 'Does the Docker image use these filters?',
+    a: 'No. The native module for Apache, nginx and IIS uses this filter list. The optimizer worker behind the Docker image and the Helm chart runs its own pipeline (image transcoding, critical CSS, caching) configured by command-line flags; see the worker and reverse-proxy configuration page.',
+  },
+];
+
+const siteOrigin = 'https://modpagespeed.com';
+const jsonLd = [
+  {
+    '@context': 'https://schema.org',
+    '@type': 'CollectionPage',
+    name: 'PageSpeed filters: the complete reference',
+    description: `Every ${PRODUCT_DISPLAY_NAME} optimization filter in one reference: what each filter does, which content type it transforms, whether CoreFilters or OptimizeForBandwidth enables it, and its risk rating. ${counts.shipped} filters plus ${counts.aliases} compound names, generated from the module source.`,
+    url: `${siteOrigin}/docs/filters/`,
+    mainEntity: {
+      '@type': 'ItemList',
+      numberOfItems: rows.length,
+      itemListElement: rows.map((f, idx) => ({
+        '@type': 'ListItem',
+        position: idx + 1,
+        name: f.name,
+        description: f.description,
+        url: `${siteOrigin}${f.href}`,
+      })),
+    },
+    about: await productRef(),
+  },
+  {
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: faq.map((item) => ({
+      '@type': 'Question',
+      name: item.q,
+      acceptedAnswer: { '@type': 'Answer', text: item.a },
+    })),
+  },
+];
+
+const yesNo = (v: boolean | 'partial') => (v === true ? 'Yes' : v === 'partial' ? 'Part' : '—');
+const riskLabel = (f: Filter) => f.risk ?? '—';
+const tone = (f: Filter) =>
+  f.dangerous || f.deprecated
+    ? 'text-text-annotation'
+    : f.risk === 'Test first' || f.risk === 'Experimental'
+      ? 'text-text-muted'
+      : 'text-text-body';
+---
+
+<BaseLayout
+  skipTarget="doc-content"
+  title="PageSpeed filters: the complete reference"
+  description={`What PageSpeed filters are, how to enable them, and all ${counts.shipped} mod_pagespeed filters with what each one changes.`}
+  jsonLd={jsonLd}
+  alternateMarkdown="/docs/filters.md"
+  wideHeader
+>
+  <div class="mx-auto max-w-6xl xl:max-w-7xl px-4 sm:px-6 lg:px-8 py-20">
+    <div class="lg:grid lg:grid-cols-[240px_minmax(0,1fr)] lg:gap-12">
+      <DocsSidebar current={FILTER_REFERENCE} />
+
+      <section id="doc-content" tabindex="-1" class="min-w-0 focus:outline-none">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:flex-wrap">
+          <h1 class="h1-hero break-words text-text-body">PageSpeed filters</h1>
+          <a
+            href="/docs/"
+            class="text-sm font-medium text-interactive hover:text-interactive-hover inline-flex items-center gap-1 self-start sm:self-auto"
+            aria-label="Back to documentation index"
+          >
+            Documentation
+            <span aria-hidden="true">&rarr;</span>
+          </a>
+        </div>
+
+        <p class="mt-4 text-lg text-text-muted">
+          A PageSpeed filter is one named optimization that{' '}
+          <a
+            href="/"
+            class="text-interactive hover:text-interactive-hover underline underline-offset-4"
+          >
+            mod_pagespeed
+          </a>
+          , the in-process module for Apache, nginx and IIS, applies to a page or a resource as the
+          server serves it: recompress an image, minify and combine CSS and JavaScript, inline the
+          critical CSS, extend a cache lifetime. The table lists every filter mod_pagespeed accepts
+          &mdash; {counts.shipped} filters and {counts.aliases} compound names that expand to
+          several &mdash; generated from the module source at {FILTERS_SOURCE.tag}, so it is the
+          list the shipped module knows. Each name links to the entry that explains what the filter
+          changes, when to use it and what can go wrong.
+        </p>
+
+        <p class="mt-4 rounded-lg border border-border bg-bg-elevated px-4 py-3 text-sm text-text-muted">
+          Looking for the Google PageSpeed Insights score at{' '}
+          <a
+            href="https://pagespeed.web.dev"
+            rel="noopener"
+            class="text-interactive hover:text-interactive-hover underline underline-offset-4"
+          >
+            pagespeed.web.dev
+          </a>
+          ? That is Google&rsquo;s online scoring tool. This page documents the optimization filters
+          that do the work, not the score. To measure a URL yourself, use{' '}
+          <a
+            href="/analyze/"
+            class="text-interactive hover:text-interactive-hover underline underline-offset-4"
+          >
+            Analyze
+          </a>
+          .
+        </p>
+
+        <h2 class="mt-10 text-xl font-semibold text-text-body" id="how-to-enable">
+          How to enable a filter
+        </h2>
+        <p class="mt-2 text-sm text-text-muted">
+          <code class="text-sm bg-bg-elevated px-1.5 py-0.5 rounded font-mono">RewriteLevel</code>{' '}
+          picks the baseline set: <strong>CoreFilters</strong> (the default) enables the{' '}
+          {counts.core} filters marked
+          <em>Core</em>, <strong>OptimizeForBandwidth</strong> enables the {counts.ofb} marked
+          <em>OFB</em> and leaves URLs unchanged, <strong>PassThrough</strong> enables none. Add or
+          remove individual filters by name:
+        </p>
+        <pre
+          tabindex="0"
+          class="mt-3 rounded-lg border border-border bg-bg-elevated p-4 text-sm font-mono overflow-x-auto"
+        ><code>pagespeed EnableFilters rewrite_images,lazyload_images;   # nginx
+pagespeed DisableFilters convert_jpeg_to_webp;
+ModPagespeedEnableFilters rewrite_images,lazyload_images   # Apache
+pagespeed EnableFilters rewrite_images,lazyload_images     # IIS (pagespeed.config)</code></pre>
+        <p class="mt-2 text-sm text-text-muted">
+          Scoping per virtual host and location,{' '}
+          <code class="text-sm bg-bg-elevated px-1.5 py-0.5 rounded font-mono">ForbidFilters</code>{' '}
+          and the thresholds each filter reads are on{' '}
+          <a
+            href="/docs/filter-selection/"
+            class="text-interactive hover:text-interactive-hover underline underline-offset-4"
+          >
+            Choosing filters
+          </a>
+          . The optimizer worker behind the Docker image runs a different pipeline, configured by
+          flags rather than this list: see{' '}
+          <a
+            href="/docs/worker-configuration/"
+            class="text-interactive hover:text-interactive-hover underline underline-offset-4"
+          >
+            Worker and reverse-proxy configuration
+          </a>
+          .
+        </p>
+
+        <h2 class="mt-10 text-xl font-semibold text-text-body" id="all-filters">
+          The full list of PageSpeed filters
+        </h2>
+        <p class="mt-1 text-sm text-text-muted">
+          Alphabetical. <em>Core</em> and <em>OFB</em>: enabled by RewriteLevel CoreFilters /
+          OptimizeForBandwidth (<em>Part</em>: a compound name whose members are only partly in the
+          set). <em>Risk</em>: the rating from the group page; <em>Dangerous</em> marks the
+          module&rsquo;s own dangerous set, which AllFilters never enables, and <em>Deprecated</em>{' '}
+          a name that is accepted but does nothing. <em>Example</em> opens the live before/after
+          demo where the gallery has one.
+        </p>
+
+        <div class="mt-4 overflow-x-auto" tabindex="0" role="region" aria-label="PageSpeed filters">
+          <table class="w-full border-collapse text-sm">
+            <thead>
+              <tr class="border-b border-border text-left align-bottom">
+                <th scope="col" class="py-2 pr-4 font-semibold text-text-body">
+                  Filter
+                </th>
+                <th scope="col" class="py-2 pr-4 font-semibold text-text-body">
+                  What it does
+                </th>
+                <th scope="col" class="py-2 pr-3 font-semibold text-text-body whitespace-nowrap">
+                  Category
+                </th>
+                <th scope="col" class="py-2 pr-3 font-semibold text-text-body">
+                  Core
+                </th>
+                <th scope="col" class="py-2 pr-3 font-semibold text-text-body">
+                  OFB
+                </th>
+                <th scope="col" class="py-2 pr-3 font-semibold text-text-body">
+                  Risk
+                </th>
+                <th scope="col" class="py-2 font-semibold text-text-body">
+                  Example
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((f) => (
+                <tr class={`border-b border-border/60 ${tone(f)}`} id={f.name}>
+                  <td class="py-2 pr-4 align-top">
+                    <a
+                      href={f.topic}
+                      class="inline-block py-1 font-mono text-interactive hover:text-interactive-hover break-all"
+                      data-topic-link
+                    >
+                      {f.name}
+                    </a>
+                    {!f.topicIndexable && (
+                      <a
+                        href={f.href}
+                        class="ml-1 inline-block px-1 py-1 text-xs text-text-annotation hover:text-interactive"
+                        data-section-link
+                        aria-label={`${f.name}: section in ${f.category} filters`}
+                      >
+                        (section)
+                      </a>
+                    )}
+                    {f.alias && (
+                      <span class="block text-xs text-text-annotation">
+                        = {f.members.join(', ')}
+                      </span>
+                    )}
+                    {f.alternateSpellingOf && (
+                      <span class="block text-xs text-text-annotation">
+                        alternate spelling of {f.alternateSpellingOf}
+                      </span>
+                    )}
+                  </td>
+                  <td class="py-2 pr-4 align-top">
+                    {f.description}
+                    {f.note && <span class="block text-xs text-text-annotation">{f.note}</span>}
+                  </td>
+                  <td class="py-2 pr-3 align-top whitespace-nowrap">{f.category}</td>
+                  <td class="py-2 pr-3 align-top">{yesNo(f.core)}</td>
+                  <td class="py-2 pr-3 align-top">{yesNo(f.optimizeForBandwidth)}</td>
+                  <td class="py-2 pr-3 align-top whitespace-nowrap">{riskLabel(f)}</td>
+                  <td class="py-2 align-top whitespace-nowrap">
+                    {f.example ? (
+                      <a
+                        href={f.example}
+                        class="text-interactive hover:text-interactive-hover underline-offset-4 hover:underline"
+                        aria-label={`${f.name} demo`}
+                      >
+                        demo
+                      </a>
+                    ) : (
+                      <span aria-hidden="true">—</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <p class="mt-4 text-sm text-text-muted">
+          {counts.shipped} filters, {counts.aliases} compound names, {counts.core} in CoreFilters,
+          {counts.ofb} in OptimizeForBandwidth, {counts.dangerous} in the dangerous set,{' '}
+          {counts.deprecated}
+          deprecated. Generated from the module source at {FILTERS_SOURCE.tag}.
+        </p>
+
+        <div class="mt-12 border-t border-border pt-8">
+          <h2 class="text-xl font-semibold text-text-body" id="by-category">
+            Filters by category
+          </h2>
+          <p class="mt-1 text-sm text-text-muted">
+            The group pages hold the entry for every filter: what it changes, when to use it, the
+            directive to enable it, its risks and the live example.
+          </p>
+          <div class="mt-6 space-y-3">
+            {categories.map((cat) => {
+              const n = groups.find((g) => PAGE_BY_CATEGORY[g.category] === cat.slug)?.filters
+                .length;
+              return (
+                <a
+                  href={`/docs/${cat.slug}/`}
+                  class="block rounded-lg border border-border bg-bg-elevated p-6 hover:border-interactive/40 hover:bg-interactive/10 transition-colors"
+                >
+                  <h3 class="text-lg font-semibold text-text-body">
+                    {cat.title}
+                    {n !== undefined && (
+                      <span class="ml-2 text-sm font-normal text-text-annotation">{n} filters</span>
+                    )}
+                  </h3>
+                  <p class="mt-1 text-sm text-text-muted">{cat.description}</p>
+                </a>
+              );
+            })}
+          </div>
+        </div>
+
+        <div class="mt-12 border-t border-border pt-8">
+          <h2 class="text-xl font-semibold text-text-body" id="faq">
+            Frequently asked questions
+          </h2>
+          <dl class="mt-4 space-y-5">
+            {faq.map((item) => (
+              <div>
+                <dt class="font-semibold text-text-body">{item.q}</dt>
+                <dd class="mt-1 text-sm text-text-muted">{item.a}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+
+        <div class="mt-12 border-t border-border pt-8">
+          <h2 class="eyebrow tracking-widest text-text-body mb-6">See also</h2>
+          <div class="space-y-3">
+            <a
+              href="/docs/filter-selection/"
+              class="block rounded-lg border border-border bg-bg-elevated p-6 hover:border-interactive/40 hover:bg-interactive/10 transition-colors"
+            >
+              <h3 class="text-lg font-semibold text-text-body">Choosing filters</h3>
+              <p class="mt-1 text-sm text-text-muted">
+                RewriteLevel presets, EnableFilters, DisableFilters, ForbidFilters, per-location
+                scoping and the tuning thresholds.
+              </p>
+            </a>
+            <a
+              href="/docs/configuration/"
+              class="block rounded-lg border border-border bg-bg-elevated p-6 hover:border-interactive/40 hover:bg-interactive/10 transition-colors"
+            >
+              <h3 class="text-lg font-semibold text-text-body">Configuration reference</h3>
+              <p class="mt-1 text-sm text-text-muted">
+                Every Apache and nginx directive of the native module, generated from the same
+                source.
+              </p>
+            </a>
+            <a
+              href="/examples/"
+              class="block rounded-lg border border-border bg-bg-elevated p-6 hover:border-interactive/40 hover:bg-interactive/10 transition-colors"
+            >
+              <h3 class="text-lg font-semibold text-text-body">Optimization examples</h3>
+              <p class="mt-1 text-sm text-text-muted">
+                Each filter on a small page, original and optimized side by side, with the source
+                diff and the measured savings.
+              </p>
+            </a>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</BaseLayout>

@@ -1,0 +1,4 @@
+{
+  "_comment": "Expected cache-test failures for PageSpeed 2.0 proxy. Body modification (minification, transcoding) may invalidate some standard cache assumptions. Update this list after running the full cache-tests suite.",
+  "expected_failures": []
+}

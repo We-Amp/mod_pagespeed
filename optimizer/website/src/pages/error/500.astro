@@ -1,0 +1,23 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import ErrorContent from '../../components/ErrorContent.astro';
+
+// Prerendered, branded 500 served by nginx via `error_page 500 502 503 504 /error/500/index.html`.
+// See src/pages/error/404.astro for why this non-special path exists. (TECH-1)
+// Excluded from the sitemap (astro.config.mjs) and noindex.
+---
+
+<BaseLayout
+  title="Server error — mod_pagespeed"
+  description="Something went wrong on our end."
+  noindex
+  canonical={false}
+>
+  <ErrorContent
+    code="500"
+    heading="The worker dropped this one"
+    body="Something on our end failed mid-request — not your fault. Retry the page, or tell us what broke and we'll trace it."
+    linkHref="/contact/"
+    linkLabel="Report an issue"
+  />
+</BaseLayout>

@@ -1,0 +1,123 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# pipeline-nuget-rehearsal.yml -- everything `publish-nuget` does except the
+# push, as a reusable workflow (caller: nuget-rehearsal.yml).
+#
+# It takes the seven .nupkg files a release run produced (the `nupkg-<sha>`
+# artifact of a Release run, or the assets of a published release), runs the
+# same checks the release lane's `package` job runs plus the rehearsal-only
+# ones (tools/ci/nupkg_checks.sh), pushes them twice with --skip-duplicate to
+# a loopback HTTP feed that answers like nuget.org (201, 409, 400), restores
+# a consumer project from that feed and reads nuget.org to see which
+# id/version pairs already exist.
+#
+# Structurally keyless: no job names an environment, nothing here reads a
+# secret (the read-only workflow token is `github.token`), no job asks for
+# id-token, and nuget.org is only ever read. The caller passes no secret.
+# tools/ci/test_nuget_rehearsal_keyless.sh asserts all of it on every PR.
+
+name: pipeline-nuget-rehearsal
+
+on:
+  workflow_call:
+    inputs:
+      run_id:
+        type: string
+        default: ''
+      release_tag:
+        type: string
+        default: ''
+      version:
+        type: string
+        required: true
+      sha:
+        type: string
+        required: true
+      first_packages:
+        type: string
+        default: ''
+      windows_binaries:
+        type: string
+        default: report
+      expect_new:
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  rehearsal:
+    name: Rehearse the nuget.org publish (no key, no push)
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      # The checks come from main, never from the tree being released.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Ensure .NET 10 SDK
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Fetch the packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.run_id }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          WANT_SHA: ${{ inputs.sha }}
+        run: |
+          set -euo pipefail
+          case "$WANT_SHA" in *[!0-9a-f]*|"") echo "::error::sha must be a full lowercase commit sha"; exit 1;; esac
+          [ "${#WANT_SHA}" -eq 40 ] || { echo "::error::sha must be 40 characters"; exit 1; }
+          if [ -n "$RUN_ID" ] && [ -n "$RELEASE_TAG" ]; then echo "::error::give run_id or release_tag, not both"; exit 1; fi
+          if [ -z "$RUN_ID" ] && [ -z "$RELEASE_TAG" ]; then echo "::error::give run_id or release_tag"; exit 1; fi
+          rm -rf nupkg && mkdir nupkg
+          if [ -n "$RUN_ID" ]; then
+            case "$RUN_ID" in *[!0-9]*) echo "::error::run_id must be a number"; exit 1;; esac
+            run="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}")"
+            [ "$(printf '%s' "$run" | jq -r '.path')" = ".github/workflows/release.yml" ] \
+              || { echo "::error::run ${RUN_ID} is not a Release workflow run"; exit 1; }
+            [ "$(printf '%s' "$run" | jq -r '.status')" = completed ] && [ "$(printf '%s' "$run" | jq -r '.conclusion')" = success ] \
+              || { echo "::error::run ${RUN_ID} did not complete with conclusion success"; exit 1; }
+            [ "$(printf '%s' "$run" | jq -r '.head_sha')" = "$WANT_SHA" ] \
+              || { echo "::error::run ${RUN_ID} ran $(printf '%s' "$run" | jq -r '.head_sha'), not ${WANT_SHA}"; exit 1; }
+            names="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/artifacts" --paginate \
+              --jq '.artifacts[] | select((.name | startswith("nupkg-")) and (.expired | not)) | .name')"
+            # exactly one nupkg-<sha> artifact; jq -e is not used (jq 1.6 exits 0 on empty input)
+            [ -n "$names" ] && [ "$(printf '%s\n' "$names" | wc -l)" -eq 1 ] \
+              || { echo "::error::run ${RUN_ID} needs exactly one unexpired nupkg-<sha> artifact, found: ${names:-none}"; exit 1; }
+            [ "$names" = "nupkg-${WANT_SHA:0:7}" ] \
+              || { echo "::error::artifact ${names} is not nupkg-${WANT_SHA:0:7}"; exit 1; }
+            echo "Run ${RUN_ID}: head $(printf '%s' "$run" | jq -r '.head_sha'), conclusion $(printf '%s' "$run" | jq -r '.conclusion'), artifact ${names}"
+            gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" -n "$names" -D nupkg
+          else
+            case "$RELEASE_TAG" in v[0-9]*) ;; *) echo "::error::release_tag must look like v<version>"; exit 1;; esac
+            [ "$(gh api "repos/${GITHUB_REPOSITORY}/commits/${RELEASE_TAG}" --jq .sha)" = "$WANT_SHA" ] \
+              || { echo "::error::${RELEASE_TAG} does not point at ${WANT_SHA}"; exit 1; }
+            gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.nupkg' --dir nupkg
+          fi
+          ls -lh nupkg
+
+      - name: Offline checks (shared with the release lane)
+        env:
+          VERSION: ${{ inputs.version }}
+          WINDOWS_BINARIES: ${{ inputs.windows_binaries }}
+          EXPECT_SHA: ${{ inputs.sha }}
+          PIN_NOTE_FATAL: ${{ inputs.expect_new && '1' || '0' }}
+        run: tools/ci/nupkg_checks.sh offline nupkg "$VERSION" "$WINDOWS_BINARIES"
+
+      - name: Local feed push (twice, --skip-duplicate) and consumer restore
+        run: tools/ci/nupkg_checks.sh local-feed nupkg "${RUNNER_TEMP}/rehearsal"
+
+      - name: Read-only look at nuget.org
+        env:
+          NUGET_ORG_EXPECT: ${{ inputs.expect_new && 'new' || 'report' }}
+          NUGET_ORG_FIRST_PACKAGES: ${{ inputs.first_packages }}
+        run: tools/ci/nupkg_checks.sh nuget-org nupkg

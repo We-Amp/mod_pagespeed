@@ -1,0 +1,413 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+---
+
+<BaseLayout
+  title="Security policy and vulnerability reporting"
+  description="The mod_pagespeed security policy: how to report a vulnerability, the threat model, supply chain security and safe harbor for researchers."
+>
+  <section class="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 py-16">
+    <h1 class="h1-hero text-text-body">Security policy</h1>
+    <p class="mt-6 text-lg text-text-muted">
+      mod_pagespeed processes untrusted content &mdash; HTML, CSS, JavaScript, and images from
+      origin servers. We take this seriously.
+    </p>
+
+    <div class="mt-12 space-y-10">
+      <!-- Reporting vulnerabilities -->
+      <div>
+        <h2 class="h2-section text-text-body">Reporting vulnerabilities</h2>
+        <p class="mt-4 text-text-muted">
+          If you've found a security vulnerability, please email
+          <a
+            href="mailto:security@modpagespeed.com"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            security@modpagespeed.com
+          </a>
+          with details, or use GitHub private vulnerability reporting on the
+          <a
+            href="https://github.com/We-Amp/mod_pagespeed/security/advisories/new"
+            rel="noopener noreferrer"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            module
+          </a>{' '}
+          or the
+          <a
+            href="https://github.com/We-Amp/pagespeed-optimizer/security/advisories/new"
+            rel="noopener noreferrer"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            optimizer worker
+          </a>{' '}
+          repository. Do not open a public GitHub issue for security vulnerabilities.
+        </p>
+        <p class="mt-4 text-text-muted">
+          We do not publish a PGP key for reports. GitHub private vulnerability reporting is the
+          encrypted channel; if you need another one, ask by email and we will arrange it before you
+          send details.
+        </p>
+      </div>
+
+      <div class="rule-ticked-scale" role="presentation" aria-hidden="true"></div>
+
+      <!-- End-of-life notices -->
+      <div>
+        <h2 id="end-of-life-notices" class="h2-section text-text-body">
+          If we emailed you about an end-of-life release
+        </h2>
+        <p class="mt-4 text-text-muted">
+          We write, once, to an organization whose public website answers with an
+          <code>X-Mod-Pagespeed</code> or <code>X-Page-Speed</code> response header identifying a
+          PageSpeed release that no longer receives security fixes. A notice from us looks like
+          this:
+        </p>
+        <ul class="mt-4 space-y-3 text-text-muted">
+          <li class="flex items-start gap-3">
+            <span class="mt-1 flex-shrink-0 text-text-annotation font-bold">&bull;</span>
+            <span>
+              By email it comes from <code>otto@modpagespeed.com</code>, DKIM-signed for
+              modpagespeed.com, as plain text without attachments, to an address published for
+              security reports, normally your organization's own.
+            </span>
+          </li>
+          <li class="flex items-start gap-3">
+            <span class="mt-1 flex-shrink-0 text-text-annotation font-bold">&bull;</span>
+            <span>
+              It names the host and the header, so you can check the claim yourself, and it lists
+              the requests we made to check it.
+            </span>
+          </li>
+          <li class="flex items-start gap-3">
+            <span class="mt-1 flex-shrink-0 text-text-annotation font-bold">&bull;</span>
+            <span>
+              It is sent once. It makes no offer and asks for no payment or bounty; one sentence
+              states that we earn our income from support and consulting. We do not write again
+              unless you reply.
+            </span>
+          </li>
+          <li class="flex items-start gap-3">
+            <span class="mt-1 flex-shrink-0 text-text-annotation font-bold">&bull;</span>
+            <span>
+              To confirm a notice, forward it to
+              <a
+                href="mailto:security@modpagespeed.com"
+                class="text-interactive hover:text-interactive-hover underline"
+              >
+                security@modpagespeed.com
+              </a>
+              and we will tell you whether we sent it.
+            </span>
+          </li>
+        </ul>
+        <p class="mt-4 text-text-muted">
+          Before writing we request the homepage (once with the documented
+          <code>?PageSpeed=off</code> parameter), one static file linked from it, and
+          <code>security.txt</code>, following redirects, and the homepage once more just before
+          sending. We request the homepage again after 30 days and after 90 days, to see whether the
+          header has changed. These requests carry the User-Agent
+          <code class="break-all">weamp-notice-check/1 (+https://modpagespeed.com/security/)</code>.
+          If a site refuses our checker, we look at its home page once in an ordinary browser, and
+          later follow-ups use a public web crawl archive rather than a request from us. The notice
+          lists every request we made, including any others to public pages. We do not log in, scan
+          or test for vulnerabilities, and we do not publish host names.
+        </p>
+        <p class="mt-4 text-text-muted">
+          If you would rather not hear from us, reply and say so: we stop the follow-up requests too
+          and keep your domain on a do-not-contact list. How we handle the correspondence is in the{' '}
+          <a
+            href="https://we-amp.com/privacy/#end-of-life-notices"
+            rel="noopener noreferrer"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            privacy policy
+          </a>
+          . To check a server and see what to do about it, read the{' '}
+          <a
+            href="/docs/end-of-life-releases/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            end-of-life advisory
+          </a>
+          .
+        </p>
+      </div>
+
+      <div class="rule-ticked-scale" role="presentation" aria-hidden="true"></div>
+
+      <!-- What to include -->
+      <div>
+        <h2 class="h2-section text-text-body">What to include</h2>
+        <ul class="mt-4 space-y-3 text-text-muted">
+          <li class="flex items-start gap-3">
+            <span class="mt-1 flex-shrink-0 text-text-annotation font-bold">&bull;</span>
+            <span>A description of the vulnerability and its potential impact.</span>
+          </li>
+          <li class="flex items-start gap-3">
+            <span class="mt-1 flex-shrink-0 text-text-annotation font-bold">&bull;</span>
+            <span>Steps to reproduce the issue.</span>
+          </li>
+          <li class="flex items-start gap-3">
+            <span class="mt-1 flex-shrink-0 text-text-annotation font-bold">&bull;</span>
+            <span>Affected versions, if known.</span>
+          </li>
+          <li class="flex items-start gap-3">
+            <span class="mt-1 flex-shrink-0 text-text-annotation font-bold">&bull;</span>
+            <span>Your assessment of severity and impact.</span>
+          </li>
+        </ul>
+      </div>
+
+      <div class="rule-ticked-scale" role="presentation" aria-hidden="true"></div>
+
+      <!-- Our commitment -->
+      <div>
+        <h2 class="h2-section text-text-body">Our commitment</h2>
+        <p class="mt-4 text-text-muted">
+          We acknowledge reports and follow a coordinated disclosure process: we work on a fix with
+          the reporter, and after the fix is released the reporter may publish details. Critical
+          vulnerabilities affecting production deployments jump the queue.
+        </p>
+        <p class="mt-4 text-text-muted">
+          We keep reporters informed as we work on a fix. If a vulnerability is being exploited, we
+          do not wait for a scheduled release: the fix is released as soon as it is ready.
+        </p>
+      </div>
+
+      <div class="rule-ticked-scale" role="presentation" aria-hidden="true"></div>
+
+      <!-- Supported versions -->
+      <div>
+        <h2 class="h2-section text-text-body">Supported versions</h2>
+        <p class="mt-4 text-text-muted">
+          Security fixes are made in the latest release. Upgrading to it is the supported path from
+          any earlier release. Security fixes reach every user at the same time, through the same
+          public channels: nobody receives a fixed build before the public release.
+        </p>
+        <p class="mt-4 text-text-muted">
+          The original project's releases, 1.14.36.1 and earlier, receive no security fixes, and we
+          do not maintain them. The{' '}
+          <a
+            href="/docs/end-of-life-releases/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            end-of-life advisory
+          </a>{' '}
+          shows how to check a server and what to do.
+        </p>
+      </div>
+
+      <div class="rule-ticked-scale" role="presentation" aria-hidden="true"></div>
+
+      <!-- Safe harbor -->
+      <div>
+        <h2 class="h2-section text-text-body">Safe harbor</h2>
+        <p class="mt-4 text-text-muted">
+          We will not pursue legal action against security researchers who act in good faith. Good
+          faith means: you report the vulnerability to us before disclosing publicly, you don't
+          access or modify other users' data, and you don't degrade the service for others.
+        </p>
+      </div>
+
+      <div class="rule-ticked-scale" role="presentation" aria-hidden="true"></div>
+
+      <!-- Scope -->
+      <div>
+        <h2 class="h2-section text-text-body">Scope</h2>
+        <p class="mt-4 text-text-muted">
+          This security policy covers the mod_pagespeed software (the module, the optimizer worker,
+          and the cache layer) on Apache, nginx and IIS, and the
+          <a
+            href="https://modpagespeed.com"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            modpagespeed.com
+          </a>{' '}
+          website.
+        </p>
+      </div>
+
+      <div class="rule-ticked-scale" role="presentation" aria-hidden="true"></div>
+
+      <!-- Security updates -->
+      <div>
+        <h2 class="h2-section text-text-body">Security updates</h2>
+        <p class="mt-4 text-text-muted">
+          Every security fix is listed on the
+          <a
+            href="/docs/release-notes/#security-updates"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            release notes
+          </a>
+          , with the release that carried it: the impact, the affected and fixed versions, and
+          whether to update, plus the CVE id when one has been assigned. The announcements describe
+          the impact; they do not describe how to trigger an issue.
+        </p>
+      </div>
+
+      <div class="rule-ticked-scale" role="presentation" aria-hidden="true"></div>
+
+      <!-- Evidence -->
+      <div>
+        <h2 class="h2-section text-text-body">Evidence</h2>
+        <div class="mt-4 space-y-6">
+          <div>
+            <h3 class="font-semibold text-text-body">Security disclosure</h3>
+            <p class="mt-2 text-text-muted">
+              Report vulnerabilities to
+              <a
+                href="mailto:security@modpagespeed.com"
+                class="text-interactive hover:text-interactive-hover underline"
+              >
+                security@modpagespeed.com
+              </a>
+              . Reports go by email or through GitHub private vulnerability reporting; the
+              repositories' SECURITY.md files state the same policy. See
+              <a
+                href="/.well-known/security.txt"
+                class="text-interactive hover:text-interactive-hover underline"
+              >
+                security.txt
+              </a>
+              .
+            </p>
+          </div>
+          <div>
+            <h3 class="font-semibold text-text-body">CVE history</h3>
+            <p class="mt-2 text-text-muted">
+              Tracked in the
+              <a
+                href="/docs/release-notes/#security-updates"
+                class="text-interactive hover:text-interactive-hover underline"
+              >
+                release notes
+              </a>
+              .
+            </p>
+          </div>
+          <div>
+            <h3 class="font-semibold text-text-body">Dependency audits</h3>
+            <p class="mt-2 text-text-muted">
+              The dependency gate blocks a change on any fixable vulnerability of medium severity or
+              higher, checked against a pinned vulnerability database, and a daily scan against the
+              live feed catches newly published ones.
+            </p>
+          </div>
+          <div>
+            <h3 class="font-semibold text-text-body">Continuous AI security scanning</h3>
+            <p class="mt-2 text-text-muted">
+              mod_pagespeed has been enrolled in{' '}
+              <a
+                href="https://github.com/anthropics/oss-scanner/blob/main/projects/mod_pagespeed/project.yaml"
+                rel="noopener noreferrer"
+                class="text-interactive hover:text-interactive-hover underline"
+              >
+                Anthropic&rsquo;s OSS Scanner
+              </a>{' '}
+              since October 2026. Its enrolment config and{' '}
+              <a
+                href="https://github.com/We-Amp/mod_pagespeed/blob/master/.oss-scanner/threat_model.md"
+                rel="noopener noreferrer"
+                class="text-interactive hover:text-interactive-hover underline"
+              >
+                threat model
+              </a>{' '}
+              are public.
+            </p>
+          </div>
+          <div>
+            <h3 class="font-semibold text-text-body">Continuous fuzzing</h3>
+            <p class="mt-2 text-text-muted">
+              mod_pagespeed has been enrolled in{' '}
+              <a
+                href="https://github.com/google/oss-fuzz/tree/master/projects/mod_pagespeed"
+                rel="noopener noreferrer"
+                class="text-interactive hover:text-interactive-hover underline"
+              >
+                OSS-Fuzz
+              </a>
+              , Google&rsquo;s fuzzing service for open-source projects, since November 2026. Its
+              HTML parser, JavaScript minifier, CSS parser and rule-pack code are fuzzed
+              continuously; findings are disclosed under OSS-Fuzz&rsquo;s standard policy, and
+              reports reach security@modpagespeed.com.
+            </p>
+          </div>
+          <div>
+            <h3 class="font-semibold text-text-body">SBOM</h3>
+            <p class="mt-2 text-text-muted">
+              An SPDX 2.3 SBOM, with a VEX document, is published in the{' '}
+              <a
+                href="https://github.com/We-Amp/pagespeed-optimizer/tree/main/sbom"
+                rel="noopener noreferrer"
+                class="text-interactive hover:text-interactive-hover underline"
+              >
+                <code>sbom/</code> directory
+              </a>{' '}
+              of the source tree. The apt and yum repositories are GPG-signed and every release
+              asset is listed in <code>SHA256SUMS</code>. Every release from 2.6.0 on also carries
+              its SPDX SBOM and VEX, for everyone. How to verify the signed packages is on the{' '}
+              <a
+                href="/support/#hardened-builds"
+                class="text-interactive hover:text-interactive-hover underline"
+              >
+                support page
+              </a>
+              .
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="rule-ticked-scale" role="presentation" aria-hidden="true"></div>
+
+      <!-- Architecture note -->
+      <div class="panel">
+        <h2 class="text-xl font-bold text-text-body">Architecture note</h2>
+        <p class="mt-4 text-text-muted">
+          Both parts process untrusted content by design &mdash; they rewrite HTML, minify CSS and
+          JavaScript, and transcode images from origins you configure. We take this attack surface
+          seriously. Both parts of mod_pagespeed build on a current toolchain and run with
+          AddressSanitizer and UndefinedBehaviorSanitizer in CI, catching memory safety issues and
+          undefined behavior before they reach production. The optimizer worker is written in C++23
+          with smart pointers and RAII throughout.
+        </p>
+      </div>
+
+      <div class="rule-ticked-scale" role="presentation" aria-hidden="true"></div>
+
+      <!-- Threat model -->
+      <div>
+        <h2 class="h2-section text-text-body">Threat model</h2>
+        <p class="mt-4 text-text-muted">
+          mod_pagespeed processes untrusted images, CSS, JS, and HTML from origin servers. The
+          module talks to the worker over a local Unix socket. The worker opens no outbound
+          connection on its own: its network traffic is the origin fetches you configure and any key
+          directories you enable, and its management API is off by default. All content parsing uses
+          memory-safe patterns validated by continuous sanitizer testing (ASan, UBSan, TSan). No
+          user data is transmitted externally. The full threat model is published in the
+          mod_pagespeed repository as{' '}
+          <a
+            href="https://github.com/We-Amp/mod_pagespeed/blob/master/.oss-scanner/threat_model.md"
+            rel="noopener noreferrer"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            <code>threat_model.md</code>
+          </a>
+          .
+        </p>
+      </div>
+
+      <div class="rule-ticked-scale" role="presentation" aria-hidden="true"></div>
+
+      <!-- Supply chain -->
+      <div>
+        <h2 class="h2-section text-text-body">Supply chain</h2>
+        <p class="mt-4 text-text-muted">
+          All dependencies are pinned with SHA-256 checksums in the build configuration.
+        </p>
+      </div>
+    </div>
+  </section>
+</BaseLayout>

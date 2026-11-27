@@ -1,0 +1,339 @@
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+<html>
+  <head>
+    <link rel="canonical" href="https://modpagespeed.com/1.0/doc/filter-flatten-css-imports" />
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Flatten CSS Imports</title>
+    <link rel="stylesheet" href="doc.css">
+  </head>
+  <body>
+<div id="archive-banner" style="background-color:#e1f5fe;padding:12px 24px;text-align:center;font-family:sans-serif;font-size:14px;line-height:1.6;position:relative;border-bottom:1px solid #b3e5fc;">
+  <span style="display:inline-block;padding:0 20px 0 0;">This is the archived documentation for the original mod_pagespeed releases, 1.14.36.1 and earlier. Those releases receive no security fixes: see the <a href="/docs/end-of-life-releases/" style="color:#0277bd;font-weight:bold;">end-of-life advisory</a>. The current mod_pagespeed is at <a href="https://modpagespeed.com" style="color:#0277bd;font-weight:bold;">modpagespeed.com</a>.</span>
+  <button onclick="this.parentElement.style.display='none'" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;font-size:18px;cursor:pointer;color:#0277bd;padding:0 4px;" aria-label="Dismiss">&times;</button>
+</div>
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+<div id=header>
+  <div id=logoline>
+    <div id=logo>
+      <a href="https://www.we-amp.com/"><img src="/1.0/we-amp.jpg"
+        srcset="/1.0/we-amp.jpg"
+        width=32 height=32 alt="We-Amp logo"></a>
+      <img src="https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png"
+           srcset="https://www.gstatic.com/images/branding/product/2x/pagespeed_32dp.png"
+           width=32 height=32 alt="pagespeed logo">
+    </div>
+    <div id=logotext>PageSpeed</div>
+  </div>
+  <div id=navline>
+    <a href="/1.0/doc/">&larr; documentation index</a>
+  </div>
+</div>
+<div id=toc></div>
+
+
+
+  <div id=content>
+<h1>Flatten CSS Imports</h1>
+<h2>Configuration</h2>
+<p>
+  The 'Flatten CSS Imports' filter is enabled by specifying:
+<dl>
+  <dt>Apache:<dd><pre class="prettyprint"
+     >ModPagespeedEnableFilters flatten_css_imports</pre>
+  <dt>Nginx:<dd><pre class="prettyprint"
+     >pagespeed EnableFilters flatten_css_imports;</pre>
+</dl>
+<p>
+in the configuration file.
+</p>
+<p>
+  When this filter is enabled, you may also enable the following setting:
+<dl>
+  <dt>Apache:<dd><pre class="prettyprint"
+     >ModPagespeedCssFlattenMaxBytes bytes</pre>
+  <dt>Nginx:<dd><pre class="prettyprint"
+     >pagespeed CssFlattenMaxBytes bytes;</pre>
+</dl>
+<p>
+  This is the maximum size in bytes of the flattened CSS; if flattening would
+  result in CSS larger than this then flattening will be aborted and the CSS
+  will be left unchanged.
+</p>
+
+<h2>Objective</h2>
+<p>
+  Reduce the number of HTTP round-trips by combining multiple CSS resources
+  into one.
+</p>
+
+<h2>PageSpeed Rule</h2>
+<p>
+  This filter implements the PageSpeed rule for
+  <a target="_blank" href="https://developers.google.com/speed/docs/best-practices/rtt#AvoidCssImport">avoiding CSS
+    imports</a>.
+</a>
+</p>
+
+<h2>Description</h2>
+<p>
+  flatten_css_imports parses linked and inlined CSS and flattens it by
+  replacing all <code>@import</code> rules with the contents of the imported
+  file, repeating the process recursively for each imported file.
+  It works on CSS found in <code>&lt;style&gt;</code> blocks and
+  <code>&lt;link&gt;</code> references.
+</p>
+
+<h2>Operation</h2>
+<p>
+  flatten_css_imports recursively processes imported CSS files; if a
+  file cannot be processed then the entire process is aborted and the initial
+  CSS is left unflattened.
+</p>
+<p>
+  The CSS is processed as follows; if any step fails the entire process is
+  aborted and the CSS is left unflattened:
+</p>
+<ol>
+  <li>The CSS is parsed; if there are any errors while parsing
+    <code>@import</code> rules, this step fails.</li>
+  <li>The CSS is checked for any leading <code>@charset</code> rule; if there
+    is one and the specified character set is not the same as the current one
+    then this step fails.</li>
+  <li>All <code>@import</code> rules are removed and the specified files are
+    fetched and processed recursively and each removed <code>@import</code>
+    rule is replaced with its file's flattened contents; if a file cannot be
+    fetched for any reason this step fails.</li>
+  <li>Any rulesets following the <code>@import</code> rules are appended.</li>
+  <li>The resulting CSS is minified; if it can't be minified this step
+    fails.</li>
+  <li>The size of the resulting CSS is checked against the configured maximum
+    for flattened CSS; if it is too big this step fails.</li>
+  <li>Finally, the original <code>&lt;style&gt;</code> or
+    <code>&lt;link&gt;</code> is replaced with the minified CSS.</li>
+</ol>
+<p>
+  The initial charset is determined according to
+  <a href="http://www.w3.org/International/O-HTTP-charset.en.php">the rules for
+    HTTP</a>: from the HTML's response headers if any, otherwise from the
+  <code>charset</code> attribute of the <code>&lt;link&gt;</code> element if
+  any, otherwise it defaults to <code>ISO-8859-1</code>.
+</p>
+<p>
+  <code>@import</code> rules can specify the media type(s) that apply to the
+  imported file, and the initial <code>&lt;style&gt;</code> or
+  <code>&lt;link&gt;</code> element can also specify the applicable media types.
+  flatten_css_imports remembers the &quot;containing&quot; media types
+  and if an <code>@import</code> specifies media types it applies the
+  intersection of the containing and specified media types to the imported
+  file; if this is empty then the file is ignored because it cannot apply.
+  This is only done for simple media types, not media expressions. If a
+  flattened file has any media types other than <code>all</code> then its
+  rulesets are wrapped in an appropriate <code>@media</code> rule.
+</p>
+
+<h3>Example</h3>
+<p>
+  The effect of this filter can be observed on modpagespeed.com
+  <a href="https://www.modpagespeed.com/examples/flatten_css_imports.html?ModPagespeed=off">before</a>
+  and
+  <a href="https://www.modpagespeed.com/examples/flatten_css_imports.html?ModPagespeed=on&ModPagespeedFilters=rewrite_css,flatten_css_imports">after</a>
+  rewriting.
+</p>
+
+<h2>Requirements</h2>
+<p>
+  The <a href="filter-css-rewrite">rewrite_css</a>
+  filter must be enabled for this filter to be applied.
+</p>
+
+<h2>Limitations</h2>
+<p>
+  Only CSS referenced by <code>&lt;style&gt;</code> and <code>&lt;link&gt;
+  </code> tags is rewritten. <code>style</code> attributes of HTML elements
+  are not rewritten.
+</p>
+<p>
+  Not all CSS3 or proprietary constructs are parsed.  When unhandled syntax
+  is present and the file cannot be parsed completely, the CSS file is left
+  unflattened.
+</p>
+
+<h2>Risks</h2>
+<p>
+  flatten_css_imports is considered moderate risk because it makes the
+  fairly complex media optimization described above.
+</p>
+
+  </div>
+  <!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+<div id=footer>
+  <!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+<div id=navline>
+  <a href="/1.0/doc/">&larr; documentation index</a>
+</div>
+
+</div>
+
+<script>
+function buildTocHelper(node, headers) {
+  if (node.nodeType == 1) {
+    // Element node.
+    var nodeName = node.nodeName.toLowerCase();
+    if (nodeName == "h2" || nodeName == "h3" || nodeName == "h4" ||
+        nodeName == "h5" || nodeName == "h6") {
+      if (node.id) {
+        headers.push([nodeName, node.innerHTML, node.id]);
+	node.appendChild(document.createTextNode("\u00A0"));  // nbsp
+	var a = document.createElement("a");
+	a.class = "header-link";
+	a.href = "#" + node.id;
+	a.textContent = "\uD83D\uDD17";  // link symbol
+	node.appendChild(a);
+      }
+    } else {
+      for (var i = 0; i < node.childNodes.length; i++) {
+        buildTocHelper(node.childNodes[i], headers);
+      }
+    }
+  }
+}
+
+function buildToc() {
+  var headers = [];
+  buildTocHelper(document.body, headers);
+  if (headers.length == 0) {
+    return;
+  }
+
+  var toc = document.getElementById("toc");
+  var tocContents = document.createElement("div");
+  tocContents.id = "toc-contents";
+  tocContents.textContent = "Contents";
+  toc.appendChild(tocContents);
+
+  var level = 1;
+  var currentUl = null;
+  for (var i = 0; i < headers.length; i++) {
+    var header = headers[i];
+    var headerLevel = header[0];
+    var headerValue = header[1];
+    var headerId = header[2];
+
+    var newLevel = parseInt(headerLevel.substring(1));
+    while (newLevel > level) {
+      // We loop here to handle the case where we have h2 ... h4.  This
+      // isn't a good way to write html, but someone may still do it.
+
+      var newUl = document.createElement("ul");
+      if (currentUl == null) {
+        toc.appendChild(newUl);
+      } else {
+        currentUl.appendChild(newUl);
+      }
+      currentUl = newUl;
+      level++;
+    }
+    while (newLevel < level) {
+      currentUl = currentUl.parentNode;
+      level--;
+    }
+    var li = document.createElement("li");
+    var a = document.createElement("a");
+    a.href = "#" + headerId;
+    a.textContent = headerValue;
+    li.appendChild(a);
+    currentUl.appendChild(li);
+  }
+}
+
+function wrapTables() {
+  var tables = document.getElementsByTagName("table");
+  for (var i = 0; i < tables.length; i++) {
+    var table = tables[i];
+    var parent = table.parentNode;
+    var div = document.createElement('div');
+    div.className = "table-wrapper";
+    parent.insertBefore(div, table);
+    div.appendChild(table);
+  }
+}
+
+buildToc();
+wrapTables();
+</script>
+
+  </body>
+</html>

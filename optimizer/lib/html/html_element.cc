@@ -1,0 +1,385 @@
+// SPDX-License-Identifier: Apache-2.0
+// GENERATED — DO NOT EDIT BY HAND. Synced by tools/sync-html-kernel.sh.
+// Canonical source: mod_pagespeed 1.15, pagespeed/kernel/html/html_element.cc (#1130).
+// Synced from the commit pinned in lib/html/HTML_KERNEL_PIN.
+// Drift guard: CI re-runs tools/sync-html-kernel.sh and byte-compares.
+// The canonical file's original license header is retained in full below;
+// Apache-2.0 headed files: see lib/html/LICENSE.apache-2.0 for the license text.
+
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ * 
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ * 
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+#include "lib/html/html_element.h"
+
+#include <cstdio>
+#include <cstring>
+#include <functional>
+#include <memory>
+
+#include "lib/html/compat/logging.h"
+#include "lib/html/compat/string.h"
+#include "lib/html/compat/string_util.h"
+#include "lib/html/html_event.h"
+#include "lib/html/html_keywords.h"
+#include "lib/html/html_name.h"
+
+namespace net_instaweb {
+
+namespace {
+
+// Returns true if an escaped attribute value cannot be serialized without
+// quotes: it is empty, or contains a byte that would terminate the value or
+// the tag in an HTML tokenizer (whitespace, '>') or a quote character.
+// '=' is intentionally not in this set: it does not terminate an unquoted
+// value, and URLs with query strings are routinely serialized unquoted.
+// Post-escaping, quotes and angle brackets can only appear as entities, so
+// in practice this guards against whitespace.
+bool EscapedValueNeedsQuotes(const StringPiece& escaped_value) {
+  if (escaped_value.empty()) {
+    return true;
+  }
+  for (char c : escaped_value) {
+    switch (c) {
+      case ' ':
+      case '\t':
+      case '\n':
+      case '\f':
+      case '\r':
+      case '"':
+      case '\'':
+      case '<':
+      case '>':
+      case '`':
+        return true;
+      default:
+        break;
+    }
+  }
+  return false;
+}
+
+// An attribute whose value is replaced with one that cannot be serialized
+// unquoted must be quoted, or the serialized form would silently split the
+// value into additional attributes.  When the value carries a literal double
+// quote but no single quote, wrap it in single quotes so the double quote
+// stays inside the value.
+HtmlElement::QuoteStyle QuoteStyleForEscapedValue(HtmlElement::QuoteStyle style,
+                                                  const char* escaped_value) {
+  if (style == HtmlElement::NO_QUOTE && escaped_value != nullptr &&
+      EscapedValueNeedsQuotes(escaped_value)) {
+    if (strchr(escaped_value, '"') != nullptr &&
+        strchr(escaped_value, '\'') == nullptr) {
+      return HtmlElement::SINGLE_QUOTE;
+    }
+    return HtmlElement::DOUBLE_QUOTE;
+  }
+  return style;
+}
+
+}  // namespace
+
+HtmlElement::HtmlElement(HtmlElement* parent, const HtmlName& name,
+                         const HtmlEventListIterator& begin,
+                         const HtmlEventListIterator& end)
+    : HtmlNode(parent), data_(std::make_unique<Data>(name, begin, end)) {}
+
+HtmlElement::~HtmlElement() {}
+
+HtmlElement::Data::Data(const HtmlName& name,
+                        const HtmlEventListIterator& begin,
+                        const HtmlEventListIterator& end)
+    : begin_line_number_(0),
+      live_(1),
+      begins_in_first_1024_bytes_(0),
+      end_line_number_(0),
+      style_(AUTO_CLOSE),
+      name_(name),
+      begin_(begin),
+      end_(end) {}
+
+HtmlElement::Data::~Data() {}
+
+void HtmlElement::MarkAsDead(const HtmlEventListIterator& end) {
+  if (data_.get() != nullptr) {
+    data_->live_ = false;
+    set_begin(end);
+    set_end(end);
+  }
+}
+
+void HtmlElement::SynthesizeEvents(const HtmlEventListIterator& iter,
+                                   HtmlEventList* queue) {
+  // We use -1 as a bogus line number, since these events are synthetic.
+  HtmlEvent* start_tag = new HtmlStartElementEvent(this, Data::kMaxLineNumber);
+  set_begin(queue->insert(iter, start_tag));
+  HtmlEvent* end_tag = new HtmlEndElementEvent(this, Data::kMaxLineNumber);
+  set_end(queue->insert(iter, end_tag));
+}
+
+bool HtmlElement::DeleteAttribute(HtmlName::Keyword keyword) {
+  AttributeList* attrs = mutable_attributes();
+  for (AttributeIterator iter(attrs->begin()); iter != attrs->end(); ++iter) {
+    if (iter->keyword() == keyword) {
+      attrs->Erase(&iter);
+      return true;
+    }
+  }
+  return false;
+}
+
+bool HtmlElement::DeleteAttribute(StringPiece name) {
+  AttributeList* attrs = mutable_attributes();
+  for (AttributeIterator iter(attrs->begin()); iter != attrs->end(); ++iter) {
+    if (iter->name_str() == name) {
+      attrs->Erase(&iter);
+      return true;
+    }
+  }
+  return false;
+}
+
+const HtmlElement::Attribute* HtmlElement::FindAttribute(
+    HtmlName::Keyword keyword) const {
+  const Attribute* ret = nullptr;
+
+  for (AttributeConstIterator iter = attributes().begin();
+       iter != attributes().end(); ++iter) {
+    const Attribute* attribute = iter.Get();
+    if (attribute->keyword() == keyword) {
+      ret = attribute;
+      break;
+    }
+  }
+  return ret;
+}
+
+const HtmlElement::Attribute* HtmlElement::FindAttribute(
+    StringPiece name) const {
+  for (AttributeConstIterator iter = attributes().begin();
+       iter != attributes().end(); ++iter) {
+    const Attribute* attribute = iter.Get();
+    if (iter->name_str() == name) {
+      return attribute;
+    }
+  }
+  return nullptr;
+}
+
+GoogleString HtmlElement::ToString() const {
+  GoogleString buf;
+
+  // Estimate size to reduce allocations: tag name + attributes + closing +
+  // line numbers. Most elements are small, but reserve a reasonable baseline.
+  size_t estimated_size = 64;  // Base estimate for small elements
+  StringPiece tag_name = data_->name_.value();
+  estimated_size += tag_name.size() * 2;  // Tag appears up to twice
+  for (const auto& attribute : attributes()) {
+    estimated_size += attribute.name_str().size() + 4;  // name + ' =' + quotes
+    const char* escaped = attribute.escaped_value();
+    if (escaped != nullptr) {
+      estimated_size += strlen(escaped);
+    }
+  }
+  buf.reserve(estimated_size);
+
+  StrAppend(&buf, "<", tag_name);
+
+  for (const auto& attribute : attributes()) {
+    const char* value = attribute.DecodedValueOrNull();
+    if (attribute.decoding_error()) {
+      // This is a debug method; not used in serialization.
+      StrAppend(&buf, " ", attribute.name_str(), "<DECODING ERROR>");
+    } else if (value != nullptr) {
+      const char* quote = attribute.quote_str();
+      StrAppend(&buf, " ", attribute.name_str(), "=", quote, value, quote);
+    } else {
+      StrAppend(&buf, " ", attribute.name_str());
+    }
+  }
+
+  switch (data_->style_) {
+    case AUTO_CLOSE:
+      StrAppend(&buf, "> (not yet closed)");
+      break;
+    case IMPLICIT_CLOSE:
+      StrAppend(&buf, ">");
+      break;
+    case EXPLICIT_CLOSE:
+      StrAppend(&buf, "></", tag_name, ">");
+      break;
+    case BRIEF_CLOSE:
+      StrAppend(&buf, "/>");
+      break;
+    case UNCLOSED:
+      StrAppend(&buf, "> (unclosed)");
+      break;
+    case INVISIBLE:
+      StrAppend(&buf, "> (invisible)");
+      break;
+  }
+
+  const bool has_begin_line =
+      (data_->begin_line_number_ != Data::kMaxLineNumber);
+  const bool has_end_line = (data_->end_line_number_ != Data::kMaxLineNumber);
+  if (has_begin_line && has_end_line) {
+    StrAppend(&buf, " ", data_->begin_line_number_, "...",
+              data_->end_line_number_);
+  } else if (has_begin_line) {
+    StrAppend(&buf, " ", data_->begin_line_number_, "...");
+  } else if (has_end_line) {
+    StrAppend(&buf, " ...", data_->end_line_number_);
+  }
+
+  return buf;
+}
+
+void HtmlElement::DebugPrint() const { puts(ToString().c_str()); }
+
+void HtmlElement::AddAttribute(const Attribute& src_attr) {
+  // escaped_value() returns nullptr for valueless attributes (e.g.
+  // <tag disabled>); constructing a StringPiece from a null const char*
+  // is undefined behavior, so handle the null case explicitly.
+  const char* escaped_value = src_attr.escaped_value();
+  StringPiece escaped_sp =
+      (escaped_value != nullptr) ? StringPiece(escaped_value) : StringPiece();
+  Attribute* attr =
+      new Attribute(src_attr.name(), escaped_sp, src_attr.quote_style());
+  if (src_attr.decoded_value_computed_) {
+    attr->decoded_value_computed_ = true;
+    attr->decoding_error_ = src_attr.decoding_error_;
+    Attribute::CopyValue(src_attr.decoded_value_.get(), &attr->decoded_value_);
+  }
+  data_->attributes_.Append(attr);
+}
+
+void HtmlElement::AddAttribute(const HtmlName& name,
+                               const StringPiece& decoded_value,
+                               QuoteStyle quote_style) {
+  GoogleString buf;
+  Attribute* attr = new Attribute(
+      name, HtmlKeywords::Escape(decoded_value, &buf), quote_style);
+  attr->decoded_value_computed_ = true;
+  attr->decoding_error_ = false;
+  Attribute::CopyValue(decoded_value, &attr->decoded_value_);
+  data_->attributes_.Append(attr);
+}
+
+void HtmlElement::AddEscapedAttribute(const HtmlName& name,
+                                      const StringPiece& escaped_value,
+                                      QuoteStyle quote_style) {
+  Attribute* attr = new Attribute(name, escaped_value, quote_style);
+  data_->attributes_.Append(attr);
+}
+
+void HtmlElement::Attribute::CopyValue(const StringPiece& src,
+                                       std::unique_ptr<char[]>* dst) {
+  if (src.data() == nullptr) {
+    // This case indicates attribute without value <tag attr>, as opposed
+    // to data()=="", which implies an empty value <tag attr=>.
+    dst->reset();
+  } else {
+    char* buf = new char[src.size() + 1];
+    memcpy(buf, src.data(), src.size());
+    buf[src.size()] = '\0';
+    dst->reset(buf);
+  }
+}
+
+HtmlElement::Attribute::Attribute(const HtmlName& name,
+                                  const StringPiece& escaped_value,
+                                  QuoteStyle quote_style)
+    : name_(name),
+      quote_style_(quote_style),
+      decoding_error_(false),
+      decoded_value_computed_(false) {
+  CopyValue(escaped_value, &escaped_value_);
+}
+
+// Modify value of attribute (eg to rewrite dest of src or href).
+// As with the constructor, copies the string in, so caller retains
+// ownership of value.
+void HtmlElement::Attribute::SetValue(const StringPiece& decoded_value) {
+  GoogleString buf;
+  // Note that we execute the lines in this order in case value
+  // is a substring of value_.  This copies the value just prior
+  // to deallocation of the old value_.
+  const char* escaped_chars = escaped_value_.get();
+  // escaped_chars is nullptr for valueless attributes (e.g. <tag disabled>),
+  // and comparing unrelated pointers with operator< is undefined behavior,
+  // so use std::less for the overlap check.
+  DCHECK(escaped_chars == nullptr ||
+         std::less<const char*>()(decoded_value.data() + decoded_value.size(),
+                                  escaped_chars) ||
+         std::less<const char*>()(escaped_chars + strlen(escaped_chars),
+                                  decoded_value.data()))
+      << "Setting unescaped value from substring of escaped value.";
+  CopyValue(HtmlKeywords::Escape(decoded_value, &buf), &escaped_value_);
+  CopyValue(decoded_value, &decoded_value_);
+  decoded_value_computed_ = true;
+  decoding_error_ = false;
+  quote_style_ = QuoteStyleForEscapedValue(quote_style_, escaped_value_.get());
+}
+
+void HtmlElement::Attribute::SetEscapedValue(const StringPiece& escaped_value) {
+  // Note that we execute the lines in this order in case value
+  // is a substring of value_.  This copies the value just prior
+  // to deallocation of the old value_.
+  const char* value_chars = decoded_value_.get();
+  if (value_chars != nullptr) {
+    DCHECK(value_chars + strlen(value_chars) < escaped_value.data() ||
+           escaped_value.data() + escaped_value.size() < value_chars)
+        << "Setting escaped value from substring of unescaped value.";
+  }
+
+  decoded_value_.reset();
+  decoding_error_ = false;
+  decoded_value_computed_ = false;
+
+  CopyValue(escaped_value, &escaped_value_);
+  quote_style_ = QuoteStyleForEscapedValue(quote_style_, escaped_value_.get());
+}
+
+const char* HtmlElement::Attribute::quote_str() const {
+  switch (quote_style_) {
+    case NO_QUOTE:
+      return "";
+    case SINGLE_QUOTE:
+      return "'";
+    case DOUBLE_QUOTE:
+    default:
+      return "\"";
+  }
+}
+
+void HtmlElement::Attribute::ComputeDecodedValue() const {
+  if (escaped_value_.get() == nullptr) {
+    // Valueless attribute (e.g. <input disabled>): no value to decode.
+    decoded_value_.reset();
+    decoding_error_ = false;
+    decoded_value_computed_ = true;
+    return;
+  }
+  GoogleString buf;
+  StringPiece unescaped_value =
+      HtmlKeywords::Unescape(escaped_value_.get(), &buf, &decoding_error_);
+  CopyValue(unescaped_value, &decoded_value_);
+  decoded_value_computed_ = true;
+}
+
+}  // namespace net_instaweb

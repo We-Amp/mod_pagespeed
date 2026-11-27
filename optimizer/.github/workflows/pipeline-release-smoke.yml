@@ -1,0 +1,1255 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# pipeline-release-smoke.yml -- the post-release NuGet smoke, as a reusable
+# workflow. The caller (release-smoke.yml) holds the triggers, the tag
+# prefix filter and the concurrency group. See docs/ci/release.md.
+#
+# The in-tree e2e suite under samples/aspnetcore/test/ exercises the
+# /console/ SPA against a locally built project reference; it never installs
+# the published packages. This workflow does: once a v* GitHub release is
+# published it installs WeAmp.PageSpeed.AspNetCore and the matching
+# WeAmp.PageSpeed.NativeAssets.<RID> from nuget.org into a hello-world
+# ASP.NET app on each supported RID, boots it on a real Kestrel port, and
+# checks:
+#
+#   A. /console/ is a real SPA, not the CI placeholder stub, with a body.
+#   B. A LIVE worker readiness gate through the published middleware stack:
+#      /v1/health, reverse-proxied through Kestrel to the published
+#      factory_worker, answers 200 with ready=true and carries no license
+#      object.
+#   C. Playwright on /console/about: the page loads and the navigation
+#      carries no "License" item.
+#
+# It consumes only nuget.org, so every RID runs on a GitHub-hosted runner.
+# The Linux and macOS jobs share one step list (YAML anchor), the Windows
+# job has its own; each carries a one-entry matrix so the steps read
+# matrix.rid / matrix.os the same way.
+
+name: pipeline-release-smoke
+
+on:
+  workflow_call:
+    inputs:
+      package_version:
+        description: WeAmp.PageSpeed.AspNetCore version on nuget.org (no leading v); empty on a release event.
+        type: string
+        default: ''
+
+permissions: {}
+
+jobs:
+  smoke-linux-x64:
+    permissions:
+      contents: read
+    name: smoke / ${{ matrix.rid }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      matrix:
+        include:
+          - rid: linux-x64
+            os: linux
+            native_package: WeAmp.PageSpeed.NativeAssets.Linux
+    env: &smoke-env
+      # Homebrew and the system dotnet location, prepended on macOS only.
+      PATH_PREFIX_MAC: /opt/homebrew/bin:/usr/local/bin:/usr/local/share/dotnet
+      KESTREL_URL: http://127.0.0.1:5050
+      WORKER_API_PORT: "9881"
+    steps: &smoke-steps-unix
+      - name: Checkout the apt helper
+        if: matrix.os == 'linux'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: ci-helpers
+          sparse-checkout: tools/ci/apt-robust.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      # ----------------------------------------------------------
+      # Resolve the version under test
+      # ----------------------------------------------------------
+      - name: Determine package version (Linux/macOS)
+        if: matrix.os != 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${{ github.event.release.tag_name }}" ]; then
+            V="${{ github.event.release.tag_name }}"
+          else
+            V="${{ inputs.package_version }}"
+          fi
+          # Strip a single leading 'v'.
+          V="${V#v}"
+          if [ -z "$V" ]; then
+            echo "::error::Could not resolve package_version" >&2
+            exit 1
+          fi
+          echo "PACKAGE_VERSION=$V" >> "$GITHUB_ENV"
+          echo "Smoke target version: $V"
+
+      # ----------------------------------------------------------
+      # Pin Node for the Playwright legs. Runner SYSTEM node must not be
+      # load-bearing: @playwright/test dropping Node 18 turned a routine
+      # release-smoke run red on every linux-x64 leg. setup-node's toolchain wins on
+      # Linux/Windows; the macOS steps still prepend PATH_PREFIX_MAC, so the
+      # Homebrew node deliberately keeps precedence there.
+      # ----------------------------------------------------------
+      - name: Pin Node 22 (Playwright toolchain)
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+
+      # ----------------------------------------------------------
+      # Ensure .NET 10 SDK + ensure dotnet is on PATH
+      # ----------------------------------------------------------
+      - name: Ensure .NET 10 SDK (Linux/macOS)
+        if: matrix.os != 'windows'
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Put the macOS dotnet location on PATH
+        if: matrix.os == 'macos'
+        shell: bash
+        run: |
+          echo "/usr/local/share/dotnet" >> "$GITHUB_PATH"
+          echo "/opt/homebrew/bin" >> "$GITHUB_PATH"
+          dotnet --list-sdks
+
+      # ----------------------------------------------------------
+      # Poll nuget.org for indexing
+      # ----------------------------------------------------------
+      # nuget.org typically indexes new versions within 2-5 minutes
+      # of `dotnet nuget push` returning 0. The 15-minute window
+      # absorbs that latency plus the occasional indexer hiccup.
+      - name: Wait for nuget.org indexing (Linux/macOS)
+        if: matrix.os != 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.os }}" = "macos" ]; then
+            export PATH="$PATH_PREFIX_MAC:$PATH"
+          fi
+          V="$PACKAGE_VERSION"
+          # `dotnet add WeAmp.PageSpeed.AspNetCore` pulls ALL THREE native
+          # RID packages (Linux+Windows+macOS) transitively, not just this
+          # matrix's own. So every matrix variant must wait for the FULL
+          # cross-platform native set to index, otherwise the linux-x64
+          # scaffold can NU1102 on a still-unindexed nativeassets.windows
+          # (3-of-4 RIDs failed v2.0.12's first smoke on exactly this race;
+          # a rerun absorbed it once windows indexing caught up). Listed
+          # lowercase to match the flatcontainer path convention.
+          #
+          # Poll ROUND-ROBIN: each round checks every still-pending package
+          # and sleeps once, so the total wait stays bounded at
+          # 30 rounds x 30s = 15 min regardless of package count. A
+          # per-package nested wait (the obvious shape) would be
+          # 5 x 15 min = 75 min worst case, over this job's 45-min timeout.
+          pending="weamp.pagespeed weamp.pagespeed.aspnetcore weamp.pagespeed.nativeassets.linux weamp.pagespeed.nativeassets.windows weamp.pagespeed.nativeassets.macos"
+          for i in $(seq 1 30); do
+            still=""
+            for pkg in $pending; do
+              if curl -fsS "https://api.nuget.org/v3-flatcontainer/${pkg}/index.json" \
+                   | jq -e --arg v "$V" '.versions | index($v)' > /dev/null 2>&1; then
+                echo "  found $pkg@$V (round $i)"
+              else
+                still="$still $pkg"
+              fi
+            done
+            pending="$still"
+            if [ -z "$pending" ]; then
+              echo "All packages indexed at $V"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "::error::Timed out waiting for nuget.org indexing of:$pending ($V, 15 min)" >&2
+              exit 1
+            fi
+            echo "Round $i: still waiting for:$pending"
+            sleep 30
+          done
+
+      # ----------------------------------------------------------
+      # Scaffold a hello-world ASP.NET app + install the packages
+      # ----------------------------------------------------------
+      - name: Scaffold smoke app (Linux/macOS)
+        if: matrix.os != 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.os }}" = "macos" ]; then
+            export PATH="$PATH_PREFIX_MAC:$PATH"
+          fi
+          # Clean tmp dir, isolate from any host NuGet config quirks.
+          SMOKE_ROOT="$RUNNER_TEMP/release-smoke-$PACKAGE_VERSION"
+          rm -rf "$SMOKE_ROOT"
+          mkdir -p "$SMOKE_ROOT"
+          echo "SMOKE_ROOT=$SMOKE_ROOT" >> "$GITHUB_ENV"
+          cd "$SMOKE_ROOT"
+          # Force a fresh re-download of nuget.org metadata (index.json,
+          # flatcontainer listings). An osx-arm64 runner was once
+          # observed serving a stale snapshot from before publish on
+          # v2.0.9, causing NU1102 "Nearest version: 2.0.8" even after the
+          # indexing-wait step confirmed 2.0.9 was live. http-cache scope
+          # avoids nuking global-packages, which is expensive to repopulate.
+          dotnet nuget locals http-cache -c
+          # CRITICAL: evict any locally-cached We-Amp packages from
+          # global-packages so the smoke installs the PUBLISHED nuget.org
+          # artifact, not a stub. The CI package smokes `dotnet pack` the
+          # AspNetCore package with a "CI placeholder" stub console at the
+          # Directory.Build.props <Version>, which, since the release PR bumps
+          # VERSION.txt (and thus <Version>) to the release version, is the SAME
+          # version this workflow then installs. `dotnet add --version X` reuses
+          # the cached stub from global-packages and never downloads the real
+          # package, so /console/ serves the 56-byte stub and the structural
+          # sanity gate fails (v2.0.13 release-smoke caught exactly this).
+          # Clearing http-cache alone is insufficient, it only drops metadata,
+          # not the extracted package under global-packages.
+          rm -rf "${HOME}/.nuget/packages/weamp.pagespeed" \
+                 "${HOME}/.nuget/packages/weamp.pagespeed.aspnetcore" \
+                 "${HOME}/.nuget/packages/weamp.pagespeed.nativeassets."* 2>/dev/null || true
+          dotnet new web -n SmokeTest -o smoke --no-https
+          cd smoke
+          dotnet add package WeAmp.PageSpeed.AspNetCore --version "$PACKAGE_VERSION"
+          dotnet add package "${{ matrix.native_package }}" --version "$PACKAGE_VERSION"
+
+      # ----------------------------------------------------------
+      # Overwrite Program.cs with a minimal app
+      # ----------------------------------------------------------
+      # Mirrors samples/aspnetcore/samples/BasicWebApp/Program.cs:
+      #   - AddPageSpeed with NO Worker.SocketPath override, so the smoke
+      #     dogfoods the v2.0.14 default: an auto-resolved per-process socket
+      #     with worker coordination ON. (Pre-2.0.14 this sample hardcoded
+      #     SocketPath = null, which silently disabled coordination, exactly
+      #     the trial-experience bug this release fixes; the gate must exercise
+      #     the real default, not the disabled path.)
+      #   - UsePageSpeed(), wires up both ConsoleMiddleware and
+      #     PageSpeedMiddleware (see PageSpeedApplicationBuilderExtensions).
+      #   - MapHealthChecks("/health") for the readiness probe.
+      - name: Write Program.cs (Linux/macOS)
+        if: matrix.os != 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$SMOKE_ROOT/smoke/Program.cs" <<'EOF'
+          using WeAmp.PageSpeed.AspNetCore;
+
+          var builder = WebApplication.CreateBuilder(args);
+
+          builder.Services.AddPageSpeed(options =>
+          {
+              // VolumePath is read from env so the job can pin a per-run cache
+              // dir (started clean every run so a previous run's state can't
+              // mask a boot regression). Defaults to a stable per-machine dir
+              // when unset.
+              var volumeDir = Environment.GetEnvironmentVariable("PAGESPEED_SMOKE_VOLUME_DIR")
+                  ?? Path.Combine(Path.GetTempPath(), "pagespeed-smoke");
+              options.Cache.VolumePath = Path.Combine(volumeDir, "volume.dat");
+              options.Cache.VolumeSizeBytes = 256 * 1024 * 1024;
+              // No SocketPath override: dogfood the v2.0.14 auto-path default
+              // (worker coordination ON). ApiPort stays set so the embedded
+              // /console/ proxy can reach the worker's management API.
+              options.Worker.ApiPort = int.Parse(
+                  Environment.GetEnvironmentVariable("PAGESPEED__WORKER__APIPORT") ?? "9881");
+          });
+
+          var app = builder.Build();
+
+          app.UseExceptionHandler("/error");
+          app.UsePageSpeed();
+          app.UseStaticFiles();
+          app.UseRouting();
+          app.MapHealthChecks("/health");
+
+          app.MapGet("/", () => Results.Content(
+              "<!DOCTYPE html><html><body><h1>release-smoke</h1></body></html>",
+              "text/html"));
+
+          app.Run();
+          EOF
+
+      # ----------------------------------------------------------
+      # Boot the app (background) and wait for /console/ to respond
+      # ----------------------------------------------------------
+      - name: Boot smoke app (Linux/macOS)
+        if: matrix.os != 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.os }}" = "macos" ]; then
+            export PATH="$PATH_PREFIX_MAC:$PATH"
+          fi
+          cd "$SMOKE_ROOT/smoke"
+          # Build first so --no-build is honored on run, and so any
+          # restore/build error surfaces here (cleaner failure mode).
+          dotnet build -c Release -v minimal
+          mkdir -p "$SMOKE_ROOT/logs"
+          # Per-run cache dir. Start clean so a previous run's state can't
+          # mask a regression in the boot path.
+          VOLUME_DIR="$SMOKE_ROOT/volume"
+          rm -rf "$VOLUME_DIR"
+          mkdir -p "$VOLUME_DIR"
+          echo "PAGESPEED_SMOKE_VOLUME_DIR=$VOLUME_DIR" >> "$GITHUB_ENV"
+          # Backstop: reap any stale process holding THIS job's ports from a
+          # prior run on a persistent runner, a real failure
+          # mode (address-in-use -> worker dies -> /v1 502). Port-scoped (NOT a
+          # blanket `pkill -f factory_worker`) so a concurrent job on the same
+          # machine, which uses disjoint ports, is never collaterally killed.
+          if command -v lsof >/dev/null 2>&1; then
+            lsof -ti "tcp:${WORKER_API_PORT}" 2>/dev/null | xargs -r kill -9 2>/dev/null || true
+            lsof -ti tcp:5050 2>/dev/null | xargs -r kill -9 2>/dev/null || true
+          fi
+          ASPNETCORE_URLS="$KESTREL_URL" \
+          PAGESPEED__WORKER__APIPORT="$WORKER_API_PORT" \
+          PAGESPEED_SMOKE_VOLUME_DIR="$VOLUME_DIR" \
+          nohup dotnet run --no-build -c Release --urls "$KESTREL_URL" \
+            > "$SMOKE_ROOT/logs/dotnet.out" 2> "$SMOKE_ROOT/logs/dotnet.err" &
+          echo $! > "$SMOKE_ROOT/dotnet.pid"
+          echo "Started dotnet pid=$(cat "$SMOKE_ROOT/dotnet.pid")"
+
+      - name: Wait for /console/ readiness (Linux/macOS)
+        if: matrix.os != 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.os }}" = "macos" ]; then
+            export PATH="$PATH_PREFIX_MAC:$PATH"
+          fi
+          for i in $(seq 1 30); do
+            if curl -fsS "$KESTREL_URL/console/" -o /dev/null; then
+              echo "Console ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::App did not respond on $KESTREL_URL/console/ within 30s" >&2
+          echo "----- dotnet.out -----"
+          tail -200 "$SMOKE_ROOT/logs/dotnet.out" || true
+          echo "----- dotnet.err -----"
+          tail -200 "$SMOKE_ROOT/logs/dotnet.err" || true
+          exit 1
+
+      # ----------------------------------------------------------
+      # Structural sanity check: CI placeholder absence + body size
+      # ----------------------------------------------------------
+      # ci.yml's pkg-smoke jobs (lines 1260, 1487) deliberately stub
+      # the SPA with the literal string "CI placeholder" so they can
+      # exercise just the embedded-resource shape. If a real release
+      # ever shipped that placeholder (the bug class this workflow
+      # exists to catch), every release-smoke job fails fast on this
+      # gate, before Playwright even starts.
+      - name: Console structural sanity (Linux/macOS)
+        if: matrix.os != 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.os }}" = "macos" ]; then
+            export PATH="$PATH_PREFIX_MAC:$PATH"
+          fi
+          BODY="$SMOKE_ROOT/console-index.html"
+          curl -fsS "$KESTREL_URL/console/" -o "$BODY"
+          BYTES=$(wc -c < "$BODY")
+          echo "console body bytes: $BYTES"
+          if [ "$BYTES" -lt 500 ]; then
+            echo "::error::/console/ body is only $BYTES bytes (<500); SPA looks stubbed" >&2
+            head -c 1000 "$BODY"
+            exit 1
+          fi
+          if grep -q "CI placeholder" "$BODY"; then
+            echo "::error::/console/ contains 'CI placeholder', published SPA is the ci.yml stub!" >&2
+            head -c 1000 "$BODY"
+            exit 1
+          fi
+
+      # ----------------------------------------------------------
+      # LIVE worker readiness gate via proxied /v1/health
+      # ----------------------------------------------------------
+      # The middleware reverse-proxies /v1/health (ConsoleMiddleware
+      # ProxyPrefixes) straight through Kestrel to factory_worker on
+      # 127.0.0.1:{apiPort}, unauthenticated. We hit the user-facing
+      # KESTREL_URL path (not the worker's own ApiPort) so the gate
+      # exercises the FULL published stack: middleware proxy + a booted
+      # worker. The product is Apache-2.0 at GA, so the health document
+      # carries no license object, assert that too, so a stale
+      # license-bearing worker can never ship under a GA package.
+      - name: Worker readiness gate (Linux/macOS)
+        if: matrix.os != 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.os }}" = "macos" ]; then
+            export PATH="$PATH_PREFIX_MAC:$PATH"
+          fi
+          HEALTH="$SMOKE_ROOT/health.json"
+          # Poll: the worker proxy (/v1/health) can lag /console/ readiness;
+          # retry until 200 + ready rather than racing the worker cold start
+          # (which would 503 -> curl -fsS fails). A 200 without a `ready`
+          # field also counts.
+          got=0
+          for _ in $(seq 1 30); do
+            if curl -fsS "$KESTREL_URL/v1/health" -o "$HEALTH" 2>/dev/null \
+                 && jq -e '(has("ready") | not) or .ready == true' "$HEALTH" >/dev/null 2>&1; then
+              got=1; break
+            fi
+            sleep 1
+          done
+          if [ "$got" -ne 1 ]; then
+            echo "::error::/v1/health never reported ready within 30s" >&2
+            tail -200 "$SMOKE_ROOT/logs/dotnet.err" || true
+            exit 1
+          fi
+          echo "health: status=$(jq -r '.status' "$HEALTH") ready=$(jq -r '.ready' "$HEALTH")"
+          if jq -e 'has("license")' "$HEALTH" >/dev/null 2>&1; then
+            echo "::error::/v1/health still carries a 'license' object, the published worker is not the license-free build" >&2
+            exit 1
+          fi
+          echo "Worker readiness gate PASSED"
+
+      # ----------------------------------------------------------
+      # Playwright check on the About page
+      # ----------------------------------------------------------
+      # The published SPA must render /console/about and its navigation
+      # must carry no "License" item (the license tab went away with the
+      # licensing apparatus).
+      - name: Install Node + Playwright deps (Linux/macOS)
+        if: matrix.os != 'windows'
+        shell: bash
+        env:
+          UBUNTU_MIRROR: ${{ vars.UBUNTU_MIRROR }}
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.os }}" = "macos" ]; then
+            export PATH="$PATH_PREFIX_MAC:$PATH"
+          fi
+          mkdir -p "$SMOKE_ROOT/pw"
+          cd "$SMOKE_ROOT/pw"
+          node --version
+          npm --version
+          npm init -y > /dev/null
+          # Pinned, not @latest: 1.62.1 silently dropped Node 18 and turned
+          # release-smoke red on every leg. Bump deliberately, checking
+          # the new version's Node engine floor first.
+          npm install --no-save --no-audit --no-fund @playwright/test@1.62.1
+          # Install Chromium's system libs explicitly before the browser
+          # itself. The previous "our runners already have the required
+          # system libs" assumption broke every time a new RID/runner combo
+          # joined the matrix (one needed a manual
+          # `sudo apt install libnss3 libnspr4 libatk1.0-0t64 ...`). Hosted
+          # runners have passwordless sudo, and
+          # `playwright install-deps` is idempotent apt-driven, so running
+          # it unconditionally lets future runner additions inherit the
+          # right deps for free. install-deps is a Linux/apt operation;
+          # macOS browser libs ship with the bundle, so skip it there.
+          if [ "${{ matrix.os }}" != "macos" ]; then
+            bash "${GITHUB_WORKSPACE}/ci-helpers/tools/ci/apt-robust.sh" update
+            npx playwright install-deps chromium
+          fi
+          npx playwright install chromium
+
+      - name: Write Playwright spec (Linux/macOS)
+        if: matrix.os != 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$SMOKE_ROOT/pw/smoke.spec.ts" <<'EOF'
+          import { test, expect } from '@playwright/test';
+
+          const BASE = process.env.SMOKE_BASE_URL ?? 'http://127.0.0.1:5050';
+
+          test('About page loads and the nav has no License item', async ({ page }) => {
+            await page.goto(`${BASE}/console/about`);
+
+            // 1. The SPA rendered something and its navigation is up.
+            await expect(page.locator('body')).not.toBeEmpty({ timeout: 15000 });
+            await expect(page.getByRole('navigation').first()).toBeVisible({ timeout: 15000 });
+
+            // 2. No License tab: the licensing apparatus is gone from the
+            //    product, so a "License" nav item on the published SPA means
+            //    a stale console build shipped.
+            await expect(
+              page.getByRole('navigation').getByRole('link', { name: /license/i })
+            ).toHaveCount(0);
+          });
+          EOF
+
+      - name: Run Playwright (Linux/macOS)
+        if: matrix.os != 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.os }}" = "macos" ]; then
+            export PATH="$PATH_PREFIX_MAC:$PATH"
+          fi
+          cd "$SMOKE_ROOT/pw"
+          SMOKE_BASE_URL="$KESTREL_URL" \
+            npx playwright test smoke.spec.ts --reporter=line --workers=1
+
+      # ----------------------------------------------------------
+      # Teardown (always)
+      # ----------------------------------------------------------
+      - name: Stop smoke app (Linux/macOS)
+        if: ${{ always() && matrix.os != 'windows' }}
+        shell: bash
+        run: |
+          set +e
+          if [ -f "${SMOKE_ROOT:-/nonexistent}/dotnet.pid" ]; then
+            PID=$(cat "$SMOKE_ROOT/dotnet.pid")
+            if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
+              echo "Stopping dotnet pid=$PID"
+              kill "$PID" 2>/dev/null
+              sleep 2
+              kill -9 "$PID" 2>/dev/null || true
+            fi
+          fi
+          # Best-effort, PORT-SCOPED: this job's Kestrel (5050) + worker
+          # (WORKER_API_PORT). Never a blanket factory_worker pkill, a
+          # concurrent job on the same runner uses disjoint ports and must
+          # not be collaterally killed.
+          if command -v lsof >/dev/null 2>&1; then
+            lsof -ti tcp:5050 2>/dev/null | xargs -r kill -9 2>/dev/null || true
+            lsof -ti "tcp:${WORKER_API_PORT:-9881}" 2>/dev/null | xargs -r kill -9 2>/dev/null || true
+          fi
+
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: release-smoke-${{ matrix.rid }}-${{ env.PACKAGE_VERSION }}
+          if-no-files-found: ignore
+          retention-days: 14
+          path: |
+            ${{ env.SMOKE_ROOT }}/logs/
+            ${{ env.SMOKE_ROOT }}/console-index.html
+            ${{ env.SMOKE_ROOT }}/health.json
+            ${{ env.SMOKE_ROOT }}/pw/playwright-report/
+            ${{ env.SMOKE_ROOT }}/pw/test-results/
+
+  smoke-linux-arm64:
+    permissions:
+      contents: read
+    name: smoke / ${{ matrix.rid }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    strategy:
+      matrix:
+        include:
+          - rid: linux-arm64
+            os: linux
+            native_package: WeAmp.PageSpeed.NativeAssets.Linux
+    env: *smoke-env
+    steps: *smoke-steps-unix
+
+  smoke-osx-arm64:
+    permissions: {}
+    name: smoke / ${{ matrix.rid }}
+    runs-on: macos-15
+    timeout-minutes: 45
+    strategy:
+      matrix:
+        include:
+          - rid: osx-arm64
+            os: macos
+            native_package: WeAmp.PageSpeed.NativeAssets.macOS
+    env: *smoke-env
+    steps: *smoke-steps-unix
+
+  smoke-win-x64:
+    permissions: {}
+    name: smoke / ${{ matrix.rid }}
+    runs-on: windows-2022
+    timeout-minutes: 45
+    strategy:
+      matrix:
+        include:
+          - rid: win-x64
+            os: windows
+            native_package: WeAmp.PageSpeed.NativeAssets.Windows
+    env: *smoke-env
+    steps:
+
+      - name: Determine package version (Windows)
+        if: matrix.os == 'windows'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = "${{ github.event.release.tag_name }}"
+          $manual = "${{ inputs.package_version }}"
+          if ($tag) { $v = $tag } else { $v = $manual }
+          if (-not $v) {
+            Write-Error "Could not resolve package_version"
+          }
+          if ($v.StartsWith("v")) { $v = $v.Substring(1) }
+          "PACKAGE_VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Smoke target version: $v"
+
+      # ----------------------------------------------------------
+      # Pin Node for the Playwright legs. Runner SYSTEM node must not be
+      # load-bearing: @playwright/test dropping Node 18 turned a routine
+      # release-smoke run red on every linux-x64 leg. setup-node's toolchain wins on
+      # Linux/Windows; the macOS steps still prepend PATH_PREFIX_MAC, so the
+      # Homebrew node deliberately keeps precedence there.
+      # ----------------------------------------------------------
+      - name: Pin Node 22 (Playwright toolchain)
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+
+      - name: Ensure .NET 10 SDK (Windows)
+        if: matrix.os == 'windows'
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Wait for nuget.org indexing (Windows)
+        if: matrix.os == 'windows'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $v = $env:PACKAGE_VERSION
+          # `dotnet add WeAmp.PageSpeed.AspNetCore` pulls ALL THREE native
+          # RID packages (Linux+Windows+macOS) transitively, not just this
+          # matrix's own. Every matrix variant must wait for the FULL
+          # cross-platform native set to index, or the scaffold can NU1102
+          # on a still-unindexed sibling RID (v2.0.12 first-smoke race).
+          #
+          # Poll ROUND-ROBIN: each round checks every still-pending package
+          # and sleeps once, so the total wait stays bounded at
+          # 30 rounds x 30s = 15 min regardless of package count (a
+          # per-package nested wait would be 5 x 15 min = 75 min, over the
+          # 45-min job timeout).
+          $pending = [System.Collections.Generic.List[string]]@(
+            "weamp.pagespeed",
+            "weamp.pagespeed.aspnetcore",
+            "weamp.pagespeed.nativeassets.linux",
+            "weamp.pagespeed.nativeassets.windows",
+            "weamp.pagespeed.nativeassets.macos"
+          )
+          for ($i = 1; $i -le 30; $i++) {
+            $still = [System.Collections.Generic.List[string]]::new()
+            foreach ($pkg in $pending) {
+              try {
+                $resp = Invoke-WebRequest -UseBasicParsing `
+                  -Uri "https://api.nuget.org/v3-flatcontainer/$pkg/index.json" `
+                  -ErrorAction Stop
+                $doc = $resp.Content | ConvertFrom-Json
+                if ($doc.versions -contains $v) {
+                  Write-Host "  found $pkg@$v (round $i)"
+                } else {
+                  $still.Add($pkg)
+                }
+              } catch {
+                $still.Add($pkg)
+              }
+            }
+            $pending = $still
+            if ($pending.Count -eq 0) {
+              Write-Host "All packages indexed at $v"
+              break
+            }
+            if ($i -eq 30) {
+              Write-Error "Timed out waiting for nuget.org indexing of: $($pending -join ', ') ($v, 15 min)"
+            }
+            Write-Host "Round ${i}: still waiting for: $($pending -join ', ')"
+            Start-Sleep -Seconds 30
+          }
+
+      - name: Scaffold smoke app (Windows)
+        if: matrix.os == 'windows'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $smokeRoot = Join-Path $env:RUNNER_TEMP "release-smoke-$env:PACKAGE_VERSION"
+          if (Test-Path $smokeRoot) { Remove-Item -Recurse -Force $smokeRoot }
+          New-Item -ItemType Directory -Force -Path $smokeRoot | Out-Null
+          "SMOKE_ROOT=$smokeRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Set-Location $smokeRoot
+          # Symmetry with Linux/macOS: force a fresh nuget.org metadata
+          # download. Windows hasn't exhibited the staleness bug yet, but
+          # the same caching pattern could surface it on a future release.
+          & dotnet nuget locals http-cache -c
+          if ($LASTEXITCODE -ne 0) { Write-Error "nuget locals clear failed ($LASTEXITCODE)" }
+          # CRITICAL: evict cached We-Amp packages from global-packages so we
+          # install the PUBLISHED artifact, not ci.yml's pkg-smoke stub (which
+          # is packed at the same VERSION.txt-derived version). See the
+          # Linux/macOS step for the full rationale. http-cache clear alone is
+          # insufficient.
+          $nugetPkgs = Join-Path $env:USERPROFILE ".nuget\packages"
+          Get-ChildItem -Path $nugetPkgs -Directory -Filter "weamp.pagespeed*" -ErrorAction SilentlyContinue |
+            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+          & dotnet new web -n SmokeTest -o smoke --no-https
+          if ($LASTEXITCODE -ne 0) { Write-Error "dotnet new failed ($LASTEXITCODE)" }
+          Set-Location (Join-Path $smokeRoot "smoke")
+          & dotnet add package WeAmp.PageSpeed.AspNetCore --version $env:PACKAGE_VERSION
+          if ($LASTEXITCODE -ne 0) { Write-Error "AspNetCore add failed ($LASTEXITCODE)" }
+          & dotnet add package "${{ matrix.native_package }}" --version $env:PACKAGE_VERSION
+          if ($LASTEXITCODE -ne 0) { Write-Error "NativeAssets add failed ($LASTEXITCODE)" }
+
+      - name: Write Program.cs (Windows)
+        if: matrix.os == 'windows'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $program = @'
+          using WeAmp.PageSpeed.AspNetCore;
+
+          var builder = WebApplication.CreateBuilder(args);
+
+          builder.Services.AddPageSpeed(options =>
+          {
+              // VolumePath is read from env so the job can pin a per-run cache
+              // dir (started clean every run so a previous run's state can't
+              // mask a boot regression). Defaults to a stable per-machine dir
+              // when unset.
+              var volumeDir = Environment.GetEnvironmentVariable("PAGESPEED_SMOKE_VOLUME_DIR")
+                  ?? Path.Combine(Path.GetTempPath(), "pagespeed-smoke");
+              options.Cache.VolumePath = Path.Combine(volumeDir, "volume.dat");
+              options.Cache.VolumeSizeBytes = 256 * 1024 * 1024;
+              // No SocketPath override: dogfood the v2.0.14 auto-path default
+              // (worker coordination ON). ApiPort stays set so the embedded
+              // /console/ proxy can reach the worker's management API.
+              options.Worker.ApiPort = int.Parse(
+                  Environment.GetEnvironmentVariable("PAGESPEED__WORKER__APIPORT") ?? "9881");
+          });
+
+          var app = builder.Build();
+
+          app.UseExceptionHandler("/error");
+          app.UsePageSpeed();
+          app.UseStaticFiles();
+          app.UseRouting();
+          app.MapHealthChecks("/health");
+
+          app.MapGet("/", () => Results.Content(
+              "<!DOCTYPE html><html><body><h1>release-smoke</h1></body></html>",
+              "text/html"));
+
+          app.Run();
+          '@
+          $target = Join-Path $env:SMOKE_ROOT "smoke\Program.cs"
+          Set-Content -Path $target -Value $program -Encoding utf8
+
+      # ----------------------------------------------------------
+      # Windows: single PS1 step covering boot through Playwright
+      # ----------------------------------------------------------
+      # The Windows runner can reap Start-Process child
+      # processes when the spawning PS1 step exits. Splitting boot,
+      # readiness, sanity, and Playwright across steps killed the
+      # dotnet app between readiness (which kept the PS1 alive while
+      # polling) and the next step's first Invoke-WebRequest. We keep
+      # everything in one shell session so $proc survives. Linux and
+      # macOS don't have this lifecycle bug and stay split for
+      # readability.
+      - name: Smoke (Windows)
+        if: matrix.os == 'windows'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          Write-Host "===Phase: dotnet boot==="
+          Set-Location (Join-Path $env:SMOKE_ROOT "smoke")
+          & dotnet build -c Release -v minimal
+          if ($LASTEXITCODE -ne 0) { Write-Error "dotnet build failed ($LASTEXITCODE)" }
+          $logDir = Join-Path $env:SMOKE_ROOT "logs"
+          New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+          # Per-run cache dir. Start clean.
+          $volumeDir = Join-Path $env:SMOKE_ROOT "volume"
+          if (Test-Path $volumeDir) { Remove-Item -Recurse -Force $volumeDir }
+          New-Item -ItemType Directory -Force -Path $volumeDir | Out-Null
+          # Backstop: reap any stale process holding THIS job's ports from a
+          # prior run (address-in-use -> worker dies -> /v1 502). Port-scoped via
+          # Get-NetTCPConnection -- NOT a blanket `Get-Process factory_worker`,
+          # so a concurrent job on disjoint ports is never killed.
+          function Stop-PortOwner($port) {
+            try {
+              Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
+                Select-Object -ExpandProperty OwningProcess -Unique |
+                ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
+            } catch { }
+          }
+          Stop-PortOwner ([int]$env:WORKER_API_PORT)
+          Stop-PortOwner 5050
+          $env:ASPNETCORE_URLS = $env:KESTREL_URL
+          $env:PAGESPEED__WORKER__APIPORT = $env:WORKER_API_PORT
+          $env:PAGESPEED_SMOKE_VOLUME_DIR = $volumeDir
+          $proc = Start-Process -FilePath "dotnet" `
+            -ArgumentList @("run","--no-build","-c","Release","--urls",$env:KESTREL_URL) `
+            -WorkingDirectory (Get-Location).Path `
+            -RedirectStandardOutput (Join-Path $logDir "dotnet.out") `
+            -RedirectStandardError  (Join-Path $logDir "dotnet.err") `
+            -PassThru `
+            -WindowStyle Hidden
+          $proc.Id | Out-File -FilePath (Join-Path $env:SMOKE_ROOT "dotnet.pid") -Encoding ascii
+          Write-Host "Started dotnet pid=$($proc.Id)"
+
+          Write-Host "===Phase: readiness probe==="
+          # Windows dotnet cold-start (incl. factory_worker spawn)
+          # routinely takes 60-90s on first invocation, longer than Linux/macOS.
+          # 120 iters at ~1-6s each gives ~3-7 min headroom before timing out.
+          $maxIter = 120
+          $ready = $false
+          for ($i = 1; $i -le $maxIter; $i++) {
+            try {
+              $r = Invoke-WebRequest -UseBasicParsing -Uri "$env:KESTREL_URL/console/" -TimeoutSec 5
+              if ($r.StatusCode -eq 200) {
+                Write-Host "Console ready after $i attempt(s)"
+                $ready = $true
+                break
+              }
+            } catch { }
+            Start-Sleep -Seconds 1
+          }
+          if (-not $ready) {
+            Write-Host "----- dotnet.out -----"
+            Get-Content (Join-Path $logDir "dotnet.out") -Tail 200 -ErrorAction SilentlyContinue
+            Write-Host "----- dotnet.err -----"
+            Get-Content (Join-Path $logDir "dotnet.err") -Tail 200 -ErrorAction SilentlyContinue
+            Write-Error "App did not respond on $env:KESTREL_URL/console/ within $maxIter attempts"
+          }
+
+          Write-Host "===Phase: structural sanity==="
+          # ci.yml's pkg-smoke jobs (lines 1260, 1487) deliberately stub
+          # the SPA with the literal string "CI placeholder" so they can
+          # exercise just the embedded-resource shape. If a real release
+          # ever shipped that placeholder (the bug class this workflow
+          # exists to catch), every release-smoke job fails fast on this
+          # gate, before Playwright even starts.
+          $body = Join-Path $env:SMOKE_ROOT "console-index.html"
+          Invoke-WebRequest -UseBasicParsing -Uri "$env:KESTREL_URL/console/" -OutFile $body
+          $bytes = (Get-Item $body).Length
+          Write-Host "console body bytes: $bytes"
+          if ($bytes -lt 500) {
+            Get-Content $body -TotalCount 20
+            Write-Error "/console/ body is only $bytes bytes (<500); SPA looks stubbed"
+          }
+          $content = Get-Content $body -Raw
+          if ($content -match "CI placeholder") {
+            Write-Error "/console/ contains 'CI placeholder' -- published SPA is the ci.yml stub!"
+          }
+
+          Write-Host "===Phase: worker readiness via proxied /v1/health==="
+          # Middleware reverse-proxies /v1/health through Kestrel to the worker
+          # (unauthenticated), so this exercises the FULL published stack:
+          # middleware proxy + a booted factory_worker. Poll: the worker proxy
+          # can lag /console/ readiness (503 until the worker port is
+          # published). Retry until we get a 200 with ready=true.
+          $healthJson = Join-Path $env:SMOKE_ROOT "health.json"
+          $h = $null
+          for ($i = 1; $i -le 30; $i++) {
+            try {
+              Invoke-WebRequest -UseBasicParsing -Uri "$env:KESTREL_URL/v1/health" -OutFile $healthJson -ErrorAction Stop
+              $cand = (Get-Content $healthJson -Raw | ConvertFrom-Json)
+              if ($null -eq $cand.ready -or $cand.ready -eq $true) { $h = $cand; break }
+            } catch { }
+            Start-Sleep -Seconds 1
+          }
+          if ($null -eq $h) {
+            Get-Content (Join-Path $logDir "dotnet.err") -Tail 200 -ErrorAction SilentlyContinue
+            Write-Error "/v1/health never reported ready within 30s"
+          }
+          Write-Host "health: status=$($h.status) ready=$($h.ready)"
+          # Apache-2.0 at GA: the health document carries no license object.
+          if ($null -ne $h.license) {
+            Write-Error "/v1/health still carries a 'license' object -- the published worker is not the license-free build"
+          }
+          Write-Host "Worker readiness gate PASSED"
+
+          Write-Host "===Phase: install Node + Playwright deps==="
+          $pwDir = Join-Path $env:SMOKE_ROOT "pw"
+          New-Item -ItemType Directory -Force -Path $pwDir | Out-Null
+          Set-Location $pwDir
+          & node --version
+          if ($LASTEXITCODE -ne 0) { Write-Error "node --version failed ($LASTEXITCODE)" }
+          & npm --version
+          if ($LASTEXITCODE -ne 0) { Write-Error "npm --version failed ($LASTEXITCODE)" }
+          & npm init -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { Write-Error "npm init failed ($LASTEXITCODE)" }
+          # Pinned, not @latest, see the Linux leg's rationale.
+          & npm install --no-save --no-audit --no-fund "@playwright/test@1.62.1"
+          if ($LASTEXITCODE -ne 0) { Write-Error "npm install failed ($LASTEXITCODE)" }
+          & npx playwright install chromium
+          if ($LASTEXITCODE -ne 0) { Write-Error "playwright install failed ($LASTEXITCODE)" }
+
+          Write-Host "===Phase: write Playwright spec==="
+          # The published SPA must render /console/about and its navigation
+          # must carry no "License" item (the license tab went away with the
+          # licensing apparatus). Mirrors the Linux/macOS spec.
+          $spec = @'
+          import { test, expect } from '@playwright/test';
+
+          const BASE = process.env.SMOKE_BASE_URL ?? 'http://127.0.0.1:5050';
+
+          test('About page loads and the nav has no License item', async ({ page }) => {
+            await page.goto(`${BASE}/console/about`);
+
+            await expect(page.locator('body')).not.toBeEmpty({ timeout: 15000 });
+            await expect(page.getByRole('navigation').first()).toBeVisible({ timeout: 15000 });
+
+            await expect(
+              page.getByRole('navigation').getByRole('link', { name: /license/i })
+            ).toHaveCount(0);
+          });
+          '@
+          $target = Join-Path $env:SMOKE_ROOT "pw\smoke.spec.ts"
+          Set-Content -Path $target -Value $spec -Encoding utf8
+
+          Write-Host "===Phase: run Playwright==="
+          $env:SMOKE_BASE_URL = $env:KESTREL_URL
+          & npx playwright test smoke.spec.ts --reporter=line --workers=1
+          $pwExit = $LASTEXITCODE
+          Write-Host "----- dotnet.out (post-playwright tail) -----"
+          Get-Content (Join-Path $logDir "dotnet.out") -Tail 200 -ErrorAction SilentlyContinue
+          Write-Host "----- dotnet.err (post-playwright tail) -----"
+          Get-Content (Join-Path $logDir "dotnet.err") -Tail 200 -ErrorAction SilentlyContinue
+          if ($pwExit -ne 0) { Write-Error "Playwright test failed ($pwExit)" }
+
+      - name: Stop smoke app (Windows)
+        if: ${{ always() && matrix.os == 'windows' }}
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $root = $env:SMOKE_ROOT
+          if (-not $root) { $root = "C:\does\not\exist" }
+          $pidFile = Join-Path $root "dotnet.pid"
+          if (Test-Path $pidFile) {
+            $procId = (Get-Content $pidFile -ErrorAction SilentlyContinue).Trim()
+            if ($procId) {
+              try {
+                $p = Get-Process -Id $procId -ErrorAction Stop
+                Write-Host "Stopping dotnet pid=$procId"
+                $p | Stop-Process -Force -ErrorAction SilentlyContinue
+              } catch { }
+            }
+          }
+          # Best-effort, PORT-SCOPED: this job's Kestrel (5050) + worker
+          # (WORKER_API_PORT). Mirrors the Linux/macOS sibling -- the PID reap
+          # above only covers this run's tracked dotnet, so an orphan (e.g. a
+          # crashed prior run's factory_worker) can survive holding 5050/worker
+          # and block the next run's bind. Port-scoped via Get-NetTCPConnection
+          # -- never a blanket factory_worker kill, so a concurrent job on
+          # disjoint ports is never collaterally killed.
+          function Stop-PortOwner($port) {
+            try {
+              Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
+                Select-Object -ExpandProperty OwningProcess -Unique |
+                ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
+            } catch { }
+          }
+          $workerPort = [int]($env:WORKER_API_PORT)
+          if (-not $workerPort) { $workerPort = 9881 }
+          Stop-PortOwner $workerPort
+          Stop-PortOwner 5050
+
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: release-smoke-${{ matrix.rid }}-${{ env.PACKAGE_VERSION }}
+          if-no-files-found: ignore
+          retention-days: 14
+          path: |
+            ${{ env.SMOKE_ROOT }}/logs/
+            ${{ env.SMOKE_ROOT }}/console-index.html
+            ${{ env.SMOKE_ROOT }}/health.json
+            ${{ env.SMOKE_ROOT }}/pw/playwright-report/
+            ${{ env.SMOKE_ROOT }}/pw/test-results/
+
+  # ----------------------------------------------------------------
+  # Sidecar packages: WeAmp.PageSpeed.Sidecar (+ the matched
+  # WeAmp.PageSpeed.Sidecar.NativeAssets.Linux) from nuget.org.
+  # ----------------------------------------------------------------
+  # The consumer path of the sidecar, exactly as the package documentation
+  # describes it: add the package to a minimal ASP.NET Core app, wire
+  # AddPageSpeed / UsePageSpeed, publish with a Linux RID so the bundled
+  # nginx pair is copied into the publish output, run the published app, and
+  # request one HTML page through it. The bytes are verified before publish;
+  # this catches a broken runtimes layout or a bad native pair right after
+  # publish. Linux only (the sidecar package is Linux-only). The version
+  # logic and the indexing wait mirror the AspNetCore legs above.
+  smoke-sidecar-linux-x64:
+    permissions:
+      contents: read
+    name: smoke / sidecar / ${{ matrix.rid }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        include:
+          - rid: linux-x64
+    env: &sidecar-env
+      SIDECAR_PORT: "5061"
+    steps: &sidecar-steps
+      - name: Checkout the apt helper
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: ci-helpers
+          sparse-checkout: tools/ci/apt-robust.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Determine package version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${{ github.event.release.tag_name }}" ]; then
+            V="${{ github.event.release.tag_name }}"
+          else
+            V="${{ inputs.package_version }}"
+          fi
+          # Strip a single leading 'v'.
+          V="${V#v}"
+          if [ -z "$V" ]; then
+            echo "::error::Could not resolve package_version" >&2
+            exit 1
+          fi
+          echo "PACKAGE_VERSION=$V" >> "$GITHUB_ENV"
+          echo "Sidecar smoke target version: $V"
+
+      - name: Set up .NET 10 SDK
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: 10.0.x
+
+      # Round-robin poll, bounded at 30 rounds x 30s = 15 min in total,
+      # for the two sidecar ids (lowercase, flatcontainer convention).
+      - name: Wait for nuget.org indexing
+        shell: bash
+        run: |
+          set -euo pipefail
+          V="$PACKAGE_VERSION"
+          pending="weamp.pagespeed.sidecar weamp.pagespeed.sidecar.nativeassets.linux"
+          for i in $(seq 1 30); do
+            still=""
+            for pkg in $pending; do
+              if curl -fsS "https://api.nuget.org/v3-flatcontainer/${pkg}/index.json" \
+                   | jq -e --arg v "$V" '.versions | index($v)' > /dev/null 2>&1; then
+                echo "  found $pkg@$V (round $i)"
+              else
+                still="$still $pkg"
+              fi
+            done
+            pending="$still"
+            if [ -z "$pending" ]; then
+              echo "All sidecar packages indexed at $V"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "::error::Timed out waiting for nuget.org indexing of:$pending ($V, 15 min)" >&2
+              exit 1
+            fi
+            echo "Round $i: still waiting for:$pending"
+            sleep 30
+          done
+
+      - name: Scaffold consumer project
+        shell: bash
+        run: |
+          set -euo pipefail
+          SMOKE_ROOT="$RUNNER_TEMP/sidecar-smoke-$PACKAGE_VERSION"
+          rm -rf "$SMOKE_ROOT"
+          mkdir -p "$SMOKE_ROOT/logs"
+          echo "SMOKE_ROOT=$SMOKE_ROOT" >> "$GITHUB_ENV"
+          cd "$SMOKE_ROOT"
+          # Fresh nuget.org metadata, and no locally cached We-Amp packages,
+          # so the restore installs the PUBLISHED artifacts (same reasons as
+          # the AspNetCore legs above).
+          dotnet nuget locals http-cache -c
+          rm -rf "${HOME}/.nuget/packages/weamp.pagespeed.sidecar" \
+                 "${HOME}/.nuget/packages/weamp.pagespeed.sidecar.nativeassets."* 2>/dev/null || true
+          dotnet new web -n SidecarSmoke -o app --no-https
+          cd app
+          dotnet add package WeAmp.PageSpeed.Sidecar --version "$PACKAGE_VERSION"
+          dotnet add package WeAmp.PageSpeed.Sidecar.NativeAssets.Linux --version "$PACKAGE_VERSION"
+          cat > Program.cs <<'EOF'
+          using WeAmp.PageSpeed.AspNetCore.DependencyInjection;
+
+          var builder = WebApplication.CreateBuilder(args);
+          builder.Services.AddPageSpeed(builder.Configuration);
+
+          var app = builder.Build();
+          app.UsePageSpeed();
+          app.MapHealthChecks("/health");
+
+          // Origin HTML with an external stylesheet that PageSpeed fetches,
+          // minifies and inlines (CoreFilters).
+          app.MapGet("/", () => Results.Content("""
+              <!DOCTYPE html>
+              <html>
+              <head>
+                  <title>sidecar release smoke</title>
+                  <link rel="stylesheet" href="/style.css">
+              </head>
+              <body><h1>sidecar release smoke</h1></body>
+              </html>
+              """, "text/html"));
+
+          app.MapGet("/style.css", (HttpContext ctx) =>
+          {
+              ctx.Response.Headers.CacheControl = "public, max-age=600";
+              return Results.Content(
+                  "body   {   color :   #333 ;   margin :   40px ;   }\n" +
+                  "h1     {   color :   #00aa77 ;   }\n",
+                  "text/css");
+          });
+
+          app.Run();
+          EOF
+
+      # A framework-dependent publish needs a Linux RID, otherwise the
+      # bundled nginx is not copied next to the app.
+      - name: Publish for the runtime identifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$SMOKE_ROOT/app"
+          dotnet publish -c Release -r "${{ matrix.rid }}" --self-contained false -o "$SMOKE_ROOT/publish" -v minimal
+          # With a RID, the SDK copies the package's native assets to the root
+          # of the publish folder; the runtimes/<rid>/native layout is the
+          # fallback the sidecar also probes. Accept either, root first.
+          PUB="$SMOKE_ROOT/publish"
+          NATIVE=""
+          for d in "$PUB" "$PUB/runtimes/${{ matrix.rid }}/native"; do
+            if [ -f "$d/nginx" ] && [ -f "$d/ngx_pagespeed_module.so" ]; then
+              NATIVE="$d"
+              break
+            fi
+          done
+          if [ -z "$NATIVE" ]; then
+            echo "::error::published output lacks the bundled nginx pair (nginx, ngx_pagespeed_module.so)" >&2
+            find "$PUB" -maxdepth 4 | head -80
+            exit 1
+          fi
+          echo "nginx pair found in $NATIVE"
+          stat -c "%A %s %n" "$NATIVE/nginx" "$NATIVE/ngx_pagespeed_module.so"
+          if [ ! -x "$NATIVE/nginx" ]; then
+            echo "::error::$NATIVE/nginx is not executable" >&2
+            exit 1
+          fi
+
+      # The bundled nginx links PCRE (libpcre.so.3), which a consumer host
+      # provides and the hosted images no longer ship; install it only when
+      # the published nginx has an unresolved library (same step as the
+      # NuGet lane's test job).
+      - name: Install the PCRE runtime the bundled nginx needs
+        shell: bash
+        env:
+          UBUNTU_MIRROR: ${{ vars.UBUNTU_MIRROR }}
+        run: |
+          set -euo pipefail
+          PUB="$SMOKE_ROOT/publish"
+          NGINX="$PUB/nginx"
+          [ -f "$NGINX" ] || NGINX="$PUB/runtimes/${{ matrix.rid }}/native/nginx"
+          if ldd "$NGINX" | grep -q 'not found'; then
+            bash "${GITHUB_WORKSPACE}/ci-helpers/tools/ci/apt-robust.sh" update
+            sudo apt-get -o DPkg::Lock::Timeout=120 install -y -qq --no-install-recommends libpcre3 >/dev/null
+          fi
+          if ldd "$NGINX" | grep 'not found'; then
+            echo "::error::the bundled nginx has unresolved libraries on this runner" >&2
+            exit 1
+          fi
+
+      - name: Start the app with the bundled nginx
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$SMOKE_ROOT/publish"
+          # The generated nginx.conf keeps the default error/access log paths, which
+          # resolve under the config directory (<conf>/logs); nginx will not create it.
+          mkdir -p "$SMOKE_ROOT/cache" "$SMOKE_ROOT/nginx-conf/logs" "$SMOKE_ROOT/logs/nginx"
+          ASPNETCORE_URLS="" \
+          PageSpeed__Sidecar__ListenPort="$SIDECAR_PORT" \
+          PageSpeed__Sidecar__ConfigDirectory="$SMOKE_ROOT/nginx-conf" \
+          PageSpeed__Cache__FileCachePath="$SMOKE_ROOT/cache" \
+          PageSpeed__Cache__LogDirectory="$SMOKE_ROOT/logs/nginx" \
+          nohup dotnet SidecarSmoke.dll \
+            > "$SMOKE_ROOT/logs/dotnet.out" 2> "$SMOKE_ROOT/logs/dotnet.err" &
+          echo $! > "$SMOKE_ROOT/dotnet.pid"
+          echo "Started dotnet pid=$(cat "$SMOKE_ROOT/dotnet.pid")"
+          # Bounded wait (60s) for the public port to answer.
+          for i in $(seq 1 60); do
+            if curl -fsS "http://127.0.0.1:${SIDECAR_PORT}/health" -o /dev/null 2>/dev/null; then
+              echo "App ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::App did not answer on port ${SIDECAR_PORT} within 60s" >&2
+          tail -100 "$SMOKE_ROOT/logs/dotnet.out" || true
+          tail -100 "$SMOKE_ROOT/logs/dotnet.err" || true
+          exit 1
+
+      # One HTML page through the sidecar: the response must carry the
+      # X-Page-Speed header (set by the bundled ngx_pagespeed on a processed
+      # response), and the external stylesheet must end up inlined. The first
+      # requests can pass through while the stylesheet is fetched, so the
+      # inlining check polls (bounded, 30 tries).
+      - name: Assert one optimized response
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL="http://127.0.0.1:${SIDECAR_PORT}/"
+          HDR="$SMOKE_ROOT/response.headers"
+          BODY="$SMOKE_ROOT/response.html"
+          ok=0
+          for i in $(seq 1 30); do
+            curl -fsS -H 'Accept: text/html' -D "$HDR" -o "$BODY" "$URL" || true
+            if grep -qi '^x-page-speed:' "$HDR" 2>/dev/null \
+                 && grep -q '<style' "$BODY" 2>/dev/null \
+                 && ! grep -q 'href="/style.css"' "$BODY"; then
+              ok=1
+              echo "optimized response on try $i"
+              break
+            fi
+            sleep 2
+          done
+          cat "$HDR" || true
+          cat "$BODY" || true
+          if [ "$ok" -ne 1 ]; then
+            echo "::error::no optimized response (X-Page-Speed header plus inlined stylesheet) within 30 tries" >&2
+            tail -100 "$SMOKE_ROOT/logs/dotnet.err" || true
+            exit 1
+          fi
+          echo "Sidecar optimized response PASSED"
+
+      - name: Stop the app
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [ -f "${SMOKE_ROOT:-/nonexistent}/dotnet.pid" ]; then
+            PID=$(cat "$SMOKE_ROOT/dotnet.pid")
+            if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
+              echo "Stopping dotnet pid=$PID"
+              kill "$PID" 2>/dev/null
+              sleep 3
+              kill -9 "$PID" 2>/dev/null || true
+            fi
+          fi
+          exit 0
+
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: release-smoke-sidecar-${{ matrix.rid }}-${{ env.PACKAGE_VERSION }}
+          if-no-files-found: ignore
+          retention-days: 14
+          path: |
+            ${{ env.SMOKE_ROOT }}/logs/
+            ${{ env.SMOKE_ROOT }}/nginx-conf/
+            ${{ env.SMOKE_ROOT }}/response.headers
+            ${{ env.SMOKE_ROOT }}/response.html
+
+  smoke-sidecar-linux-arm64:
+    permissions:
+      contents: read
+    name: smoke / sidecar / ${{ matrix.rid }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        include:
+          - rid: linux-arm64
+    env: *sidecar-env
+    steps: *sidecar-steps

@@ -1,0 +1,90 @@
+{
+  "origin": "https://modpagespeed.com",
+  "capturedAt": "2026-11-24T09:49:40.672Z",
+  "paths": {
+    "/": {
+      "status": 200,
+      "wireBytes": 40973,
+      "decodedBytes": 205749,
+      "ttfbMs": 131,
+      "headers": {
+        "x-mod-pagespeed": "2.10.0",
+        "vary": "User-Agent,Accept-Encoding,Save-Data",
+        "content-encoding": "gzip",
+        "content-type": "text/html",
+        "cache-control": "max-age=0, no-cache",
+        "content-length": "40973"
+      }
+    },
+    "/docs/": {
+      "status": 200,
+      "wireBytes": 34355,
+      "decodedBytes": 181869,
+      "ttfbMs": 129,
+      "headers": {
+        "x-mod-pagespeed": "2.10.0",
+        "vary": "User-Agent,Accept-Encoding,Save-Data",
+        "content-encoding": "gzip",
+        "content-type": "text/html",
+        "cache-control": "max-age=0, no-cache",
+        "content-length": "34355"
+      }
+    },
+    "/download/": {
+      "status": 200,
+      "wireBytes": 34145,
+      "decodedBytes": 174568,
+      "ttfbMs": 126,
+      "headers": {
+        "x-mod-pagespeed": "2.10.0",
+        "vary": "User-Agent,Accept-Encoding,Save-Data",
+        "content-encoding": "gzip",
+        "content-type": "text/html",
+        "cache-control": "max-age=0, no-cache",
+        "content-length": "34145"
+      }
+    },
+    "/pricing/": {
+      "status": 200,
+      "wireBytes": 34619,
+      "decodedBytes": 180164,
+      "ttfbMs": 127,
+      "headers": {
+        "x-mod-pagespeed": "2.10.0",
+        "vary": "User-Agent,Accept-Encoding,Save-Data",
+        "content-encoding": "gzip",
+        "content-type": "text/html",
+        "cache-control": "max-age=0, no-cache",
+        "content-length": "34619"
+      }
+    },
+    "/features/": {
+      "status": 200,
+      "wireBytes": 43028,
+      "decodedBytes": 227483,
+      "ttfbMs": 131,
+      "headers": {
+        "x-mod-pagespeed": "2.10.0",
+        "vary": "User-Agent,Accept-Encoding,Save-Data",
+        "content-encoding": "gzip",
+        "content-type": "text/html",
+        "cache-control": "max-age=0, no-cache",
+        "content-length": "43028"
+      }
+    },
+    "/demo/": {
+      "status": 200,
+      "wireBytes": 36346,
+      "decodedBytes": 210427,
+      "ttfbMs": 133,
+      "headers": {
+        "x-mod-pagespeed": "2.10.0",
+        "vary": "User-Agent,Accept-Encoding,Save-Data",
+        "content-encoding": "gzip",
+        "content-type": "text/html",
+        "cache-control": "max-age=0, no-cache",
+        "content-length": "36346"
+      }
+    }
+  }
+}

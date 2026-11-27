@@ -1,0 +1,64 @@
+# mod_pagespeed - Zero-Copy Benchmark
+#
+# 4-service stack comparing PageSpeed cache serving vs plain nginx static files.
+#
+# Services:
+#   origin (8081)         - nginx serving static test files (PageSpeed proxy target)
+#   worker                - factory_worker processing cache notifications
+#   nginx-pagespeed (8085)- nginx + PageSpeed module, proxy to origin, serve from cache
+#   nginx-baseline (8086) - plain nginx serving same static files directly
+#
+# Usage:
+#   ./tools/benchmark/run_benchmark.sh
+
+services:
+  # Origin server: plain nginx serving static test files for PageSpeed to proxy.
+  origin:
+    image: nginx:1.26-alpine
+    volumes:
+      - ./benchdata:/usr/share/nginx/html:ro
+      - ./nginx-origin.conf:/etc/nginx/conf.d/default.conf:ro
+
+  # PageSpeed factory worker processing cache notifications.
+  worker:
+    build:
+      context: ../../
+      dockerfile: tools/e2e/Dockerfile.e2e
+    entrypoint: ["/entrypoint-worker-benchmark.sh"]
+    ports:
+      - "9882:9882"
+    environment:
+      - WORKER_CACHE_SIZE=${WORKER_CACHE_SIZE:-524288000}
+      - WORKER_LOG_LEVEL=${WORKER_LOG_LEVEL:-warning}
+    volumes:
+      - shared:/shared
+      - ./entrypoint-worker-benchmark.sh:/entrypoint-worker-benchmark.sh:ro
+    depends_on:
+      - origin
+
+  # Nginx with PageSpeed module: proxy to origin, serve optimized from cache.
+  nginx-pagespeed:
+    build:
+      context: ../../
+      dockerfile: tools/e2e/Dockerfile.e2e
+    command: ["nginx", "-g", "daemon off;", "-c", "/etc/nginx/nginx-benchmark.conf"]
+    ports:
+      - "8085:8085"
+    volumes:
+      - shared:/shared
+      - ./nginx-benchmark.conf:/etc/nginx/nginx-benchmark.conf:ro
+    depends_on:
+      - origin
+      - worker
+
+  # Baseline nginx: serves the exact same static files with no proxy or module.
+  nginx-baseline:
+    image: nginx:1.26-alpine
+    ports:
+      - "8086:8086"
+    volumes:
+      - ./benchdata:/usr/share/nginx/html:ro
+      - ./nginx-baseline.conf:/etc/nginx/conf.d/default.conf:ro
+
+volumes:
+  shared:

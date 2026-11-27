@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
+# Nginx image for production readiness tests.
+# Builds pagespeed + brotli dynamic modules.
+
+FROM pagespeed2-dev AS builder
+
+WORKDIR /workspace
+COPY . /workspace/
+
+# Install nginx package + matching source for module compilation.
+RUN rm -rf /nginx-src \
+    && sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources \
+    && apt-get update && apt-get install -y \
+    nginx \
+    dpkg-dev \
+    libpcre3-dev \
+    zlib1g-dev \
+    libssl-dev \
+    cmake \
+    && mkdir -p /nginx-src \
+    && cd /nginx-src \
+    && apt-get source nginx \
+    && rm -rf /var/lib/apt/lists/*
+
+# Clone ngx_brotli with bundled brotli encoder/decoder source.
+RUN git clone --recurse-submodules https://github.com/google/ngx_brotli.git /ngx_brotli \
+    && cd /ngx_brotli && git checkout a71f9312c2deb28875acc7bacfdd5695a111aa53
+
+# Build bundled brotli static library.
+RUN cd /ngx_brotli/deps/brotli \
+    && mkdir -p out && cd out \
+    && cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF .. \
+    && cmake --build . --config Release -j$(nproc)
+
+# Configure nginx source and build brotli dynamic module.
+RUN cd /nginx-src/nginx-* \
+    && ./configure --with-compat --add-dynamic-module=/ngx_brotli \
+    && make modules \
+    && cp objs/ngx_http_brotli_filter_module.so /tmp/ngx_http_brotli_filter_module.so
+
+# Add GitHub to known hosts (needed for Cyclone fetch via SSH).
+RUN mkdir -p /root/.ssh && ssh-keyscan github.com >> /root/.ssh/known_hosts
+
+# Build the pagespeed dynamic module.
+# --mount=type=ssh: forwards host SSH agent for private repo access (Cyclone).
+RUN --mount=type=ssh NGINX_PATH=$(ls -d /nginx-src/nginx-*) \
+    bazel build --config=docker //src/nginx:ngx_pagespeed_module.so
+
+# ---- Runtime image ----
+# nginx comes from pagespeed2-base-runtime (nginx.org stable channel) so the
+# ABI matches the dynamic module built above. See docker/Dockerfile.base-runtime
+# for the rationale.
+FROM pagespeed2-base-runtime
+
+COPY --from=builder /workspace/bazel-bin/src/nginx/ngx_pagespeed_module.so \
+     /usr/lib/nginx/modules/ngx_pagespeed_module.so
+COPY --from=builder /tmp/ngx_http_brotli_filter_module.so \
+     /usr/lib/nginx/modules/ngx_http_brotli_filter_module.so
+
+COPY tools/production-tests/nginx.conf /etc/nginx/nginx.conf
+
+VOLUME /shared
+
+EXPOSE 8080
+
+CMD ["nginx", "-g", "daemon off;"]

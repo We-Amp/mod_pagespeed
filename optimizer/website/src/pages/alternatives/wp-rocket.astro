@@ -1,0 +1,366 @@
+---
+import { OG_DEFAULT_IMAGE_URL } from '../../data/og-image';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PageHero from '../../components/PageHero.astro';
+import CompareTable from '../../components/vs/CompareTable.astro';
+import { offerJsonLd } from '../../data/offer-jsonld';
+import { productJsonLd } from '../../data/software-jsonld';
+import {
+  editionClause,
+  FREE_TO_RUN_LINE,
+  NGINX_APT_SHORT_NBSP,
+  NGINX_RPM_SHORT,
+} from '../../data/product-facts.mjs';
+
+const rows = [
+  {
+    label: 'Deployment',
+    mps: 'Self-hosted (module + optimizer worker)',
+    other: 'Self-hosted (WordPress plugin)',
+  },
+  {
+    label: 'Scope',
+    mps: 'Full HTML pipeline at the server layer',
+    other: 'Full WordPress optimization at the CMS layer',
+  },
+  {
+    label: 'Platform',
+    mps: 'Native module for Apache and nginx, reverse-proxy mode in front of any HTTP origin, or ASP.NET Core middleware. The IIS package ships as a signed installer on the mod_pagespeed GitHub release.',
+    other: 'WordPress only',
+  },
+  {
+    label: 'Pricing model',
+    mps: 'Free (Apache-2.0); paid support optional',
+    other: 'Annual subscription per site bundle (see vendor)',
+  },
+  {
+    label: 'Image optimization',
+    mps: `${editionClause(['WebP', 'AVIF'])} &mdash; responsive variants at origin`,
+    other: 'Lazy load + delegated image optimization (via add-on)',
+  },
+  {
+    label: 'Critical CSS injection',
+    mps: 'yes',
+    other: 'Yes (Remove Unused CSS / Critical CSS)',
+  },
+  { label: 'JS / CSS minification', mps: 'yes', other: 'yes' },
+  {
+    label: 'HTML rewriting',
+    mps: 'yes',
+    other: "Yes (within WordPress's rendering)",
+  },
+  {
+    label: 'Caching',
+    mps: 'Cyclone cache, zero-copy mmap serving from nginx',
+    other: 'WordPress page cache (PHP-generated static files)',
+  },
+  {
+    label: 'CWV optimization',
+    mps: 'LCP, render-blocking, image bytes; CLS from unsized images',
+    other: 'LCP, CLS, INP via caching + render-blocking deferral',
+  },
+  {
+    label: 'Measured page-size reduction',
+    mps: '<span class="font-mono tabular-nums font-semibold text-success">&minus;68%</span> on our own pages (server-layer pipeline)',
+    other: 'Comparable on WordPress; varies by theme and plugins',
+    highlight: true,
+  },
+  {
+    label: 'License',
+    mps: 'Licensed under the Apache License&nbsp;2.0. The software is free. We sell support; the software and its signed packages are the same for everyone. See the <a href="/license/" class="text-interactive hover:text-interactive-hover underline">software license</a>.',
+    other: 'Proprietary',
+  },
+  {
+    label: 'Control over data',
+    mps: 'Your servers; nothing leaves your origin',
+    other: 'Your servers; nothing leaves your origin',
+  },
+  {
+    label: 'Configuration surface',
+    mps: 'nginx config + management endpoint',
+    other: 'wp-admin UI',
+  },
+];
+
+const jsonLd = [
+  await productJsonLd({
+    image: OG_DEFAULT_IMAGE_URL,
+    description:
+      'WP Rocket is a WordPress plugin running in PHP. mod_pagespeed runs at the server layer (nginx/Apache) and works on any CMS, not just WordPress.',
+    offers: offerJsonLd({ url: 'https://modpagespeed.com/pricing/' }),
+  }),
+];
+---
+
+<BaseLayout
+  title="WP Rocket alternative: mod_pagespeed at the server layer"
+  description="A WP Rocket alternative: WP Rocket optimizes inside WordPress; mod_pagespeed optimizes at the nginx server layer on any CMS. Plugin vs server, in numbers."
+  jsonLd={jsonLd}
+>
+  <PageHero id="wp-rocket-title" width="prose" class="max-w-3xl" title="mod_pagespeed vs WP Rocket">
+    <nav slot="before" class="mb-6 text-small text-text-annotation" aria-label="Breadcrumb">
+      <a href="/" class="hover:text-text-body">
+        Home
+      </a>
+      <span class="mx-1">/</span>
+      <a href="/alternatives/" class="hover:text-text-body">
+        Alternatives
+      </a>
+      <span class="mx-1">/</span>
+      <span>vs WP Rocket</span>
+    </nav>
+  </PageHero>
+
+  <article class="container-prose max-w-3xl pb-16">
+    <section>
+      <h2 class="h2-section text-text-body">TL;DR</h2>
+      <p class="mt-4 text-text-body">
+        WP Rocket is the long-running WordPress performance plugin. It runs as a PHP plugin inside
+        WordPress and does caching, minification, lazy loading, and other in-CMS optimizations.
+        mod_pagespeed runs at the server layer, below the CMS, and optimizes whatever the origin
+        emits &mdash; WordPress or otherwise. If your stack is WordPress and you want a plugin you
+        can configure from wp-admin, WP Rocket is the obvious fit. If you want optimization that
+        lives in nginx and works regardless of CMS, mod_pagespeed is the architectural alternative.
+      </p>
+    </section>
+
+    <section class="mt-12">
+      <h2 id="at-a-glance" class="h2-section text-text-body">
+        At a glance
+      </h2>
+      <div class="mt-4">
+        <CompareTable competitor="WP Rocket" rows={rows} labelledBy="at-a-glance" />
+      </div>
+    </section>
+
+    <section class="mt-12">
+      <h2 class="h2-section text-text-body">When to choose WP Rocket</h2>
+      <ul class="mt-4 space-y-2 list-disc pl-6 text-text-body">
+        <li>
+          Your stack is WordPress and you want a plugin you can install and configure from wp-admin.
+          No nginx editing, no Docker.
+        </li>
+        <li>
+          The site owner is a content/marketing team, not a sysadmin. WP Rocket's UI is built for
+          that audience.
+        </li>
+        <li>
+          You're already running multiple WordPress sites and prefer the plugin operating model
+          &mdash; backups, migrations, and updates all flow through WordPress.
+        </li>
+        <li>
+          You want a vendor with deep WordPress-ecosystem knowledge (compatibility lists with
+          themes, page builders, hosts).
+        </li>
+        <li>
+          The optimizations WP Rocket does are sufficient for your CWV targets and you don't need
+          server-level image variant generation.
+        </li>
+      </ul>
+    </section>
+
+    <section class="mt-12">
+      <h2 class="h2-section text-text-body">When to choose mod_pagespeed</h2>
+      <ul class="mt-4 space-y-2 list-disc pl-6 text-text-body">
+        <li>
+          You're not on WordPress, or you run a mix of platforms. WP Rocket only optimizes WordPress
+          sites.
+        </li>
+        <li>
+          You want optimization at the server layer so it applies to all responses &mdash; WordPress
+          pages, static files, custom app responses &mdash; uniformly.
+        </li>
+        <li>
+          Your site runs on more than one server. mod_pagespeed is free under the Apache License
+          2.0, however many load-balanced nginx boxes, replicas, and failover machines sit behind
+          it.
+        </li>
+        <li>
+          You don't trust a CMS plugin with your performance layer. PHP plugins can be disabled by
+          accident, or by an unrelated WordPress update. nginx config doesn't move.
+        </li>
+        <li>
+          You care about origin-side image variant generation &mdash; WebP and AVIF &mdash; and want
+          the format chosen from the request's
+          <code>Accept</code> header, not predetermined at cache time.
+        </li>
+      </ul>
+    </section>
+
+    <section class="mt-12">
+      <h2 class="h2-section text-text-body">How they overlap</h2>
+      <p class="mt-4 text-text-body">
+        Both products optimize WordPress sites. Both produce minified CSS/JS, defer render-blocking
+        resources, and extract critical CSS. Both reduce the number of bytes the browser downloads.
+      </p>
+      <p class="mt-4 text-text-body">
+        The overlap is large for the WordPress-only case. The difference matters when your stack
+        isn't WordPress, or when you want the optimization layer to be independent of any CMS.
+      </p>
+      <p class="mt-4 text-text-body">
+        You can also run them together: WP Rocket inside WordPress, mod_pagespeed in nginx. They
+        don't conflict if configured to avoid double-minifying the same assets. Most operators pick
+        one.
+      </p>
+    </section>
+
+    <section class="mt-12">
+      <h2 id="migrating-from-wp-rocket-to-modpagespeed" class="h2-section text-text-body">
+        Migrating from WP Rocket to mod_pagespeed
+      </h2>
+      <p class="mt-4 text-text-body">
+        Migration is reasonable if your stack diversified beyond WordPress, if you're consolidating
+        sites onto an nginx host and want optimization configured once at the server layer rather
+        than as a plugin in every install, or if you want the optimization layer to outlive any
+        specific CMS.
+      </p>
+      <p class="mt-4 text-text-body">
+        mod_pagespeed is the better fit when the optimization layer needs to outlive any one CMS,
+        scale across many sites from a single nginx host, or apply to non-WordPress responses on the
+        same origin.
+      </p>
+      <p class="mt-4 text-text-body">If you do migrate:</p>
+      <ol class="mt-3 space-y-2 list-decimal pl-6 text-text-body">
+        <li>
+          Disable WP Rocket's minification and cache before enabling mod_pagespeed, so the two don't
+          double-process responses.
+        </li>
+        <li>
+          Verify mod_pagespeed's filter set produces the optimizations you used in WP Rocket
+          (critical CSS, lazy load, image format conversion). The{' '}
+          <a
+            href="/blog/server-side-critical-css-nginx/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            server-side critical CSS in nginx
+          </a>{' '}
+          post walks through the equivalent setup.
+        </li>
+        <li>
+          Audit any WP Rocket integrations with page builders or e-commerce plugins. mod_pagespeed
+          operates below the CMS &mdash; page-builder-specific exclusion rules don't carry over and
+          may not be needed.
+        </li>
+        <li>
+          Keep WordPress's own object cache and database cache; mod_pagespeed doesn't replace those.
+        </li>
+      </ol>
+    </section>
+
+    <section class="mt-12">
+      <h2 class="h2-section text-text-body">Code &amp; config side-by-side</h2>
+      <p class="mt-4 text-text-body">
+        <strong>Enabling minification and lazy loading in WP Rocket</strong>: toggle the checkboxes
+        in <code>wp-admin &rarr; WP Rocket &rarr; File Optimization / Media</code>. No server
+        config.
+      </p>
+      <p id="config-1" class="mt-4 text-text-body">
+        <strong>
+          Equivalent in{' '}
+          <a href="/" class="text-interactive hover:text-interactive-hover underline">
+            mod_pagespeed
+          </a>
+          .
+        </strong>{' '}
+        Install the nginx module on {NGINX_APT_SHORT_NBSP} (amd64 + arm64), or
+        AlmaLinux/RHEL/Rocky&nbsp;{NGINX_RPM_SHORT}:
+      </p>
+      <pre
+        tabindex="0"
+        role="region"
+        aria-labelledby="config-1"
+        class="mt-3 overflow-x-auto rounded bg-bg-secondary p-4 text-sm sm:text-xs leading-snug text-text-body"
+      ><code>curl -fsSL https://packages.modpagespeed.com/install.sh | sudo sh
+sudo apt install nginx-module-pagespeed   # or: sudo dnf install nginx-module-pagespeed</code></pre>
+      <p id="config-2" class="mt-4 text-text-body">
+        Then enable the filters (nginx config; applies to all WordPress responses and anything else
+        nginx serves):
+      </p>
+      <pre
+        tabindex="0"
+        role="region"
+        aria-labelledby="config-2"
+        class="mt-3 overflow-x-auto rounded bg-bg-secondary p-4 text-sm sm:text-xs leading-snug text-text-body"
+      ><code>pagespeed on;
+pagespeed RewriteLevel CoreFilters;
+pagespeed EnableFilters lazyload_images,rewrite_css,rewrite_javascript,prioritize_critical_css;
+pagespeed FileCachePath /var/cache/pagespeed;</code></pre>
+      <p class="mt-4 text-text-body">
+        The functional output overlaps. The difference is which layer owns the configuration &mdash;
+        wp-admin or nginx.conf.
+      </p>
+    </section>
+
+    <section class="mt-12">
+      <div class="rounded-card border border-border bg-bg-secondary p-6 md:p-7">
+        <h2 class="h2-section text-text-body">Switching from WP Rocket</h2>
+        <p class="mt-3 text-text-body">
+          Server-layer optimization that works on WordPress and everything else nginx serves. On our
+          own pages it measures
+          <span class="font-mono tabular-nums font-semibold text-success">&minus;68%</span> page
+          size. Install and run it. {FREE_TO_RUN_LINE}
+        </p>
+        <div class="mt-5 flex flex-wrap gap-3">
+          <a href="/download/" class="btn-primary" data-umami-event="cta_vs_wprocket_install">
+            Download &amp; run
+          </a>
+          <a
+            href="#migrating-from-wp-rocket-to-modpagespeed"
+            class="rounded-md border border-border-strong px-4 py-2 text-sm font-medium text-text-body hover:border-border-strong"
+            data-umami-event="cta_vs_wprocket_migrate"
+          >
+            See the migration steps &rarr;
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <section class="mt-12 border-t border-border pt-8">
+      <p class="text-base font-semibold uppercase tracking-wide text-text-body">See also:</p>
+      <ul class="mt-4 space-y-2 text-sm">
+        <li>
+          <a
+            href="/alternatives/nitropack/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            mod_pagespeed vs NitroPack
+          </a>{' '}
+          &mdash; managed SaaS WordPress alternative
+        </li>
+        <li>
+          <a
+            href="/alternatives/cloudflare-apo/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            mod_pagespeed vs Cloudflare APO
+          </a>{' '}
+          &mdash; edge-cache alternative
+        </li>
+        <li>
+          <a
+            href="/alternatives/mod-pagespeed/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            Alternatives to mod_pagespeed
+          </a>{' '}
+          &mdash; for readers searching for a mod_pagespeed replacement
+        </li>
+        <li>
+          <a
+            href="/blog/server-side-critical-css-nginx/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            Server-side critical CSS in nginx
+          </a>{' '}
+          &mdash; the equivalent of WP Rocket's Remove Unused CSS, at the server layer
+        </li>
+      </ul>
+    </section>
+
+    <p class="mt-10 text-xs text-text-annotation">
+      WP Rocket and other product names are trademarks of their respective owners. Comparisons
+      reflect publicly available information as of 2026 and are provided for evaluation; We-Amp B.V.
+      is not affiliated with or endorsed by WP Rocket.
+    </p>
+  </article>
+</BaseLayout>

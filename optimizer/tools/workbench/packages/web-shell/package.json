@@ -1,0 +1,44 @@
+{
+  "name": "@pagespeed/web-shell",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "imports": {
+    "#lib/*": "./src/lib/*"
+  },
+  "scripts": {
+    "dev": "vite dev",
+    "prebuild": "pnpm --filter \"@pagespeed/web-shell^...\" build",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run --passWithNoTests",
+    "lint": "svelte-check --tsconfig ./tsconfig.json"
+  },
+  "dependencies": {
+    "@pagespeed/api-client": "workspace:*",
+    "@pagespeed/ui": "workspace:*",
+    "d3-axis": "^3.0.0",
+    "d3-format": "^3.1.2",
+    "d3-scale": "^4.0.2",
+    "d3-selection": "^3.0.0",
+    "pixelmatch": "^7.1.0",
+    "svelte": "^5.57.1",
+    "uplot": "^1.6.32"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@sveltejs/adapter-static": "^4.0.1",
+    "@sveltejs/kit": "^3.1.1",
+    "@sveltejs/vite-plugin-svelte": "^7.0.0",
+    "@types/d3-axis": "^3.0.6",
+    "@types/d3-format": "^3.0.4",
+    "@types/d3-scale": "^4.0.9",
+    "@types/d3-selection": "^3.0.11",
+    "@types/node": "^22.0.0",
+    "jsdom": "^28.0.0",
+    "svelte-check": "^4.0.0",
+    "typescript": "^6.0.0",
+    "vite": "^8.3.8",
+    "vitest": "^4.1.12"
+  }
+}

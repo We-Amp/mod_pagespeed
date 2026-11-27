@@ -1,0 +1,83 @@
+---
+title: 'Release notes: 2.5'
+description: 'mod_pagespeed 2.5 release notes: 2.5.2, a security update for the bundled nginx and libpng, and 2.5.0, with one version number from then on.'
+order: 77
+group: 'Release notes by line'
+lastUpdated: 2026-10-28
+---
+
+import ReleaseNotesDeepLink from '../../components/ReleaseNotesDeepLink.astro';
+
+<ReleaseNotesDeepLink />
+
+mod_pagespeed 2.5 was released as 2.5.0 on 2026-10-19 and 2.5.2 on 2026-10-22: the module and the optimizer worker together, installed as a matching pair. From 2.5.0 on, the packages in the signed apt and yum repositories, the container images, the NuGet packages and the Helm chart's application version all carry the product version. The newest release is [2.6.0](/docs/release-notes-2-6/). The [release notes index](/docs/release-notes/) lists every release of every line, and [Security updates](/docs/release-notes/#security-updates) lists every security fix we have published with the release that carried it. Both entries are collapsed; open one to read it in place.
+
+## Releases
+
+<details id="v2-5-2" class="rn-entry">
+<summary><span class="rn-ver">2.5.2</span> <span class="rn-date">2026-10-22</span> <span class="rn-badge rn-badge-pair">module + optimizer worker</span> <span class="rn-lede">Security update for the module and the optimizer worker, released together: the bundled nginx and libpng are updated, and images chosen by the optimizer worker carry the full Vary list. Update recommended.</span></summary>
+
+**mod_pagespeed 2.5.2 is a security update for the module and the optimizer worker, released together and installed as a matching pair. Update recommended.** The packages `mod-pagespeed` (Apache), `nginx-module-pagespeed`, the IIS installer and the cPanel package are all 2.5.2, with `pagespeed-optimizer` 2.5.2; the container images, the NuGet packages and the Helm chart's application version (chart 0.3.11) are 2.5.2 as well. No ASP.NET Core sidecar package (`WeAmp.PageSpeed.Sidecar`, `WeAmp.PageSpeed.Sidecar.NativeAssets.Linux`) is published with this release; 1.17.0 remains the latest. There is no module release 2.5.1; the module moves from 2.5.0 to 2.5.2 to pair with pagespeed-optimizer 2.5.2. The optimizer worker 2.5.1 was superseded the same day by 2.5.2, which carries all of its changes; they are listed below.
+
+**Highlights**
+
+**Security: the nginx we bundle is updated to 1.30.6, which fixes two memory-safety issues in nginx (CVE-2026-15176, CVE-2026-93479).** This covers the container images and the sidecar native pair; the portable `ngx_pagespeed` module tarballs are built against nginx 1.30.6. **Update recommended.** The per-distribution `nginx-module-pagespeed` packages build against the distribution's own nginx, which the distribution's security updates cover.
+
+**Security: `pagespeed-optimizer` 2.5.2 updates its bundled libpng to 1.6.58, which fixes memory-safety issues in PNG decoding, one of them reachable on arm64 when an origin PNG with a palette is optimized (CVE-2026-33636, CVE-2026-33416, CVE-2026-34757).** The packages pair with it. **Update recommended.**
+
+**Behind a shared cache or CDN, images chosen by the optimizer worker now carry the full `Vary` list.** An image served at its original URL is chosen by the device class and Save-Data as well as by `Accept`; the response now names `Vary: Accept, Save-Data, User-Agent, Sec-CH-DPR` on Apache, nginx and IIS, so a shared cache no longer hands one device's image to another. A cache that ignores `Vary` by default (Cloudflare, Amazon CloudFront) still needs to be configured to key on the device class, `Accept` and `Save-Data`, or to skip these images; the changelog links the guidance. **Update recommended for sites behind a shared cache or CDN.**
+
+**nginx packages install the admin-page restriction as a config file,** `/etc/nginx/snippets/pagespeed_admin_localhost.conf`. Include it in each `server {}` block that serves the admin pages.
+
+**The ASP.NET Core sidecar packages will be versioned with mod_pagespeed.** 2.5.2 releases the native pair they will carry, tested with live nginx tests, as module release assets. The sidecar NuGet packages follow in a later release; until then 1.17.0 remains the latest sidecar package.
+
+**IIS: a rebuilt installer of the same version now upgrades the installed one** instead of installing beside it, keeping `pagespeed.config` and the optimizer service's settings.
+
+**Optimizer worker images:** a phone whose browser accepts WebP but not AVIF could be served the full-size desktop image instead of the phone-size one, several times larger. Image selection now prefers an image at the client's size over one in its preferred format at another size, so phones get a phone-size image and desktops a desktop-size one. With `Save-Data: on`, a full-size JPEG could be larger than the one sent without it, so turning Save-Data on cost more data. The Save-Data JPEG is now encoded at the Save-Data quality, and the optimizer no longer stores any Save-Data image that is not smaller than the normal one for the same client. WebP and AVIF images were stored and served even when they were larger than the optimized JPEG (or other original-format image) of the same size, so a browser that accepts the newer formats could download several times more than one that does not. Such a WebP or AVIF image is now discarded and those browsers get the smaller image. With the nginx module, desktop browsers that accept only JPEG (or another original format) were served the original upload unoptimized, because the optimizer never replaced the copy the module stores for them. The optimizer now builds the optimized image for those browsers too, and keeps the upload as the reference it rebuilds variants from.
+
+**Packages:** installing the nginx or Apache module package before `pagespeed-optimizer`, or both in one transaction, left the web server's user out of group `pagespeed`, so the web server could not reach the worker. The `pagespeed-optimizer` package now adds each existing web-server user (`www-data`, `nginx`, `apache`) to the group when it installs or upgrades, in any install order. When it adds a user it says so: restart the web server once to pick up the new group. Upgrading from 2.5.0 repairs an install that was affected.
+
+**ASP.NET Core (`WeAmp.PageSpeed.AspNetCore`):** on Linux and macOS, a full cache purge (`POST /v1/cache/purge` with `"scope": "all"`, the console's purge everything) now takes effect within about a second. The middleware kept using the cache volume the purge had deleted and went on answering `X-PageSpeed: HIT` with pre-purge content until the application restarted. On Windows a full purge may still not take effect while the application is running.
+
+**Helm chart 0.3.11:** the chart defaults `podSecurityContext.fsGroup: 918`, the worker's `pagespeed` uid/gid, so the shared cache volume arrives group-owned before any container starts, which is what the worker needs when it runs without its root phase. The chart also stops shipping an nginx ConfigMap nothing read. Installing 0.3.11 renders one fewer object and adds the fsGroup field; nothing else changes. Its default image version is 2.5.2.
+
+**Signed checksums:** the GitHub releases of the host packages (`optimizer-v*`) and of the NuGet packages (`v*`) carry `SHA256SUMS.asc`, a detached signature of `SHA256SUMS` made with the We-Amp release signing key (fingerprint `411D EFDB 5713 51D2 B25A EFCC 9C02 B5BD CCE7 5313`), the key that already signs the module releases. Releases up to and including 2.5.0 have no signature.
+
+Also: a timed-out read from the optimizer worker is reported as a timeout rather than a dropped connection; the sidecar's supported hosts are documented (Debian 11 and 12, Ubuntu 20.04 to 24.04); and the shipped `pagespeed.conf` comment on in-place optimization and `Vary` is corrected.
+
+**Before you upgrade**
+
+Changed (nginx admin pages): the new snippet is not included anywhere on its own. Add `include /etc/nginx/snippets/pagespeed_admin_localhost.conf;` where you want the restriction, and remove the `include` lines before purging or removing the package.
+
+Purge the cache once after upgrading the module and `pagespeed-optimizer` together: in the console use purge everything, or send `POST /v1/cache/purge` with `{"scope": "all"}` to the management API. Image variants stored by 2.5.0 are otherwise served until they are refreshed, and the optimizer rebuilds them as images are requested again. The cache format is the one 2.5.0 introduced, so nothing else is cleared and no other configuration changes. Behind a shared cache or CDN, also purge the images it holds once, since copies cached before the upgrade still carry `Vary: Accept` alone.
+
+</details>
+
+<details id="v2-5-0" class="rn-entry">
+<summary><span class="rn-ver">2.5.0</span> <span class="rn-date">2026-10-19</span> <span class="rn-badge rn-badge-pair">module + optimizer worker</span> <span class="rn-lede">Security update for the module and the optimizer worker, released together, and one version number from this release on. Update recommended.</span></summary>
+
+**mod_pagespeed 2.5.0 is a security update for the module and the optimizer worker, released together and installed as a matching pair. Update recommended.** It fixes several classes of security defects: crafted images, scripts, stylesheets or cache contents could make a worker process exit, consume unbounded memory or read memory out of bounds; certain GIF images could expose process memory in optimized output; damaged or stale disk-cache contents could be served; the nginx module could cache a truncated origin response as complete; some origin responses could be cached longer than the origin allowed, including private ones; a server log could contain information that lets someone with log access construct valid signed resource URLs; and the IIS module could abort or crash on certain requests, configuration values or large responses. Memory-safety defects under concurrent load, in Windows shared memory and in the ASP.NET Core sidecar are fixed as well. Affected: the module in releases up to and including 1.19.0 (product 2.4.0); the crafted-image and JavaScript-parsing items also affect the optimizer worker and the `WeAmp.PageSpeed.NativeAssets.*` packages up to and including 2.4.0, and each changelog entry says which products it covers.
+
+**Highlights**
+
+**One version number from this release on.** The packages go from 1.19.0 to 2.5.0 and the product from 2.4.0 to 2.5.0, so the version apt, dnf, the container registry and NuGet show is the product version. 2.5.0 relabels the version. The packages, the `X-Mod-Pagespeed` and `X-Page-Speed` header value and the module and optimizer tags move from 1.19.0 to 2.5.0 in one step; until now a 2.N release carried package version 1.(N+15). If you pin packages to `1.*` (apt pins or preferences, dnf versionlock, Helm image tags, NuGet version ranges) or match the header on `1.`, update the pin or the pattern before you upgrade. The on-disk cache format changed generation, so the cache starts cold once after the upgrade. The ABI and the configuration are unchanged: your configuration carries over as it is.
+
+**The disk cache starts empty once after the upgrade.** The cache library moves to a new on-disk format. On the first start after the upgrade each process opens a new cache file, so expect a one-time rise in origin fetches and optimization work, and prefer an off-peak window. The previous cache file stays on disk until you delete it; during a rolling restart the old and new versions use separate files, so disk use temporarily doubles and the hit rate stays low until every process runs the new version. Rolling back finds the previous file intact.
+
+**Moving from Google's archived mod_pagespeed package now works in one step:** `apt-get install mod-pagespeed` on Debian and Ubuntu, `dnf swap mod-pagespeed-stable mod-pagespeed` on Enterprise Linux. A kept Google configuration that loads `mod_pagespeed_ap24.so` keeps working.
+
+**nginx (container images and Helm chart):** responses that carry static policy and resource headers (HTTP Strict Transport Security, the frame and XSS protection headers, the reporting policy headers, `Link`, static CORS headers, `Content-Language`, `Content-Disposition`, `Alt-Svc`, `Allow`, `X-Powered-By`, `X-Robots-Tag`) are now cached and replayed on cache hits. A `Link` header that carries a nonce is never cached.
+
+**ASP.NET Core (`WeAmp.PageSpeed.AspNetCore`):** the web console and the worker API proxy are reachable without authentication unless you configure otherwise. Set `PageSpeed:Console:Enabled` to `false` in production, or put your own authentication in front of the console and the `/v1/` paths it proxies; the production guidance in the documentation has the details.
+
+Also: `s-maxage` is honoured for shared-cache freshness (it can only shorten the lifetime set by `max-age` or `Expires`, and `s-maxage=0` keeps a response out of the cache); the EL8 and EL10 Apache packages now require the matching optimizer package and ship the worker configuration and SELinux policy; disk-cache writes skipped under momentary contention no longer count as cache failures; and many smaller fixes listed in the changelogs.
+
+**Before you upgrade**
+
+Changed (all servers): the optimizer worker's cache directory moves from `/var/cache/pagespeed-optimizer/v2` to `/var/cache/pagespeed-optimizer/v3` and the packaged configuration follows. If you set `ModPagespeedDaemonVolumePath` (Apache) or `pagespeed DaemonVolumePath` (nginx) yourself, change `v2` to `v3` before you restart. A module and worker that disagree refuse to attach and say so in the log, and in-place optimization stays off until they agree. Upgrade the module and the worker together, as the packages require.
+
+Changed (version pins): see "One version number" above. Nothing else in the configuration changes.
+
+Changed (ASP.NET Core sidecar, `WeAmp.PageSpeed.Sidecar`): the sidecar information endpoint requires authorization by default; an app without authentication passes `requireAuthorization: false` to `MapPageSpeedInfo`. With `UseForwardedHeaders()` before `UsePageSpeed()`, raw-origin requests are rejected with 421; call `UsePageSpeed()` first (the fixes are in this source release; an updated package follows separately, as `WeAmp.PageSpeed.Sidecar` 2.5.x on the product version).
+
+</details>

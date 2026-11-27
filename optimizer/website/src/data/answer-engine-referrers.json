@@ -1,0 +1,48 @@
+{
+  "hosts": [
+    { "host": "chatgpt.com", "operator": "OpenAI", "product": "ChatGPT", "checked": "2026-10-14" },
+    {
+      "host": "chat.openai.com",
+      "operator": "OpenAI",
+      "product": "ChatGPT",
+      "checked": "2026-10-14"
+    },
+    {
+      "host": "perplexity.ai",
+      "operator": "Perplexity",
+      "product": "Perplexity",
+      "checked": "2026-10-14"
+    },
+    {
+      "host": "copilot.microsoft.com",
+      "operator": "Microsoft",
+      "product": "Copilot",
+      "checked": "2026-10-14"
+    },
+    {
+      "host": "gemini.google.com",
+      "operator": "Google",
+      "product": "Gemini",
+      "checked": "2026-10-14"
+    },
+    { "host": "claude.ai", "operator": "Anthropic", "product": "Claude", "checked": "2026-10-14" },
+    { "host": "you.com", "operator": "You.com", "product": "You.com", "checked": "2026-10-14" },
+    { "host": "meta.ai", "operator": "Meta", "product": "Meta AI", "checked": "2026-10-14" },
+    { "host": "grok.com", "operator": "xAI", "product": "Grok", "checked": "2026-10-14" },
+    {
+      "host": "chat.deepseek.com",
+      "operator": "DeepSeek",
+      "product": "DeepSeek",
+      "checked": "2026-10-14"
+    },
+    {
+      "host": "chat.mistral.ai",
+      "operator": "Mistral AI",
+      "product": "Le Chat",
+      "checked": "2026-10-14"
+    },
+    { "host": "phind.com", "operator": "Phind", "product": "Phind", "checked": "2026-10-14" },
+    { "host": "poe.com", "operator": "Quora", "product": "Poe", "checked": "2026-10-14" }
+  ],
+  "queryMarkers": [{ "param": "utm_source", "value": "chatgpt.com", "operator": "OpenAI" }]
+}

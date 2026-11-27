@@ -1,0 +1,17 @@
+# Compose override: use pre-built CI artifacts instead of building from source.
+#
+# Only overrides worker and nginx; the website and origin services build normally.
+#
+# Usage:
+#   docker compose -f tools/workbench-demo/docker-compose.yml \
+#                  -f tools/workbench-demo/docker-compose.prebuilt.yml up -d
+
+services:
+  worker:
+    build:
+      context: ../../
+      dockerfile: tools/e2e/Dockerfile.prebuilt
+  nginx:
+    build:
+      context: ../../
+      dockerfile: tools/e2e/Dockerfile.prebuilt

@@ -1,0 +1,12 @@
+#Software: Microsoft Internet Information Services 10.0
+#Version: 1.0
+#Date: 2026-10-10 13:55:36
+#Fields: date time s-ip cs-method cs-uri-stem cs-uri-query s-port cs-username c-ip cs(User-Agent) cs(Referer) sc-status sc-substatus sc-win32-status time-taken
+2026-10-10 13:55:36 10.0.0.1 GET /guide/ - 443 - 203.0.113.5 Mozilla/5.0+(Macintosh)+Chrome/130 https://chatgpt.com/ 200 0 0 12
+2026-10-10 13:56:01 10.0.0.1 GET /guide/ - 443 - 203.0.113.6 Mozilla/5.0+(compatible;+GPTBot/1.2;++https://openai.com/gptbot) - 200 0 0 15
+#Software: Microsoft Internet Information Services 10.0
+#Version: 1.0
+#Date: 2026-10-10 14:00:00
+#Fields: date time cs-method cs-uri-stem cs-uri-query cs(User-Agent) cs(Referer) sc-status sc-bytes
+2026-10-10 14:00:00 GET /pricing/ - Mozilla/5.0+(compatible;+ClaudeBot/1.0;++claudebot@anthropic.com) - 200 3000
+2026-10-10 14:02:00 GET /guide/ utm_source=chatgpt.com Mozilla/5.0+(Windows+NT+10.0)+Firefox/131 - 200 5120

@@ -1,0 +1,293 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// PlatformInterestForm — the tell-me-when-it-ships interest form on /platform/ and its
+// two sub-pages. One instance per transform-pack direction; `wedge` names the
+// direction and is the only thing that differs between instances on the hub.
+//
+// BACKEND. Posts same-origin to the contact pipeline
+// (/ai-readability/api/contact -> render service -> email + lead ledger)
+// with topic "platform" and the structured `wedge` field the ledger already
+// counts per direction. `url` is the page PATH (never the query string), as
+// the quick-message widget sends it; the ledger stores it as the lead's page.
+// The visitor's optional site URL and the optional site count ride inside
+// `message`, the way the contact form folds its qualifiers in, so the
+// email notification is self-describing.
+//
+// Without JavaScript the form posts natively to the same contact endpoint
+// (form-encoded, like the contact form's own no-JS path) and the endpoint
+// redirects to the thanks page; the hidden topic and wedge fields keep the
+// lead self-describing. There is deliberately no mailto: form action, which
+// browsers and Lighthouse report as an insecure form target.
+//
+// Analytics: on a successful POST only, umami.track(<wedge>) plus the
+// site-wide lead_submit event with channel "platform".
+import { COMMERCIAL_EMAIL } from '../data/product-facts.mjs';
+
+interface Props {
+  /** The direction this form measures interest in; a form field, never copy. */
+  wedge: string;
+  /** The pack's visible name, written into the message as "Pack: …". */
+  pack: string;
+  /** Show the optional site URL field (default true). */
+  site?: boolean;
+  /** Show the optional "sites you manage" number field (default false). */
+  sites?: boolean;
+  /** Label of the free-text field (default "Message"). */
+  messageLabel?: string;
+  /** Require the free-text field (default false). */
+  messageRequired?: boolean;
+  /** Hint under the free-text field. */
+  messageHint?: string;
+  /** Submit button label. */
+  submitLabel?: string;
+}
+
+const {
+  wedge,
+  pack,
+  site = true,
+  sites = false,
+  messageLabel = 'Message',
+  messageRequired = false,
+  messageHint,
+  submitLabel = 'Tell me when it ships',
+} = Astro.props;
+
+const id = `pi-${wedge}`;
+const inputClass =
+  'mt-1 block w-full rounded-md border border-control-border bg-bg-elevated text-text-body px-3 py-2 focus:border-interactive focus:ring-2 focus:ring-interactive';
+---
+
+<form
+  action="/ai-readability/api/contact"
+  method="post"
+  data-platform-form
+  data-wedge={wedge}
+  data-pack={pack}
+  data-fallback-email={COMMERCIAL_EMAIL}
+  aria-label={`Tell me when it ships: ${pack}`}
+  class="mt-5 space-y-3"
+>
+  <input type="hidden" name="topic" value="platform" />
+  <input type="hidden" name="wedge" value={wedge} />
+  <input type="hidden" name="redirect" value="/contact/thanks/" />
+  <input type="hidden" name="t" value="" />
+  <div
+    style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden"
+    aria-hidden="true"
+  >
+    <label for={`${id}-company`}>Leave this field empty</label>
+    <input
+      id={`${id}-company`}
+      type="text"
+      name="company"
+      tabindex="-1"
+      autocomplete="new-password"
+    />
+  </div>
+
+  <div>
+    <label for={`${id}-email`} class="eyebrow">
+      Email
+    </label>
+    <input
+      id={`${id}-email`}
+      name="email"
+      type="email"
+      required
+      aria-required="true"
+      autocomplete="email"
+      class={`${inputClass} aria-[invalid=true]:border-accent aria-[invalid=true]:ring-1 aria-[invalid=true]:ring-accent`}
+    />
+  </div>
+
+  {site && (
+    <div>
+      <label for={`${id}-site`} class="eyebrow">
+        Site URL <span class="font-normal text-text-annotation">(optional)</span>
+      </label>
+      <input
+        id={`${id}-site`}
+        name="site"
+        type="url"
+        inputmode="url"
+        autocomplete="url"
+        placeholder="https://"
+        class={inputClass}
+      />
+    </div>
+  )}
+
+  {sites && (
+    <div>
+      <label for={`${id}-sites`} class="eyebrow">
+        Sites you manage <span class="font-normal text-text-annotation">(optional)</span>
+      </label>
+      <input
+        id={`${id}-sites`}
+        name="sites"
+        type="number"
+        min="1"
+        step="1"
+        inputmode="numeric"
+        class={inputClass}
+      />
+    </div>
+  )}
+
+  <div>
+    <label for={`${id}-message`} class="eyebrow">
+      {messageLabel}
+      {!messageRequired && <span class="font-normal text-text-annotation">(optional)</span>}
+    </label>
+    <textarea
+      id={`${id}-message`}
+      name="message"
+      rows="3"
+      maxlength="4000"
+      required={messageRequired}
+      aria-required={messageRequired ? 'true' : undefined}
+      aria-describedby={messageHint ? `${id}-message-hint` : undefined}
+      class={inputClass}
+    ></textarea>
+    {messageHint && (
+      <p id={`${id}-message-hint`} class="mt-1 text-sm text-text-annotation">
+        {messageHint}
+      </p>
+    )}
+  </div>
+
+  <p class="text-xs text-text-annotation">
+    We use what you send to reply and to email you when it ships. See the
+    <a
+      href="https://we-amp.com/privacy/"
+      class="text-interactive hover:text-interactive-hover underline"
+    >
+      privacy policy
+    </a>
+    .
+  </p>
+
+  <div class="flex flex-col gap-2">
+    <button type="submit" class="btn-primary self-start" data-submit>
+      {submitLabel}
+    </button>
+    <p data-status role="status" aria-live="polite" class="min-h-5 text-sm"></p>
+  </div>
+</form>
+
+<script>
+  // One script for every interest form on the page (Astro renders a
+  // component script once, however many instances the page holds).
+  const ENDPOINT = '/ai-readability/api/contact';
+  const TOPIC = 'platform';
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const loadedAt = Date.now();
+
+  for (const form of document.querySelectorAll<HTMLFormElement>('form[data-platform-form]')) {
+    const wedge = form.dataset.wedge ?? '';
+    const pack = form.dataset.pack ?? '';
+    const recipient = form.dataset.fallbackEmail ?? '';
+    const statusEl = form.querySelector<HTMLElement>('[data-status]');
+    const submitBtn = form.querySelector<HTMLButtonElement>('[data-submit]');
+    const emailInput = form.querySelector<HTMLInputElement>('input[name="email"]');
+    let sending = false;
+
+    function setStatus(kind: 'success' | 'error' | 'busy', msg: string) {
+      if (!statusEl) return;
+      statusEl.textContent = msg;
+      statusEl.classList.remove('text-interactive', 'text-accent', 'text-text-muted');
+      statusEl.classList.add(
+        kind === 'success'
+          ? 'text-interactive'
+          : kind === 'error'
+            ? 'text-accent'
+            : 'text-text-muted',
+      );
+    }
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (sending) return;
+      if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+      }
+      const data = new FormData(form);
+      const email = String(data.get('email') ?? '').trim();
+      if (!EMAIL_RE.test(email)) {
+        setStatus('error', 'That email address does not look right. Check it and try again.');
+        if (emailInput) {
+          emailInput.setAttribute('aria-invalid', 'true');
+          emailInput.focus();
+        }
+        return;
+      }
+      emailInput?.setAttribute('aria-invalid', 'false');
+
+      // The optional qualifiers ride inside the message, as on the contact
+      // form, so the notification reads as one block.
+      const site = String(data.get('site') ?? '').trim();
+      const sites = String(data.get('sites') ?? '').trim();
+      const note = String(data.get('message') ?? '').trim();
+      const lines = [
+        `Pack: ${pack}`,
+        site ? `Site: ${site}` : '',
+        sites ? `Sites managed: ${sites}` : '',
+      ].filter(Boolean);
+      const message = note ? `${lines.join('\n')}\n\n${note}` : lines.join('\n');
+
+      sending = true;
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.setAttribute('aria-busy', 'true');
+      }
+      setStatus('busy', 'Sending…');
+      try {
+        const res = await fetch(ENDPOINT, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            email,
+            name: '',
+            topic: TOPIC,
+            wedge,
+            // PATH ONLY (no query string, no hash), as the quick-message
+            // widget sends it; the ledger stores it as the lead's page.
+            url: window.location.pathname,
+            message,
+            t: loadedAt,
+          }),
+        });
+        if (!res.ok) throw new Error(`status ${res.status}`);
+        form.reset();
+        // Fire on a successful POST only (not on click), so a failed or
+        // validation-blocked submit never counts as interest.
+        const umami = (window as any).umami;
+        umami?.track(wedge);
+        // lead_submit — one event per successful form submit, alongside the
+        // form's own event, with the same property set the other forms use.
+        umami?.track('lead_submit', {
+          channel: 'platform',
+          topic: TOPIC,
+          wedge,
+          source_path: window.location.pathname,
+        });
+        setStatus(
+          'success',
+          'Thanks, we have your request. We will email you when the compliance or privacy packs ship.',
+        );
+      } catch {
+        setStatus('error', `Could not send just now. Try again, or email ${recipient}.`);
+      } finally {
+        sending = false;
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.removeAttribute('aria-busy');
+        }
+      }
+    });
+  }
+</script>

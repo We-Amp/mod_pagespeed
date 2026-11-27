@@ -1,0 +1,35 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// Home band: the AI-readability scan, one line plus its source. It sits after
+// the specification section.
+//
+// The markup keeps the indentation it has inside the page layout (see
+// Hero.astro).
+---
+
+  <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 home-band-ai">
+    <a
+      href="/ai-readability/"
+      data-umami-event="cta_home_hero_ai_readability"
+      class="group inline-flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-border bg-bg-secondary px-4 py-2.5 text-sm text-text-body hover:border-interactive/40 transition-colors"
+    >
+      <span class="display-num font-semibold text-text-body">≈40%</span>
+      <span>
+        of the top 1,000 sites render almost nothing for AI assistants. Check yours with
+        RenderPeek
+      </span>
+      <span class="font-medium text-interactive group-hover:underline" aria-hidden="true">
+        &rarr;
+      </span>
+    </a>
+    <p class="mt-2 text-xs text-text-annotation">
+      <a
+        href="/blog/can-ai-read-your-website/"
+        class="underline decoration-control-border underline-offset-2 hover:text-text-body"
+      >
+        (our scan, May 2026 <span aria-hidden="true">&rarr;</span>)
+      </a>
+    </p>
+  </div>

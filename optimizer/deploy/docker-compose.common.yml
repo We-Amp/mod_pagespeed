@@ -1,0 +1,41 @@
+# mod_pagespeed - Common Service Definitions
+#
+# Shared healthcheck, logging, and restart patterns used by all deployments.
+# Referenced via `extends` in per-environment docker-compose files.
+#
+# This file is NOT meant to be used standalone.
+
+services:
+  worker-base:
+    # Common worker configuration shared across all deployments.
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:${PAGESPEED_API_PORT:-9880}/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  website-base:
+    # Common website (Astro SSR origin) configuration.
+    environment:
+      - HOST=0.0.0.0
+      - PORT=4321
+    expose: ["4321"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4321').then(r=>{process.exit(r.ok?0:1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

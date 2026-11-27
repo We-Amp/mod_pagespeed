@@ -1,0 +1,1211 @@
+---
+import { ORGANIZATION_PUBLISHER } from '../data/organization';
+import { OG_DEFAULT_IMAGE_URL } from '../data/og-image';
+import BaseLayout from '../layouts/BaseLayout.astro';
+import PageHero from '../components/PageHero.astro';
+import { FILTERS } from '../data/filters';
+import { LICENSE_CLAUSE, FREE_TO_RUN_LINE } from '../data/product-facts.mjs';
+
+// PageSpeed optimization guide. Organised by resource type (images, CSS,
+// JavaScript, HTML, caching) and by where the work is applied; the audit-by-
+// audit view lives on /pagespeed-insights/ and the per-metric view on
+// /core-web-vitals/. The centrepiece is the table: every row names an
+// optimization, says whether a server module can automate it, and links the
+// mod_pagespeed filter that does. Two build-time checks keep the table in
+// step with the generated filter reference: filter() throws on an unknown
+// name, and a row rated "yes" may not name a filter the reference rates
+// "Test first".
+
+// Shown on the page and used as dateModified. Change it when the facts on the
+// page are re-checked against their sources, not on every edit.
+const published = '2026-11-22';
+const reviewed = '2026-11-22';
+const reviewedLabel = new Date(`${reviewed}T00:00:00Z`).toLocaleDateString('en-GB', {
+  day: 'numeric',
+  month: 'long',
+  year: 'numeric',
+  timeZone: 'UTC',
+});
+
+const title = 'PageSpeed optimization: what to fix and what to automate';
+const description =
+  'What PageSpeed optimization involves in 2026, which fixes a web server can apply automatically on nginx, Apache and IIS, and which stay in your code.';
+const h1 = 'PageSpeed optimization: what to fix, and what a server can do for you';
+
+const filter = (name: string) => {
+  const f = FILTERS.find((x) => x.name === name);
+  if (!f) throw new Error(`pagespeed-optimization: no filter named "${name}" in filters.json`);
+  return { name: f.name, href: f.topic, risk: f.risk };
+};
+
+type Coverage = 'yes' | 'partly' | 'no';
+
+const coverageBadge: Record<Coverage, { label: string; cls: string }> = {
+  yes: { label: 'Yes', cls: 'bg-success-wash text-success' },
+  partly: { label: 'Partly', cls: 'bg-accent-wash text-accent' },
+  no: { label: 'No', cls: 'bg-bg-elevated text-text-muted' },
+};
+
+interface Row {
+  optimization: string;
+  improves: string;
+  coverage: Coverage;
+  filters: string[];
+  // Shown in the filter column when no filter applies.
+  instead?: string;
+  yours: string;
+}
+
+const groups: { id: string; name: string; rows: Row[] }[] = [
+  {
+    id: 'images',
+    name: 'Images',
+    rows: [
+      {
+        optimization: 'Recompress images and strip metadata',
+        improves: 'Page weight, LCP',
+        coverage: 'yes',
+        filters: ['rewrite_images'],
+        yours: 'Checking logos and screenshots with text for quality.',
+      },
+      {
+        optimization: 'Serve WebP to browsers that accept it',
+        improves: 'Page weight, LCP',
+        coverage: 'yes',
+        filters: ['convert_jpeg_to_webp'],
+        yours: 'A CDN in front must pass the Accept header and vary on it.',
+      },
+      {
+        optimization: 'Serve AVIF to browsers that accept it',
+        improves: 'Page weight, LCP',
+        coverage: 'partly',
+        filters: ['convert_jpeg_to_avif'],
+        yours: 'Opting in, and the extra CPU that AVIF encoding takes.',
+      },
+      {
+        optimization: 'Resize images to the size they are shown at',
+        improves: 'Page weight, LCP',
+        coverage: 'partly',
+        filters: ['resize_images', 'responsive_images'],
+        yours: 'Width and height in the markup. Art direction.',
+      },
+      {
+        optimization: 'Lazy-load images below the fold',
+        improves: 'Initial page weight',
+        coverage: 'yes',
+        filters: ['lazyload_images'],
+        yours: 'Marking a critical image that detection misses.',
+      },
+      {
+        optimization: 'Reserve space for images',
+        improves: 'CLS',
+        coverage: 'partly',
+        filters: ['insert_image_dimensions'],
+        yours: 'Space for ads, embeds and script-inserted content.',
+      },
+      {
+        optimization: 'Fetch the LCP image first',
+        improves: 'LCP',
+        coverage: 'partly',
+        filters: ['prioritize_critical_images'],
+        yours: 'Background images set by a script.',
+      },
+    ],
+  },
+  {
+    id: 'css',
+    name: 'CSS',
+    rows: [
+      {
+        optimization: 'Minify CSS',
+        improves: 'Page weight',
+        coverage: 'yes',
+        filters: ['rewrite_css'],
+        yours: 'Nothing.',
+      },
+      {
+        optimization: 'Cut stylesheet requests',
+        improves: 'Request count, first paint',
+        coverage: 'yes',
+        filters: ['combine_css', 'flatten_css_imports', 'inline_css'],
+        yours: 'Nothing.',
+      },
+      {
+        optimization: 'Inline critical CSS and load the rest without blocking',
+        improves: 'FCP, LCP',
+        coverage: 'partly',
+        filters: ['prioritize_critical_css'],
+        yours: 'Testing it. Removing CSS that no page uses.',
+      },
+      {
+        optimization: 'Web fonts',
+        improves: 'CLS, LCP',
+        coverage: 'partly',
+        filters: ['inline_google_font_css'],
+        yours: 'Which fonts, how many weights, subsetting and font-display.',
+      },
+    ],
+  },
+  {
+    id: 'javascript',
+    name: 'JavaScript',
+    rows: [
+      {
+        optimization: 'Minify JavaScript',
+        improves: 'Page weight',
+        coverage: 'yes',
+        filters: ['rewrite_javascript'],
+        yours: 'Nothing.',
+      },
+      {
+        optimization: 'Cut script requests',
+        improves: 'Request count',
+        coverage: 'yes',
+        filters: ['combine_javascript', 'inline_javascript'],
+        yours: 'Nothing.',
+      },
+      {
+        optimization: 'Defer script execution',
+        improves: 'FCP, Total Blocking Time',
+        coverage: 'partly',
+        filters: ['defer_javascript'],
+        yours: 'Testing every page type. Some scripts break.',
+      },
+      {
+        optimization: 'Ship less JavaScript and break up long tasks',
+        improves: 'INP, Total Blocking Time',
+        coverage: 'no',
+        filters: [],
+        instead: 'Your code',
+        yours: 'Code splitting, lighter frameworks, shorter event handlers.',
+      },
+      {
+        optimization: 'Control third-party scripts',
+        improves: 'INP, Total Blocking Time',
+        coverage: 'no',
+        filters: [],
+        instead: 'Your code',
+        yours: 'Auditing tags and loading the rest late.',
+      },
+    ],
+  },
+  {
+    id: 'html',
+    name: 'HTML and resource hints',
+    rows: [
+      {
+        optimization: 'Minify HTML',
+        improves: 'Page weight',
+        coverage: 'yes',
+        filters: ['collapse_whitespace', 'remove_comments'],
+        yours: 'Nothing.',
+      },
+      {
+        optimization: 'Warm up connections to other origins',
+        improves: 'Connection setup time',
+        coverage: 'yes',
+        filters: ['insert_dns_prefetch'],
+        yours: 'Reducing how many origins a page depends on.',
+      },
+      {
+        optimization: 'Preload stylesheets and scripts',
+        improves: 'FCP, LCP',
+        coverage: 'partly',
+        filters: ['hint_preload_subresources'],
+        yours: 'Font preloads and the choice of what is critical.',
+      },
+    ],
+  },
+  {
+    id: 'caching',
+    name: 'Caching and compression',
+    rows: [
+      {
+        optimization: 'Long browser cache lifetimes with content-hashed URLs',
+        improves: 'Repeat-visit load time',
+        coverage: 'yes',
+        filters: ['extend_cache'],
+        yours: 'The cache policy of the HTML itself.',
+      },
+      {
+        optimization: 'Compress text responses with gzip or Brotli',
+        improves: 'Page weight',
+        coverage: 'yes',
+        filters: [],
+        instead: 'Web server setting, not a filter',
+        yours: 'Turning it on once.',
+      },
+    ],
+  },
+  {
+    id: 'application',
+    name: 'Application and back end',
+    rows: [
+      {
+        optimization: 'Generate the page faster',
+        improves: 'TTFB, and every metric after it',
+        coverage: 'no',
+        filters: [],
+        instead: 'Your code',
+        yours: 'Queries, application code, page caching, hosting capacity.',
+      },
+    ],
+  },
+];
+
+// Resolve every filter name once, so an unknown name fails the build here,
+// and hold the "yes" rating to the reference: a filter the reference rates
+// anything other than "Generally safe" belongs in a "partly" row.
+const tableGroups = groups.map((g) => ({
+  ...g,
+  rows: g.rows.map((r) => {
+    const links = r.filters.map(filter);
+    const untested = links
+      .filter((f) => f.risk != null && f.risk !== 'Generally safe')
+      .map((f) => `${f.name} "${f.risk}"`);
+    if (r.coverage === 'yes' && untested.length > 0) {
+      throw new Error(
+        `pagespeed-optimization: row "${r.optimization}" is rated "yes" but filters.json rates ${untested.join(', ')}; rate the row "partly" or move the filter to its own row`,
+      );
+    }
+    return { ...r, links };
+  }),
+}));
+
+// A filter name with a line-break opportunity after each underscore, so a
+// long name wraps between words in a narrow column and in print. Names come
+// from filters.json and hold only lowercase letters and underscores.
+const withBreaks = (name: string) => name.replaceAll('_', '_<wbr>');
+
+// The metrics block. Thresholds: web.dev and the PageSpeed Insights
+// documentation. Weights: the Lighthouse scoring documentation and the
+// default config in the Lighthouse source.
+const metrics = [
+  {
+    name: 'Largest Contentful Paint (LCP)',
+    good: '2.5 s or less',
+    poor: 'over 4.0 s',
+    weight: '25%',
+  },
+  {
+    name: 'Interaction to Next Paint (INP)',
+    good: '200 ms or less',
+    poor: 'over 500 ms',
+    weight: '0',
+  },
+  { name: 'Cumulative Layout Shift (CLS)', good: '0.1 or less', poor: 'over 0.25', weight: '25%' },
+  {
+    name: 'First Contentful Paint (FCP)',
+    good: '1.8 s or less',
+    poor: 'over 3.0 s',
+    weight: '10%',
+  },
+  { name: 'Total Blocking Time (TBT)', good: 'lab only', poor: 'lab only', weight: '30%' },
+  { name: 'Speed Index', good: 'lab only', poor: 'lab only', weight: '10%' },
+];
+
+const places = [
+  {
+    name: 'Build pipeline',
+    changes: 'Build configuration, and often templates.',
+    reach: 'Only what the build produces, not images that editors upload later.',
+    cost: 'Runs on the build machine. Costs build time and upkeep.',
+  },
+  {
+    name: 'CMS plugin',
+    changes: 'None, though one plugin per job is common.',
+    reach: 'One CMS. Other applications on the server get nothing.',
+    cost: 'Runs in the application or at the vendor. Free to a subscription.',
+  },
+  {
+    name: 'CDN or edge service',
+    changes: 'None, unless you adopt the provider’s image URLs.',
+    reach: 'Every site routed through the provider.',
+    cost: 'Runs on the provider’s network. Plan-based or metered.',
+  },
+  {
+    name: 'Web server module',
+    changes: 'None. It rewrites responses as they leave the server.',
+    reach: 'Every application on that server, in any language.',
+    cost: 'Runs on your own server. The software is free; you pay in CPU and disk.',
+  },
+];
+
+const steps = [
+  { who: 'You', text: 'Measure. Run a lab test and read the field data if the site has any.' },
+  { who: 'You', text: 'Fix server response time if it is slow.' },
+  {
+    who: 'Server',
+    text: 'Optimize images: recompress, convert, resize, lazy-load, reserve their space.',
+  },
+  {
+    who: 'Server',
+    text: 'Minify and combine CSS and JavaScript, then test critical CSS and script deferral.',
+  },
+  { who: 'Server', text: 'Set long cache lifetimes on static resources and turn on compression.' },
+  { who: 'You', text: 'Audit third-party scripts and long tasks. This is the INP work.' },
+  { who: 'You', text: 'Measure again. Field data needs up to 28 days to reflect the change.' },
+];
+
+const sections = [
+  { id: 'seven-steps', label: 'Seven steps' },
+  { id: 'what-it-means', label: 'What it means' },
+  { id: 'optimizations', label: 'The optimizations' },
+  { id: 'where-to-optimize', label: 'Where to optimize' },
+  { id: 'at-the-web-server', label: 'At the web server' },
+  { id: 'history', label: 'History' },
+  { id: 'check-a-page', label: 'Check a page' },
+  { id: 'common-questions', label: 'Common questions' },
+];
+
+// TechArticle first, FAQPage second; BaseLayout appends the BreadcrumbList.
+const articleJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'TechArticle',
+  headline: h1,
+  description,
+  url: 'https://modpagespeed.com/pagespeed-optimization/',
+  mainEntityOfPage: 'https://modpagespeed.com/pagespeed-optimization/',
+  datePublished: published,
+  dateModified: reviewed,
+  image: OG_DEFAULT_IMAGE_URL,
+  author: { '@type': 'Organization', name: 'We-Amp B.V.' },
+  publisher: ORGANIZATION_PUBLISHER,
+};
+
+// One array feeds both the visible list and the FAQPage JSON-LD. Answers are
+// plain text; an optional source link is shown under the answer.
+const faqEntries: { q: string; a: string; source?: { href: string; label: string } }[] = [
+  {
+    q: 'What is PageSpeed optimization?',
+    a: 'PageSpeed optimization is the work of making web pages load, render and respond faster, judged by Lighthouse lab tests and Core Web Vitals field data. In practice it means smaller images, less render-blocking CSS and JavaScript, better caching, a faster server response and less main-thread work in the browser.',
+  },
+  {
+    q: 'Can PageSpeed optimization be automated?',
+    a: 'A large part of it can. A server-side PageSpeed optimizer can recompress and convert images, minify and combine CSS and JavaScript, add image dimensions and extend cache lifetimes with no change to the application. It cannot speed up slow application code, cut the amount of JavaScript a page runs, or manage third-party scripts.',
+  },
+  {
+    q: 'Is PageSpeed optimization the same as raising the PageSpeed Insights score?',
+    a: 'No. The 0 to 100 Performance score is one lab test on emulated hardware. PageSpeed optimization also covers field data: Core Web Vitals measured on real Chrome users over 28 days. A page can pass one and fail the other. Use the score to find problems and the field data to judge the result.',
+  },
+  {
+    q: 'Does PageSpeed optimization improve SEO?',
+    a: 'It can help and it guarantees nothing. Google states that Core Web Vitals are used by its ranking systems, that there is no single page experience signal, and that good results do not guarantee top rankings. It also says that chasing a perfect score only for SEO may not be the best use of your time.',
+    source: {
+      href: 'https://developers.google.com/search/docs/appearance/page-experience',
+      label: 'Google Search Central on page experience',
+    },
+  },
+  {
+    q: 'How long does PageSpeed optimization take to show up in field data?',
+    a: 'Lab results change as soon as the optimized page is served. Field data moves slowly: PageSpeed Insights reports the Chrome User Experience Report over the previous 28-day collection period, so a fix made today is fully reflected about four weeks later.',
+  },
+  {
+    q: 'Is there a hosted PageSpeed optimization service?',
+    a: 'Google ran one, PageSpeed Service, and turned it off on 3 August 2015. Today the same kind of work is done by a CDN or edge service, by a CMS plugin, or by a module on your own server.',
+    source: {
+      href: 'https://web.archive.org/web/20160127102916/https://developers.google.com/speed/pagespeed/service/Deprecation',
+      label: 'Google’s turndown notice for PageSpeed Service (archived)',
+    },
+  },
+];
+
+const faqJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: faqEntries.map((entry) => ({
+    '@type': 'Question',
+    name: entry.q,
+    acceptedAnswer: { '@type': 'Answer', text: entry.a },
+  })),
+};
+
+const link = 'text-interactive hover:text-interactive-hover underline';
+const badgeBase =
+  'inline-flex items-center justify-self-start rounded-md px-2 py-0.5 text-micro font-semibold uppercase tracking-wide';
+---
+
+<BaseLayout
+  title={title}
+  description={description}
+  jsonLd={[articleJsonLd, faqJsonLd]}
+  breadcrumbLeafName="PageSpeed optimization"
+>
+  <PageHero id="psopt" width="prose" eyebrow="Guide" title={h1}>
+    <nav slot="before" class="mb-6 text-small text-text-annotation" aria-label="Breadcrumb">
+      <a href="/" class="hover:text-text-body">
+        Home
+      </a>
+      <span class="mx-1">/</span>
+      <span>PageSpeed optimization</span>
+    </nav>
+    <Fragment slot="lede">
+      <p>
+        PageSpeed optimization is the work of making pages load, render and respond faster, as
+        measured by Lighthouse lab tests and Core Web Vitals field data. This guide lists the tasks
+        and says which of them a web server can do for you, with no change to your application, and
+        which it cannot. We-Amp helped build ngx_pagespeed, maintained mod_pagespeed, and develops
+        mod_pagespeed today, so the split below comes from the software that does the work.
+      </p>
+    </Fragment>
+    <p class="mt-6 font-mono text-xs text-text-annotation" data-pagefind-ignore>
+      Last reviewed <time datetime={reviewed}>{reviewedLabel}</time>
+    </p>
+    <p class="mt-3 max-w-3xl text-xs text-text-annotation">
+      PageSpeed Insights and Lighthouse are products of Google LLC. mod_pagespeed is developed by
+      We-Amp B.V. and is not affiliated with or endorsed by Google.
+    </p>
+  </PageHero>
+
+  <article class="container-prose pb-16">
+    <!-- Jump list -->
+    <nav aria-label="Sections on this page" class="print:hidden" data-pagefind-ignore>
+      <p class="text-xs font-semibold uppercase tracking-wide text-text-annotation">On this page</p>
+      <ul class="mt-3 flex flex-wrap gap-2">
+        {sections.map((s) => (
+          <li>
+            <a
+              href={`#${s.id}`}
+              class="inline-flex items-center rounded-md border border-border bg-bg-elevated px-2.5 py-1 text-xs text-text-body hover:border-interactive/40"
+            >
+              {s.label}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </nav>
+
+    <!-- Working order -->
+    <section class="mt-12">
+      <h2 id="seven-steps" class="h2-section text-text-body">
+        PageSpeed optimization in seven steps
+      </h2>
+      <p class="mt-4 text-text-body">
+        Each step is marked with who does it: you, or software at the web server.
+      </p>
+      <ol class="mt-6 space-y-3">
+        {steps.map((s, i) => (
+          <li class="flex gap-4 border-b border-border pb-3">
+            <span class="font-mono text-sm text-text-annotation">{i + 1}</span>
+            <span class="flex-1 text-text-body">{s.text}</span>
+            <span
+              class={`h-fit shrink-0 rounded-md px-2 py-0.5 text-micro font-semibold uppercase tracking-wide ${
+                s.who === 'Server' ? coverageBadge.yes.cls : coverageBadge.no.cls
+              }`}
+            >
+              {s.who}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </section>
+
+    <hr class="rule-ticked my-14" />
+
+    <!-- Definition and metrics -->
+    <section>
+      <h2 id="what-it-means" class="h2-section text-text-body">
+        What PageSpeed optimization means in 2026
+      </h2>
+      <p class="mt-4 text-text-body">
+        PageSpeed began as Google&rsquo;s name for a family of tools: PageSpeed Insights, the
+        PageSpeed modules for web servers, and the libraries they share. Google&rsquo;s
+        <a href="https://developers.google.com/speed" rel="noopener noreferrer" class={link}>
+          overview of the tools
+        </a>{' '}
+        still describes the modules as software that rewrites and optimizes resources on an Apache
+        or nginx server automatically. Today the phrase covers any work that improves what those
+        tools measure, and it is often written as page speed optimization.
+      </p>
+      <p class="mt-4 text-text-body">
+        Two results are measured. The lab result is one Lighthouse run on emulated hardware, which
+        gives the 0 to 100 Performance score. The field result is the Chrome User Experience Report:
+        real Chrome users at the 75th percentile over the previous 28-day collection period, as the
+        <a
+          href="https://developers.google.com/speed/docs/insights/v5/about"
+          rel="noopener noreferrer"
+          class={link}
+        >
+          PageSpeed Insights documentation
+        </a>{' '}
+        describes. The
+        <a href="/pagespeed-insights/" class={link}>
+          PageSpeed Insights
+        </a>{' '}
+        page maps each audit to its fix, and the
+        <a href="/core-web-vitals/" class={link}>
+          Core Web Vitals
+        </a>{' '}
+        pages go through each metric.
+      </p>
+      <div
+        class="mt-6 overflow-x-auto"
+        tabindex="0"
+        role="region"
+        aria-labelledby="psopt-metrics-caption"
+      >
+        <table class="w-full border-collapse text-sm">
+          <caption id="psopt-metrics-caption" class="sr-only">
+            Field thresholds and Lighthouse Performance score weights per metric
+          </caption>
+          <thead>
+            <tr class="border-b border-border">
+              <th scope="col" class="py-3 pr-4 text-left font-semibold text-text-body">
+                Metric
+              </th>
+              <th scope="col" class="px-3 py-3 text-left font-semibold text-text-body">
+                Good in the field
+              </th>
+              <th scope="col" class="px-3 py-3 text-left font-semibold text-text-body">
+                Poor in the field
+              </th>
+              <th scope="col" class="px-3 py-3 text-left font-semibold text-text-body">
+                Weight in the lab score
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {metrics.map((m) => (
+              <tr class="border-b border-border align-top">
+                <th scope="row" class="py-3 pr-4 text-left font-medium text-text-body">
+                  {m.name}
+                </th>
+                <td class="px-3 py-3 text-text-muted">{m.good}</td>
+                <td class="px-3 py-3 text-text-muted">{m.poor}</td>
+                <td class="px-3 py-3 text-text-muted">{m.weight}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p class="mt-4 text-sm text-text-muted">
+        LCP, INP and CLS are the Core Web Vitals, assessed at the 75th percentile of page loads.
+        Sources:
+        <a href="https://web.dev/articles/vitals" rel="noopener noreferrer" class={link}>
+          web.dev&rsquo;s Core Web Vitals article
+        </a>
+        , its account of
+        <a
+          href="https://web.dev/articles/defining-core-web-vitals-thresholds"
+          rel="noopener noreferrer"
+          class={link}
+        >
+          how the thresholds were set
+        </a>
+        , the
+        <a
+          href="https://developer.chrome.com/docs/lighthouse/performance/performance-scoring"
+          rel="noopener noreferrer"
+          class={link}
+        >
+          Lighthouse scoring guide
+        </a>{' '}
+        and the
+        <a
+          href="https://github.com/GoogleChrome/lighthouse/blob/main/core/config/default-config.js"
+          rel="noopener noreferrer"
+          class={link}
+        >
+          default configuration in the Lighthouse source
+        </a>
+        .
+      </p>
+      <p class="mt-4 text-text-body">
+        INP
+        <a href="https://web.dev/blog/inp-cwv-launch" rel="noopener noreferrer" class={link}>
+          replaced First Input Delay
+        </a>{' '}
+        as a Core Web Vital on 12 March 2024. A Lighthouse page load has no user input, so it cannot
+        measure INP. INP has a weight of 0 in the lab score, and Total Blocking Time is its lab
+        proxy. Time to First Byte is not a Core Web Vital, but every other metric starts after it;
+        web.dev suggests
+        <a href="https://web.dev/articles/ttfb" rel="noopener noreferrer" class={link}>
+          0.8 seconds or less
+        </a>{' '}
+        for most sites.
+      </p>
+    </section>
+
+    <hr class="rule-ticked my-14" />
+
+    <!-- The table -->
+    <section>
+      <h2 id="optimizations" class="h2-section text-text-body">
+        The optimizations, and which ones can be automated
+      </h2>
+      <p class="mt-4 text-text-body">
+        Each row says whether a web server module can apply the optimization with no change to your
+        application, links the mod_pagespeed filter that does it, and names what remains your job.
+      </p>
+
+      <div class="mt-6 flex flex-wrap gap-x-5 gap-y-2 text-xs">
+        <span class="inline-flex items-center gap-2">
+          <span class={`${badgeBase} ${coverageBadge.yes.cls}`}>Yes</span>
+          <span class="text-text-muted">applied at the server, no code change</span>
+        </span>
+        <span class="inline-flex items-center gap-2">
+          <span class={`${badgeBase} ${coverageBadge.partly.cls}`}>Partly</span>
+          <span class="text-text-muted">works with conditions, or needs testing first</span>
+        </span>
+        <span class="inline-flex items-center gap-2">
+          <span class={`${badgeBase} ${coverageBadge.no.cls}`}>No</span>
+          <span class="text-text-muted">the fix is in your application</span>
+        </span>
+      </div>
+
+      <table role="table" class="psopt-stack mt-8 w-full border-collapse text-sm">
+        <caption class="sr-only">
+          PageSpeed optimizations by resource type: whether a web server module can automate each
+          one, the mod_pagespeed filter that applies it, and what stays in your code
+        </caption>
+        <thead role="rowgroup">
+          <tr role="row" class="border-b border-border">
+            <th
+              role="columnheader"
+              scope="col"
+              class="w-[30%] py-3 pr-4 text-left font-semibold text-text-body"
+            >
+              Optimization
+            </th>
+            <th
+              role="columnheader"
+              scope="col"
+              class="px-3 py-3 text-left font-semibold text-text-body"
+            >
+              Server can automate it
+            </th>
+            <th
+              role="columnheader"
+              scope="col"
+              class="w-[27%] px-3 py-3 text-left font-semibold text-text-body"
+            >
+              mod_pagespeed filter
+            </th>
+            <th
+              role="columnheader"
+              scope="col"
+              class="w-[29%] py-3 pl-3 text-left font-semibold text-text-body"
+            >
+              What stays in your code
+            </th>
+          </tr>
+        </thead>
+        {tableGroups.map((g) => (
+          <tbody role="rowgroup">
+            <tr role="row">
+              <td
+                role="cell"
+                colspan="4"
+                class="pt-8 pb-2 text-left font-mono text-xs font-semibold uppercase tracking-wide text-interactive"
+              >
+                {g.name}
+              </td>
+            </tr>
+            {g.rows.map((r) => {
+              const badge = coverageBadge[r.coverage];
+              return (
+                <tr role="row" class="psopt-row border-b border-border align-top">
+                  <th
+                    role="rowheader"
+                    scope="row"
+                    class="py-4 pr-4 text-left font-medium text-text-body"
+                  >
+                    {r.optimization}
+                    <span class="mt-1 block text-xs font-normal text-text-annotation">
+                      {r.improves}
+                    </span>
+                  </th>
+                  <td role="cell" class="psopt-cell px-3 py-4">
+                    <span class="psopt-label" aria-hidden="true">
+                      Automated
+                    </span>
+                    <span class={`${badgeBase} ${badge.cls}`}>{badge.label}</span>
+                  </td>
+                  <td role="cell" class="psopt-cell px-3 py-4">
+                    <span class="psopt-label" aria-hidden="true">
+                      Filter
+                    </span>
+                    {r.links.length > 0 ? (
+                      <ul class="space-y-1">
+                        {r.links.map((f) => (
+                          <li>
+                            <a
+                              href={f.href}
+                              class={`font-mono text-xs ${link}`}
+                              set:html={withBreaks(f.name)}
+                            />
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <span class="text-text-muted">{r.instead}</span>
+                    )}
+                  </td>
+                  <td role="cell" class="psopt-cell py-4 pl-3 text-text-muted">
+                    <span class="psopt-label" aria-hidden="true">
+                      Your part
+                    </span>
+                    <span>{r.yours}</span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        ))}
+      </table>
+      <p class="mt-6 text-sm text-text-muted">
+        The
+        <a href="/docs/filters/" class={link}>
+          filter reference
+        </a>{' '}
+        lists every filter with its risk rating, and
+        <a href="/docs/filter-selection/" class={link}>
+          filter selection
+        </a>{' '}
+        explains which ones are on by default.
+      </p>
+
+      <h3 class="mt-12 text-xl font-semibold text-text-body">Images</h3>
+      <p class="mt-3 text-text-body">
+        <a href={filter('rewrite_images').href} class={link}>
+          <code>rewrite_images</code>
+        </a>{' '}
+        is on by default and keeps a result only when it is smaller than the original. AVIF, lazy
+        loading and added dimensions are opt-in. Resizing follows the <code>width</code> and
+        <code>height</code> in the markup: an image sized only by CSS keeps its original dimensions
+        unless you enable
+        <a href={filter('resize_rendered_image_dimensions').href} class={link}>
+          <code set:html={withBreaks('resize_rendered_image_dimensions')} />
+        </a>
+        , which resizes to the size browsers report. Art direction, the choice of the LCP image and
+        the size of the files people upload stay manual.
+      </p>
+
+      <h3 class="mt-10 text-xl font-semibold text-text-body">CSS</h3>
+      <p class="mt-3 text-text-body">
+        Minifying, combining, flattening <code>@import</code> chains and inlining small files are on
+        by default.
+        <a href={filter('prioritize_critical_css').href} class={link}>
+          <code set:html={withBreaks('prioritize_critical_css')} />
+        </a>{' '}
+        is opt-in and rated &ldquo;test first&rdquo;. It learns which rules a page uses from
+        visitors&rsquo; browsers, so it takes effect after a few page loads, and it does not run on
+        Envoy. The font filter only inlines the Google Fonts stylesheet. No filter removes CSS that
+        your pages never use.
+      </p>
+
+      <h3 class="mt-10 text-xl font-semibold text-text-body">JavaScript</h3>
+      <p class="mt-3 text-text-body">
+        Minification is on by default and leaves identifiers alone.
+        <a href={filter('defer_javascript').href} class={link}>
+          <code>defer_javascript</code>
+        </a>{' '}
+        is opt-in, because it breaks scripts that call <code>document.write</code> or expect to run
+        during parsing. Nothing at the server can decide that a page needs less script or split a
+        long task into short ones. INP is decided here, in code you or your vendors wrote.
+      </p>
+
+      <h3 class="mt-10 text-xl font-semibold text-text-body">HTML and resource hints</h3>
+      <p class="mt-3 text-text-body">
+        None of these filters is on by default.
+        <a href={filter('hint_preload_subresources').href} class={link}>
+          <code set:html={withBreaks('hint_preload_subresources')} />
+        </a>{' '}
+        and
+        <a href={filter('prioritize_critical_images').href} class={link}>
+          <code set:html={withBreaks('prioritize_critical_images')} />
+        </a>{' '}
+        depend on reports from real visits and do nothing until they have them. Font preloads stay
+        manual.
+      </p>
+
+      <h3 class="mt-10 text-xl font-semibold text-text-body">Caching and compression</h3>
+      <p class="mt-3 text-text-body">
+        <a href={filter('extend_cache').href} class={link}>
+          <code>extend_cache</code>
+        </a>{' '}
+        is on by default. A URL carries a hash of the file&rsquo;s content and gets a one-year cache
+        lifetime, so a changed file is fetched again. It does not make HTML cacheable. Compression
+        with gzip or Brotli is a setting of the web server itself.
+      </p>
+
+      <h3 class="mt-10 text-xl font-semibold text-text-body">What no server module fixes</h3>
+      <p class="mt-3 text-text-body">
+        A module rewrites the bytes that leave your server. It does not change what your application
+        does. These stay with you:
+      </p>
+      <div class="mt-6 rounded-card border border-accent/40 bg-accent-wash p-6">
+        <dl class="space-y-5">
+          <div>
+            <dt class="font-semibold text-text-body">Slow interactions (INP) and long tasks</dt>
+            <dd class="mt-1 text-sm text-text-muted">
+              Event handlers, hydration and framework work run on the visitor&rsquo;s main thread.
+              Minifying and deferring scripts reduces the work at startup. It does not make a slow
+              click handler fast. The
+              <a href="/core-web-vitals/inp/" class={link}>
+                INP guide
+              </a>{' '}
+              covers the application-side fixes.
+            </dd>
+          </div>
+          <div>
+            <dt class="font-semibold text-text-body">Third-party scripts</dt>
+            <dd class="mt-1 text-sm text-text-muted">
+              Analytics, tag managers, chat widgets and ads load from other origins and run their
+              own code. By default a module leaves resources on other origins untouched, and no
+              rewrite changes what a vendor&rsquo;s script does once it runs.
+            </dd>
+          </div>
+          <div>
+            <dt class="font-semibold text-text-body">A slow back end</dt>
+            <dd class="mt-1 text-sm text-text-muted">
+              When the application takes a second to build the page, the first byte is a second
+              late. The fix is in queries, application code, page caching or capacity.
+            </dd>
+          </div>
+          <div>
+            <dt class="font-semibold text-text-body">Layout shifts from late content</dt>
+            <dd class="mt-1 text-sm text-text-muted">
+              Missing image dimensions can be added at the server. Ads, embeds and anything else a
+              script inserts above existing content need space reserved in your CSS.
+            </dd>
+          </div>
+          <div>
+            <dt class="font-semibold text-text-body">Heavy client-side frameworks</dt>
+            <dd class="mt-1 text-sm text-text-muted">
+              A page that renders in the browser pays in script size and main-thread time. On pages
+              it recognizes as hydrated, mod_pagespeed holds some filters back so the framework
+              keeps working.
+            </dd>
+          </div>
+        </dl>
+      </div>
+    </section>
+
+    <hr class="rule-ticked my-14" />
+
+    <!-- Where to apply the work -->
+    <section>
+      <h2 id="where-to-optimize" class="h2-section text-text-body">
+        Build, plugin, CDN or server module: where to optimize
+      </h2>
+      <p class="mt-4 text-text-body">
+        None is best in every case. A static site with a good build pipeline already has most of the
+        table above. A site whose content is uploaded by editors, or a server that hosts several
+        applications, gains most from a module or an edge service. A CDN also shortens the network
+        path to the visitor, which no server module does; the two are often combined.
+      </p>
+      <table role="table" class="psopt-stack mt-6 w-full border-collapse text-sm">
+        <caption class="sr-only">
+          Where PageSpeed optimizations can be applied: code changes needed, reach, and where the
+          work runs and what it costs
+        </caption>
+        <thead role="rowgroup">
+          <tr role="row" class="border-b border-border">
+            <th
+              role="columnheader"
+              scope="col"
+              class="py-3 pr-4 text-left font-semibold text-text-body"
+            >
+              Where
+            </th>
+            <th
+              role="columnheader"
+              scope="col"
+              class="px-3 py-3 text-left font-semibold text-text-body"
+            >
+              Code changes
+            </th>
+            <th
+              role="columnheader"
+              scope="col"
+              class="px-3 py-3 text-left font-semibold text-text-body"
+            >
+              Reach
+            </th>
+            <th
+              role="columnheader"
+              scope="col"
+              class="py-3 pl-3 text-left font-semibold text-text-body"
+            >
+              Where it runs, what it costs
+            </th>
+          </tr>
+        </thead>
+        <tbody role="rowgroup">
+          {places.map((p) => (
+            <tr role="row" class="psopt-row border-b border-border align-top">
+              <th
+                role="rowheader"
+                scope="row"
+                class="py-4 pr-4 text-left font-medium text-text-body"
+              >
+                {p.name}
+              </th>
+              <td role="cell" class="psopt-cell px-3 py-4 text-text-muted">
+                <span class="psopt-label" aria-hidden="true">
+                  Changes
+                </span>
+                <span>{p.changes}</span>
+              </td>
+              <td role="cell" class="psopt-cell px-3 py-4 text-text-muted">
+                <span class="psopt-label" aria-hidden="true">
+                  Reach
+                </span>
+                <span>{p.reach}</span>
+              </td>
+              <td role="cell" class="psopt-cell py-4 pl-3 text-text-muted">
+                <span class="psopt-label" aria-hidden="true">
+                  Runs, costs
+                </span>
+                <span>{p.cost}</span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p class="mt-6 text-sm text-text-muted">
+        The
+        <a href="/alternatives/" class={link}>
+          alternatives
+        </a>{' '}
+        pages compare mod_pagespeed with specific plugins, CDNs and image services.
+      </p>
+    </section>
+
+    <hr class="rule-ticked my-14" />
+
+    <!-- The server route -->
+    <section>
+      <h2 id="at-the-web-server" class="h2-section text-text-body">
+        Automatic PageSpeed optimization at the web server
+      </h2>
+      <p class="mt-4 text-text-body">
+        A server-side optimizer sits in the response path. It parses the HTML as the application
+        produces it, optimizes the images, stylesheets and scripts the page refers to, and caches
+        the results on the server. Each rewrite has a short deadline, 10 milliseconds by default. If
+        the optimized file is not ready in time, that response keeps the original URL and later
+        responses use the cached result. Source files on disk are never modified.
+      </p>
+      <p class="mt-4 text-text-body">
+        mod_pagespeed is {LICENSE_CLAUSE}, so the cost is in resources: CPU for the first
+        optimization of each image (at most eight at once by default, and AVIF adds an extra decode
+        and encode), disk for the cache, and a warm-up period while the cache fills. The
+        <a href="/examples/" class={link}>
+          examples gallery
+        </a>{' '}
+        shows the original and the optimized output of individual filters on live pages, and
+        <a href="/how-it-works/" class={link}>
+          How it works
+        </a>{' '}
+        explains the mechanics.
+      </p>
+
+      <h3 class="mt-10 text-xl font-semibold text-text-body">PageSpeed optimization on nginx</h3>
+      <p class="mt-3 text-text-body">
+        Install the module from the signed package repository, then turn it on in a
+        <code>server</code> block. The default filters are active as soon as the module is on;
+        <code>EnableFilters</code> adds the opt-in ones.
+      </p>
+      <pre class="mt-4 overflow-x-auto rounded-md bg-bg-recessed p-4 text-xs sm:text-sm"><code class="text-text-body">{`pagespeed on;
+pagespeed FileCachePath /var/cache/ngx_pagespeed;
+pagespeed EnableFilters lazyload_images,insert_image_dimensions;`}</code></pre>
+      <p class="mt-3 text-sm text-text-muted">
+        The
+        <a href="/docs/installation-module/#native-nginx-module" class={link}>
+          nginx install steps
+        </a>{' '}
+        cover the packages and the optimizer worker, a separate process that takes the heavy work
+        off the web server.
+      </p>
+
+      <h3 class="mt-10 text-xl font-semibold text-text-body">PageSpeed optimization on Apache</h3>
+      <p class="mt-3 text-text-body">
+        The Apache package enables the module and its default <code>pagespeed.conf</code>, so the
+        default filters run after a restart. Add opt-in filters in that file. The
+        <a href="/docs/installation-module/#native-apache-module" class={link}>
+          Apache install steps
+        </a>{' '}
+        have the commands.
+      </p>
+      <pre class="mt-4 overflow-x-auto rounded-md bg-bg-recessed p-4 text-xs sm:text-sm"><code class="text-text-body">{`ModPagespeed on
+ModPagespeedEnableFilters lazyload_images,insert_image_dimensions`}</code></pre>
+
+      <h3 class="mt-10 text-xl font-semibold text-text-body">PageSpeed optimization on IIS</h3>
+      <p class="mt-3 text-text-body">
+        On IIS, mod_pagespeed runs as a native module installed from a signed MSI. A site is
+        optimized when its root holds a <code>pagespeed.config</code> file; the
+        <a href="/docs/install-iis/" class={link}>
+          IIS install guide
+        </a>{' '}
+        has the details. There is also an experimental
+        <a href="/docs/install-envoy/" class={link}>
+          Envoy HTTP filter
+        </a>
+        , built from source and not packaged.
+      </p>
+
+      <h3 class="mt-10 text-xl font-semibold text-text-body">
+        WordPress, Magento and other applications
+      </h3>
+      <p class="mt-3 text-text-body">
+        The module works below the application, so it needs no plugin, and every application on the
+        server shares one configuration. The
+        <a href="/wordpress/" class={link}>
+          WordPress page
+        </a>{' '}
+        covers that stack, and the
+        <a href="/core-web-vitals/" class={link}>
+          Core Web Vitals hub
+        </a>{' '}
+        links a guide per platform and metric.
+      </p>
+    </section>
+
+    <hr class="rule-ticked my-14" />
+
+    <!-- History -->
+    <section>
+      <h2 id="history" class="h2-section text-text-body">
+        Where the PageSpeed modules came from, and where they are now
+      </h2>
+      <p class="mt-4 text-text-body">
+        mod_pagespeed started as an open-source Apache module developed at Google. Google&rsquo;s
+        documentation describes its core, the PageSpeed Optimization Libraries, as
+        <a
+          href="https://developers.google.com/speed/pagespeed/psol"
+          rel="noopener noreferrer"
+          class={link}
+        >
+          &ldquo;a set of C++ classes that automatically optimize web pages and resources they
+          use&rdquo;
+        </a>
+        . ngx_pagespeed brought the same core to nginx. The project
+        <a
+          href="https://incubator.apache.org/projects/pagespeed.html"
+          rel="noopener noreferrer"
+          class={link}
+        >
+          entered the Apache Incubator
+        </a>{' '}
+        on 30 September 2017, and the podling retired on 17 March 2023.
+      </p>
+      <p class="mt-4 text-text-body">
+        We-Amp B.V. helped build ngx_pagespeed, maintained mod_pagespeed and drove the
+        project&rsquo;s Apache incubation, and it develops mod_pagespeed today for Apache, nginx and
+        IIS. The directive syntax and filter names are the ones the original modules used. The
+        <a href="/psol/" class={link}>
+          PSOL page
+        </a>{' '}
+        and the
+        <a href="/mod-pagespeed-still-maintained/" class={link}>
+          maintenance status page
+        </a>{' '}
+        have the details.
+      </p>
+    </section>
+
+    <hr class="rule-ticked my-14" />
+
+    <!-- Measure first -->
+    <section>
+      <div class="rounded-card border border-border bg-bg-secondary p-6 md:p-8">
+        <h2 id="check-a-page" class="h2-section text-text-body">
+          Check a page before you change anything
+        </h2>
+        <p class="mt-3 text-text-body">
+          Measure first. Run a URL through the analyzer or through
+          <a href="https://pagespeed.web.dev/" rel="noopener noreferrer" class={link}>
+            Google&rsquo;s PageSpeed Insights tool
+          </a>
+          . The analyzer calls Google&rsquo;s public PageSpeed Insights API and marks which findings
+          a server module addresses.
+        </p>
+        <div class="mt-6 flex flex-wrap gap-3">
+          <a href="/analyze/" class="btn-primary" data-umami-event="cta_psopt_analyze">
+            Analyze a page
+          </a>
+          <a
+            href="/docs/getting-started/"
+            class="btn-secondary"
+            data-umami-event="cta_psopt_install"
+          >
+            Install guide <span aria-hidden="true">&rarr;</span>
+          </a>
+        </div>
+        <p class="mt-3 text-xs text-text-annotation">{FREE_TO_RUN_LINE}</p>
+      </div>
+    </section>
+
+    <!-- FAQ: the visible list mirrors the FAQPage JSON-LD -->
+    <section class="mt-16">
+      <h2 id="common-questions" class="h2-section text-text-body">
+        Common questions
+      </h2>
+      <dl class="mt-8 space-y-6">
+        {faqEntries.map((entry) => (
+          <div class="border-b border-border pb-6">
+            <dt class="font-semibold text-text-body">{entry.q}</dt>
+            <dd class="mt-2 text-sm text-text-muted">{entry.a}</dd>
+            {entry.source && (
+              <dd class="mt-2 text-xs text-text-annotation">
+                Source:{' '}
+                <a href={entry.source.href} rel="noopener noreferrer" class={link}>
+                  {entry.source.label}
+                </a>
+              </dd>
+            )}
+          </div>
+        ))}
+      </dl>
+    </section>
+  </article>
+</BaseLayout>
+
+<style>
+  /* The two comparison tables are real tables from 1024px up. Below that each
+     row becomes a block: the row header on top, then one line per cell with a
+     short label in front. The labels are aria-hidden because the column
+     headers, which stay in the accessibility tree, already name each cell. */
+  .psopt-label {
+    display: none;
+  }
+  @media (max-width: 1023.98px) {
+    .psopt-stack,
+    .psopt-stack tbody,
+    .psopt-stack tr,
+    .psopt-stack th,
+    .psopt-stack td {
+      display: block;
+    }
+    .psopt-stack thead {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+    .psopt-stack .psopt-row {
+      padding: 1rem 0;
+    }
+    .psopt-stack .psopt-row > th {
+      padding: 0;
+    }
+    .psopt-stack .psopt-cell {
+      display: grid;
+      grid-template-columns: 6rem 1fr;
+      column-gap: 0.75rem;
+      align-items: baseline;
+      padding: 0.5rem 0 0;
+    }
+    .psopt-label {
+      display: block;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.025em;
+      color: var(--color-text-annotation);
+    }
+  }
+</style>

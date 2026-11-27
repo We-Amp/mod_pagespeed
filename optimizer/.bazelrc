@@ -1,0 +1,311 @@
+# Auto-select config based on host OS (linux, macos, windows)
+common --enable_platform_specific_config
+
+# Pass host environment to cmake_build rule so libaom cmake can find tools.
+build --action_env=PATH
+build --action_env=INCLUDE
+build --action_env=LIB
+
+# ---------- Compiler flags (GCC/Clang — Linux and macOS) ----------
+# These are in the top-level 'build' scope because --enable_platform_specific_config
+# applies build:windows AFTER these, and MSVC ignores unknown GCC flags when
+# /nologo is set. However, to be safe, we move platform-sensitive flags to
+# build:linux and build:macos configs below, and keep only truly universal ones here.
+
+# Position independent code (needed for shared libraries; default on macOS/Windows)
+build:linux --copt=-fPIC
+
+# C++ standard (C++23 required for Cyclone cache)
+build:linux --cxxopt=-std=c++23
+build:linux --host_cxxopt=-std=c++23
+build:macos --cxxopt=-std=c++23
+build:macos --host_cxxopt=-std=c++23
+
+# Compiler warnings (GCC/Clang only)
+build:linux --cxxopt=-Wall
+build:linux --cxxopt=-Wextra
+build:linux --per_file_copt=^lib/.*,^src/.*,^test/.*@-Werror
+# Abseil 20260107.1 enables layering_check, header_modules, and parse_headers at the
+# package level. With Bazel 9 + rules_cc 0.2.16 the clang toolchain honours these,
+# but abseil's cord-related targets have incomplete deps causing build failures.
+# Also required on Linux so hedron_compile_commands' aquery subprocess (which auto-
+# selects build:linux but not --config=docker) does not encounter parse_headers
+# header-only compile actions that hedron cannot handle (AssertionError on .h files).
+build:linux --features=-layering_check
+build:linux --features=-header_modules
+build:linux --features=-parse_headers
+build:macos --cxxopt=-Wall
+build:macos --cxxopt=-Wextra
+build:macos --per_file_copt=^lib/.*,^src/.*,^test/.*@-Werror
+
+# Common libc++ flags (shared by macOS and Docker configs)
+build:libc++ --cxxopt=-stdlib=libc++
+build:libc++ --linkopt=-stdlib=libc++
+# Clang warns about -stdlib=libc++ on pure link steps and LTO backend compiles
+build:libc++ --linkopt=-Wno-unused-command-line-argument
+build:libc++ --copt=-Wno-unused-command-line-argument
+
+# Platform-specific (auto-selected on macOS)
+build:macos --config=libc++
+# Deployment target floor 11.0: CLT 27.0's libc++ (macOS 27 SDK) dropped
+# availability support below macOS 11.0, and its
+# __configuration/availability.h #warning "The selected platform is no longer
+# supported by libc++." fails the per-file -Werror build. 11.0 is also the
+# hardware floor for arm64 binaries, so this pin was already fiction on Apple
+# Silicon.
+build:macos --macos_minimum_os=11.0
+# ld64 warns about Bazel's duplicate -l flags
+build:macos --linkopt=-Wl,-no_warn_duplicate_libraries
+# Same abseil layering_check workaround as docker config (see comment above).
+build:macos --features=-layering_check
+build:macos --features=-header_modules
+build:macos --features=-parse_headers
+# Apple clang rejects flags it does not know; keep the next flag harmless there
+build:macos --copt=-Wno-unknown-warning-option
+# Clang 21 warns on char8_t→char32_t in googletest gtest-printers.h
+build:macos --copt=-Wno-character-conversion
+
+# Docker: clang + libc++ (GCC has constexpr bugs with abseil hash_policy_traits.h)
+build:docker --config=libc++
+build:docker --linkopt=-rtlib=compiler-rt
+# Abseil 20260107.1 enables layering_check, header_modules, and parse_headers at the
+# package level in its BUILD files. With Bazel 9 + rules_cc 0.2.16 the clang toolchain
+# now honours these features, but abseil's cord-related targets have incomplete deps
+# that cause build failures (e.g. cordz_info missing a dep on the module exporting
+# absl/base/const_init.h). Disable all three until abseil ships a fix.
+build:docker --features=-layering_check
+build:docker --features=-header_modules
+build:docker --features=-parse_headers
+
+# compile_commands.json generation (hedron_compile_commands / clang-tidy)
+# parse_headers/layering_check/header_modules are already disabled by build:linux above.
+# This config exists so CI can pass --config=compdb explicitly for clarity and future use.
+build:compdb --features=-layering_check
+build:compdb --features=-header_modules
+build:compdb --features=-parse_headers
+
+# ---------- Windows (MSVC) ----------
+build:windows --cxxopt=/std:c++latest
+build:windows --host_cxxopt=/std:c++latest
+# Exception handling model (required for C++ exceptions)
+build:windows --copt=/EHsc
+# Warning level 3 (similar to -Wall; /W4 is too noisy for third-party code)
+build:windows --copt=/W3
+# Treat warnings as errors for own code (disabled during Windows port stabilization)
+# build:windows --per_file_copt=^lib/.*,^src/.*,^test/.*@/WX
+# Standard conformance
+build:windows --copt=/permissive-
+build:windows --copt=/Zc:__cplusplus
+# Suppress common MSVC warnings from third-party code
+build:windows --per_file_copt=^external/.*@/W0
+# Disable warnings-as-errors on own code during Windows port stabilization.
+# Re-enable /WX once the Windows build is fully clean.
+# build:windows --per_file_copt=^lib/.*,^src/.*,^test/.*@/WX
+build:windows --copt=/wd4267   # size_t -> int truncation
+build:windows --copt=/wd4244   # int -> float, double -> float narrowing
+build:windows --copt=/wd4305   # double -> float truncation in initializers
+# Link-time code generation (MSVC equivalent of LTO)
+build:windows --features=static_link_msvcrt
+# The Rust staticlibs too: rustc's MSVC target links the DLL runtime unless
+# crt-static is set, and one such archive is enough to make the worker import
+# vcruntime140.dll. Build scripts and proc-macros are not affected (they run
+# on the build machine); a crate that compiles C through the cc crate would
+# need its own /MT, which tools/ci/check-no-vc-runtime.ps1 would catch.
+build:windows --@rules_rust//:extra_rustc_flags=-Ctarget-feature=+crt-static
+# Define NOMINMAX and WIN32_LEAN_AND_MEAN globally
+build:windows --copt=/DNOMINMAX
+build:windows --copt=/D_USE_MATH_DEFINES
+build:windows --copt=/DWIN32_LEAN_AND_MEAN
+build:windows --copt=/D_WIN32_WINNT=0x0601
+# Enable runfiles (off by default on Windows)
+build:windows --enable_runfiles=yes
+
+# Debug build (MSVC uses /Od automatically via compilation_mode=dbg)
+build:dbg --compilation_mode=dbg
+build:dbg --cxxopt=-g
+build:dbg --cxxopt=-O0
+
+# Release build (MSVC uses /O2 automatically via compilation_mode=opt)
+build:opt --compilation_mode=opt
+build:opt --cxxopt=-O3
+build:opt --cxxopt=-DNDEBUG
+# thin_lto is GCC/Clang only; Windows uses LTCG via compilation_mode=opt
+build:opt --features=thin_lto
+# Test configuration
+test --test_output=errors
+test --test_verbose_timeout_warnings
+test --keep_going
+
+# Sanitizer configs
+build:sanitizer --config=libc++
+build:sanitizer --copt=-fno-omit-frame-pointer
+build:sanitizer --copt=-g
+build:sanitizer --strip=never
+# _FORTIFY_SOURCE conflicts with ASan/MSan interceptors; force it off under every
+# sanitizer so the :hardening config can never compose badly with one. -U first
+# avoids a -Wmacro-redefined error under the per-file -Werror.
+build:sanitizer --copt=-U_FORTIFY_SOURCE
+# Instrumented binaries run two to three times slower than plain ones, so a
+# test sized right for a plain build can hit its limit under a sanitizer on a
+# busy host. Scale the short, moderate and long limits by three; eternal stays
+# at an hour, which is the order of the jobs' own wall-clock limits.
+test:sanitizer --test_timeout=180,900,2700,3600
+# Note on libc++: sanitizer builds run inside the pagespeed2-dev container
+# (Ubuntu 22.04). System libstdc++ on jammy is GCC-11 which lacks `<expected>`
+# (C++23); Cyclone uses `<expected>` so the build fails without -stdlib=libc++.
+# The non-sanitizer `--config=ci`/`--config=release` chains already pull in
+# libc++ via `--config=docker`; here we wire it directly.
+
+# ASan + UBSan (works on all platforms)
+# Exclude vptr: requires UBSan runtime in all shared libs, breaks with Bazel's
+# shared GoogleTest when using clang + libc++. Other UBSan checks still active.
+build:asan --config=sanitizer
+build:asan --copt=-fsanitize=address,undefined
+build:asan --copt=-fno-sanitize=vptr
+build:asan --linkopt=-fsanitize=address,undefined
+build:asan --linkopt=-fno-sanitize=vptr
+build:asan --test_env=ASAN_OPTIONS=check_initialization_order=1
+build:asan --test_env=UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
+
+# ASan + UBSan + LeakSanitizer (Docker only: /workspace path requires container)
+# For local Linux runs without leak detection, use --config=asan instead.
+build:asan-leaks --config=asan
+build:asan-leaks --test_env=ASAN_OPTIONS=check_initialization_order=1:detect_leaks=1
+build:asan-leaks --test_env=LSAN_OPTIONS=suppressions=/workspace/tools/lsan_suppressions.txt
+
+# TSan — use this for local/CI runs (no suppression file; Bazel sandboxing
+# makes the suppressions path unreliable)
+build:tsan --config=sanitizer
+build:tsan --copt=-fsanitize=thread
+build:tsan --linkopt=-fsanitize=thread
+build:tsan --test_env=TSAN_OPTIONS=halt_on_error=1
+test:tsan --test_tag_filters=-no_tsan
+
+# TSan with suppressions — use this inside Docker (tools/docker-sanitizers.sh)
+# where the workspace is mounted at /workspace and the path is stable
+build:tsan-suppressed --config=tsan
+build:tsan-suppressed --test_env=TSAN_OPTIONS=halt_on_error=1:suppressions=/workspace/tools/tsan_suppressions.txt
+
+# Coverage (clang needs llvm-cov; --enable_platform_specific_config auto-selects)
+coverage --combined_report=lcov
+coverage --instrumentation_filter=//lib[/:],//src[/:]
+# Note: no_tsan tests are only excluded from TSan runs, not coverage.
+# Coverage does not use TSan, so all tests contribute to coverage data.
+coverage:linux --repo_env=GCOV=/usr/bin/llvm-cov
+coverage:macos --repo_env=GCOV=/opt/homebrew/opt/llvm/bin/llvm-cov
+
+# Windows ASan (MSVC /fsanitize=address — no UBSan support on MSVC)
+# Informational only in CI; MSVC ASan may produce false positives.
+# Uses Bazel's default /Z7 debug info (per-obj, no PDB contention).
+build:windows-asan --config=windows
+build:windows-asan --copt=/fsanitize=address
+
+# ---------- Remote cache (shared CI cache) ----------
+# Shared L2 cache across all CI runners and runs. Used alongside --disk_cache (L1).
+# A bazel-remote instance. Writes may need credentials, supplied by the runner
+# as a system bazelrc (docs/ci/runner-environment.md, BAZEL_CACHE_AUTH_RC);
+# nothing is stored here.
+#
+# The endpoint is addressed through the environment-neutral alias
+# `bazel-remote-cache`; NO environment-specific hostname or address is stored in
+# this tree (they live in the CI system's repository variables).
+#   * CI Linux jobs run in Docker and map the alias with
+#     `--add-host=bazel-remote-cache:${BAZEL_CACHE_HOST}`
+#     (tools/ci/remote-cache-docker-args.sh).
+#   * CI Windows jobs build natively and pass `--remote_cache` explicitly.
+#   * Locally, either add a `bazel-remote-cache` entry to /etc/hosts, or put
+#     `build:remote-cache --remote_cache=http://<host>:9090` in .bazelrc.user
+#     (gitignored, imported at the END of this file so it wins).
+build:remote-cache --remote_cache=http://bazel-remote-cache:9090
+build:remote-cache --remote_upload_local_results=true
+build:remote-cache --remote_timeout=120
+
+# ---------- CI configuration (tarball-first CI) ----------
+# Used by the CI workflows on the x64 Linux runners.
+# Linux CI builds run inside the pagespeed2-dev Docker container.
+build:ci --config=docker
+build:ci --config=remote-cache
+build:ci --jobs=HOST_CPUS*.75
+build:ci --nostamp
+
+# Full-tier Linux job configs (pipeline-full.yml); tools/ci/bisect-job.sh runs
+# the same configs. The remote-cache/jobs choice, --nocache_test_results and
+# the target patterns stay on the command line.
+build:ci-asan --vendor_dir=vendor
+build:ci-asan --config=asan-leaks
+build:ci-tsan --vendor_dir=vendor
+build:ci-tsan --config=tsan-suppressed
+build:ci-build --vendor_dir=vendor
+
+# arm64 Linux CI (native Docker on Mac, no Rosetta)
+build:ci-linux-arm64 --config=docker
+build:ci-linux-arm64 --config=remote-cache
+build:ci-linux-arm64 --jobs=HOST_CPUS*.75
+build:ci-linux-arm64 --nostamp
+
+# macOS CI (native, Apple Silicon runner)
+build:ci-macos --config=macos
+build:ci-macos --config=remote-cache
+build:ci-macos --jobs=8
+build:ci-macos --nostamp
+
+# CI-only flaky-test mitigation. Bazel re-runs ONLY tests that fail, marks them
+# FLAKY when a retry passes, and STILL fails the build when a test fails every
+# attempt — so this does not mask deterministic breakage, only transient flakes
+# (timing/port/container-ordering). Scoped to `test:` (never `build:`) so a
+# `bazel build --config=ci` cannot pick up this test-only flag, and to the CI
+# config names so local-dev `bazel test //...` keeps the default (1 attempt).
+test:ci --flaky_test_attempts=2
+test:ci-linux-arm64 --flaky_test_attempts=2
+test:ci-macos --flaky_test_attempts=2
+# Windows unit tests run with --config=windows (no separate ci config); scoping
+# to test:windows keeps it off the `bazel build --config=windows` steps.
+test:windows --flaky_test_attempts=2
+
+# --- Binary hardening ----------------------------------------------------
+# Applied to the release configs below (NOT sanitizer builds — see the
+# FORTIFY override on :sanitizer). Shipped artifacts are shared objects
+# (libpagespeed.so, ngx_pagespeed_module.so), already -fPIC / ET_DYN, so
+# -pie/-fPIE do NOT apply; the factory_worker executable keeps the toolchain
+# default PIE. -U_FORTIFY_SOURCE first avoids a -Wmacro-redefined error under
+# the per-file -Werror if the toolchain already defines it.
+#   x86-64 : composed into :release via :hardening + :hardening-cet
+#   arm64  : composed into :release-linux-arm64 via :hardening + :hardening-bti
+# Verified to land on the linked .so (readelf): GNU_RELRO, FLAGS_1 NOW,
+# __stack_chk_fail, _FORTIFY_SOURCE _chk symbols — asserted at release time by
+# tools/assert-binary-hardening.sh.
+build:hardening --copt=-U_FORTIFY_SOURCE
+build:hardening --copt=-D_FORTIFY_SOURCE=2
+build:hardening --copt=-fstack-protector-strong
+build:hardening --linkopt=-Wl,-z,relro
+build:hardening --linkopt=-Wl,-z,now
+# Branch-protection is BEST-EFFORT: it instruments our code (x86-64 endbr /
+# arm64 BTI landing pads + PAC), but the binary-level CET/BTI enforcement
+# GNU-property note only sets when every static object is branch-protection-
+# compiled (vendored libs are not), so readelf will not show it and the
+# assertion does not require it. arm64 PAC still enforces intrinsically.
+build:hardening-cet --copt=-fcf-protection=full
+build:hardening-bti --copt=-mbranch-protection=standard
+
+# Release builds (tag-triggered, optimized)
+build:release --config=ci
+build:release --config=opt
+build:release --config=hardening
+build:release --config=hardening-cet
+build:release --stamp
+
+# arm64 Linux release builds (native Docker on Mac)
+build:release-linux-arm64 --config=ci-linux-arm64
+build:release-linux-arm64 --config=opt
+build:release-linux-arm64 --config=hardening
+build:release-linux-arm64 --config=hardening-bti
+build:release-linux-arm64 --stamp
+
+# ---------- Local overrides (gitignored) ----------------------------------
+# LAST in the file on purpose: for any given config the last matching option
+# wins, so an entry here overrides everything above -- including the
+# `build:remote-cache --remote_cache=...` default. Use it to point a local
+# build at a reachable cache without editing (or dirtying) this file:
+#   build:remote-cache --remote_cache=http://<host>:9090
+# Absent, this is a no-op: try-import does not fail on a missing file.
+try-import %workspace%/.bazelrc.user

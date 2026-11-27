@@ -1,0 +1,17 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import ErrorContent from '../components/ErrorContent.astro';
+---
+
+<BaseLayout
+  title="Page not found — mod_pagespeed"
+  description="The page you're looking for doesn't exist."
+  noindex
+  canonical={false}
+>
+  <ErrorContent
+    code="404"
+    heading="Page not found"
+    body="This page does not exist. Search the site, or start from one of these."
+  />
+</BaseLayout>

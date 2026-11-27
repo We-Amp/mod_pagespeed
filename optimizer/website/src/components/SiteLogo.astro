@@ -1,0 +1,94 @@
+---
+// The site logo as inline SVG: the same drawing as public/logo.svg (which stays
+// for the JSON-LD and external use), painted from the colour tokens so the print
+// view gets the light values, and with no image request. The text uses the
+// page's own Inter and IBM Plex Mono faces.
+interface Props {
+  width: number;
+  height: number;
+  class?: string;
+  /**
+   * Accessible name (role="img"). In a link, name the link through this label
+   * rather than an aria-label on the link: the logo's text is visible content,
+   * and a link label that omits it fails label-in-name (WCAG 2.5.3).
+   */
+  label?: string;
+}
+const { width, height, class: className, label } = Astro.props;
+---
+
+<svg
+  viewBox="0 0 392 58"
+  width={width}
+  height={height}
+  class:list={['site-logo', className]}
+  xmlns="http://www.w3.org/2000/svg"
+  {...(label ? { role: 'img', 'aria-label': label } : { 'aria-hidden': 'true' })}
+  focusable="false"
+>
+  <g>
+    <rect x="0" y="11" width="7" height="7" rx="1" class="site-logo-lit"></rect>
+    <rect x="10" y="11" width="7" height="7" rx="1" class="site-logo-lit"></rect>
+    <rect x="20" y="11" width="7" height="7" rx="1" class="site-logo-clear"></rect>
+    <rect x="30" y="11" width="7" height="7" rx="1" class="site-logo-clear"></rect>
+    <rect x="0" y="21" width="7" height="7" rx="1" class="site-logo-lit"></rect>
+    <rect x="10" y="21" width="7" height="7" rx="1" class="site-logo-clear"></rect>
+    <rect x="20" y="21" width="7" height="7" rx="1" class="site-logo-clear"></rect>
+    <rect x="30" y="21" width="7" height="7" rx="1" class="site-logo-lit"></rect>
+  </g>
+  <!-- prettier-ignore -->
+  <text x="48" y="30" font-weight="700" font-size="32" letter-spacing="-1.2" textLength="231" lengthAdjust="spacingAndGlyphs" class="site-logo-word">mod_pagespeed</text>
+  <rect x="282" y="6" width="2.5" height="28" rx="1" class="site-logo-lit site-logo-cursor"></rect>
+  <!-- prettier-ignore -->
+  <text x="48" y="53" font-weight="600" font-size="14" class="site-logo-sub">we-amp.com</text>
+</svg>
+
+<style>
+  .site-logo-lit {
+    fill: var(--color-bit-lit);
+  }
+  .site-logo-clear {
+    fill: var(--color-bit-clear);
+  }
+  .site-logo-word {
+    fill: var(--color-text-body);
+    font-family: var(--font-sans);
+  }
+  .site-logo-sub {
+    fill: var(--color-text-muted);
+    font-family: var(--font-mono);
+  }
+  .site-logo-cursor {
+    opacity: 0.95;
+  }
+  /* Forced colours do not repaint SVG fills: map them to system colours so the
+     logo stays visible on the forced background. */
+  @media (forced-colors: active) {
+    .site-logo-word,
+    .site-logo-sub {
+      fill: CanvasText;
+    }
+    .site-logo-lit {
+      fill: Highlight;
+    }
+    .site-logo-clear {
+      fill: GrayText;
+    }
+  }
+  /* Finite blink (4 cycles, then steady), only without reduced motion (WCAG 2.2.2). */
+  @keyframes site-logo-blink {
+    0%,
+    49% {
+      opacity: 0.95;
+    }
+    50%,
+    100% {
+      opacity: 0;
+    }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .site-logo-cursor {
+      animation: site-logo-blink 1.2s steps(1) 4;
+    }
+  }
+</style>

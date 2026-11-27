@@ -1,0 +1,184 @@
+---
+title: 'ASP.NET Core in production'
+description: 'Production deployment of the mod_pagespeed ASP.NET Core middleware: configuration, health probes, multi-instance scale and zero-downtime restarts.'
+order: 51
+group: 'Operate'
+lastUpdated: 2026-10-22
+faq:
+  - q: 'Does scaling the ASP.NET Core middleware across multiple instances add per-server cost?'
+    a: 'No. mod_pagespeed is licensed under Apache-2.0 and free to run in development and in production, so scaling out adds no software cost — size replica counts for traffic and availability.'
+  - q: 'What does the /healthz check report?'
+    a: 'The plain-text status: `Healthy` while the cache is operational, `Unhealthy` when the cache cannot be opened — wire monitoring to alert on `Unhealthy`.'
+---
+
+import NugetCmd from '../../components/release/NugetCmd.astro';
+import XPageSpeedExample from '../../components/release/XPageSpeedExample.astro';
+import { getRelease } from '../../lib/release';
+
+export const rel21 = await getRelease('2.1');
+
+{/* The NuGet package shares the product version; if the two ever diverge, read the package version from its own release entry. */}
+
+This page is for teams shipping the mod_pagespeed ASP.NET Core middleware
+(`WeAmp.PageSpeed.AspNetCore`) into a production ASP.NET Core deployment. If you
+are still evaluating the middleware locally, start with
+[Install ASP.NET Core middleware](/docs/aspnet-getting-started/) instead.
+
+The current NuGet release is {rel21.display.badge_version}. The middleware runs
+in-process in your request pipeline and, by default, launches the `factory_worker`
+binary from the same package as a child process to do the expensive work — image
+transcoding and critical-CSS extraction — out of process. If you need an in-process
+native module for Apache, nginx or IIS instead, see [mod_pagespeed](/), where
+the module runs in-process in the web server. The IIS package ships as a signed
+installer on the mod_pagespeed GitHub release.
+
+## Prerequisites
+
+- .NET 8 or .NET 10 runtime on your production host.
+- An ASP.NET Core application that serves HTML responses.
+- A supported runtime identifier — `linux-x64`, `linux-arm64`, `osx-arm64`,
+  or `win-x64`. The meta-package resolves the matching native asset
+  automatically at restore time.
+
+## Install
+
+Add the NuGet package to your project. CI restores the correct native
+library for the target RID — no per-platform branching in your build.
+
+<pre>
+  <code class="language-bash">
+    <NugetCmd />
+  </code>
+</pre>
+
+If your build container differs from the deployment target, restore with an
+explicit RID so the native asset matches the production host:
+
+```bash
+dotnet publish -c Release -r linux-x64 --self-contained false
+```
+
+## Wire up the middleware
+
+Register the services and add `UsePageSpeed()` early in the pipeline, before
+any middleware that writes to the response body:
+
+```csharp
+using WeAmp.PageSpeed.AspNetCore;
+
+var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddRazorPages();
+builder.Services.AddPageSpeed(); // binds the "PageSpeed" configuration section
+
+var app = builder.Build();
+app.UsePageSpeed();
+app.MapHealthChecks("/healthz");
+app.MapRazorPages();
+app.Run();
+```
+
+Bind a `PageSpeed` section in your configuration. For the full set of
+`PageSpeedOptions` properties and hot-reload semantics, see the
+[ASP.NET Core configuration reference](/docs/aspnet-configuration/).
+
+Turn the web console off in production. By default the middleware serves it at
+`/console/`, with its worker API proxy under `/v1/*`, from your site's root
+without authentication. Set it in the production environment, as an
+environment variable or in `appsettings.Production.json`:
+
+```bash
+PageSpeed__Console__Enabled=false
+```
+
+If you need the console in production, gate it with your own authentication
+instead; see [Console](/docs/aspnet-configuration/#console-pagespeedconsole).
+
+## Cache backing
+
+The middleware writes a single memory-mapped Cyclone volume file under
+`PageSpeed.Cache.VolumePath` (default: `/var/cache/pagespeed/volume.dat`,
+1 GB). For production:
+
+- Set an explicit `PageSpeed__Cache__VolumePath` (double-underscore for
+  nesting) on a persistent volume so the cache survives container restarts
+  and isn't billed against ephemeral disk. The path is a single file,
+  pre-sized to `PageSpeed__Cache__VolumeSizeBytes`.
+- Ensure the application user has read/write access to the file's parent
+  directory.
+- Leave `CacheMode` at `Safe` for the initial rollout. Safe mode adds
+  `must-revalidate` to asset responses so a misconfigured option recovers in
+  minutes rather than hours. Switch to `Aggressive` only after a stable
+  baseline and with a CDN purge path available — see
+  [Choose a cache mode](/docs/cache-modes/) for the full trade-off.
+
+## Validate the deployment
+
+After deploy, confirm the middleware is active:
+
+<pre>
+  <code class="language-bash">
+    {`curl -I https://<your-domain>/
+# `}
+    <XPageSpeedExample line="2.1" surface="middleware" />
+    {`
+
+curl -s https://<your-domain>/healthz
+# Healthy
+
+curl -s -o /dev/null -w '%{http_code}\n' https://<your-domain>/v1/config
+# 404 with the console off; 401, 403 or 302 when gated`}
+  </code>
+</pre>
+
+The `/healthz` endpoint answers with the plain-text status: `Healthy` while the
+cache is operational, `Unhealthy` when the cache cannot be opened — wire
+monitoring to alert on `Unhealthy`. The check also records the cache entry
+count and the middleware version as health-check data; the default
+`MapHealthChecks` response shows only the status, so add a JSON
+`ResponseWriter` to see them.
+
+The `/v1/config` check must not return the optimizer's configuration, JSON with
+keys such as `webp_quality`: that would mean anyone can read and change it
+through the console proxy. A `200` from your own app (its own `/v1/config`
+route, or a catch-all or SPA fallback) is not the console.
+
+The middleware starts the worker with `--api-no-auth` on a loopback-only
+management port (`PageSpeed.Worker.ApiPort`; an ephemeral port when left at
+`0`). The worker refuses a non-loopback bind without a token, so the port
+itself is not reachable off-host; never publish it. The worker API is still
+reachable off-host through the middleware's console proxy unless you turn the
+console off or gate it, as above.
+
+## Scale across multiple instances
+
+mod_pagespeed is licensed under Apache-2.0 and free to run in development
+and in production, so scaling out adds no software cost. Size replica counts
+for your traffic and availability needs.
+
+Each instance maintains its own on-disk cache. There is no shared cache
+backing across replicas; each replica builds its own warm cache, which
+isolates cache state across instances.
+
+## Zero-downtime restarts
+
+The middleware honors ASP.NET Core's standard graceful-shutdown semantics.
+On `SIGTERM`, in-flight requests complete against the existing cache before
+the worker shuts down; new requests route to a fresh instance. Configure
+your orchestrator's `terminationGracePeriodSeconds` (Kubernetes) or
+equivalent to at least 30 seconds so any mid-flight HTML rewrites complete
+cleanly.
+
+For container deployments, the [Deploy to production](/docs/deployment/)
+guide covers the Docker / Helm shipping path; the systemd and Kubernetes
+patterns there apply equally to the NuGet middleware when wrapped in your
+own container image.
+
+## See also
+
+- [ASP.NET Core configuration reference](/docs/aspnet-configuration/) — full
+  options table, hot reload, environment-specific layering.
+- [License](/docs/license/) — Apache License 2.0, support subscriptions.
+- [Choose a cache mode](/docs/cache-modes/) — `Safe` vs `Aggressive`
+  trade-offs and CDN guidance.
+- [Troubleshoot common issues](/docs/troubleshooting/) — diagnostic flow for
+  cache and worker problems.

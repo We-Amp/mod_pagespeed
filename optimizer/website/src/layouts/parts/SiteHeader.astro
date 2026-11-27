@@ -1,0 +1,460 @@
+---
+// The sticky site header: logo, the desktop menus, the search and source
+// links, the primary button, and the phone menu. The menu data lives in
+// src/data/nav.ts; the script that opens and closes the menus is in the
+// layout.
+//
+// Markup here keeps the layout's indentation: the build does not compress
+// HTML, so whitespace in this file is whitespace in every page.
+import SiteLogo from '../../components/SiteLogo.astro';
+import Icon from '../../components/Icon.astro';
+import { PRODUCT_DISPLAY_NAME } from '../../data/product-facts.mjs';
+import { docsHome, docsSections, headerPricing, navLinks, umamiAttrs } from '../../data/nav';
+
+// `wide`: the docs pages with a three-column body use the wider 80rem box,
+// so their header keeps that width from xl up; every other page shares the
+// 72rem page container with the footer and the page content.
+interface Props {
+  wide?: boolean;
+}
+const { wide = false } = Astro.props;
+
+const currentLabel = PRODUCT_DISPLAY_NAME;
+
+const currentPath = Astro.url.pathname;
+const docsPrefixes = ['/docs/', '/packs/', '/platform/'];
+const normPath = currentPath.endsWith('/') ? currentPath : `${currentPath}/`;
+const isDocsActive = docsPrefixes.some((p) => normPath.startsWith(p));
+const isExact = (href: string) => normPath === href;
+---
+    <header class="border-b border-border bg-bg-primary sticky top-0 z-50">
+      <nav
+        class:list={[
+          'relative mx-auto max-w-6xl px-4 sm:px-6 lg:px-8',
+          wide && 'xl:max-w-7xl',
+        ]}
+        aria-label="Main navigation"
+      >
+        <div class="flex h-16 items-center justify-between">
+          <a href="/" class="flex shrink-0 items-center">
+            <SiteLogo width={216} height={32} class="h-8 w-auto" label={`${currentLabel} — Home`} />
+          </a>
+
+          {/* Desktop nav */}
+          <div class="hidden lg:flex items-center gap-4">
+            {navLinks.map((link, index) =>
+              link.docsMenu ? (
+                <div class="group nav-dropdown-group">
+                  <button
+                    type="button"
+                    class:list={[
+                      'nav-dropdown-btn group/dd text-sm font-medium tracking-wide transition-colors flex items-center gap-1',
+                      isDocsActive
+                        ? 'text-interactive nav-item-active'
+                        : 'text-text-muted hover:text-text-body',
+                    ]}
+                    aria-controls={`nav-panel-${index}`}
+                    aria-expanded="false"
+                  >
+                    {link.label}
+                    <Icon
+                      name="chevron-down"
+                      class="h-4 w-4 opacity-50 transition-transform group-aria-expanded/dd:rotate-180"
+                    />
+                  </button>
+                  <div
+                    id={`nav-panel-${index}`}
+                    class="nav-dropdown-panel absolute left-4 right-4 sm:left-6 sm:right-6 lg:left-8 lg:right-auto xl:right-8 pt-4 hidden z-50"
+                  >
+                    <div class="nav-panel-box w-[34rem] xl:w-auto max-w-full max-h-[calc(100dvh-7rem)] overflow-auto rounded-[var(--radius-card)] border border-border bg-bg-elevated p-4">
+                      <a
+                        href={docsHome.href}
+                        data-umami-event={docsHome.umamiEvent}
+                        aria-current={isExact(docsHome.href) ? 'page' : undefined}
+                        class="block rounded-md px-3 py-2 hover:bg-bg-secondary transition-colors"
+                      >
+                        <span class="text-sm font-medium text-text-body">{docsHome.label}</span>
+                        <span class="block text-xs text-text-annotation">{docsHome.subtitle}</span>
+                      </a>
+                      <div class="mt-3 grid grid-cols-2 xl:grid-cols-[repeat(4,max-content)] xl:justify-between gap-x-4 gap-y-5 border-t border-border pt-4">
+                        {docsSections.map((section, si) => (
+                          <div>
+                            <p
+                              id={`docs-menu-h-${si}`}
+                              class="eyebrow px-3 pb-1 xl:whitespace-nowrap"
+                            >
+                              {section.title}
+                            </p>
+                            <ul aria-labelledby={`docs-menu-h-${si}`}>
+                              {section.links.map((item) => (
+                                <li>
+                                  <a
+                                    href={item.href}
+                                    data-umami-event={item.umamiEvent ?? 'nav-docs-menu'}
+                                    {...umamiAttrs({ position: section.position })}
+                                    aria-current={isExact(item.href) ? 'page' : undefined}
+                                    class:list={[
+                                      'block rounded-md px-3 py-1.5 text-sm hover:bg-bg-secondary transition-colors',
+                                      isExact(item.href)
+                                        ? 'text-interactive font-medium'
+                                        : 'text-text-body',
+                                    ]}
+                                  >
+                                    {item.label}
+                                  </a>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : link.children ? (
+                <div class="relative group nav-dropdown-group">
+                  <button
+                    type="button"
+                    class:list={[
+                      'nav-dropdown-btn group/dd text-sm font-medium tracking-wide transition-colors flex items-center gap-1',
+                      link.children.some((c) => currentPath.startsWith(c.href))
+                        ? 'text-interactive nav-item-active'
+                        : 'text-text-muted hover:text-text-body',
+                    ]}
+                    aria-controls={`nav-panel-${index}`}
+                    aria-expanded="false"
+                  >
+                    {link.label}
+                    <Icon
+                      name="chevron-down"
+                      class="h-4 w-4 opacity-50 transition-transform group-aria-expanded/dd:rotate-180"
+                    />
+                  </button>
+                  <div
+                    id={`nav-panel-${index}`}
+                    class="nav-dropdown-panel absolute left-0 pt-4 hidden z-50"
+                  >
+                    <div class="nav-panel-box w-64 rounded-[var(--radius-card)] border border-border bg-bg-elevated py-2">
+                      {link.children.map((child) => (
+                        <a
+                          href={child.href}
+                          data-umami-event={child.umamiEvent}
+                          {...umamiAttrs(child.umamiProps)}
+                          rel={child.external ? 'noopener' : undefined}
+                          class:list={[
+                            'block px-4 py-3 hover:bg-bg-secondary transition-colors',
+                            currentPath.startsWith(child.href) ? 'bg-bg-secondary' : '',
+                          ]}
+                        >
+                          <span class="flex items-center gap-1.5">
+                            <span
+                              class:list={[
+                                'text-sm font-medium',
+                                currentPath.startsWith(child.href)
+                                  ? 'text-interactive'
+                                  : 'text-text-body',
+                              ]}
+                            >
+                              {child.label}
+                            </span>
+                            {child.badge && <span class="badge-interactive">{child.badge}</span>}
+                          </span>
+                          <span class="block text-xs text-text-annotation mt-0.5">
+                            {child.subtitle}
+                          </span>
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <a
+                  href={link.href}
+                  data-umami-event={link.umamiEvent}
+                  aria-current={currentPath.startsWith(link.href!) ? 'page' : undefined}
+                  class:list={[
+                    'text-sm font-medium tracking-wide transition-colors items-center gap-1.5 xl:whitespace-nowrap inline-flex',
+                    currentPath.startsWith(link.href!)
+                      ? 'text-interactive nav-item-active'
+                      : 'text-text-muted hover:text-text-body',
+                  ]}
+                >
+                  {link.label}
+                  {link.badge && <span class="badge-interactive">{link.badge}</span>}
+                </a>
+              ),
+            )}
+            <button
+              type="button"
+              data-search-open
+              data-umami-event="search_open"
+              aria-haspopup="dialog"
+              aria-controls="site-search"
+              aria-keyshortcuts="/ Control+K Meta+K"
+              title="Search (/)"
+              class="text-sm font-medium tracking-wide transition-colors inline-flex items-center gap-1.5 text-text-muted hover:text-interactive"
+            >
+              <Icon name="search" class="h-4 w-4" />
+              <span class="sr-only xl:not-sr-only">Search</span>
+              <kbd
+                class="hidden xl:inline-block rounded border border-border px-1 text-micro font-normal leading-4 text-text-annotation"
+                aria-hidden="true"
+              >
+                /
+              </kbd>
+            </button>
+            <a
+              href={headerPricing.href}
+              data-umami-event={headerPricing.umamiEvent}
+              {...umamiAttrs(headerPricing.umamiProps)}
+              aria-current={currentPath.startsWith(headerPricing.href) ? 'page' : undefined}
+              class:list={[
+                'hidden xl:inline-flex items-center gap-1.5 whitespace-nowrap rounded-md border px-2.5 py-1 text-sm font-medium transition-colors',
+                currentPath.startsWith(headerPricing.href)
+                  ? 'border-interactive text-interactive'
+                  : 'border-border text-text-muted hover:text-text-body hover:border-text-annotation',
+              ]}
+            >
+              {headerPricing.label}
+            </a>
+            <a
+              href="https://github.com/We-Amp/mod_pagespeed"
+              aria-label="Source on GitHub"
+              title="Source on GitHub"
+              rel="noopener noreferrer"
+              data-umami-event="nav_source_github"
+              class="inline-flex items-center transition-colors text-text-muted hover:text-interactive"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path
+                  fill-rule="evenodd"
+                  clip-rule="evenodd"
+                  d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0022 12.017C22 6.484 17.522 2 12 2z"
+                ></path>
+              </svg>
+            </a>
+            <a
+              href="/download/"
+              data-umami-event="cta_nav_download"
+              class="btn-primary btn-sm ml-2 whitespace-nowrap"
+            >
+              Download &amp; run
+            </a>
+          </div>
+
+          {/* Dark-only identity — theme toggle removed; the site is
+              rendered exclusively on the instrument-black canvas. */}
+
+          {/* Mobile: search + menu buttons */}
+          <div class="flex items-center lg:hidden">
+            <button
+              type="button"
+              data-search-open
+              data-umami-event="search_open_mobile"
+              aria-label="Search"
+              aria-haspopup="dialog"
+              aria-controls="site-search"
+              aria-keyshortcuts="/ Control+K Meta+K"
+              class="p-2 text-text-muted hover:text-text-body"
+            >
+              <Icon name="search" class="h-6 w-6" />
+            </button>
+            <button
+              id="mobile-menu-btn"
+              class="lg:hidden p-2 text-text-muted hover:text-text-body"
+              aria-label="Toggle menu"
+              aria-expanded="false"
+              aria-controls="mobile-menu"
+            >
+              <svg
+                class="h-6 w-6"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                aria-hidden="true"
+              >
+                <path
+                  id="menu-icon-open"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M4 6h16M4 12h16M4 18h16"
+                ></path>
+                <path
+                  id="menu-icon-close"
+                  class="hidden"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M6 18L18 6M6 6l12 12"
+                ></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        {/* Mobile nav */}
+        <div
+          id="mobile-menu"
+          class="hidden lg:hidden pb-4 max-h-[calc(100dvh-121px)] overflow-y-auto"
+        >
+          <a
+            href="/download/"
+            data-umami-event="cta_nav_download_mobile"
+            class="btn-primary mb-3 w-full"
+          >
+            Download &amp; run
+          </a>
+          {navLinks.map((link) =>
+            link.docsMenu ? (
+              <div>
+                <p class="eyebrow py-2">{link.label}</p>
+                <a
+                  href={docsHome.href}
+                  data-umami-event={`${docsHome.umamiEvent}-mobile`}
+                  aria-current={isExact(docsHome.href) ? 'page' : undefined}
+                  class:list={[
+                    'flex items-center gap-2 py-3 text-sm font-medium',
+                    isExact(docsHome.href)
+                      ? 'text-interactive'
+                      : 'text-text-muted hover:text-text-body',
+                  ]}
+                >
+                  <span>{docsHome.label}</span>
+                </a>
+                {docsSections.map((section) => (
+                  <details
+                    class="group mobile-docs-section"
+                    open={section.links.some((l) => isExact(l.href))}
+                  >
+                    <summary class="flex min-h-12 cursor-pointer items-center justify-between py-3 pl-4 text-sm font-medium text-text-muted hover:text-text-body">
+                      {section.title}
+                      <Icon name="chevron-down" class="h-4 w-4 opacity-50 group-open:rotate-180" />
+                    </summary>
+                    <ul>
+                      {section.links.map((item) => (
+                        <li>
+                          <a
+                            href={item.href}
+                            data-umami-event={
+                              item.umamiEvent ? `${item.umamiEvent}-mobile` : 'nav-docs-menu'
+                            }
+                            {...umamiAttrs({ position: section.position }, '_mobile')}
+                            aria-current={isExact(item.href) ? 'page' : undefined}
+                            class:list={[
+                              'block py-3 pl-8 text-sm font-medium',
+                              isExact(item.href)
+                                ? 'text-interactive'
+                                : 'text-text-muted hover:text-text-body',
+                            ]}
+                          >
+                            {item.label}
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                ))}
+              </div>
+            ) : link.children ? (
+              ((children) => {
+                const items = children.map((child) => (
+                  <a
+                    href={child.href}
+                    data-umami-event={
+                      child.umamiProps
+                        ? child.umamiEvent
+                        : child.umamiEvent
+                          ? `${child.umamiEvent}-mobile`
+                          : undefined
+                    }
+                    {...umamiAttrs(child.umamiProps, '_mobile')}
+                    rel={child.external ? 'noopener' : undefined}
+                    class:list={[
+                      'block py-3 pl-4 text-sm font-medium',
+                      currentPath.startsWith(child.href)
+                        ? 'text-interactive'
+                        : 'text-text-muted hover:text-text-body',
+                    ]}
+                  >
+                    <span class="inline-flex items-center gap-1.5">
+                      {child.label}
+                      {child.badge && <span class="badge-interactive">{child.badge}</span>}
+                    </span>
+                    <span class="block text-xs text-text-annotation font-normal">
+                      {child.subtitle}
+                    </span>
+                  </a>
+                ));
+                return link.mobileCollapsed ? (
+                  <details
+                    class="group"
+                    open={children.some((c) => currentPath.startsWith(c.href))}
+                  >
+                    <summary class="flex min-h-12 cursor-pointer items-center justify-between py-2">
+                      <span class="eyebrow">{link.label}</span>
+                      <Icon
+                        name="chevron-down"
+                        class="h-4 w-4 text-text-muted opacity-50 group-open:rotate-180"
+                      />
+                    </summary>
+                    {items}
+                  </details>
+                ) : (
+                  <div>
+                    <p class="eyebrow py-2">{link.label}</p>
+                    {items}
+                  </div>
+                );
+              })(link.children)
+            ) : (
+              <a
+                href={link.href}
+                data-umami-event={link.umamiEvent ? `${link.umamiEvent}-mobile` : undefined}
+                aria-current={currentPath.startsWith(link.href!) ? 'page' : undefined}
+                class:list={[
+                  'flex items-center gap-2 py-3 text-sm font-medium',
+                  currentPath.startsWith(link.href!)
+                    ? 'text-interactive'
+                    : 'text-text-muted hover:text-text-body',
+                ]}
+              >
+                <span>{link.label}</span>
+                {link.badge && <span class="badge-interactive">{link.badge}</span>}
+              </a>
+            ),
+          )}
+        </div>
+      </nav>
+      <div class="rule-ticked" role="presentation" aria-hidden="true"></div>
+    </header>
+    <style>
+      /* Active top-level nav item: the interactive color plus a 2px inset rule
+         under the link or dropdown button, so state never rides on color
+         alone. Dropdown buttons whose child is active get the same. */
+      .nav-item-active {
+        box-shadow: inset 0 -2px 0 var(--color-interactive);
+      }
+      /* Dropdown panel: the specular inset of .card-featured instead of a drop
+         shadow; the frame is the 1px token border. */
+      .nav-panel-box {
+        box-shadow:
+          inset 0 1px 0 var(--color-specular),
+          inset 0 0 0 1px var(--color-border);
+      }
+      /* Mobile menu: a hairline divider on every item row. */
+      #mobile-menu a:not(.btn-primary),
+      #mobile-menu summary {
+        border-top: 1px solid var(--color-border);
+      }
+      #mobile-menu summary {
+        list-style: none;
+      }
+      #mobile-menu summary::-webkit-details-marker {
+        display: none;
+      }
+      /* Links inside a Docs section sit under the summary's rule, not their own. */
+      #mobile-menu details a:not(.btn-primary) {
+        border-top: 0;
+      }
+    </style>

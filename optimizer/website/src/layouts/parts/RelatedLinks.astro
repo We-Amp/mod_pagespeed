@@ -1,0 +1,35 @@
+---
+// "Related" links at the end of a landing page, from src/data/related.ts.
+// Renders nothing on pages without an entry. Kept out of the search index so
+// the labels do not show up as page text in results.
+import { relatedFor } from '../../data/related';
+
+const links = relatedFor(Astro.url.pathname);
+const position = (href: string) => href.replace(/^\/|\/$/g, '').replace(/[-/]/g, '_');
+---
+{links.length > 0 && (
+  <nav
+    aria-labelledby="related-heading"
+    data-related
+    data-pagefind-ignore
+    class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-10"
+  >
+    <h2 id="related-heading" class="eyebrow uppercase text-text-annotation tracking-[0.08em] [&::before]:hidden">
+      Related
+    </h2>
+    <ul class="mt-3 flex flex-wrap gap-x-6 gap-y-2">
+      {links.map((item) => (
+        <li>
+          <a
+            href={item.href}
+            data-umami-event="nav-related"
+            data-umami-event-position={position(item.href)}
+            class="text-sm text-text-muted underline underline-offset-2 hover:text-text-body"
+          >
+            {item.label}
+          </a>
+        </li>
+      ))}
+    </ul>
+  </nav>
+)}

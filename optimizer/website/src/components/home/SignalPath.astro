@@ -1,0 +1,840 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// Home section 03: the request path as a signal diagram, sync lane on top,
+// async worker lane below. Colours are tokens via the dg-* classes of the
+// page's style block.
+//
+// The markup keeps the indentation it has inside the page layout: the build
+// does not compress HTML, so this indentation is the whitespace of the page.
+// The class names are styled by the page's global style block in
+// src/pages/index.astro. Keep the component imports below in this order: it
+// decides the order of the inline style blocks in <head> (see the note in
+// src/pages/index.astro).
+
+import HitMissBadge from '../instrument/HitMissBadge.astro';
+import SectionHeader from '../instrument/SectionHeader.astro';
+---
+
+  <section class="py-13 sm:py-18">
+    <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+      <SectionHeader
+        id="s-signal"
+        index="03"
+        eyebrow="Signal path"
+        title="The worker optimizes off the request path. The module serves from cache."
+      >
+        The module serves; the worker{' '}
+        <a
+          href="/how-it-works/async-rewriting/"
+          class="text-interactive hover:text-interactive-hover underline"
+        >
+          optimizes outside the request path
+        </a>
+        . Both sides use the same proven{' '}
+        <a href="/psol/" class="text-interactive hover:text-interactive-hover underline">
+          PSOL optimization core
+        </a>
+        .
+      </SectionHeader>
+
+      {/* 2.0 Architecture diagram — inline SVG.
+          Desktop (md+): horizontal flow with branching HIT/MISS lanes and a
+          separate async lane showing Worker -> Variant cache feedback.
+          Mobile (<md): vertical SVG with the same node set.
+          Colours are design tokens via the dg-* classes in the page style
+          block: HIT = success/success-wash, MISS = accent/accent-wash,
+          module + worker = interactive, neutrals = border-strong.
+          The <title> element inside each SVG gives screen
+          readers a short label; the figure wrapper has the longer
+          aria-label for the full narrative. */}
+      <figure
+        class="mt-10"
+        aria-label="mod_pagespeed request flow. A request hits the module which performs a cache lookup. On HIT the variant is served from mmap in under a millisecond. On MISS the origin response is returned immediately while the optimizer worker optimizes and writes the variant, feeding future HITs."
+      >
+        {/* Desktop / tablet (>= md) */}
+        <svg
+          class="hidden md:block w-full h-auto text-text-body"
+          viewBox="0 0 880 320"
+          preserveAspectRatio="xMidYMid meet"
+          role="img"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <title>
+            mod_pagespeed architecture: request, module and cache lookup, HIT serves from mmap,
+            MISS serves origin while an async worker writes the optimized variant.
+          </title>
+          <defs>
+            <marker
+              id="arrow-stone-20"
+              viewBox="0 0 10 10"
+              refX="9"
+              refY="5"
+              markerWidth="6"
+              markerHeight="6"
+              orient="auto-start-reverse"
+            >
+              <path d="M0,0 L10,5 L0,10 z" class="dg-fill-neutral"></path>
+            </marker>
+            <marker
+              id="arrow-hit-20"
+              viewBox="0 0 10 10"
+              refX="9"
+              refY="5"
+              markerWidth="6"
+              markerHeight="6"
+              orient="auto-start-reverse"
+            >
+              <path d="M0,0 L10,5 L0,10 z" class="dg-fill-success"></path>
+            </marker>
+            <marker
+              id="arrow-miss-20"
+              viewBox="0 0 10 10"
+              refX="9"
+              refY="5"
+              markerWidth="6"
+              markerHeight="6"
+              orient="auto-start-reverse"
+            >
+              <path d="M0,0 L10,5 L0,10 z" class="dg-fill-accent"></path>
+            </marker>
+            <marker
+              id="arrow-async-20"
+              viewBox="0 0 10 10"
+              refX="9"
+              refY="5"
+              markerWidth="6"
+              markerHeight="6"
+              orient="auto-start-reverse"
+            >
+              <path d="M0,0 L10,5 L0,10 z" class="dg-fill-interactive"></path>
+            </marker>
+          </defs>
+
+          {/* Lane labels */}
+          <text
+            x="40"
+            y="24"
+            class="dg-fill-annot"
+            font-size="11"
+            font-family="ui-sans-serif, system-ui, sans-serif"
+            font-weight="600"
+            letter-spacing="0.08em"
+          >
+            REQUEST PATH &middot; sub-ms
+          </text>
+          <text
+            x="40"
+            y="226"
+            class="dg-fill-annot"
+            font-size="11"
+            font-family="ui-sans-serif, system-ui, sans-serif"
+            font-weight="600"
+            letter-spacing="0.08em"
+          >
+            ASYNC PATH &middot; background
+          </text>
+
+          {/* Subtle lane divider */}
+          <line
+            x1="20"
+            y1="210"
+            x2="860"
+            y2="210"
+            class="dg-stroke-lane"
+            stroke-width="1"
+            stroke-dasharray="2 4"
+          ></line>
+
+          {/* Node: Request */}
+          <rect
+            x="30"
+            y="80"
+            width="120"
+            height="60"
+            rx="8"
+            class="dg-node"
+            stroke-width="1.5"
+          ></rect>
+          <text
+            x="90"
+            y="115"
+            text-anchor="middle"
+            class="dg-fill-body"
+            font-size="14"
+            font-family="ui-sans-serif, system-ui, sans-serif"
+            font-weight="600"
+          >
+            Request
+          </text>
+
+          {/* Node: the module (serving side) */}
+          <rect
+            x="210"
+            y="70"
+            width="170"
+            height="80"
+            rx="8"
+            class="dg-node-interactive"
+            stroke-width="2"
+          ></rect>
+          <text
+            x="295"
+            y="102"
+            text-anchor="middle"
+            class="dg-fill-interactive"
+            font-size="14"
+            font-family="ui-sans-serif, system-ui, sans-serif"
+            font-weight="700"
+          >
+            module
+          </text>
+          <text
+            x="295"
+            y="122"
+            text-anchor="middle"
+            class="dg-fill-muted"
+            font-size="11"
+            font-family="ui-sans-serif, system-ui, sans-serif"
+          >
+            Intercept + cache lookup
+          </text>
+
+          {/* HIT branch */}
+          <rect
+            x="450"
+            y="40"
+            width="200"
+            height="70"
+            rx="8"
+            class="dg-node-hit"
+            stroke-width="1.5"
+          ></rect>
+          <text
+            x="550"
+            y="68"
+            text-anchor="middle"
+            class="dg-fill-success"
+            font-size="14"
+            font-family="ui-sans-serif, system-ui, sans-serif"
+            font-weight="700"
+          >
+            HIT
+          </text>
+          <text
+            x="550"
+            y="88"
+            text-anchor="middle"
+            class="dg-fill-muted"
+            font-size="11"
+            font-family="ui-sans-serif, system-ui, sans-serif"
+          >
+            Served from mmap
+          </text>
+
+          {/* MISS branch */}
+          <rect
+            x="450"
+            y="130"
+            width="200"
+            height="70"
+            rx="8"
+            class="dg-node-miss"
+            stroke-width="1.5"
+          ></rect>
+          <text
+            x="550"
+            y="158"
+            text-anchor="middle"
+            class="dg-fill-accent"
+            font-size="14"
+            font-family="ui-sans-serif, system-ui, sans-serif"
+            font-weight="700"
+          >
+            MISS
+          </text>
+          <text
+            x="550"
+            y="178"
+            text-anchor="middle"
+            class="dg-fill-muted"
+            font-size="11"
+            font-family="ui-sans-serif, system-ui, sans-serif"
+          >
+            Pass through to origin
+          </text>
+
+          {/* Node: Response */}
+          <rect
+            x="720"
+            y="80"
+            width="130"
+            height="60"
+            rx="8"
+            class="dg-node"
+            stroke-width="1.5"
+          ></rect>
+          <text
+            x="785"
+            y="115"
+            text-anchor="middle"
+            class="dg-fill-body"
+            font-size="14"
+            font-family="ui-sans-serif, system-ui, sans-serif"
+            font-weight="600"
+          >
+            Response
+          </text>
+
+          {/* Node: Worker (async lane) */}
+          <rect
+            x="210"
+            y="240"
+            width="170"
+            height="60"
+            rx="8"
+            class="dg-node-interactive"
+            stroke-width="2"
+            stroke-dasharray="4 3"
+          ></rect>
+          <text
+            x="295"
+            y="266"
+            text-anchor="middle"
+            class="dg-fill-interactive"
+            font-size="14"
+            font-family="ui-sans-serif, system-ui, sans-serif"
+            font-weight="700"
+          >
+            Worker
+          </text>
+          <text
+            x="295"
+            y="284"
+            text-anchor="middle"
+            class="dg-fill-muted"
+            font-size="11"
+            font-family="ui-sans-serif, system-ui, sans-serif"
+          >
+            Optimize &middot; write variant
+          </text>
+
+          {/* Node: Variant cache (async lane) */}
+          <rect
+            x="450"
+            y="240"
+            width="200"
+            height="60"
+            rx="8"
+            class="dg-node-cache"
+            stroke-width="1.5"
+          ></rect>
+          <text
+            x="550"
+            y="266"
+            text-anchor="middle"
+            class="dg-fill-body"
+            font-size="13"
+            font-family="ui-sans-serif, system-ui, sans-serif"
+            font-weight="600"
+          >
+            Variant cache
+          </text>
+          <text
+            x="550"
+            y="284"
+            text-anchor="middle"
+            class="dg-fill-muted"
+            font-size="11"
+            font-family="ui-sans-serif, system-ui, sans-serif"
+          >
+            mmap &middot; per-client variants
+          </text>
+
+          {/* Edges — request path */}
+          <line
+            x1="150"
+            y1="110"
+            x2="206"
+            y2="110"
+            class="dg-edge-neutral"
+            stroke-width="1.5"
+            marker-end="url(#arrow-stone-20)"
+          ></line>
+
+          {/* module -> HIT (green) */}
+          <path
+            d="M 380 95 C 410 95, 420 75, 446 75"
+            class="dg-edge-hit"
+            stroke-width="2"
+            fill="none"
+            marker-end="url(#arrow-hit-20)"
+          ></path>
+
+          {/* module -> MISS (amber) */}
+          <path
+            d="M 380 125 C 410 125, 420 165, 446 165"
+            class="dg-edge-miss"
+            stroke-width="2"
+            fill="none"
+            marker-end="url(#arrow-miss-20)"
+          ></path>
+
+          {/* HIT -> Response */}
+          <path
+            d="M 650 75 C 690 75, 700 100, 716 105"
+            class="dg-edge-hit"
+            stroke-width="2"
+            fill="none"
+            marker-end="url(#arrow-hit-20)"
+          ></path>
+
+          {/* MISS -> Response */}
+          <path
+            d="M 650 165 C 690 165, 700 120, 716 115"
+            class="dg-edge-miss"
+            stroke-width="2"
+            fill="none"
+            marker-end="url(#arrow-miss-20)"
+          ></path>
+
+          {/* MISS forks down into Worker (async, dashed amber) */}
+          <path
+            d="M 550 200 L 550 225 L 295 225 L 295 236"
+            class="dg-edge-miss"
+            stroke-width="1.5"
+            stroke-dasharray="4 3"
+            fill="none"
+            marker-end="url(#arrow-async-20)"
+          ></path>
+
+          {/* Worker -> Variant cache (dashed cyan, write) */}
+          <line
+            x1="380"
+            y1="270"
+            x2="446"
+            y2="270"
+            class="dg-edge-async"
+            stroke-width="1.5"
+            stroke-dasharray="4 3"
+            marker-end="url(#arrow-async-20)"
+          ></line>
+
+          {/* Variant cache -> back up to the module (feedback, faint dashed) */}
+          <path
+            d="M 460 245 C 410 245, 400 175, 380 150"
+            class="dg-edge-faint"
+            stroke-width="1.2"
+            stroke-dasharray="2 3"
+            fill="none"
+          ></path>
+          <text
+            x="420"
+            y="214"
+            class="dg-fill-annot dg-halo"
+            font-size="10"
+            font-style="italic"
+            font-family="ui-sans-serif, system-ui, sans-serif"
+          >
+            feeds future HITs
+          </text>
+
+          {/* Edge labels */}
+          <text
+            x="386"
+            y="62"
+            class="dg-fill-success"
+            font-size="10"
+            font-weight="600"
+            font-family="ui-sans-serif, system-ui, sans-serif"
+          >
+            &lt; 1 ms
+          </text>
+          <text
+            x="392"
+            y="119"
+            class="dg-fill-accent"
+            font-size="10"
+            font-weight="600"
+            font-family="ui-sans-serif, system-ui, sans-serif"
+          >
+            first request
+          </text>
+        </svg>
+
+        {/* Mobile (< md) */}
+        <svg
+          class="block md:hidden w-full h-auto text-text-body"
+          viewBox="0 0 320 720"
+          preserveAspectRatio="xMidYMid meet"
+          role="img"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <title>
+            mod_pagespeed architecture: request, module and cache lookup, HIT serves from mmap,
+            MISS serves origin while an async worker writes the optimized variant.
+          </title>
+          <defs>
+            <marker
+              id="arrow-stone-20m"
+              viewBox="0 0 10 10"
+              refX="9"
+              refY="5"
+              markerWidth="6"
+              markerHeight="6"
+              orient="auto-start-reverse"
+            >
+              <path d="M0,0 L10,5 L0,10 z" class="dg-fill-neutral"></path>
+            </marker>
+            <marker
+              id="arrow-hit-20m"
+              viewBox="0 0 10 10"
+              refX="9"
+              refY="5"
+              markerWidth="6"
+              markerHeight="6"
+              orient="auto-start-reverse"
+            >
+              <path d="M0,0 L10,5 L0,10 z" class="dg-fill-success"></path>
+            </marker>
+            <marker
+              id="arrow-miss-20m"
+              viewBox="0 0 10 10"
+              refX="9"
+              refY="5"
+              markerWidth="6"
+              markerHeight="6"
+              orient="auto-start-reverse"
+            >
+              <path d="M0,0 L10,5 L0,10 z" class="dg-fill-accent"></path>
+            </marker>
+            <marker
+              id="arrow-async-20m"
+              viewBox="0 0 10 10"
+              refX="9"
+              refY="5"
+              markerWidth="6"
+              markerHeight="6"
+              orient="auto-start-reverse"
+            >
+              <path d="M0,0 L10,5 L0,10 z" class="dg-fill-interactive"></path>
+            </marker>
+          </defs>
+
+          {/* Request */}
+          <rect
+            x="100"
+            y="20"
+            width="120"
+            height="50"
+            rx="8"
+            class="dg-node"
+            stroke-width="1.5"
+          ></rect>
+          <text
+            x="160"
+            y="50"
+            text-anchor="middle"
+            class="dg-fill-body"
+            font-size="14"
+            font-weight="600"
+            font-family="ui-sans-serif, system-ui, sans-serif"
+          >
+            Request
+          </text>
+          <line
+            x1="160"
+            y1="70"
+            x2="160"
+            y2="100"
+            class="dg-edge-neutral"
+            stroke-width="1.5"
+            marker-end="url(#arrow-stone-20m)"
+          ></line>
+
+          {/* module node */}
+          <rect
+            x="50"
+            y="105"
+            width="220"
+            height="70"
+            rx="8"
+            class="dg-node-interactive"
+            stroke-width="2"
+          ></rect>
+          <text
+            x="160"
+            y="135"
+            text-anchor="middle"
+            class="dg-fill-interactive"
+            font-size="14"
+            font-weight="700"
+            font-family="ui-sans-serif, system-ui, sans-serif"
+          >
+            module
+          </text>
+          <text
+            x="160"
+            y="155"
+            text-anchor="middle"
+            class="dg-fill-muted"
+            font-size="11"
+            font-family="ui-sans-serif, system-ui, sans-serif"
+          >
+            Intercept + cache lookup
+          </text>
+
+          {/* Fork down to HIT (left) + MISS (right) */}
+          <path
+            d="M 110 175 L 110 205 L 80 215"
+            class="dg-edge-hit"
+            stroke-width="2"
+            fill="none"
+            marker-end="url(#arrow-hit-20m)"
+          ></path>
+          <path
+            d="M 210 175 L 210 205 L 240 215"
+            class="dg-edge-miss"
+            stroke-width="2"
+            fill="none"
+            marker-end="url(#arrow-miss-20m)"
+          ></path>
+
+          {/* HIT box */}
+          <rect
+            x="20"
+            y="220"
+            width="120"
+            height="60"
+            rx="8"
+            class="dg-node-hit"
+            stroke-width="1.5"
+          ></rect>
+          <text
+            x="80"
+            y="244"
+            text-anchor="middle"
+            class="dg-fill-success"
+            font-size="13"
+            font-weight="700"
+            font-family="ui-sans-serif, system-ui, sans-serif"
+          >
+            HIT
+          </text>
+          <text
+            x="80"
+            y="262"
+            text-anchor="middle"
+            class="dg-fill-muted"
+            font-size="10"
+            font-family="ui-sans-serif, system-ui, sans-serif"
+          >
+            mmap &middot; &lt; 1 ms
+          </text>
+
+          {/* MISS box */}
+          <rect
+            x="180"
+            y="220"
+            width="120"
+            height="60"
+            rx="8"
+            class="dg-node-miss"
+            stroke-width="1.5"
+          ></rect>
+          <text
+            x="240"
+            y="244"
+            text-anchor="middle"
+            class="dg-fill-accent"
+            font-size="13"
+            font-weight="700"
+            font-family="ui-sans-serif, system-ui, sans-serif"
+          >
+            MISS
+          </text>
+          <text
+            x="240"
+            y="262"
+            text-anchor="middle"
+            class="dg-fill-muted"
+            font-size="10"
+            font-family="ui-sans-serif, system-ui, sans-serif"
+          >
+            serve from origin
+          </text>
+
+          {/* Rejoin to Response */}
+          <path
+            d="M 80 280 L 80 320 L 158 342"
+            class="dg-edge-hit"
+            stroke-width="2"
+            fill="none"
+            marker-end="url(#arrow-hit-20m)"
+          ></path>
+          <path
+            d="M 240 280 L 240 320 L 162 342"
+            class="dg-edge-miss"
+            stroke-width="2"
+            fill="none"
+            marker-end="url(#arrow-miss-20m)"
+          ></path>
+
+          {/* Response */}
+          <rect
+            x="100"
+            y="345"
+            width="120"
+            height="50"
+            rx="8"
+            class="dg-node"
+            stroke-width="1.5"
+          ></rect>
+          <text
+            x="160"
+            y="375"
+            text-anchor="middle"
+            class="dg-fill-body"
+            font-size="14"
+            font-weight="600"
+            font-family="ui-sans-serif, system-ui, sans-serif"
+          >
+            Response
+          </text>
+
+          {/* Lane divider */}
+          <line
+            x1="20"
+            y1="415"
+            x2="300"
+            y2="415"
+            class="dg-stroke-lane"
+            stroke-width="1"
+            stroke-dasharray="2 4"
+          ></line>
+          <text
+            x="160"
+            y="435"
+            text-anchor="middle"
+            class="dg-fill-annot"
+            font-size="11"
+            font-weight="600"
+            letter-spacing="0.08em"
+            font-family="ui-sans-serif, system-ui, sans-serif"
+          >
+            ASYNC PATH
+          </text>
+
+          {/* MISS -> Worker (dashed amber) */}
+          <path
+            d="M 240 280 L 300 280 L 300 480 L 220 480"
+            class="dg-edge-miss"
+            stroke-width="1.5"
+            stroke-dasharray="4 3"
+            fill="none"
+            marker-end="url(#arrow-async-20m)"
+          ></path>
+
+          {/* Worker */}
+          <rect
+            x="60"
+            y="455"
+            width="160"
+            height="60"
+            rx="8"
+            class="dg-node-interactive"
+            stroke-width="2"
+            stroke-dasharray="4 3"
+          ></rect>
+          <text
+            x="140"
+            y="480"
+            text-anchor="middle"
+            class="dg-fill-interactive"
+            font-size="13"
+            font-weight="700"
+            font-family="ui-sans-serif, system-ui, sans-serif"
+          >
+            Worker
+          </text>
+          <text
+            x="140"
+            y="498"
+            text-anchor="middle"
+            class="dg-fill-muted"
+            font-size="10"
+            font-family="ui-sans-serif, system-ui, sans-serif"
+          >
+            optimize + write
+          </text>
+
+          <line
+            x1="140"
+            y1="515"
+            x2="140"
+            y2="555"
+            class="dg-edge-async"
+            stroke-width="1.5"
+            stroke-dasharray="4 3"
+            marker-end="url(#arrow-async-20m)"
+          ></line>
+
+          {/* Variant cache */}
+          <rect
+            x="40"
+            y="560"
+            width="200"
+            height="60"
+            rx="8"
+            class="dg-node-cache"
+            stroke-width="1.5"
+          ></rect>
+          <text
+            x="140"
+            y="585"
+            text-anchor="middle"
+            class="dg-fill-body"
+            font-size="13"
+            font-weight="600"
+            font-family="ui-sans-serif, system-ui, sans-serif"
+          >
+            Variant cache
+          </text>
+          <text
+            x="140"
+            y="603"
+            text-anchor="middle"
+            class="dg-fill-muted"
+            font-size="10"
+            font-family="ui-sans-serif, system-ui, sans-serif"
+          >
+            mmap &middot; per-client variants
+          </text>
+
+          <text
+            x="160"
+            y="660"
+            text-anchor="middle"
+            class="dg-fill-annot"
+            font-size="10"
+            font-style="italic"
+            font-family="ui-sans-serif, system-ui, sans-serif"
+          >
+            Variant cache feeds future HITs above.
+          </text>
+        </svg>
+        <div class="mt-5 flex flex-wrap items-center justify-center gap-x-8 gap-y-2">
+          <span class="text-xs text-text-annotation">Reverse-proxy deployment:</span>
+          <HitMissBadge state="HIT" note="hash lookup + mmap pointer" />
+          <HitMissBadge state="MISS" note="original served, worker queued" />
+        </div>
+        <figcaption class="mt-4 text-center text-xs text-text-annotation max-w-xl mx-auto">
+          Optimization happens outside the request path. Cache misses serve immediately; the worker
+          writes the optimized variant in the background so the next request is served from cache.
+          Deploys as a native module for Apache or nginx with the optimizer worker alongside it, or
+          as the reverse-proxy deployment.
+        </figcaption>
+      </figure>
+    </div>
+  </section>

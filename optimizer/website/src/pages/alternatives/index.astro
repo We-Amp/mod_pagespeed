@@ -1,0 +1,424 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PageHero from '../../components/PageHero.astro';
+import { BUILTWITH_AS_OF, BUILTWITH_SITES, LICENSE_CLAUSE_CAP } from '../../data/product-facts.mjs';
+import { roundDownDisplay } from '../../lib/instrument';
+
+const cards = [
+  {
+    href: '/alternatives/mod-pagespeed/',
+    title: 'mod_pagespeed alternative',
+    summary:
+      'Open-source mod_pagespeed is deprecated. mod_pagespeed, the native module plus the optimizer worker, is its actively maintained continuation.',
+  },
+  {
+    href: '/alternatives/ngx-pagespeed/',
+    title: 'ngx_pagespeed alternative',
+    summary:
+      'ngx_pagespeed was the nginx port of mod_pagespeed; the GitHub repository is now read-only. mod_pagespeed is the maintained nginx path — the native module plus the optimizer worker, with variant-aware caching and zero-copy serving.',
+  },
+  {
+    href: '/alternatives/iispeed/',
+    title: 'IISpeed alternative',
+    summary:
+      'IISpeed is deprecated. Free license transfer to mod_pagespeed for native IIS, or to the WeAmp.PageSpeed.AspNetCore NuGet package for ASP.NET Core.',
+  },
+  {
+    href: '/alternatives/google-pagespeed-module/',
+    title: 'Google PageSpeed Module alternative',
+    summary:
+      '"Google PageSpeed Module" almost always means the deprecated server module (mod_pagespeed / ngx_pagespeed) — not PageSpeed Insights (pagespeed.web.dev), which is still active and unrelated.',
+  },
+];
+
+const comparisons = [
+  {
+    slug: 'imgproxy',
+    title: 'mod_pagespeed vs imgproxy',
+    summary:
+      'Both self-hosted. imgproxy is image-only; mod_pagespeed is a full HTML pipeline that includes image work.',
+    kind: 'Self-hosted, image-focused',
+  },
+  {
+    slug: 'thumbor',
+    title: 'mod_pagespeed vs Thumbor',
+    summary:
+      'Thumbor is a Python image server with face-aware smart cropping. mod_pagespeed handles images plus CSS, JS, and HTML.',
+    kind: 'Self-hosted, image-focused',
+  },
+  {
+    slug: 'cloudflare-apo',
+    title: 'mod_pagespeed vs Cloudflare APO',
+    summary:
+      'APO caches WordPress HTML at the edge; mod_pagespeed optimizes at the origin and works on any stack.',
+    kind: 'Managed edge / WordPress',
+  },
+  {
+    slug: 'nitropack',
+    title: 'mod_pagespeed vs NitroPack',
+    summary:
+      'NitroPack is managed SaaS for WordPress; mod_pagespeed runs on your server and is free under the Apache License 2.0, with no traffic tiers.',
+    kind: 'Managed SaaS / WordPress',
+  },
+  {
+    slug: 'wp-rocket',
+    title: 'mod_pagespeed vs WP Rocket',
+    summary:
+      'WP Rocket is the established WordPress optimization plugin. mod_pagespeed runs at the server layer and is CMS-independent.',
+    kind: 'Self-hosted plugin / WordPress',
+  },
+  {
+    slug: 'cloudinary',
+    title: 'mod_pagespeed vs Cloudinary',
+    summary:
+      'Cloudinary is a managed media CDN with video. mod_pagespeed is self-hosted image optimization inside a broader HTML pipeline.',
+    kind: 'Managed SaaS / media',
+  },
+  {
+    slug: 'shortpixel',
+    title: 'mod_pagespeed vs ShortPixel',
+    summary:
+      'ShortPixel optimizes WordPress images via a plugin and its Adaptive Images CDN. mod_pagespeed is self-hosted and optimizes images plus CSS, JS, and HTML at your origin.',
+    kind: 'WordPress plugin / image CDN',
+  },
+  {
+    slug: 'imgix',
+    title: 'mod_pagespeed vs imgix',
+    summary:
+      'imgix is a managed real-time image CDN; your images egress to its edge. mod_pagespeed is a self-hosted full HTML pipeline; images never leave your origin.',
+    kind: 'Managed SaaS / image CDN',
+  },
+];
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'CollectionPage',
+  name: 'mod_pagespeed vs WP Rocket, NitroPack, Cloudinary & more',
+  description:
+    'Side-by-side mod_pagespeed comparisons with WP Rocket, NitroPack, Cloudinary and more, plus the maintained path from ngx_pagespeed and IISpeed.',
+  url: 'https://modpagespeed.com/alternatives/',
+  hasPart: [
+    ...cards.map((card) => ({
+      '@type': 'WebPage',
+      name: card.title,
+      description: card.summary,
+      url: `https://modpagespeed.com${card.href}`,
+    })),
+    ...comparisons.map((c) => ({
+      '@type': 'WebPage',
+      name: c.title,
+      description: c.summary,
+      url: `https://modpagespeed.com/alternatives/${c.slug}/`,
+    })),
+  ],
+};
+
+// Rounded down to a 10,000 step, the way the home page shows it.
+const builtwithLiveRounded = roundDownDisplay(Number(BUILTWITH_SITES.replace(/,/g, '')), 10000);
+---
+
+<BaseLayout
+  title="mod_pagespeed vs WP Rocket, NitroPack, Cloudinary & more"
+  description="Side-by-side mod_pagespeed comparisons with WP Rocket, NitroPack, Cloudinary and more, plus the maintained path from ngx_pagespeed and IISpeed."
+  jsonLd={jsonLd}
+>
+  <PageHero title="Alternatives to mod_pagespeed, ngx_pagespeed, and IISpeed" width="prose">
+    <Fragment slot="lede">
+      The archived Google modules,{' '}
+      <code class="rounded bg-bg-elevated px-1 py-0.5 text-base">mod_pagespeed</code> and{' '}
+      <code class="rounded bg-bg-elevated px-1 py-0.5 text-base">ngx_pagespeed</code>, get no more
+      fixes, and IISpeed is in transition. These pages cover the maintained mod_pagespeed and how
+      each server reaches it.
+    </Fragment>
+    <p class="lede-sub mt-4 max-w-2xl text-small text-text-muted">
+      mod_pagespeed shares the optimization core that powers{' '}
+      <span class="font-semibold text-text-body">{builtwithLiveRounded} live sites</span> today (
+      <a
+        href="https://trends.builtwith.com/Server/mod_pagespeed"
+        rel="noopener noreferrer"
+        class="text-interactive hover:text-interactive-hover underline"
+      >
+        BuiltWith, {BUILTWITH_AS_OF}
+      </a>
+      ) &mdash; not We-Amp customers, but proof it works at scale.
+    </p>
+  </PageHero>
+
+  <section class="container-prose pb-20">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+      {cards.map((card) => (
+        <div class="card card-stretch rounded-card border border-border bg-bg-elevated p-6 md:p-7 hover:border-interactive/40 transition-colors flex flex-col">
+          <h2 class="text-lg font-semibold text-text-body">
+            <a href={card.href} class="card-stretch-link">
+              {card.title}
+            </a>
+          </h2>
+          <p class="mt-2 text-body sm:text-sm text-text-muted flex-1">{card.summary}</p>
+          <span class="mt-4 text-sm font-medium text-interactive">
+            Read <span aria-hidden="true">&rarr;</span>
+          </span>
+        </div>
+      ))}
+    </div>
+
+    <section class="mt-16" aria-labelledby="compared-with-other-tools">
+      <h2 id="compared-with-other-tools" class="h2-section text-text-body">
+        mod_pagespeed vs the alternatives
+      </h2>
+      <p class="mt-3 text-text-muted">
+        {comparisons.length} side-by-side write-ups: where mod_pagespeed overlaps with adjacent
+        tools, and where it doesn't. A self-hosted nginx pipeline behaves nothing like a SaaS CDN or
+        a WordPress plugin, so each write-up says where mod_pagespeed wins and where the other tool
+        does.
+      </p>
+      <ul class="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {comparisons.map((c) => (
+          <li>
+            <div class="card-stretch block h-full rounded-lg border border-border bg-bg-elevated p-5 hover:border-interactive/40 transition-colors">
+              <p class="text-xs font-semibold uppercase tracking-wide text-text-annotation">
+                {c.kind}
+              </p>
+              <h3 class="mt-2 text-lg font-semibold text-text-body">
+                <a href={`/alternatives/${c.slug}/`} class="card-stretch-link">
+                  {c.title}
+                </a>
+              </h3>
+              <p class="mt-2 text-body sm:text-sm text-text-muted">{c.summary}</p>
+              <p class="mt-3 text-sm font-medium text-interactive">
+                Read the comparison <span aria-hidden="true">&rarr;</span>
+              </p>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+
+    <section class="mt-16">
+      <h2 id="where-each-tool-fits" class="h2-section text-text-body">
+        Where each tool fits
+      </h2>
+      <p class="mt-3 text-text-muted">
+        mod_pagespeed optimizes at your origin: one self-hosted pipeline for images, CSS, JS, and
+        HTML. The tools below each solve part of that, or solve it somewhere else: at the edge, in a
+        SaaS dashboard, or inside WordPress.
+      </p>
+      <div
+        class="mt-6 overflow-x-auto rounded-card border border-border"
+        tabindex="0"
+        role="region"
+        aria-labelledby="where-each-tool-fits"
+      >
+        <table class="w-full border-collapse text-left text-sm">
+          <thead>
+            <tr class="bg-bg-elevated/80">
+              <th
+                scope="col"
+                class="sticky top-0 z-10 bg-bg-elevated py-3 pl-4 pr-4 font-semibold text-text-body"
+              >
+                Tool
+              </th>
+              <th
+                scope="col"
+                class="sticky top-0 z-10 bg-bg-elevated py-3 pr-4 font-semibold text-text-body"
+              >
+                Type
+              </th>
+              <th
+                scope="col"
+                class="sticky top-0 z-10 bg-bg-elevated py-3 pr-4 font-semibold text-text-body"
+              >
+                Best at
+              </th>
+              <th
+                scope="col"
+                class="sticky top-0 z-10 border-l-2 border-interactive/40 bg-interactive/10 py-3 px-4 font-semibold text-text-body"
+              >
+                Where mod_pagespeed fits
+              </th>
+            </tr>
+          </thead>
+          <tbody class="text-text-muted">
+            {[
+              {
+                tool: 'imgproxy',
+                type: 'Self-hosted image proxy',
+                best: 'On-demand image transforms by URL',
+                fits: 'Images plus CSS, JS, and HTML in one pipeline',
+              },
+              {
+                tool: 'Thumbor',
+                type: 'Self-hosted Python image server',
+                best: 'Face-aware smart cropping',
+                fits: 'Images plus CSS, JS, and HTML',
+              },
+              {
+                tool: 'Cloudflare APO',
+                type: 'Managed edge cache',
+                best: 'Edge HTML caching for WordPress',
+                fits: 'Origin-side optimization on any stack',
+              },
+              {
+                tool: 'NitroPack',
+                type: 'Managed SaaS (WordPress)',
+                best: 'Turnkey, hosted setup',
+                fits: 'Runs on your server, free under Apache-2.0, no traffic tiers',
+              },
+              {
+                tool: 'WP Rocket',
+                type: 'WordPress plugin',
+                best: 'Deep WordPress integration',
+                fits: 'Server-layer, CMS-independent',
+              },
+              {
+                tool: 'Cloudinary',
+                type: 'Managed media CDN',
+                best: 'Video and digital-asset management',
+                fits: 'Self-hosted image optimization in a broader pipeline',
+              },
+              {
+                tool: 'ShortPixel',
+                type: 'WordPress plugin / image CDN',
+                best: 'WordPress image compression + CDN delivery',
+                fits: 'Full origin pipeline (images, CSS, JS, HTML), any CMS',
+              },
+              {
+                tool: 'imgix',
+                type: 'Managed image CDN',
+                best: 'Real-time image transforms by URL',
+                fits: 'Self-hosted; images stay at your origin, plus CSS/JS/HTML',
+              },
+            ].map((r) => (
+              <tr class="border-t border-border">
+                <th
+                  scope="row"
+                  class="py-3 pl-4 pr-4 text-left align-top font-medium text-text-body"
+                >
+                  {r.tool}
+                </th>
+                <td class="py-3 pr-4 align-top">{r.type}</td>
+                <td class="py-3 pr-4 align-top">{r.best}</td>
+                <td class="border-l-2 border-interactive/40 bg-interactive/10 py-3 px-4 align-top">
+                  {r.fits}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="mt-16">
+      <h2 class="h2-section text-text-body">Background reading</h2>
+      <ul class="mt-4 space-y-3 text-text-body">
+        <li>
+          <a
+            href="/blog/mod-pagespeed-alternatives/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            mod_pagespeed alternatives in 2026
+          </a>{' '}
+          — the deep comparison of what is available to replace the deprecated module, written for
+          teams evaluating their options.
+        </li>
+        <li>
+          <a
+            href="/blog/mod-pagespeed-deprecated-2026/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            Is mod_pagespeed deprecated? Yes &mdash; here's what to use in 2026
+          </a>{' '}
+          &mdash; the full history of the deprecation and a path-by-path forward plan.
+        </li>
+        <li>
+          <a
+            href="/mod-pagespeed-still-maintained/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            Is mod_pagespeed still maintained?
+          </a>{' '}
+          &mdash; what development resumed and what has shipped since.
+        </li>
+        <li>
+          <a
+            href="/pagespeed-insights/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            Improving your PageSpeed Insights score
+          </a>{' '}
+          &mdash; which render-blocking, next-gen image, and caching audits a server module fixes.
+        </li>
+        <li>
+          Serving images yourself?{' '}
+          <a
+            href="/self-hosted-image-optimization/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            Self-hosted image optimization
+          </a>{' '}
+          covers WebP and AVIF serving without a third-party image CDN.
+        </li>
+        <li>
+          Running Apache? The{' '}
+          <a
+            href="/docs/installation-module/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            Apache PageSpeed module
+          </a>{' '}
+          is the native in-process continuation for httpd.
+        </li>
+      </ul>
+    </section>
+
+    <section class="mt-16">
+      <h2 class="h2-section text-text-body">Try mod_pagespeed</h2>
+      <p class="mt-4 text-text-body">
+        Every integration is licensed under the Apache License 2.0. The software is free. We sell
+        support; the software and its signed packages are the same for everyone. See{' '}
+        <a
+          href="/support/"
+          class="text-interactive hover:text-interactive-hover underline"
+          data-umami-event="cta_commercial"
+          data-umami-event-offer="support"
+          data-umami-event-surface="alternatives"
+          data-umami-event-position="try_section"
+        >
+          support
+        </a>{' '}
+        and the{' '}
+        <a href="/license/" class="text-interactive hover:text-interactive-hover underline">
+          software license
+        </a>
+        .
+      </p>
+      <div class="mt-6 flex flex-wrap gap-3">
+        <a href="/download/" class="btn-primary" data-umami-event="cta_alternatives_hub_download">
+          Download &amp; run
+        </a>
+        <a
+          href="/pricing/"
+          data-umami-event="cta_alternatives_hub_buy"
+          class="rounded-md border border-border-strong px-4 py-2 text-sm font-medium text-text-body hover:border-border-strong"
+        >
+          Support pricing
+        </a>
+      </div>
+      <p class="mt-3 text-sm text-text-annotation">
+        {LICENSE_CLAUSE_CAP} &mdash; free in development and in production.
+      </p>
+    </section>
+
+    <p class="mt-16 text-sm text-text-muted">
+      Written by We-Amp, which develops mod_pagespeed, so the framing isn't neutral. Where a
+      competitor is the better fit for your stack, the comparison says so.
+    </p>
+
+    <p class="mt-4 text-xs text-text-annotation">
+      mod_pagespeed, ngx_pagespeed, IISpeed, imgproxy, Thumbor, Cloudflare, NitroPack, WP Rocket,
+      Cloudinary, ShortPixel, imgix, and other product names are trademarks of their respective
+      owners. Comparisons reflect publicly available information as of 2026 and are provided for
+      evaluation; We-Amp B.V. is not affiliated with or endorsed by any of them, by Google or by the
+      Apache Software Foundation.
+    </p>
+  </section>
+</BaseLayout>

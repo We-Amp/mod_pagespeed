@@ -1,0 +1,260 @@
+---
+title: 'Release notes: 2.2'
+description: 'mod_pagespeed 2.2.0 release notes: the module and the optimizer worker as one release (packages 1.17.0), its security fixes and what changed.'
+order: 80
+group: 'Release notes by line'
+lastUpdated: 2026-10-20
+---
+
+import ReleaseNotesDeepLink from '../../components/ReleaseNotesDeepLink.astro';
+import Version from '../../components/release/Version.astro';
+
+<ReleaseNotesDeepLink />
+
+mod_pagespeed 2.2.0 was released on 2026-10-06 as the module and the optimizer worker together, installed as a matching pair. In the signed apt and yum repositories both parts carry the package version 1.17.0; 2.2.0 is the version of the container images and the NuGet packages and the application version of the Helm chart (chart 0.3.6). The current release is <Version line="2.1" />. The [release notes index](/docs/release-notes/) lists every release of every line, and [Security updates](/docs/release-notes/#security-updates) lists every security fix we have published with the release that carried it. The entry below is collapsed; open it to read it in place.
+
+## Releases
+
+<span id="v1-17-0" class="rn-alias" aria-hidden="true"></span>
+<details id="v2-2-0" class="rn-entry">
+<summary><span class="rn-ver">2.2.0</span> <span class="rn-date">2026-10-06</span> <span class="rn-badge rn-badge-pair">module + optimizer worker</span> <span class="rn-lede">Security and reliability update for the module and the optimizer worker, released together. Update recommended.</span></summary>
+
+**mod_pagespeed 2.2.0 is a security and reliability update for the module and the optimizer worker, released together and installed as a matching pair.** In the signed apt and yum repositories both parts carry the package version 1.17.0; 2.2.0 is the version of the container images and the NuGet packages and the application version of the Helm chart (chart 0.3.6). It fixes eleven security issues across the nginx and Apache modules, the admin console, the optimizer worker and the Windows NuGet packages, and it updates the bundled curl; see Security below. It stops a server process that dies or starts at the wrong moment from hanging others or itself, and it stops optimized copies from being lost from a shared cache. The nginx module can now use the optimizer worker, and `prioritize_critical_css` loads stylesheets so that content is not shown without its styles. Container images and the Helm chart are published with this release.
+**Update recommended.**
+
+**Security**
+
+Security: denial of service — nginx module. A request without authentication could make an nginx worker process exit, disrupting service. Affected: the nginx module, all releases up to and including 1.16.0. Update recommended.
+
+Security: denial of service — Apache module. A request could make an Apache child process exit, disrupting service. Affected: all releases up to and including 1.16.0. Update recommended.
+
+Security: denial of service — HTML rewriter. Some pages served through the rewriter could make the server worker process handling them exit, losing the requests it was serving. Affected: releases 1.15.0+r20 through 1.16.0. Update recommended.
+
+Security: access restrictions — nginx admin pages. This release addresses an access-restriction bypass affecting the admin, statistics, console and message pages in the nginx module, and updates the access-restriction example in the packaged snippet and in the [Admin Console guide](/docs/admin-console/#setup). Affected: the nginx module, all releases up to and including 1.16.0, where access to these pages is restricted in the nginx configuration. Update recommended, and after updating replace your access rules for these pages with the updated example in every `server` block; see "Before you upgrade".
+
+Security: information disclosure between sites — per-host admin console. On a server that hosts several sites and uses the optimizer worker, a per-host admin console could show optimizer cache information that belongs to other sites on the same server. A per-host console now receives only its own site's data; the complete view stays on the whole-server console. This matters where per-host consoles are given to different people. On IIS and Envoy a per-host console shows none of this data for now. Affected: module 1.16.0 with the optimizer worker in use. Update recommended.
+
+Security: cache integrity — nginx in-place optimization. A request could affect what in-place optimization stores and serves to other visitors. Affected: the nginx module, all releases up to and including 1.16.0, with in-place optimization enabled (the default). Update recommended.
+
+Security: information disclosure — nginx in-place optimization. In some nginx configurations, in-place optimization could make content available that the configuration does not expose directly. Affected: the nginx module, all releases up to and including 1.16.0, with in-place optimization enabled (the default). Update recommended, and flush the PageSpeed cache once after updating; see "Before you upgrade".
+
+Security: request forgery — admin console. Actions in the admin console can no longer be triggered from other sites, and admin responses are hardened against use from other sites. Before, a per-host admin page could also act on other sites on the same server. Affected: all releases up to and including 1.16.0 where the admin console is reachable beyond loopback. Update recommended. Scripted purges and some monitoring probes need a change; see "Before you upgrade".
+
+Security: denial of service — optimizer management API. A request to the management API could stop the optimizer worker. Affected: optimizer worker 2.0.0 through 2.1.0, and the optimizer packages through 1.16.0, with the management API enabled. Update recommended.
+
+Security: information disclosure — optimizer management API with `--api-read-open`. With `--api-read-open`, more data could be read without the API token than intended. Affected: optimizer worker 2.0.0 through 2.1.0, and the optimizer packages through 1.16.0, started with `--api-read-open`. Update recommended. A read-only client that relied on `--api-read-open` for anything beyond the documented read endpoints now needs the API token; the unix socket and `--api-no-auth` are unchanged.
+
+Security: local privilege escalation — Windows. Code already running locally on a Windows host could gain the privileges of an application that uses the optimizer. Affected: the `WeAmp.PageSpeed.AspNetCore` and `WeAmp.PageSpeed.NativeAssets.Windows` NuGet packages, versions 2.0.0 through 2.1.0, and the Windows optimizer worker built from them. Linux and macOS are not affected. Update recommended.
+
+Security: the bundled HTTPS fetch library is updated to curl 8.22.0, which addresses nine curl vulnerabilities published on 2026-09-02 (CVE-2026-19931, CVE-2026-18924, CVE-2026-82209, CVE-2026-80229, CVE-2026-80230, CVE-2026-80231, CVE-2026-80255, CVE-2026-82208 and CVE-2026-13608), every one of which curl's own vulnerability database records as fixed in 8.22.0. Affected: module releases 1.1.0-beta.2 through 1.16.0. No exploitation is known. Update recommended.
+
+**Before you upgrade**
+
+Changed (plan for this before you upgrade): the disk cache starts empty once. The cache library moves to a new on-disk format. The module's own disk cache (`ModPagespeedFileCachePath`) opens a new file beside the old one. The optimizer worker's default cache directory is now `/var/cache/pagespeed-optimizer/v2` (1.16.0 used `…/v1`), and the packaged `pagespeed_daemon.conf` points `ModPagespeedDaemonVolumePath` at `/var/cache/pagespeed-optimizer/v2/cache`. If you set the cache path yourself (`ModPagespeedDaemonVolumePath`, `pagespeed_cache_path`), change `v1` to `v2`. After the upgrade the cache refills as traffic arrives, so expect a lower hit rate for a while. The old files are left on disk, so a rollback to 1.16.0 starts with a warm cache (on nginx, only until you run the one-time flush below); delete them once you will not roll back. The optimizer packages print a notice when they find the `v1` directory.
+
+Changed: upgrade the module and the optimizer worker together, and start the optimizer first. A module and an optimizer on different cache formats do not share a cache. The Apache module refuses to attach to the optimizer's cache and says so. The native nginx module, when it uses the optimizer worker, starts with in-place optimization through the optimizer off and the reason in the error log; right after an update that changes the cache format, a fresh start of nginx in that window can fail instead, again with the reason in the error log. Starting the optimizer and then restarting the web server clears both. The nginx module of the reverse-proxy and container deployments keeps serving, turns its cache off and logs one error until the two agree. The fix for lost optimized copies (below) also needs both on this release. On Linux, upgrading or reinstalling the `pagespeed-optimizer` package (deb or rpm) turns the optimizer service back on and restarts it even if you had turned it off, as 1.16.0 already did.
+
+Changed (nginx): replace the access rules for the admin, statistics, console and message pages. After updating, replace your access rules for these pages with the updated example under [Admin Console → Setup](/docs/admin-console/#setup), in every `server` block that serves them. The update does not change rules that are already in your configuration.
+
+Changed (nginx): flush the PageSpeed cache once after updating (touch `cache.flush` in the `FileCachePath` directory, or purge `*` when `EnableCachePurge` is on), so that entries recorded by earlier releases are dropped. The flush also empties the cache that a rollback to 1.16.0 would reuse, so a rollback after the flush starts with the module's own cache empty (the optimizer's cache is not affected); on Apache, where no flush is needed, a rollback starts with a warm cache.
+
+Changed (Apache and nginx): a server that is hanging when you upgrade, or that has a worker process left stuck after a graceful restart, needs a full stop and start. The fixes for hangs (see "Server processes and fetching") take effect in fresh server processes; a reload or graceful restart leaves processes that are already stuck waiting.
+
+Changed (container images and Helm chart): this release publishes the container images and the Helm chart (0.3.6, application version 2.2.0). No images or chart were published for 2.1.0: the previous images on the registry are 2.0.41 and the previous published chart is 0.3.4, so an upgrade from those also brings the changes described in the 2.1.0 entry below; read its "plan for this before you upgrade" items and the [migration guide](/docs/migrating-to-2-1/) too. Custom compose files that share the cache volume across an upgrade should run both services in one PID namespace, as the shipped compose file now does (see "Cache").
+
+Changed (containers): replace copied health probes. The Docker Compose file and the Helm chart (0.3.6) now give the optimizer up to 4 seconds to answer its health check. If you copied the earlier probe into your own manifests, replace it: a probe of the form `echo '' | socat - UNIX-CONNECT:...` gives up after half a second whatever its timeout says. The new form is `socat -u -T 4 UNIX-CONNECT:<health socket> -`.
+
+Changed: an HTTPS origin that the module fetches by IP address must present a certificate for the site's name. This applies to resources on the server's own origin that no domain directive names, and to an origin that `MapOriginDomain` maps to an IP address. A certificate that names only the IP address no longer passes. See "Server processes and fetching".
+
+Changed: purging through `pagespeed_admin/cache?purge=` with a GET no longer works; it answers 405. Send a POST with the `X-Requested-With: XMLHttpRequest` header, and purge the whole cache (`purge=*`) from the global admin page (`pagespeed_global_admin`). Purge another host's URLs through that host's admin page or the whole-server admin page. Scripts that use the `PURGE` request method (`PurgeMethod`) are unaffected. A monitoring probe that appends a cache-busting query string to the console's `v1/daemon/health` must drop it: the console's optimizer status pages answer a request with a query string with a 400.
+
+Changed: sites that use `prioritize_critical_css` are optimized again after the update. Reports collected by earlier releases are not reused, so each page keeps ordinary blocking stylesheets until its visitors' browsers have reported, normally within a few page views.
+
+Changed: the optimizer's serve statistics, including the serve savings the admin console shows, restart at zero once when an updated optimizer worker first starts, because the shared statistics file has a new layout. A module built against the previous layout stops recording into it until it is updated too.
+
+Changed: the optimizer's systemd unit now admits the `mincore(2)` system call, which the cache library uses before it issues a readahead hint. A host that replaced the unit's system-call allow-list with its own must add it, or the optimizer is stopped with `SIGSYS`.
+
+**Server processes and fetching**
+
+Fixed (Apache and nginx): a worker process could hang right after it started and keep its slot. A worker process created at an unlucky moment could start with one of the file cache's internal locks already taken, and it stopped at its first cache lookup that needed that lock. On Apache that could be during the worker's own start-up, and it then never served a request. It was most visible after `apache2ctl graceful`, which log rotation runs: the stuck worker stayed behind, and later graceful restarts did not remove it. A worker could also stop the same way while it was shutting down. The bundled cache library now finishes its background work before a worker process is created. Nothing needs configuring. Affected: the Apache and nginx modules in 1.15.0 and 1.16.0; IIS and Envoy are not affected. Update recommended. A server that has such a stuck worker when you upgrade needs a full stop and start; see "Before you upgrade".
+
+Fixed: a server process that dies at the wrong moment no longer hangs the rest of the server. When an Apache or nginx process was killed or crashed while it held one of the module's shared-memory locks, every other process that needed that lock waited for good and the sites hung until the server was restarted. The next process now takes the lock over and logs a warning; a part of the shared metadata cache that was being changed at that moment is set aside and acts as empty until the next restart. Separately, a process that died while it read a value from the shared-memory cache left that entry blocked, and the next write of the same entry waited forever; on Apache a child stuck this way did not exit on a graceful restart. A write now gives up after one second, logs a warning and drops the write. That entry is no longer kept in the shared-memory cache until the server is restarted; it is still served from the file cache or the external cache. A server that is already hanging when you upgrade needs a full stop and start; see "Before you upgrade".
+
+Fixed: HTTPS fetches that failed in common configurations now work. With `ModPagespeedSslCertDirectory` set and no `ModPagespeedSslCertFile`, as in the configuration the Debian and Ubuntu packages install, every HTTPS fetch failed with curl error 77; the fetcher now uses the directory on its own. With `ModPagespeedFetchProxy`, or a proxy from the environment, every HTTPS fetch through the proxy ended with status 0; it now works. And a resource the module fetches from its own server by IP address, with the site's name in the `Host` header, failed certificate verification (curl error 60) and stayed in its original form; the fetcher now checks the certificate against the site's name, as releases before the curl fetcher did, and still connects to that address. Fetches to a host name are unchanged.
+
+**Cache**
+
+Fixed: an optimized copy could be lost from a cache shared by the web server and the optimizer worker. When the web server recorded a URL's original at the same moment the optimizer wrote the optimized copy of that URL, the optimized copy could be dropped without any error, and the URL was then served in its original form. The cache library now notices that another process changed the entry between a write's two steps and redoes the write. Nothing needs configuring. A process still on the older library can drop a copy the same way, so the protection is complete only when the module and the optimizer are both updated.
+
+Fixed: a full purge of the optimizer's cache (`purge-all`) that ran while other requests were still reading from or writing to the cache could crash the optimizer. Usually nothing visible happened; rarely the optimizer stopped and was restarted by its service manager or container runtime, losing the work in progress. A purge now finishes safely around reads and writes that are still in flight: a write that comes too late is dropped, and the content is optimized again on a later request. A purge can take a little longer while a write is being completed, normally not noticeably. No damage to cache files is known; an entry damaged this way would be rejected when it is read. Affected: optimizer worker 2.0.0 through 2.1.0 and the optimizer packages through 1.16.0.
+
+Fixed: a stylesheet or script whose optimized copy had gone missing from the optimizer's cache, while its compressed copies stayed, was served in its original form until the URL was purged. The optimizer worker now notices on the next notification for the URL and processes it again, at most once per URL and client class (viewport, pixel density, Save-Data) per 10 seconds. On Apache and nginx the module also notices when it serves the stored original of such a URL and asks the optimizer for it again, about once per URL every 10 seconds per server process. The response itself is unchanged, and content the optimizer leaves as it is on purpose (already minimal, not parseable, pinned by an integrity attribute) is not asked for. Known limits: images are not covered; on IIS the module does not ask yet; with gzip compression turned off in the optimizer the module cannot recognise such a URL; and the optimizer restores on its own only a copy it wrote itself since it last judged the URL. In each of those cases the URL is optimized again when its stored original expires and is recorded again. New counters: `ipro_daemon_heal_notified` and `ipro_daemon_heal_notify_failed` in the module; `notifications.missing_copy_healed` in `GET /v1/stats` and `pagespeed_notifications_missing_copy_healed_total` in `GET /v1/metrics` in the optimizer.
+
+Fixed: after a purge of the optimizer's whole cache, the web server kept using the deleted cache file: nothing was optimized any more, and copies stored before the purge could still be served, until the web server was restarted. The module now notices within a second that the optimizer replaced its cache, stops using the old file (requests are answered by the origin meanwhile) and opens the new one at the optimizer's current cache size. In the ordinary case no restart is needed. Known limits: the old file stays open in each worker process until that process ends, so every full purge keeps one more cache file's worth of disk space in use until the worker processes are recycled; a worker process follows four full purges this way and at the fifth stops using the optimizer's cache until the web server is reloaded, logging one error. Sites that purge the whole cache routinely should reload the web server along with it. On IIS a full purge still needs an application-pool recycle, because Windows usually cannot delete a cache file that worker processes hold open.
+
+Fixed: under heavy write traffic, one process could take over a cross-process cache lock that another process still held, and the two writes could overlap. A process now waits for a live holder. A write or removal that has waited 250 ms in total gives up: the write is dropped and redone on a later miss, and a purge reports failure instead of success. In the module a removal that gave up is no longer counted in `cyclone_cache_deletes`.
+
+Fixed: in the container deployments the optimizer worker and nginx could overwrite each other's cache writes, because the cache library could mistake a live lock holder in another PID namespace for a dead one. The library now tells the two apart across PID namespaces. Because older builds do not, the compose file now runs both services in the PID namespace of a small `pidns` container, which keeps an upgrade safe while an old and a new build share the cache volume; stopping or recreating `pidns` stops both services, and `docker compose up -d` brings all three back. The Helm chart (0.3.6) sets `shareProcessNamespace: true` on the pod. Custom compose files that share the cache volume across an upgrade should do the same.
+
+Changed: after the disk cache wraps around, entries from the previous pass stay readable until their bytes are actually overwritten, so hit rates no longer dip just after a wrap.
+
+Fixed: on a host under heavy CPU load, a cache read that coincided with a write to the same part of the cache index could report a present entry as missing. A reader now waits briefly for the writer instead, and reports the cache as busy if the wait runs out.
+
+Fixed: in a cache shared by several processes, a read in one process that coincided with the cache wrapping around in another could be given a region the writer was about to reuse. The wrap is now made visible to the other processes before the region is reused.
+
+Changed: the cache library no longer briefly serves an entry's previous version from memory right after the entry was recorded again, and a process that exits while a cache is still open no longer risks an abnormal termination on exit.
+
+Added: the optimizer's nginx module (reverse-proxy and container deployments) checks that the optimizer worker uses the same cache format it does. If the two differ (an optimizer rolled back, or the two upgraded separately), nginx keeps serving but turns its cache off and logs one error that names both sides and the fix; before, such a pair silently used two different cache files. The check runs at start, on reload, and whenever the optimizer rewrites its shared configuration, so a finished rolling upgrade turns the cache back on without a reload. The result is available in the nginx variables `$pagespeed_cache_generation` (`match`, `mismatch` or `unknown`), `$pagespeed_cache_generation_module` and `$pagespeed_cache_generation_optimizer`.
+
+**Critical CSS in the module (`prioritize_critical_css`)**
+
+Fixed: `prioritize_critical_css` could show part of a page without its styles while the full stylesheet was still loading. Three things change.
+
+- The rules for everything in the page are inlined, not only the rules for the first screen. Since 1.15.0+r18 only first-screen rules were inlined, so on a slow connection content further down could be shown partly styled and then move. The inline block is larger for it. `@keyframes` now stay in the inline rules, and a selector a visitor's browser cannot parse is treated as needed.
+- Each full stylesheet is fetched from the place its `<link>` had in the page, as a preload that takes effect there as soon as it has arrived, with a `<noscript>` copy of the link after it. Before, the stylesheets were discovered only after the page had been parsed. The order in which a page's rules apply is now the page's own. If the stylesheet request fails, the link becomes an ordinary stylesheet link at once.
+- Only reports that describe the page as it is now are used. After a deploy that adds rules, the new rules stay inline until a browser has reported on them, and the page's stylesheets stay blocking until the first such report arrives. A report that had to be cut short because the page has more matching selectors than one report can carry is no longer taken for a complete one; such a page keeps blocking stylesheets until a complete report arrives (see the `beacon_overflow_count` statistic). The module asks for a new report after about a minute by default instead of about eight.
+
+What else changes for a site that has the filter on: inline `<style>` blocks are left in place and complete (one that contains an `@import` therefore blocks rendering as it does without the filter), and alternate, print-only and `<noscript>` stylesheets are no longer moved. A stylesheet keeps its ordinary blocking `<link>` when it still has an `@import` the server could not merge into it, when nearly all of it would be inline anyway, or when its `<link>` carries an event-handler attribute, a `title` or `disabled`. The `<noscript class="psa_add_styles">` blocks at the end of the body are gone; a page script that looked for them finds the deferred stylesheets as `link[data-pagespeed-deferred-css]`.
+
+Known limits: content a script adds while the page is loading takes its rules from the full stylesheet. The browser reports which rules the page uses once it has loaded, so content that a script removes, hides or re-classes before then (a loading overlay, for example) can be painted without the rules that applied only to its earlier state, until the full stylesheet arrives. For pages whose markup differs from visitor to visitor under one URL the filter is best left off. The filter depends on browser reports and therefore does nothing on Envoy.
+
+Added: `CriticalCssAboveTheFoldOnly` (default off) makes `prioritize_critical_css` inline only the rules for the first screen, as releases from 1.15.0+r18 to 1.16.0 did. Choose it when the smallest inline block matters more than content further down being styled from the first paint. Apache: `ModPagespeedCriticalCssAboveTheFoldOnly on`; nginx: `pagespeed CriticalCssAboveTheFoldOnly on;`; IIS: `pagespeed CriticalCssAboveTheFoldOnly on`.
+
+Fixed (Apache): reports from phones and tablets are now used. The module keeps what browsers report for `prioritize_critical_css`, and for the filters that use critical-image reports such as `prioritize_critical_images`, per device class: phone, tablet and desktop. On Apache every page view was treated as a desktop one when that data was looked up, while a report was filed under the class of the browser that sent it. Reports from phones and tablets were therefore ignored and those visitors were served data computed from desktop browsers; a site visited mostly from phones could stay on blocking stylesheets until a desktop browser happened to report. nginx, IIS and Envoy were not affected. After updating, phones and tablets on an existing Apache site get ordinary stylesheets and ordinary image handling until the first report from a browser of that class arrives, normally within a few page views.
+
+**nginx**
+
+Added: the nginx module can use the optimizer worker for in-place optimization, as the Apache module does. With `pagespeed DaemonSocketPath` and `pagespeed DaemonVolumePath` both set in a `server` block, the module records each eligible resource into the optimizer's cache, the optimizer builds optimized variants of it, and the module serves the variant that fits each client from that cache. Install the optimizer package of the same release. The nginx packages set neither directive, so nothing changes until you set both; with both unset, in-place optimization works as before. Set-up, start order and limits: [Using the optimizer worker with nginx](/docs/installation-module/#using-the-optimizer-daemon-with-nginx).
+
+Fixed: the module's filters run at their intended place in nginx's filter chain. In earlier releases the dynamically loaded module ran ahead of all of nginx's own output filters instead of immediately before compression.
+
+- An `expires` or `add_header Cache-Control` directive no longer overrides the caching headers of rewritten HTML or of `.pagespeed.` resources. Before, a location with `expires 1h` made rewritten HTML cacheable for an hour and cut optimized resources down to an hour.
+- Responses the module serves carry one `Vary: Accept-Encoding` line (uncompressed responses carried two), and `add_header` values are no longer added to them a second time; a doubled `Access-Control-Allow-Origin` is rejected by browsers.
+- Content brought in by SSI includes, `sub_filter` and `addition` is optimized with the rest of the page.
+- Responses that in-place optimization is still working on carry `s-maxage` (`InPlaceSMaxAgeSec`, default 10) so that shared caches fetch them again once optimized.
+
+This applies to the dynamically loaded module, which is what the packages ship; a build that links the module into nginx statically keeps its previous position.
+
+Changed: responses the nginx module generates (`.pagespeed.` resources and in-place optimized responses) carry the headers of the origin response they were made from, including what your `add_header` directives put on it, exactly once. A resource read with `LoadFromFile` has no origin response to inherit from; use `pagespeed AddResourceHeader` for a header that must be on every optimized resource.
+
+**Apache and nginx with the optimizer worker**
+
+Added: in-place serving can send the optimizer's stored gzip and brotli copies (off by default). With `ModPagespeedDaemonServeStoredEncodings on` (nginx: `pagespeed DaemonServeStoredEncodings on;`), a stylesheet, script or SVG image the optimizer has stored compressed is sent to a client that lists `br` or `gzip` in `Accept-Encoding` as that stored copy, instead of being compressed again on the way out. Other clients, HTML, and resources without a stored copy get the response they get today. Not available on IIS in this release.
+
+Fixed: a server start or configuration test can no longer hang on the optimizer's socket. An optimizer that existed but was not accepting connections could hold the start indefinitely. The start-up check now gives up after two seconds, once per start, and the server starts with in-place optimization through the optimizer off, as it already does when the optimizer is not running.
+
+Fixed (Apache): a start that is refused because the module's cache volume does not match the optimizer's no longer leaves a stray cache file behind. Before, the file stayed, and the next start attached to it without refusing and ran on a separate cache the optimizer never reads. If a start with 1.16.0 refused with "created a SECOND volume file (…)", stop the optimizer, remove the file that message named, then start the optimizer and then the server.
+
+Fixed (Apache): stylesheets and scripts served from the optimizer's variants no longer notify the optimizer again on every request. Responses were correct; the cost was one needless notification per request and an `ipro_daemon_fallback_notified` counter that climbed with traffic.
+
+Fixed: when the web server starts with in-place optimization off because it cannot use the optimizer's cache, the reason now also appears in the admin console's message history; before, it was written only to the web server's error log.
+
+**IIS and Windows**
+
+*The IIS changes in this entry first reached a published Windows installer with mod_pagespeed 2.5.0: the signed MSI on the mod_pagespeed GitHub release. Until then the published IIS installer was 1.15.0, which does not include them.*
+
+Added (IIS): the installer also installs the optimizer worker, as the Windows service `WeAmpPageSpeedOptimizer`, disabled, under its own virtual account. Turned on and pointed at with the `DaemonSocketPath` and `DaemonVolumePath` directives, it takes over in-place optimization: the module records each eligible resource, the optimizer builds optimized variants, and the module serves the variant that fits each client. An upgrade or repair with the Windows installer keeps an optimizer you turned on running and keeps the cache size you chose (`OPTIMIZERCACHESIZE`, 1 GiB by default). Installs that do not turn it on behave as before.
+
+Added: the Windows optimizer worker runs as a Windows service. Register it with `--service` on its command line; the Service Control Manager starts it, sees it as running once it is ready, and stops it gracefully on a service stop or at system shutdown. `--log-file PATH`, valid only with `--service`, appends the log to a file.
+
+Fixed: the Windows optimizer worker (`factory_worker.exe`) starts on a Windows Server that has no Visual C++ runtime installed. It used to fail at once with a missing-DLL error (exit code 0xC0000135) unless the Visual C++ 2015-2022 redistributable was present.
+
+Fixed (IIS): `UseEventLog on` writes to the Windows event log again. In earlier releases the directive parsed and did nothing. It now writes the module's warnings and errors under the `PageSpeed` source, one entry per distinct message per worker process and at most a thousand of them. Known limit: the installer does not register the event source yet, so Event Viewer prefaces each entry with a note that it cannot find the description; the message itself is intact.
+
+Fixed (IIS): the user-mode cache time-to-live for optimized resources is now applied.
+
+Fixed (IIS): the installer's permission grants on the cache and logs directories now take effect. They failed silently on every install; most installs worked anyway through inherited rights, but an install where those rights had been tightened got the `cache-path-not-writable` diagnostic page. Installing or repairing this release applies the grants.
+
+**All servers**
+
+Fixed: option response headers such as `PageSpeed: off` no longer reach the client on Apache (when they switch optimization off for a response) and on nginx. They are a server-side control channel.
+
+Fixed: a resource fetch that times out, cannot connect or is answered with a 5xx is remembered for ten seconds, not five minutes. Before, one stalled origin fetch could turn into a five-minute 404 for that `.pagespeed.` resource. A 404 or 410 the origin actually sent is still remembered for `MetadataInputErrorsCacheTtlMs` (five minutes by default).
+
+Fixed: remote configuration is applied only from a successful response. A `RemoteConfigurationUrl` answered with a status other than 200 (or a 304 revalidating the cached copy) is no longer applied, even when its body is a valid configuration. And once the cached configuration expires, a refetch that fails no longer drops it: the last good copy keeps applying for up to one day past its expiry, until a refetch succeeds. `ServeStaleIfFetchError off` turns the second behaviour off.
+
+Fixed: CSS parser diagnostics for modern syntax the parser does not interpret (for example `color-mix()` or `calc(var(--x))`) no longer fill the web server's error log at the default log level. They now appear at debug level only. The parser itself is unchanged.
+
+Fixed: the optimizer packages' post-install scripts no longer warn about outdated optimizer paths in backup or leftover web-server configuration files that the web server does not load.
+
+**Admin console**
+
+Added: the console opens on an Overview page. It says whether the module is working and what it has saved, whether the optimizer is running, not configured, unreachable or too old for this console, and which scope (this host or the whole server) the figures cover. It lists findings, worst first, each with what is wrong, how to fix it and where to read more, and groups the warnings logged in the last 15 minutes by kind.
+
+Added: a Savings page shows module rewrite savings and optimizer cache-serve savings, with a split per content type of where its traffic went (already optimal, optimized and served, served compressed, not yet optimized). Every headline number states the window it counts over. With an optimizer that reports serve savings per host, the whole-server console lists them per site, and a per-host console shows its own site's figures. Known limits: a site is listed under a host name its configuration states (Apache `ServerName` or an exact `ServerAlias`, nginx `server_name`); a site without a usable name of its own is counted under "other", and on IIS every serve is counted under "other" for now.
+
+Added: the whole-server console has a Host selector that narrows the URL list and the Logs timeline to one site. The choice is part of the page address, so a link can be shared.
+
+Added: the whole-server console has a URLs page that pages through the optimizer's cached-URL index, and a URL detail view that shows the cached variants of one URL with image previews and a before/after comparison. A Logs page puts the module's messages and the optimizer's recent log on one timeline. These need an optimizer and a module that provide the data; on a per-host console the pages explain why they are empty.
+
+Changed: console layout and navigation. The sidebar is grouped as Overview, Savings, URLs; Module; Optimizer; Help. Pages use the full width of the window and share one header, number format and phone layout. The three optimizer pages are one "Optimizer status" page; old links and bookmarks land on the matching section. The console can be used with a keyboard and a screen reader, has keyboard shortcuts (`?` lists them), and its text meets the WCAG AA contrast ratio in the light and the dark theme.
+
+Changed: the console refreshes more gently and says when it cannot reach the server. Each page makes one request at a time, waits longer after each failed refresh (up to a minute) and makes no requests while its browser tab is hidden. A banner names an outage, says when the figures on screen were last refreshed and offers "Retry now".
+
+Fixed: the console's Graphs page no longer re-requests its data continuously for as long as it is open; it now polls every 5 seconds.
+
+Fixed: the optimizer panels now say why the optimizer is unavailable instead of one generic message; the global console's graphs plot the whole server, not the serving host; the nginx module's message-history endpoint returns the same JSON as the Apache module's; and on IIS the message-history endpoint is served and IPv6 loopback counts as local for the admin pages.
+
+Changed: with per-virtual-host statistics enabled, the whole-server statistics log keeps receiving samples, so the whole-server Graphs page shows the whole server's history. The Graphs page draws time series with axes, and a counter missing from a stretch of the log shows as a gap instead of a dip. Tools that read the `histograms` endpoint now get an array of objects instead of an HTML table wrapped in JSON.
+
+**Optimizer worker: management API and statistics**
+
+Fixed: the optimizer no longer exits when a client closes its connection before the reply has been written; only that one connection is closed. On Linux the optimizer stopped and lost the work in progress; in a container the container restarted, and in the combined image the web server in the same container stopped with it, so the site was briefly unavailable. Affected: optimizer worker 2.0.0 through 2.1.0 and the optimizer packages through 1.16.0, on Linux, in two situations. In a container, whenever the optimizer is not the container's first process: the combined image (2.0.22 and later), a container started with `--init`, a pod or Compose project that shares the process namespace, or a wrapper script that does not `exec` it. Outside a container, whenever it is not run by the packaged systemd service, for example when it is started by hand or by another supervisor. The packaged systemd service and the worker image started as the container's own first process were not affected.
+
+Added: `GET /v1/logs?since=<seq>&limit=<n>` reads the optimizer's recent log over plain HTTP, for clients that cannot hold a WebSocket open. A page holds at most 500 entries and 512 KiB. Entries are numbered from 1, so `since=0` reads from the beginning of the log. A log message now carries at most 4 KiB of text; a longer one is cut and marked as truncated.
+
+Fixed: the live log stream (`/v1/ws/logs`) no longer loses lines without saying so. When more than 64 lines arrived within 100 ms, a connected client received the first 64 and never the rest, and nothing on the stream showed it. The stream now sends every line the optimizer still holds (its most recent 2000), in order, as fast as the client reads them. A client that reads too slowly, or misses lines because more than 2000 arrived at once, receives an `overflow` message in their place with the number of lines missed and their sequence numbers. The `log` and `snapshot` messages are unchanged.
+
+Added: `GET /v1/stats` reports each content type's cache serves split by the transfer encoding actually served (identity, gzip or brotli), how many entries of each type were judged already optimal with their original sizes, and when the worker process started. `GET /v1/metrics` carries the same counters.
+
+Added: `GET /v1/stats` reports serve savings per host (`serve_savings_by_host`): up to 32 hosts, drawn from the first 64 distinct hosts seen since the optimizer started, with everything else under `other`. `GET /v1/metrics` carries the same numbers with a `host` label.
+
+Changed: repeated authentication timeouts on the management API are logged at most once a minute, and the bundled console stops reconnecting to a stream the server refused for a missing token, until a token is set.
+
+**Optimizer worker: browser analysis and critical CSS**
+
+Changed: browser analysis renders phones and tablets as phones and tablets. Until now every analysis render reported the headless desktop browser's User-Agent and emulated no touch screen, and the tablet viewport was laid out as a desktop window. A site that adapts to the User-Agent was therefore analysed in its desktop variant for phone and tablet visitors too, and rules under `(hover: none)` or `(pointer: coarse)` never reached a phone's critical CSS. The phone viewport (375 px) now reports Chrome on an Android phone and the tablet viewport (768 px) Chrome on an Android tablet, both laid out as mobile devices with a touch screen. The desktop viewport (1440 px) is unchanged. Validation records for phone and tablet viewports made before this change stop matching once, and those pages keep their stylesheets render-blocking until they have been analysed again.
+
+Fixed: browser analysis now reads the page it renders. Page analysis could collect its results before the page had been written into the analysis tab, so it returned no images, no above-the-fold elements and no largest-contentful-paint element, and the critical CSS was derived from an estimate of the fold instead of a measurement. Separately, the render that validates stylesheet deferral ran into its 60-second timeout on any page with a subresource at an absolute URL, so such pages were never validated and their stylesheets stayed render-blocking. Both are fixed. Existing profiles and validation records stay in use until the page is analysed again.
+
+Fixed: content inside `<noscript>` no longer counts as part of the page in analysis. Two analysis renders run with JavaScript turned off, where a browser displays `<noscript>` content; a "please enable JavaScript" banner could therefore take the top of the fold. The optimizer now removes `<noscript>` elements from the documents those renders load, and CSS inside `<noscript>`, `<template>`, `<noembed>` or `<noframes>` no longer reaches the inlined critical CSS. The page served to visitors keeps its `<noscript>` elements. When the optimizer cannot be sure where a `<noscript>` ends, it does not validate the page and the stylesheet stays render-blocking; the new `noscript_strip_refusals` counter counts those.
+
+Fixed: the inlined critical CSS block now comes before the stylesheet it was taken from, instead of at the end of `<head>`. When the block came after the stylesheet, its copies of rules won every tie against the real stylesheet for as long as the page stayed open, so a responsive rule the block had left out lost to the general rule it kept. Pages whose stylesheets use CSS cascade layers, which includes Tailwind CSS v4 pages, get the same placement when the optimizer can prove the page's layer order; the block then starts with an `@layer` statement that lists the page's layers in the page's own order. When it cannot prove the order (a stylesheet from another domain or not cached yet, a layer first declared inside a conditional rule, a script that may insert a stylesheet ahead of one that declares a new layer), the block stays at the end of `<head>` and leaves out rules inside anonymous layers. Known limit: a stylesheet inserted by an `async`, `defer` or module script is not detected.
+
+Fixed: critical CSS covers more of what the top of the page needs.
+
+- On pages with a large `<head>`, the estimate used when no browser profile exists spent its element budget before the first visible element. The budget now starts at `<body>` and its default grows from 25 to 300 elements; elements that a `position: fixed` rule selects count as above the fold wherever they sit.
+- Media-query range syntax such as `@media (width >= 48rem)` is read, `@media not print` and `@media screen, print` blocks are no longer left out, and `@media` blocks are filtered rule by rule instead of copied whole.
+- A backslash-escaped quote in a selector, as Tailwind CSS v4 writes in some class names, no longer hides the rest of the stylesheet from the extractor.
+- Rules whose selectors contain a space or a combinator inside brackets or parentheses, such as `li:nth-child(2n+1)` or `.note:not(.a > .b)`, are no longer dropped.
+- An at-rule whose condition has a `;` inside parentheses, such as `@supports (a;b) { … }`, is no longer split at that `;`; the inlined block could drop or garble such a rule.
+- On phones and tablets, the rules that size images, video, embeds and inline SVG are part of the critical CSS wherever those elements are on the page, so an unsized element far down the page no longer widens the page while the stylesheet loads. They add at most 8 KiB.
+- On a page with a `<base href>`, stylesheet links are resolved against it, as browsers do. Before, the stylesheet could be read from the wrong place and counted as missing, and the page's stylesheet was never deferred.
+
+The block is not inlined, and the stylesheet stays render-blocking, when the block would be 60% or more of a combined stylesheet of 15 KB or more, or when it is larger than 64 KiB while the stylesheet stays render-blocking; the new `critical_css_skipped_byte_cap` counter on `/v1/stats` counts those.
+
+**Optimizer worker: images and CSS**
+
+Fixed: an image inside `<noscript>` is no longer treated as the page's largest image. The preload link, the Early Hint and the `fetchpriority="high"` the optimizer emitted for such an image fetched a file the page never shows. For the common lazy-loading shape, where the hero is an `<img data-src>` without a `src` plus a `<noscript>` copy, the optimizer now emits no image hint for that hero container, because nothing in the markup says which bytes the loader will fetch.
+
+Fixed: more images get a WebP or AVIF variant. When a first encode measured below the accepted quality band, the search for a better quality could only look a short distance above where it started, and an image whose acceptable quality lay further up was refused even though an acceptable encode existed. The search now reaches the top of the quality range within the same number of encodes. An image that already received a variant may receive a slightly different one, usually slightly larger.
+
+Fixed: the CSS minifier deleted an empty statement inside a parenthesized or bracketed group in a declaration value: `a{--x:(a;;b)}` was served as `a{--x:(a;b)}`. A custom property stores its value as written, so the page saw a different value than the author wrote.
+
+**Containers and Helm**
+
+Fixed: the container health checks in the Docker Compose file and the Helm chart now wait up to 4 seconds for the optimizer's answer, inside their 5-second timeout. Until now they gave up after half a second whatever the timeout said, so an optimizer that was busy for longer than that was reported unhealthy: under Kubernetes the pod left the Service after three such checks and was restarted after six. The Helm chart's startup, readiness and liveness probes (chart 0.3.6) and the Compose health check changed the same way. If you copied the old probe into your own manifests, replace it; see "Before you upgrade".
+
+**Note for embedders**
+
+Note for embedders: the C API gains `ps_serve_stats_record_hit_host`, which records a cache serve like `ps_serve_stats_record_hit` and attributes it to the host the front end served the response for. Serves recorded without a host are attributed to "other".
+
+Note for embedders: the defaults of `ps_html_config_t.critical_css_max_elements` and `ps_critical_css_config_t.max_elements` change from 25 to 300.
+
+Note for embedders: building from the source tarball of a final release works again.
+
+**Thanks**
+
+Thanks to [@trcyberoptic](https://github.com/trcyberoptic), who contributed the HTTPS fetch, shared-memory and source-build fixes in this release.
+
+</details>

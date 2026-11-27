@@ -1,0 +1,113 @@
+---
+// Shared body for the error pages. Used by both the special top-level pages
+// (src/pages/404.astro, 500.astro — for dev + the node adapter) and the
+// prerendered copies at /error/404/ and /error/500/ that nginx actually serves
+// in production (TECH-1: the production error mapping names these paths).
+// The TermPanel readout shows Astro.url.pathname at render: on the SSR special
+// routes that is the real requested path. The prerendered /error/* copies are
+// served by nginx error_page for any failing URL, so their build-time path is
+// the copy's own and must never be shown: the request line renders blank and
+// is filled from location.pathname on load (nginx's internal redirect keeps
+// the browser URL). The /error/500/ copy also serves 502/503/504, so there the
+// status reads 5xx; the /error/404/ copy only ever serves 404.
+// A 404 is a lost visitor, so instead of one onward link it offers the site
+// search (opened with the last segment of the missing path as the query; see
+// SearchDialog.astro) and a short row of the pages most people were after.
+// Its readout is two lines of status, not something to paste: no copy button.
+import TermPanel from './instrument/TermPanel.astro';
+
+interface Props {
+  code: string;
+  heading: string;
+  body: string;
+  linkHref?: string;
+  linkLabel?: string;
+}
+const { code, heading, body, linkHref, linkLabel } = Astro.props;
+const notFound = code === '404';
+const startLinks = [
+  { href: '/docs/getting-started/', label: 'Install' },
+  { href: '/docs/configuration/', label: 'Configuration reference' },
+  { href: '/docs/filters/', label: 'Filter reference' },
+  { href: '/download/', label: 'Download' },
+  { href: '/support/', label: 'Support' },
+];
+
+const path = Astro.url.pathname;
+const isPrerenderedCopy = path.startsWith('/error/');
+const requestLine = isPrerenderedCopy ? '' : `GET ${path}`;
+const statusLine = isPrerenderedCopy && code === '500' ? '5xx' : code;
+---
+
+<section class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-24 sm:py-32 text-center">
+  <p class="text-sm font-semibold text-interactive">{code}</p>
+  <h1 id="error-heading" class="mt-4 text-4xl sm:text-5xl font-bold tracking-tight text-text-body">
+    {heading}
+  </h1>
+  <p class="mt-6 text-lg text-text-muted max-w-xl mx-auto">{body}</p>
+  <div class="mt-10 mx-auto max-w-md text-left" data-error-readout>
+    <TermPanel
+      label="Request and status"
+      copy={!notFound}
+      lines={[
+        { text: requestLine, tone: 'strong' },
+        { marker: '→ ', text: statusLine, tone: 'hl' },
+      ]}
+    />
+  </div>
+  <!-- On the prerendered copies this fills the blank request line with the
+       real URL (nginx's internal error_page redirect keeps the browser URL).
+       On SSR renders it writes the same path the line already carries. -->
+  <script is:inline>
+    (function () {
+      var line = document.querySelector('[data-error-readout] .term-body span');
+      if (line) line.textContent = 'GET ' + location.pathname + '\n';
+    })();
+  </script>
+  <div class="mt-10 flex flex-wrap items-center justify-center gap-4">
+    <a href="/" class="btn-primary">
+      {' '}
+      Go home{' '}
+    </a>
+    {notFound ? (
+      <button
+        type="button"
+        class="btn-secondary"
+        data-search-open
+        data-search-prefill-path
+        data-umami-event="error_404_search"
+        aria-haspopup="dialog"
+        aria-controls="site-search"
+      >
+        Search the site
+      </button>
+    ) : (
+      linkHref &&
+      linkLabel && (
+        <a
+          href={linkHref}
+          class="text-sm font-semibold text-text-muted hover:text-text-body transition-colors"
+        >
+          {linkLabel}
+          <span aria-hidden="true">&rarr;</span>
+        </a>
+      )
+    )}
+  </div>
+  {notFound && (
+    <ul class="mt-6 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 list-none p-0">
+      {startLinks.map((link) => (
+        <li>
+          <a
+            href={link.href}
+            data-umami-event="error_404_link"
+            data-umami-event-to={link.href}
+            class="inline-flex min-h-11 items-center px-3 text-sm font-semibold text-text-muted underline underline-offset-4 decoration-border-strong hover:text-text-body hover:decoration-interactive transition-colors"
+          >
+            {link.label}
+          </a>
+        </li>
+      ))}
+    </ul>
+  )}
+</section>

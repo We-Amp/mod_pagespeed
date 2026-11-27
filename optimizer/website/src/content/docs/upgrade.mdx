@@ -1,0 +1,302 @@
+---
+title: 'Upgrade and migrate'
+description: 'Upgrade mod_pagespeed per shape: apt or dnf, Docker tag, Helm, the Windows installer and NuGet; what to read first, security updates, rollback.'
+order: 10
+group: 'Upgrade and migrate'
+lastUpdated: 2026-11-14
+datePublished: 2026-10-08
+faq:
+  - q: 'Do I upgrade the module and the optimizer worker separately?'
+    a: 'No. They are a matched pair: install, upgrade and roll them back together, and start the optimizer before the web server. On the packages the Apache module depends on the worker package at the same version, so one upgrade command moves both.'
+  - q: 'How do security updates reach me?'
+    a: 'As regular releases through the channel you installed from, listed under Security in the release notes by impact class with "update recommended". Security fixes reach everyone at the same time. A support subscription adds first-response targets and advance notice of planned security releases. Every release from 2.6.0 on carries its SPDX SBOM and VEX document, and both are also in the source tree.'
+---
+
+import ImageTag from '../../components/release/ImageTag.astro';
+import Version from '../../components/release/Version.astro';
+import NugetCmd from '../../components/release/NugetCmd.astro';
+
+## Where are you coming from
+
+| You run | Read |
+| --- | --- |
+| mod_pagespeed 2.x | This page |
+| mod_pagespeed 1.15 | [Migrate from mod_pagespeed 1.15](/docs/migrate-from-1-15/) |
+| The archived Google module (1.13 and earlier) | [Migrate from the archived Google module](/docs/migrate-from-google-mod-pagespeed/) |
+| ngx_pagespeed | [Migrate from ngx_pagespeed](/docs/migrate-from-ngx-pagespeed/) |
+| IISpeed | [Migrate from IISpeed](/docs/migrate-from-iispeed/) |
+| ModPageSpeed 2.0 | [Migrate from ModPageSpeed 2.0](/docs/migrating-to-2-1/) |
+
+The current release is <Version line="2.1" style="badge" />. Upgrading is a
+package, image or chart update on whichever shape you run, with one rule across
+all of them: the module and the optimizer worker move together, and the
+optimizer starts first. Read the current release's notes before you start; the
+one-time steps a release needs are listed under "Before you upgrade" in the
+[release notes](/docs/release-notes/#current-release).
+
+## Before you upgrade
+
+- **Read the release notes.** A release that changes the cache format starts
+  the cache empty once: the new optimizer opens a new volume beside the old one
+  and never reads the old one, so the first requests after the upgrade are
+  misses and the hit rate dips until the cache refills. The old files stay on
+  disk, which is what makes a rollback warm; delete them once you will not
+  roll back.
+- **Check free space.** Both volumes exist during such an upgrade, so the cache
+  directory needs free space at least equal to the configured cache size on
+  top of what the current volume occupies.
+- **Pick a quiet hour** if your origin is sensitive to the refill.
+- **Plan to purge cached HTML in your CDN** once the upgrade is done. See
+  [Hydrated pages](/docs/hydrated-pages/).
+- **Move both parts together, optimizer first.** A module and an optimizer on
+  different cache formats do not share a cache: the Apache module refuses to
+  attach and says so; the native nginx module turns in-place optimization
+  through the optimizer off and logs the reason; the reverse-proxy nginx keeps
+  serving with its cache off and logs one error until the two agree. Starting
+  the optimizer and then restarting the web server clears all three.
+
+## Apache and nginx packages
+
+```bash
+# Debian / Ubuntu
+sudo apt-get update
+sudo apt-get install --only-upgrade mod-pagespeed pagespeed-optimizer           # Apache
+sudo apt-get install --only-upgrade nginx-module-pagespeed pagespeed-optimizer  # nginx
+
+# AlmaLinux / RHEL / Rocky
+sudo dnf upgrade mod-pagespeed pagespeed-optimizer            # Apache
+sudo dnf upgrade nginx-module-pagespeed pagespeed-optimizer   # nginx
+```
+
+Upgrading or reinstalling the `pagespeed-optimizer` package turns the optimizer
+service back on and restarts it, even if you had turned it off. Then restart
+the web server: `sudo systemctl restart apache2` (`httpd` on Enterprise Linux)
+or `sudo systemctl restart nginx`. At boot the packaged unit orders the
+optimizer ahead of `apache2.service`, `httpd.service` and `nginx.service`;
+during a hand-run upgrade that order is yours to keep: optimizer first, web
+server second.
+
+The nginx module is built for the exact nginx version your distribution ships,
+and nginx refuses to load a module built for another version; see the
+[compatibility table](/docs/installation-module/#nginx-compatibility) before
+you upgrade nginx itself.
+
+On cPanel / EasyApache 4 the module is the `ea-apache24-mod_pagespeed` RPM in
+the opt-in `ea4` repository: `sudo dnf upgrade --enablerepo=ea4 ea-apache24-mod_pagespeed`.
+See [cPanel / EasyApache 4](/docs/cpanel/).
+
+## Docker
+
+The worker and nginx images are tagged by release, and the two must run the
+same tag. Set it in `deploy/.env` and recreate the stack:
+
+<pre>
+  <code class="language-bash">
+    {`# deploy/.env
+PAGESPEED_VERSION=`}
+    <ImageTag line="2.1" />
+    {`
+
+docker compose -f deploy/docker-compose.yml pull
+docker compose -f deploy/docker-compose.yml up -d`}
+  </code>
+</pre>
+
+The named cache volume survives the recreate, and both containers share one
+PID namespace through the `pidns` container, so an upgrade that briefly mixes
+builds does not put the cache's write lock at risk. The combined evaluation
+image is the one image published as `:latest`:
+`docker pull ghcr.io/we-amp/pagespeed-combined:latest`, then recreate its
+container.
+
+## Helm
+
+```bash
+helm repo update
+helm upgrade pagespeed weamp/pagespeed -f my-values.yaml
+```
+
+Or move only the image tag. The chart takes one `image.tag` for both images
+(leave it unset to track the chart's `appVersion`); the per-image
+`worker.image.tag` and `nginx.image.tag` keys are rejected, because a worker
+and an nginx on different builds break the async-CSS loader:
+
+<pre>
+  <code class="language-bash">
+    {`helm upgrade pagespeed weamp/pagespeed --reuse-values --set image.tag=`}
+    <ImageTag line="2.1" />
+  </code>
+</pre>
+
+The `emptyDir` cache is lost on pod restart and rebuilds as requests arrive.
+[Deploy with Helm](/docs/helm-deployment/) has the values.
+
+## IIS
+
+:::warning[Maintenance window]
+Running the MSI — to install, upgrade, repair or uninstall the module — takes
+every IIS site on the server down for the duration, not only the sites it
+optimizes. The installer stops the Windows Process Activation Service (WAS)
+and the World Wide Web Publishing Service (W3SVC), force-kills any `w3wp.exe`
+worker process still running, and starts IIS again when it is done; anything
+else that depends on WAS, such as the WCF non-HTTP activation services
+(net.tcp, net.pipe, net.msmq), is stopped with it and not restarted. In-flight
+requests are dropped. Plan a maintenance window.
+:::
+
+Download the current MSI from the [download page](/download/) and run it over
+the existing install, then `iisreset`. An upgrade or repair keeps an optimizer
+service you turned on running and keeps the cache size you chose. The IIS
+package ships as a signed installer on the mod_pagespeed GitHub release.
+
+## ASP.NET Core
+
+Update the package reference and redeploy:
+
+<pre>
+  <code class="language-bash">
+    <NugetCmd />
+  </code>
+</pre>
+
+Without a version, `dotnet add package` pins the newest release in the project
+file. The middleware launches the worker from the same package, so the two
+stay matched by construction.
+
+## Options that load with a warning
+
+These options and filters from older configurations still load. The server
+logs a deprecation warning for each and starts normally, so a configuration
+that ran on 1.14 or on ngx_pagespeed keeps working while you clean it up. On
+Apache the directive names carry the `ModPagespeed` prefix, for example
+`ModPagespeedFileCacheInodeLimit`. A repeated directive is listed once:
+nginx has 33 such lines and Apache 44, which are 43 distinct names because
+`LogMobilizationSamples` appears twice on Apache. `sudo nginx -t` and
+`sudo apachectl configtest` print every warning, so run one before you restart.
+
+| Option | Server | What happens now |
+| --- | --- | --- |
+| `AllowVaryOn` | nginx, Apache | Warns, does nothing |
+| `AnalyticsID` | nginx, Apache | Warns, does nothing |
+| `CollectRefererStatistics` | Apache | Warns, does nothing |
+| `ContentExperimentID` | nginx, Apache | Warns, does nothing |
+| `ContentExperimentVariantID` | nginx, Apache | Warns, does nothing |
+| `DisableForBots` | Apache | Warns, does nothing |
+| `DistributedRewriteKey` | nginx, Apache | Warns, does nothing |
+| `DistributedRewriteServers` | nginx, Apache | Warns, does nothing |
+| `DistributedRewriteTimeoutMs` | nginx, Apache | Warns, does nothing |
+| `DistributeFetches` | nginx, Apache | Warns, does nothing |
+| `ExperimentalCentralControllerPort` | nginx, Apache | Warns, does nothing |
+| `ExperimentalPopularityContestMaxInFlight` | nginx, Apache | Warns, does nothing |
+| `ExperimentalPopularityContestMaxQueueSize` | nginx, Apache | Warns, does nothing |
+| `ExperimentVariable` | nginx, Apache | Warns, does nothing |
+| `FetchFromModSpdy` | Apache | Warns, does nothing |
+| `FileCacheCleanIntervalMs` | nginx, Apache | Warns, does nothing |
+| `FileCacheInodeLimit` | nginx, Apache | Warns, does nothing |
+| `GeneratedFilePrefix` | Apache | Warns, does nothing |
+| `HashRefererStatistics` | Apache | Warns, does nothing |
+| `IncreaseSpeedTracking` | nginx, Apache | Warns, does nothing |
+| `InheritVHostConfig` | Apache | Warns, does nothing |
+| `LogMobilizationSamples` | nginx, Apache | Warns, does nothing |
+| `MaxPrefetchJsElements` | nginx, Apache | Warns, does nothing |
+| `NumShards` | Apache | Warns, does nothing |
+| `PrivateNotVaryForIE` | nginx, Apache | Warns, does nothing |
+| `RefererStatisticsOutputLevel` | Apache | Warns, does nothing |
+| `ShardDomain` | nginx, Apache | Warns, still applies |
+| `StatisticsLoggingFile` | Apache | Warns, does nothing |
+| `UrlPrefix` | Apache | Warns, does nothing |
+| `UseAnalyticsJs` | nginx, Apache | Warns, does nothing |
+| `UseExperimentalJsMinifier` | nginx, Apache | Warns, does nothing |
+| `EnableFilters defer_iframe` | nginx, Apache | Warns, does nothing |
+| `EnableFilters div_structure` | nginx, Apache | Warns, does nothing |
+| `EnableFilters explicit_close_tags` | nginx, Apache | Warns, does nothing |
+| `EnableFilters flush_subresources` | nginx, Apache | Warns, does nothing |
+| `EnableFilters in_place_optimize_for_browser` | nginx, Apache | Warns, does nothing |
+| `EnableFilters insert_ga` | nginx, Apache | Warns, does nothing |
+| `EnableFilters local_storage_cache` | nginx, Apache | Warns, does nothing |
+| `EnableFilters make_google_analytics_async` | nginx, Apache | Warns, does nothing |
+| `EnableFilters mobilize` | nginx, Apache | Warns, does nothing |
+| `EnableFilters mobilize_precompute` | nginx, Apache | Warns, does nothing |
+| `EnableFilters split_html` | nginx, Apache | Warns, does nothing |
+| `EnableFilters split_html_helper` | nginx, Apache | Warns, does nothing |
+
+Inside a `<Directory>` block Apache refuses the server-scope rows
+(`GeneratedFilePrefix`, `InheritVHostConfig`, `FetchFromModSpdy`, `NumShards`
+and `UrlPrefix`); put them at server level or in a `<VirtualHost>`, or delete
+them.
+
+All but `ShardDomain` are accepted and then ignored. `ShardDomain` still
+shards, and its warning says why you should stop: sharding hurts with HTTP/2
+and HTTP/3. Remove the lines when you can; none needs a replacement.
+
+On nginx, seven of these names (`FileCacheCleanIntervalMs`,
+`FileCacheInodeLimit`, `DistributeFetches`, `DistributedRewriteKey`,
+`DistributedRewriteServers`, `DistributedRewriteTimeoutMs` and
+`MaxPrefetchJsElements`) are accepted with a warning from 2.9.0 on. Earlier
+releases do not recognize them, and `nginx -t` fails until you delete the
+lines.
+
+## Changed defaults
+
+Four defaults differ from 1.14. A configuration that sets the value explicitly
+is unaffected; check the ones you leave unset.
+
+- `NumRewriteThreads` and `NumExpensiveRewriteThreads`: were 4 when the server
+  is threaded and 1 otherwise; the unset default now follows the CPU budget and
+  the number of server processes.
+- `FileCacheSizeKb`: was 100 MB, now 1 GB.
+- `GoogleFontCssInlineMaxBytes`: was 3 KiB, now 48 KiB.
+
+## Settings to check after upgrading
+
+- **ExperimentSpec.** An ExperimentSpec in the main configuration that sets
+  options above directory scope now fails at load; set such options outside
+  the ExperimentSpec. `ExperimentSpec` `options=` accepts only options that can
+  be set per directory; an experiment that names any other option is refused.
+  An ExperimentSpec that sets an alternate origin domain is refused in
+  `.htaccess` files (500 error) and in remote configuration; set it in the
+  server or virtual-host configuration.
+- **Apache `.htaccess`.** Files with `MapOriginDomain`, `MapProxyDomain` or
+  `CustomFetchHeader` now give a 500 error. Move these directives to the
+  server or virtual-host configuration.
+- **`MapProxyDomain`** no longer forwards visitor cookies or credentials to
+  the mapped host. If the mapped host relies on receiving them, change that
+  setup before upgrading.
+- In-place optimization and `MapProxyDomain`: a response fetched for a visitor
+  whose request carried a cookie is shared only when the origin marks it
+  shareable: `Cache-Control: public` or `s-maxage` for pages, a stated lifetime
+  (`max-age`, `s-maxage` or `Expires`) for stylesheets, scripts and images.
+  Entries stored by earlier versions on these paths are fetched again once
+  after the upgrade.
+- **`RequestOptionOverride`.** If you set it, rotate the token after
+  upgrading.
+- **IIS `RequestOptionOverride`.** Do not send the token in a response header:
+  IIS does not read it from responses, and `web.config` `customHeaders` send it
+  to every client. If it was ever set there, choose a new token.
+- **ASP.NET Core.** On a cache miss, the page is re-fetched anonymously, so
+  each cached response is requested twice. Set `RecordResponses` to `false` if
+  your GET handlers have side effects; put rules that admit clients by address
+  or identity after `UsePageSpeed()`, or list their paths in `ExcludePaths`;
+  and call `UseRouting()` after `UsePageSpeed()`.
+
+## Security updates
+
+Security fixes ship as regular releases through the channel you installed
+from, and every one is listed under Security in the
+[release notes](/docs/release-notes/#security-updates) by impact class, with
+"update recommended" and the affected versions. The signed packages
+are free for everyone. A [support subscription](/support/) adds support from
+the people who build the product, with first-response targets and advance
+notice of planned security releases. Security fixes reach everyone at the same
+time. Every release from 2.6.0 on carries its SPDX SBOM and VEX document,
+and both are also in the source tree.
+
+## Roll back
+
+Roll the module and the optimizer back together, optimizer first, to the
+previous release you ran. After a release that changed the cache format, the
+previous release's cache files are still on disk, so the rollback starts with
+a warm cache (on nginx, only until you ran the one-time flush that release
+asked for).
+[Uninstall and rollback](/docs/uninstall/#roll-back-to-the-previous-release)
+has the commands per shape.

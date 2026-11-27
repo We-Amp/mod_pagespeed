@@ -1,0 +1,27 @@
+# TSan suppressions for mod_pagespeed
+# Add suppressions for false positives in third-party code here.
+#
+# Format:
+#   race:function_name
+#   race:source_file.cc
+#   deadlock:function_name
+#
+# See: https://github.com/google/sanitizers/wiki/ThreadSanitizerSuppressions
+
+# Cyclone CacheStats counters are plain uint64_t fields updated by the
+# HitTracker background flush thread without synchronization.  The race
+# is benign: worst case is reading a slightly stale counter value.
+race:cyclone::HitTracker
+
+# Cyclone MmapDirectory is a seqlock: writers bump the bucket version to odd
+# (acquire_writer), mutate DirEntry slots, then release to even; readers copy
+# entries between two version loads and DISCARD the copy when the version
+# moved (probe_each's torn-read retry loop).  The entry copy can therefore
+# genuinely race an in-flight insert -- that is inherent to seqlocks and safe
+# by protocol, because a torn copy never escapes the retry loop.  The
+# __tsan_acquire/__tsan_release annotations on the version word cover the
+# quiescent path but cannot model the racing-copy-then-discard case, so TSan
+# reports it (observed via worker_test's variant-poll reads racing a
+# proactive-matrix insert).  Root fix belongs in Cyclone (e.g. TSan-only
+# relaxed-atomic entry fields or __tsan ignore ranges around the copy).
+race:cyclone::MmapDirectory::probe_each

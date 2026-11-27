@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <!-- ground -->
+  <rect x="0" y="0" width="1200" height="630" fill="#0b0c0e"/>
+
+  <!-- hairline frame -->
+  <rect x="24.5" y="24.5" width="1151" height="581" fill="none" stroke="#2a2e34" stroke-width="1"/>
+  <!-- inner corner ticks -->
+  <g stroke="#3a3f47" stroke-width="1">
+    <path d="M40 40 h18 M40 40 v18"/>
+    <path d="M1160 40 h-18 M1160 40 v18"/>
+    <path d="M40 590 h18 M40 590 v-18"/>
+    <path d="M1160 590 h-18 M1160 590 v-18"/>
+  </g>
+
+  <!-- top eyebrow -->
+  <text x="64" y="92" font-family="'IBM Plex Mono', ui-monospace, monospace" font-size="15" letter-spacing="3" fill="#8a9099">COST MODEL / IMAGE OPTIMIZATION</text>
+  <line x1="64" y1="108" x2="700" y2="108" stroke="#2a2e34" stroke-width="1"/>
+
+  <!-- headline -->
+  <text x="64" y="178" font-family="'Inter', sans-serif" font-size="52" font-weight="700" fill="#e8eaed">Image CDN bills scale</text>
+  <text x="64" y="238" font-family="'Inter', sans-serif" font-size="52" font-weight="700" fill="#e8eaed">with traffic. <tspan fill="#5EB1C9">Self-hosted</tspan></text>
+  <text x="64" y="298" font-family="'Inter', sans-serif" font-size="52" font-weight="700" fill="#e8eaed">doesn't.</text>
+
+  <!-- subhead -->
+  <text x="64" y="356" font-family="'IBM Plex Mono', ui-monospace, monospace" font-size="20" fill="#a7aeb6">The full cost model — break-even at</text>
+  <text x="64" y="386" font-family="'IBM Plex Mono', ui-monospace, monospace" font-size="20" fill="#a7aeb6">~<tspan fill="#e8eaed">300-500K</tspan> image requests / month.</text>
+
+  <!-- ===================== chart panel ===================== -->
+  <g>
+    <rect x="708" y="120" width="428" height="300" fill="#121417" stroke="#2a2e34" stroke-width="1"/>
+
+    <text x="728" y="150" font-family="'IBM Plex Mono', ui-monospace, monospace" font-size="13" letter-spacing="2" fill="#8a9099">MONTHLY COST</text>
+    <text x="1116" y="150" text-anchor="end" font-family="'IBM Plex Mono', ui-monospace, monospace" font-size="13" letter-spacing="1" fill="#8a9099">REQUESTS / MO</text>
+
+    <!-- dashed chemin-de-fer grid -->
+    <g stroke="#2a2e34" stroke-width="1" stroke-dasharray="3 5">
+      <line x1="740" y1="222" x2="1116" y2="222"/>
+      <line x1="740" y1="272" x2="1116" y2="272"/>
+      <line x1="740" y1="322" x2="1116" y2="322"/>
+    </g>
+    <!-- axes -->
+    <line x1="740" y1="172" x2="740" y2="372" stroke="#3a3f47" stroke-width="1"/>
+    <line x1="740" y1="372" x2="1116" y2="372" stroke="#3a3f47" stroke-width="1"/>
+    <g stroke="#3a3f47" stroke-width="1">
+      <line x1="740" y1="372" x2="740" y2="378"/>
+      <line x1="833" y1="372" x2="833" y2="378"/>
+      <line x1="926" y1="372" x2="926" y2="378"/>
+      <line x1="1019" y1="372" x2="1019" y2="378"/>
+      <line x1="1116" y1="372" x2="1116" y2="378"/>
+    </g>
+
+    <!-- self-hosted FLAT green line -->
+    <line x1="740" y1="332" x2="1116" y2="332" stroke="#6fbf8f" stroke-width="3"/>
+    <!-- CDN RISING cyan line -->
+    <polyline points="740,344 833,318 926,278 1019,222 1116,182" fill="none" stroke="#5EB1C9" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+
+    <!-- break-even marker -->
+    <line x1="945" y1="172" x2="945" y2="372" stroke="#e0a24a" stroke-width="1" stroke-dasharray="2 4"/>
+    <circle cx="945" cy="265" r="4" fill="#0b0c0e" stroke="#e0a24a" stroke-width="1.5"/>
+    <text x="945" y="166" text-anchor="middle" font-family="'IBM Plex Mono', ui-monospace, monospace" font-size="12" fill="#e0a24a">break-even</text>
+
+    <!-- series labels -->
+    <g font-family="'IBM Plex Mono', ui-monospace, monospace" font-size="13">
+      <rect x="1058" y="178" width="9" height="9" fill="#5EB1C9"/>
+      <text x="1073" y="187" fill="#a7aeb6">CDN</text>
+      <rect x="990" y="338" width="9" height="3" fill="#6fbf8f"/>
+      <text x="1006" y="344" fill="#a7aeb6">self-hosted</text>
+    </g>
+
+    <!-- x scale numbers -->
+    <g font-family="'IBM Plex Mono', ui-monospace, monospace" font-size="12" fill="#8a9099" text-anchor="middle">
+      <text x="740" y="394">0</text>
+      <text x="945" y="394">400K</text>
+      <text x="1116" y="394">1M</text>
+    </g>
+  </g>
+
+  <!-- ===================== bottom bar ===================== -->
+  <line x1="64" y1="556" x2="1136" y2="556" stroke="#2a2e34" stroke-width="1"/>
+
+  <!-- bit-strip mark + wordmark -->
+  <g>
+    <g fill="#5EB1C9">
+      <rect x="64" y="582" width="9" height="14"/>
+      <rect x="76" y="582" width="9" height="14"/>
+      <rect x="100" y="582" width="9" height="14"/>
+      <rect x="124" y="582" width="9" height="14"/>
+    </g>
+    <text x="146" y="595" font-family="'IBM Plex Mono', ui-monospace, monospace" font-size="22" letter-spacing="0.5" fill="#e8eaed">modpagespeed.com</text>
+  </g>
+
+  <!-- right tag -->
+  <text x="1136" y="595" text-anchor="end" font-family="'IBM Plex Mono', ui-monospace, monospace" font-size="14" fill="#8a9099">CDN wins for small sites. Past ~400K, it flips.</text>
+</svg>

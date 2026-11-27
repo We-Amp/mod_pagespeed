@@ -1,0 +1,86 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PageHero from '../../components/PageHero.astro';
+import { getCollection } from 'astro:content';
+
+const posts = (await getCollection('blog'))
+  .filter((post) => !post.data.draft)
+  .sort((a, b) => {
+    // Pinned posts come first, ordered by ascending `pinned` value
+    // (1 sorts above 2). Unpinned posts fall through to date-desc sort.
+    const aPin = a.data.pinned;
+    const bPin = b.data.pinned;
+    if (aPin !== undefined && bPin !== undefined) return aPin - bPin;
+    if (aPin !== undefined) return -1;
+    if (bPin !== undefined) return 1;
+    return b.data.date.getTime() - a.data.date.getTime();
+  });
+
+// Blog index JSON-LD: an ordered list of the post URLs, in the order the page
+// shows them. Each post page carries its own full BlogPosting, so the index
+// does not repeat headline, description, dates and author for every post.
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'ItemList',
+  name: 'mod_pagespeed Blog',
+  url: 'https://modpagespeed.com/blog/',
+  itemListElement: posts.map((post, i) => ({
+    '@type': 'ListItem',
+    position: i + 1,
+    url: `https://modpagespeed.com/blog/${post.id}/`,
+  })),
+};
+---
+
+<BaseLayout
+  title="Blog — web performance & PageSpeed engineering"
+  description="Technical insights on web performance, automatic optimization, and the engineering behind mod_pagespeed — the module and the optimizer worker."
+  jsonLd={jsonLd}
+>
+  <PageHero title="Blog" size="utility" width="prose">
+    <Fragment slot="lede">
+      Technical insights on web performance, automatic optimization, and the engineering behind
+      mod_pagespeed — the module and the optimizer worker.
+    </Fragment>
+  </PageHero>
+
+  <section class="container-prose pb-20">
+    {posts.length === 0 ? (
+      <p class="text-text-annotation">No posts yet. Check back soon.</p>
+    ) : (
+      <div class="space-y-6">
+        {posts.map((post) => (
+          <article class="card-resource group relative">
+            <div class="flex flex-wrap items-center gap-3">
+              <time datetime={post.data.date.toISOString()} class="eyebrow">
+                {post.data.date.toLocaleDateString('en-US', {
+                  year: 'numeric',
+                  month: 'long',
+                  day: 'numeric',
+                })}
+              </time>
+              {post.data.pinned !== undefined && <span class="badge-interactive">Featured</span>}
+            </div>
+            <h2 class="mt-2 break-words text-2xl font-bold text-text-body">
+              {/* One link per card: the title link is stretched over the whole
+                  card, so the post is a single tab stop with a descriptive name. */}
+              <a
+                href={`/blog/${post.id}/`}
+                class="hover:text-interactive transition-colors after:absolute after:inset-0 after:content-['']"
+              >
+                {post.data.title}
+              </a>
+            </h2>
+            <p class="mt-2 text-text-muted">{post.data.description}</p>
+            <span
+              aria-hidden="true"
+              class="mt-3 inline-block text-sm font-medium text-interactive group-hover:text-interactive-hover"
+            >
+              Read post &rarr;
+            </span>
+          </article>
+        ))}
+      </div>
+    )}
+  </section>
+</BaseLayout>

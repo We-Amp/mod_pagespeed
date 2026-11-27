@@ -1,0 +1,236 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// /kit/components/ — DEV-ONLY showcase of the readout component set in every
+// tone and state, for review screenshots. getStaticPaths returns [] outside
+// dev, so the route does not exist in the production build (dist/client/kit/
+// must stay absent). Numbers are computed from src/data/demo-metrics.json or
+// src/data/product-facts.mjs; the one literal ("0 third parties") restates
+// existing feature-card copy.
+
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import SectionHeader from '../../components/instrument/SectionHeader.astro';
+import Readout from '../../components/instrument/Readout.astro';
+import ReadoutPanel from '../../components/instrument/ReadoutPanel.astro';
+import Chip from '../../components/instrument/Chip.astro';
+import HitMissBadge from '../../components/instrument/HitMissBadge.astro';
+import ByteDelta from '../../components/instrument/ByteDelta.astro';
+import TermPanel from '../../components/instrument/TermPanel.astro';
+import {
+  formatBytes,
+  pctDelta,
+  formatPct,
+  gaugeWidth,
+  monthYear,
+  roundDownDisplay,
+} from '../../lib/instrument';
+import metricsData from '../../data/demo-metrics.json';
+import { BUILTWITH_SITES } from '../../data/product-facts.mjs';
+
+export const prerender = true;
+
+export function getStaticPaths() {
+  return import.meta.env.DEV ? [{ params: { name: 'components' } }] : [];
+}
+
+const shop = metricsData.sites.find((s) => s.id === 'ecommerce')!;
+const { html, css, js, images } = shop.resources;
+const measured = monthYear(metricsData.generated_at);
+const source = `Measured on our demo store, ${measured}.`;
+const imgPct = pctDelta(images.totalJpeg, images.totalAvif);
+const imgAfterPct = (images.totalAvif / images.totalJpeg) * 100;
+const builtwith = Number(BUILTWITH_SITES.replace(/,/g, ''));
+
+const helperRows: Array<[string, string]> = [
+  ['formatBytes(images.totalJpeg)', formatBytes(images.totalJpeg)],
+  ['pctDelta(totalJpeg, totalAvif)', String(imgPct)],
+  ['formatPct(imgPct)', formatPct(imgPct)],
+  ['gaugeWidth(lighthouse.after, 0, 100)', String(gaugeWidth(shop.lighthouse.after, 0, 100))],
+  ['monthYear(generated_at)', measured],
+  ['roundDownDisplay(BUILTWITH_SITES, 10000)', roundDownDisplay(builtwith, 10000)],
+];
+---
+
+<BaseLayout title="Component kit" noindex={true}>
+  <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-16 space-y-16">
+    <SectionHeader
+      id="kit-top"
+      as="h1"
+      index="00"
+      eyebrow="Component kit"
+      title="Readout components, every tone and state."
+    >
+      <p>Dev-only review page. All numbers come from the demo metrics data file.</p>
+    </SectionHeader>
+
+    <div class="rule-ticked-scale" aria-hidden="true" role="presentation"></div>
+
+    <section aria-labelledby="kit-section-header" class="space-y-10">
+      <h2 id="kit-section-header" class="text-xl font-semibold">
+        SectionHeader
+      </h2>
+      <SectionHeader
+        id="kit-sh-index"
+        index="01"
+        eyebrow="This page, measured"
+        title="With an index, the field-tick yields to the channel number."
+      >
+        <p>A lede slot renders below the title when it is non-empty.</p>
+      </SectionHeader>
+      <SectionHeader id="kit-sh-tick" eyebrow="No index" title="Without an index the tick shows." />
+      <SectionHeader
+        id="kit-sh-center"
+        index="02"
+        eyebrow="Centered"
+        title="Centered variant."
+        align="center"
+      >
+        <p>The lede centers with the heading.</p>
+      </SectionHeader>
+    </section>
+
+    <div class="rule-ticked-scale" aria-hidden="true" role="presentation"></div>
+
+    <section aria-labelledby="kit-readouts" class="space-y-6">
+      <h2 id="kit-readouts" class="text-xl font-semibold">
+        Readout and ReadoutPanel
+      </h2>
+      <ReadoutPanel
+        id="kit-rp"
+        title="Readout · demo store"
+        href="/demo/"
+        hrefLabel="see it live"
+        source={source}
+      >
+        <Readout
+          label="Lighthouse performance score"
+          before={String(shop.lighthouse.before)}
+          after={String(shop.lighthouse.after)}
+          gauge={{ min: 0, max: 100, before: shop.lighthouse.before, after: shop.lighthouse.after }}
+        />
+        <Readout
+          label="page load, cut in half (simulated 3G)"
+          before={`${shop.loadTime.before}s`}
+          after={`${shop.loadTime.after}s`}
+          gauge={{ min: 0, max: 2, before: shop.loadTime.before, after: shop.loadTime.after }}
+        />
+        <Readout
+          label="product image, JPEG → AVIF"
+          after={formatPct(imgPct)}
+          gauge={{ min: 0, max: 100, before: 100, after: imgAfterPct }}
+        />
+        <Readout label="third parties in the request path" after="0" tone="neutral" />
+      </ReadoutPanel>
+      <div class="panel max-w-md">
+        <Readout
+          label="neutral tone carries a cyan bar"
+          before={formatBytes(css.before)}
+          after={formatBytes(css.minified)}
+          tone="neutral"
+          gauge={{ min: 0, max: css.before, before: css.before, after: css.minified }}
+        />
+      </div>
+    </section>
+
+    <div class="rule-ticked-scale" aria-hidden="true" role="presentation"></div>
+
+    <section aria-labelledby="kit-chips" class="space-y-6">
+      <h2 id="kit-chips" class="text-xl font-semibold">
+        Chip and HitMissBadge
+      </h2>
+      <div class="panel space-y-4">
+        <p class="flex flex-wrap items-center gap-2">
+          <Chip tone="success" label="HIT" />
+          <Chip tone="accent" label="MISS" />
+          <Chip tone="interactive" label="New" />
+          <Chip tone="neutral" label="STALE" />
+          <Chip tone="interactive" label="link chip" href="/demo/" />
+        </p>
+        <p class="flex flex-wrap items-center gap-2">
+          <Chip tone="success" label="HIT" wash />
+          <Chip tone="accent" label="MISS" wash />
+          <Chip tone="interactive" label="New" wash />
+          <Chip tone="neutral" label="REVALIDATED" wash />
+        </p>
+        <p class="text-sm text-text-muted">
+          Washed chips sit on this elevated panel only; on a recessed surface they stay transparent.
+        </p>
+      </div>
+      <p class="space-x-4">
+        <HitMissBadge state="HIT" note="served from cache" />
+        <HitMissBadge state="MISS" />
+        <HitMissBadge state="STALE" />
+        <HitMissBadge state="REVALIDATED" />
+      </p>
+    </section>
+
+    <div class="rule-ticked-scale" aria-hidden="true" role="presentation"></div>
+
+    <section aria-labelledby="kit-bytedelta" class="space-y-6">
+      <h2 id="kit-bytedelta" class="text-xl font-semibold">
+        ByteDelta
+      </h2>
+      <ByteDelta
+        rows={[
+          { label: 'JPEG', bytes: images.totalJpeg },
+          { label: 'WebP', bytes: images.totalWebp },
+          { label: 'AVIF', bytes: images.totalAvif },
+        ]}
+        source={source}
+        caption={`${images.count} images on the page`}
+      />
+      <ByteDelta
+        rows={[
+          { label: 'JavaScript', bytes: js.before },
+          { label: 'HTML', bytes: html.before },
+          { label: 'CSS', bytes: css.before },
+        ]}
+        source={`${source} Positive-delta rendering, shown positive.`}
+      />
+    </section>
+
+    <div class="rule-ticked-scale" aria-hidden="true" role="presentation"></div>
+
+    <section aria-labelledby="kit-termpanel" class="space-y-6">
+      <h2 id="kit-termpanel" class="text-xl font-semibold">
+        TermPanel
+      </h2>
+      <TermPanel
+        command={`measure --site ${shop.id}`}
+        label="Demo store resource bytes, before and after"
+        chip={{ tone: 'neutral', label: shop.id }}
+        lines={[
+          { text: `# ${shop.name} — ${shop.description}`, tone: 'dim' },
+          { text: `html    ${formatBytes(html.before)}`, tone: 'plain' },
+          { text: `css     ${formatBytes(css.before)} → ${formatBytes(css.minified)}`, tone: 'hl' },
+          { text: `js      ${formatBytes(js.before)} → ${formatBytes(js.minified)}`, tone: 'hl' },
+          {
+            text: `images  ${formatBytes(images.totalJpeg)} → ${formatBytes(images.totalAvif)}`,
+            tone: 'ok',
+          },
+          {
+            text: `score   ${shop.lighthouse.before} → ${shop.lighthouse.after}`,
+            tone: 'strong',
+          },
+        ]}
+      />
+    </section>
+
+    <div class="rule-ticked-scale" aria-hidden="true" role="presentation"></div>
+
+    <section aria-labelledby="kit-helpers" class="space-y-6">
+      <h2 id="kit-helpers" class="text-xl font-semibold">
+        Helpers
+      </h2>
+      <dl class="panel grid gap-2 font-mono text-sm">
+        {helperRows.map(([call, out]) => (
+          <div class="grid grid-cols-1 gap-0 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-4">
+            <dt class="text-text-muted break-anywhere">{call}</dt>
+            <dd class="display-num text-text-body">{out}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  </div>
+</BaseLayout>

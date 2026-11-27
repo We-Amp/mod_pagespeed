@@ -1,0 +1,299 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// /pricing/ — the software is free and open, rule packs included; what is sold
+// is support and expertise: support in three tiers,
+// with published yearly prices (euro, excl. VAT). Standard and Priority go
+// straight to the hosted checkout, Enterprise and the audit to the contact
+// form. The page also carries the fixed-price agent-readiness audit, the
+// hosting-partner strip (partner terms are agreed per fleet and not published)
+// and the buying FAQ. Tier rows, prices, the checkout links and the
+// pricing lines come from product-facts.mjs.
+
+import BaseLayout from '../layouts/BaseLayout.astro';
+import PageHero from '../components/PageHero.astro';
+import SupportTiers from '../components/SupportTiers.astro';
+import { faqPricing } from '../data/faq-pricing';
+import { stripHtml } from '../data/faq-shared';
+import { offerJsonLd, supportTierOffersJsonLd } from '../data/offer-jsonld';
+import {
+  AUDIT_PRICE_EUR,
+  COMMERCIAL_EMAIL,
+  LICENSE_CLAUSE,
+  LICENSE_CLAUSE_CAP,
+  LICENSING_TERMS_URL,
+  PRICE_HOLD_LINE,
+  PRICING_TERMS_LINE,
+  PRODUCT_DISPLAY_NAME,
+  RESPONSE_TARGETS_LINE,
+  SUPPORT_TIERS,
+  formatEur,
+} from '../data/product-facts.mjs';
+import { productNode } from '../data/software-jsonld';
+import Icon from '../components/Icon.astro';
+
+const PRODUCT = PRODUCT_DISPLAY_NAME;
+
+// Terms version subscriptions are made under. MUST stay in lockstep with
+// the "Version YYYY-MM[-DD]" stamp in src/pages/terms.astro —
+// test/sync/terms-version-sync.test.ts guards it.
+const TERMS_VERSION_WEB = '2026-11-16';
+
+// The software itself costs nothing (a zero-price Offer is accurate and keeps
+// the SoftwareApplication markup valid); each support tier is its own priced
+// Offer node.
+const offer = offerJsonLd({ url: 'https://modpagespeed.com/pricing/' });
+const tierOffers = supportTierOffersJsonLd({ url: 'https://modpagespeed.com/pricing/' });
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    await productNode({
+      description: `Self-hosted web performance optimization: a native module for Apache and nginx with a separate optimizer worker. ${LICENSE_CLAUSE_CAP}; support subscriptions are sold separately, from ${formatEur(SUPPORT_TIERS[0].prices.annualEur)} a year, excl. VAT.`,
+      offers: [offer, ...tierOffers],
+    }),
+    {
+      '@type': 'FAQPage',
+      mainEntity: faqPricing.map((entry) => ({
+        '@type': 'Question',
+        name: entry.q,
+        acceptedAnswer: { '@type': 'Answer', text: stripHtml(entry.a) },
+      })),
+    },
+  ],
+};
+
+const tierPrice = (t: (typeof SUPPORT_TIERS)[number]) =>
+  `${t.prices.from ? 'from ' : ''}${formatEur(t.prices.annualEur)}`;
+const metaDescription = `mod_pagespeed and its rule packs are free and open. Support costs ${SUPPORT_TIERS.slice(0, -1).map(tierPrice).join(', ')} or ${tierPrice(SUPPORT_TIERS[SUPPORT_TIERS.length - 1])} a year, excl. VAT. Fixed-price audit and consulting.`;
+
+const auditPoints = [
+  'What a crawler that does not run JavaScript sees, compared with what a browser renders',
+  'Whether your pages can be served as Markdown to agents that ask for it',
+  'Page-speed findings, with the configuration change for each one',
+  'A written report, then one review call',
+];
+---
+
+<BaseLayout
+  title="mod_pagespeed: free software, paid support and expertise"
+  description={metaDescription}
+  jsonLd={jsonLd}
+>
+  <PageHero title="Run it on any number of servers. Pay us for support and expertise.">
+    <Fragment slot="lede">
+      Everything you run is free and open, for everyone: the module, the optimizer worker and the
+      rule packs are {LICENSE_CLAUSE}. Install {PRODUCT} and run it, in development and in
+      production. No registration.
+    </Fragment>
+    <p class="mt-4 text-small text-text-annotation" data-pricing-terms>
+      {PRICING_TERMS_LINE}
+    </p>
+  </PageHero>
+
+  <section id="tiers" class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 pb-8">
+    <h2 class="sr-only">Support tiers</h2>
+    <SupportTiers surface="pricing" />
+    <p class="mt-6 max-w-3xl text-text-muted" data-pricing-what>
+      What we sell is support: a direct line to the people who build the software, advance notice of
+      planned security releases, and from Priority up, vulnerability notifications timed to the EU
+      Cyber Resilience Act reporting windows. No tier changes the software or comes with extra
+      software. The rest of what we sell is expertise: the audit below, and consulting and
+      integration work.
+    </p>
+    <div class="mt-6 rounded-lg border border-border bg-bg-secondary p-5 text-body text-text-muted">
+      <p data-response-targets>
+        {RESPONSE_TARGETS_LINE} What each tier covers in detail, and how releases are signed and
+        verified, is on the{' '}
+        <a
+          href="/support/"
+          class="text-interactive hover:text-interactive-hover underline"
+          data-umami-event="cta_commercial"
+          data-umami-event-offer="support"
+          data-umami-event-surface="pricing"
+          data-umami-event-position="plans_detail"
+        >
+          support page
+        </a>
+        .
+      </p>
+      <p class="mt-2 text-text-body font-medium" data-pricing-status>
+        {PRICE_HOLD_LINE}
+      </p>
+    </div>
+  </section>
+
+  {/* Agent-readiness audit */}
+  <section id="audit" class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 section">
+    <div class="card">
+      <h2 class="h2-section text-text-body">
+        Want someone to look at your site rather than the software?
+      </h2>
+      <p class="mt-3 text-text-muted max-w-3xl">
+        The agent-readiness audit checks one site the way AI crawlers and agents read it, and the
+        way browsers load it. You get a written report and a call to walk through it.
+      </p>
+      <ul class="mt-5 space-y-2 text-body text-text-muted">
+        {auditPoints.map((item) => (
+          <li class="flex gap-2">
+            <Icon name="check" class="mt-1 h-4 w-4 shrink-0 text-interactive" />
+            <span>{item}</span>
+          </li>
+        ))}
+      </ul>
+      <p class="mt-5 text-text-body" data-audit-price>
+        <span class="font-semibold">{formatEur(AUDIT_PRICE_EUR)} per site, excl. VAT.</span>
+        One site, one written report, one review call. It does not require mod_pagespeed, and the
+        fixed price does not include implementation work. The audit measures technical readiness and
+        ends with the configuration change for each finding, so you can check each fix with a
+        rescan. It does not measure visibility in AI answers. With mod_pagespeed, the fix for
+        serving Markdown to agents is the optimizer worker (experimental, off by default); the
+        module alone never renders Markdown.
+      </p>
+      <a
+        href="/contact/?topic=audit"
+        class="btn-secondary mt-6 self-start"
+        data-umami-event="cta_commercial"
+        data-umami-event-offer="audit"
+        data-umami-event-surface="pricing"
+        data-umami-event-position="audit"
+      >
+        <span>
+          Ask for an audit <span aria-hidden="true">&rarr;</span>
+        </span>
+      </a>
+      <p class="mt-6 text-body text-text-muted">
+        Want the quick version first? The{' '}
+        <a href="/ai-readability/" class="text-interactive hover:text-interactive-hover underline">
+          AI readability check
+        </a>{' '}
+        is free and takes one URL.
+      </p>
+      <p class="mt-2 text-body text-text-muted">
+        Integration into your stack, rules written for your own sites, and longer engagements on
+        caching and reverse-proxy infrastructure run through{' '}
+        <a
+          href="https://we-amp.com/consulting/"
+          class="text-interactive hover:text-interactive-hover underline"
+          data-umami-event="cta_commercial"
+          data-umami-event-offer="consulting"
+          data-umami-event-surface="pricing"
+          data-umami-event-position="consulting_line"
+        >
+          We-Amp consulting
+        </a>
+        .
+      </p>
+    </div>
+  </section>
+
+  {/* Hosting providers */}
+  <section class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-8">
+    <div
+      id="hosting-strip"
+      class="readout-plate flex flex-col gap-4 px-5 py-5 md:flex-row md:items-center md:justify-between"
+    >
+      <div>
+        <h2 class="font-semibold text-text-body">For hosting providers</h2>
+        <p class="mt-1 text-body text-text-muted max-w-3xl">
+          The hosting partner program covers multi-tenant fleets: Priority-level support for your
+          second- and third-line team, plus cPanel/EA4 and distribution-channel upkeep. Unlimited
+          hosted domains. Partner terms are agreed per fleet.
+        </p>
+      </div>
+      <a
+        href="/hosting-partners/"
+        class="btn-secondary shrink-0"
+        data-umami-event="cta_commercial"
+        data-umami-event-offer="hosting"
+        data-umami-event-surface="pricing"
+        data-umami-event-position="hosting_strip"
+      >
+        <span>
+          Partner program <span aria-hidden="true">&rarr;</span>
+        </span>
+      </a>
+    </div>
+  </section>
+
+  {/* FAQ */}
+  <section id="faq" class="border-t border-border section">
+    <div class="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
+      <h2 class="h2-section text-center text-text-body">Pricing questions</h2>
+      <div class="mt-8 space-y-3">
+        {faqPricing.map((entry) => (
+          <details class="group rounded-lg border border-border bg-bg-elevated">
+            <summary class="flex items-center justify-between gap-3 cursor-pointer list-none px-4 py-3 text-body font-semibold text-text-body">
+              <span>{entry.q}</span>
+              <Icon
+                name="chevron-down"
+                class="h-5 w-5 shrink-0 text-text-muted group-open:rotate-180"
+              />
+            </summary>
+            <p class="px-4 pb-4 pt-1 max-w-prose text-body text-text-muted" set:html={entry.a} />
+          </details>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  {/* Closing CTA */}
+  <section id="start" class="border-t border-border bg-bg-secondary section">
+    <div class="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 text-center">
+      <h2 class="h2-section text-text-body">Pick a tier, or ask a question first</h2>
+      <div class="mt-8 flex flex-wrap justify-center gap-3" data-closing-cta>
+        {SUPPORT_TIERS.map((tier) => (
+          <a
+            href={tier.cta.href}
+            rel={tier.cta.external ? 'noopener' : undefined}
+            class={tier.id === 'priority' ? 'btn-primary' : 'btn-secondary'}
+            data-umami-event="cta_commercial"
+            data-umami-event-offer={tier.cta.offer}
+            data-umami-event-surface="pricing"
+            data-umami-event-position={`closing_${tier.id}`}
+          >
+            <span>
+              {tier.cta.label} <span aria-hidden="true">&rarr;</span>
+            </span>
+          </a>
+        ))}
+      </div>
+      <p class="mt-6 text-body text-text-muted">
+        Questions before you buy?{' '}
+        <a
+          href={`mailto:${COMMERCIAL_EMAIL}`}
+          class="text-interactive hover:text-interactive-hover underline"
+        >
+          {COMMERCIAL_EMAIL}
+        </a>
+        , or the{' '}
+        <a href="/contact/" class="text-interactive hover:text-interactive-hover underline">
+          contact form
+        </a>
+        . We usually reply within one business day (CET).
+      </p>
+      <p class="mt-4 text-small text-text-annotation" data-terms-version={TERMS_VERSION_WEB}>
+        Subscriptions are governed by the{' '}
+        <a
+          href={LICENSING_TERMS_URL}
+          class="text-interactive hover:text-interactive-hover underline"
+        >
+          support terms
+        </a>{' '}
+        and the{' '}
+        <a href="/terms/" class="text-interactive hover:text-interactive-hover underline">
+          terms of service
+        </a>{' '}
+        (version {TERMS_VERSION_WEB}). We use what you send only to reply; see the{' '}
+        <a
+          href="https://we-amp.com/privacy/"
+          class="text-interactive hover:text-interactive-hover underline"
+        >
+          privacy policy
+        </a>
+        .
+      </p>
+    </div>
+  </section>
+</BaseLayout>

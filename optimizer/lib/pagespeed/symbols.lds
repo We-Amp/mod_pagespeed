@@ -1,0 +1,196 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Copyright (c) 2024-2026 We-Amp B.V. */
+
+/* symbols.lds -- explicit symbol list with versioning */
+PAGESPEED_1.0 {
+  global:
+    ps_version_major;
+    ps_version_minor;
+    ps_version_patch;
+    ps_git_commit;
+    ps_product_version;
+    ps_async_css_loader_path;
+    ps_async_css_loader_js;
+    ps_error_name;
+    ps_strerror;
+    ps_last_error_message;
+    ps_classify;
+    ps_classify_content_type;
+    ps_content_type_mime;
+    ps_mask_set_viewport_from_width;
+    ps_score_alternate;
+    ps_normalize_hostname;
+    ps_cache_config_init;
+    ps_cache_open;
+    ps_cache_close;
+    ps_cache_read_best;
+    ps_cache_read_alternate;
+    ps_cache_read_early_hints;
+    ps_read_content;
+    ps_read_copy;
+    ps_read_mask;
+    ps_read_content_type;
+    ps_read_origin_content_type;
+    ps_read_flags;
+    ps_read_cache_inserted_at;
+    ps_read_origin_content_length;
+    ps_read_is_worker_processed;
+    ps_read_is_ram_hit;
+    ps_read_renew_lease;
+    ps_read_free;
+    ps_serve_stats_open;
+    ps_serve_stats_record_hit;
+    ps_serve_stats_record_serve_class;
+    ps_serve_stats_snapshot;
+    ps_serve_stats_close;
+    ps_write_params_init;
+    ps_cache_write_begin;
+    ps_cache_write_sentinel;
+    ps_write_data;
+    ps_write_close;
+    ps_write_abort;
+    ps_cache_alternate_exists;
+    ps_cache_remove;
+    ps_cache_list_alternates;
+    ps_alternates_free;
+    ps_cache_stats;
+    ps_notify_worker;
+    /* HTML Processing API */
+    ps_html_config_init;
+    ps_html_process;
+    ps_html_result_output;
+    ps_html_result_modified;
+    ps_html_result_has_critical_css;
+    ps_html_result_early_hints;
+    ps_html_result_needs_revalidation;
+    ps_html_result_free;
+    ps_html_scan;
+    ps_scan_element_count;
+    ps_scan_element;
+    ps_scan_element_classes;
+    ps_scan_stylesheet_count;
+    ps_scan_stylesheet;
+    ps_scan_inline_css;
+    ps_scan_lcp_candidate;
+    ps_scan_origin_count;
+    ps_scan_origin;
+    ps_scan_result_free;
+    ps_critical_css_config_init;
+    ps_css_extract_critical;
+    ps_critical_css_output;
+    ps_critical_css_stats;
+    ps_critical_css_result_free;
+    ps_css_validate;
+    ps_css_flatten_imports;
+    ps_css_minify;
+    ps_free;
+    ps_html_transform_create;
+    ps_html_transform_run;
+    ps_html_transform_modified;
+    ps_html_transform_free;
+  local:
+    *;
+};
+
+PAGESPEED_1.2 {
+  global:
+    ps_wants_agent_markdown;
+    ps_cache_read_best_agent;
+    ps_read_shared_config_agent_entitled;
+    ps_read_origin_html_hash;
+    ps_read_origin_max_age;
+    ps_read_origin_s_maxage;
+    ps_read_origin_cc_flags;
+    ps_read_origin_last_modified;
+    ps_read_origin_etag;
+    ps_write_params_init_sized;
+    ps_age_adjusted_insert_time;
+    ps_freshness_config_init_sized;
+    ps_evaluate_freshness;
+    ps_build_cache_control;
+    ps_vary_uncacheable;
+    ps_parse_cache_control;
+} PAGESPEED_1.0;
+
+PAGESPEED_1.3 {
+  global:
+    ps_cache_write_original;
+} PAGESPEED_1.2;
+
+PAGESPEED_1.4 {
+  global:
+    ps_cache_write_headers_sidecar;
+    ps_headers_sidecar_classify;
+} PAGESPEED_1.3;
+
+PAGESPEED_1.5 {
+  global:
+    ps_notify_params_init_sized;
+    ps_notify_worker_ex;
+    ps_option_context_signature;
+} PAGESPEED_1.4;
+
+PAGESPEED_1.6 {
+  global:
+    ps_cache_config_init_sized;
+    ps_read_shared_config_volume_size;
+} PAGESPEED_1.5;
+
+PAGESPEED_1.7 {
+  global:
+    ps_vary_varies_accept;
+} PAGESPEED_1.6;
+
+PAGESPEED_1.9 {
+  global:
+    ps_html_config_init_sized;
+    ps_critical_css_config_init_sized;
+} PAGESPEED_1.7;
+
+PAGESPEED_1.10 {
+  global:
+    ps_read_shared_config_generation;
+} PAGESPEED_1.9;
+
+PAGESPEED_1.11 {
+  global:
+    ps_serve_stats_record_hit_host;
+} PAGESPEED_1.10;
+
+PAGESPEED_1.12 {
+  global:
+    ps_html_store_classify;
+    ps_html_decision_format;
+    ps_html_store_reason_name;
+    ps_read_encoded_origin_length;
+    ps_serve_stats_record_hit_split;
+    ps_cache_read_best_site;
+    ps_cache_read_alternate_site;
+    ps_cache_write_original_site;
+} PAGESPEED_1.11;
+
+PAGESPEED_1.13 {
+  global:
+    /* site-scoped HTML store: sidecar, removal, purge epoch */
+    ps_cache_write_headers_sidecar_site;
+    ps_headers_sidecar_read;
+    ps_header_block_count;
+    ps_header_block_get;
+    ps_header_block_pairing_hash;
+    ps_header_block_pairing;
+    ps_header_block_free;
+    ps_cache_remove_site;
+    ps_cache_write_site_purge_epoch;
+    ps_cache_read_site_purge_epoch;
+} PAGESPEED_1.12;
+
+PAGESPEED_1.14 {
+  global:
+    ps_html_serve_classify;
+    ps_html_serve_reason_name;
+    ps_html_store_write_params;
+    ps_html_stored_facts_from_reads;
+    ps_html_markdown_etag;
+    ps_if_none_match_matches_weak;
+    ps_read_shared_config_html_mode;
+} PAGESPEED_1.13;

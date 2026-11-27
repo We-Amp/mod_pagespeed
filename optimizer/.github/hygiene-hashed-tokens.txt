@@ -1,0 +1,62 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# Hashed hygiene tokens, enforced by tools/ci/check-public-hygiene.py (run from
+# tools/ci/check-public-hygiene.sh). Some blocked vocabulary is itself
+# non-public (private host names, private repository slugs, held-back private
+# paths), so it must not be spelled out in this public tree.
+#
+# HONEST LIMIT: plain sha256 of a short, word-like token is guessable (brute
+# force plus word lists recovers many of them in seconds). This protects
+# against casual reading and against grep, nothing more. For that reason the
+# list holds internal TOPOLOGY tokens only (host names, runner prefixes,
+# private repository slugs, internal paths) and must never hold a customer,
+# partner, person or credential-shaped token.
+#
+# Each line is
+#
+#   <class> <TAB> <scope> <TAB> <sha256 of the lowercase token> <TAB> <mode>
+#
+# The checker lowercases and hashes every candidate token found in the tracked
+# tree and fails on a hash listed here. Candidate tokens: runs of up to two
+# words joined by "-" inside one path segment (words split on "-", "_" and ".",
+# so host.local, host_name and x-y-z all contain their words), and runs of up
+# to three consecutive path segments joined by "/". A backslash counts as "/"
+# and a trailing ".git" is stripped from a segment. scope "all" applies to
+# every tracked text file, scope "md" to markdown files only. mode "block"
+# fails the gate; mode "advisory" prints a warning only (no rule uses it
+# today; kept for rules awaiting a ruling).
+# To add a token:
+#   printf '%s' 'token' | tr A-Z a-z | shasum -a 256
+# Classes: internal-hosts (private machine names), private-repos (private
+# repository slugs; a link to one is a link nobody outside can open),
+# build-infra (private build-fleet paths), dangling-tooling (private tooling
+# paths that are not in this tree), held-back-docs (private planning and
+# test-tracking paths that prose must not send a reader to).
+internal-hosts	all	4c3a392fd130eec232c326d32c5971a18296f50cedb19010a9b55dff51139b86	block
+internal-hosts	all	dfdfd6e05ad156f08fb99317bce91a78c19cbb904ae95a39e6e3d4f8d480d53b	block
+internal-hosts	all	b2b81046a2d4ff9cd05881f38827025a591525bac04fbb28342d163d51bc8e9d	block
+internal-hosts	all	4dd13f8b76bad72596b04391a1ee5195227581d4eb7a1add60128d25295c6f71	block
+internal-hosts	all	ead246f1887730a7edf7b00a817eb975e5ed63be8e93427d28ad164c8ca03ece	block
+internal-hosts	all	aeeb5b6b9e857b868fbb471b057a6742741a19c95ec999a1b2c0b039e703b6f4	block
+internal-hosts	all	fd326013beed3aa57f6f3c301703c684beef2ede9a1b8b1b104b590f8be4dd18	block
+internal-hosts	all	c9b6f05aad023506545548cda9ca3a9a64e22b234c326ee6ffca7a9b6d56519d	block
+internal-hosts	all	baee24c9de40ce203e3518f7eab38dd5c452da0c883d5e569c91445fff408aa4	block
+build-infra	all	a63c63c5a8fb6d0a2b4bf11cadbf30b9da65b5852ed251c5fd7e5aa2583fad5e	block
+dangling-tooling	all	25eea3d269aa397a0aeb451ab03879d34c8df68865db5e0065dc1812c2b36ed0	block
+dangling-tooling	all	9b1f16cd9f62c74e8463fb6dafcd6c4a3036750dfcb6eb1f41968b72f2bebc42	block
+private-repos	all	3f5e71b3bc494d90c10b7760750954b80003473ad4c133989597019cb79fd201	block
+private-repos	all	efe8c3498e1d50979010165bd5d5d54ebb3501fcb8123e6a4fa1034a79ebacd6	block
+private-repos	all	8661fe8bd638eaf875b29a6bc44ccbed4cfa3453b59d406870d7545bd2eeae22	block
+private-repos	all	67fa90f021245252dc3a776582d89ca202b433c2718aebe31034f9ef24ca1c44	block
+private-repos	all	42339940f295d93d4adf612d2811f4f0b14f739a2107129c7cf4bee9da3ce1f1	block
+private-repos	all	e94ad3bd92fe32143664327a15f1dbead39f26345b8f128d2d594fc2c22e04d7	block
+private-repos	all	d6d0512474c21d9a33029fd5dcd4dc050c4bc4d02ac90b23ec1e4d9d10463011	block
+private-repos	all	c5a9f2df10804fec5f870589405901da6d1b127dc41a40d4132a25d5fb8defae	block
+private-repos	all	c09c230b17fefff08caa93283358d72e17b9013578ad4a33ce5e20e329a7c7bd	block
+private-repos	all	c06ca6d0d38878fc58b0085d8e3e4aab6b512f8954e46d4591b4733e47fbeb62	block
+private-repos	all	34d00dad1090f20859443e5b6ea5fb9b07cbb9776fbd6b92a884407332a96feb	block
+private-repos	all	47e1c177007fe770aecdff4a925432519843e7b710af1fb7a6dcd2b49c780779	block
+held-back-docs	md	a8d01f00ddf272f49aa4029592965119c1b544fa37d9ebcccbf31b50c2c330b0	block
+held-back-docs	md	90e054e32f683a92beb539ef03aee32cacbe4b8c4ccc7ba65162b1d82ae53be4	block
+held-back-docs	md	1585eeba317be3e0cdabff54ea976adfbb2544db91b088bc151e712be4e40915	block

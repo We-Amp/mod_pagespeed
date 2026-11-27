@@ -1,0 +1,23 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// Renders a Docker / Helm image tag for a release line, sourced from the
+// release manifest (§3). Each line ships container images
+// tagged by SemVer per `artifacts.docker.tag_template`.
+//
+// Examples in MDX:
+//   <ImageTag line="2.1" />   → 2.1.0
+
+import { getRelease, dockerTag } from '../../lib/release';
+
+interface Props {
+  line: '1.1' | '2.0' | '2.1';
+}
+
+const { line } = Astro.props;
+const rel = await getRelease(line);
+const tag = dockerTag(rel);
+---
+
+<Fragment>{tag}</Fragment>

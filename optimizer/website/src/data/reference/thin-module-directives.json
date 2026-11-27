@@ -1,0 +1,233 @@
+{
+  "source": {
+    "repo": "https://github.com/We-Amp/pagespeed-optimizer",
+    "path": "src/nginx/ngx_pagespeed_module.cc"
+  },
+  "generator": "website/scripts/generate-references.mjs",
+  "directives": [
+    {
+      "name": "pagespeed",
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "type": "flag",
+      "values": null,
+      "field": "enable",
+      "default": "off",
+      "defaultNote": null
+    },
+    {
+      "name": "pagespeed_cache_path",
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "type": "string",
+      "values": null,
+      "field": "cache_path",
+      "default": "",
+      "defaultNote": null
+    },
+    {
+      "name": "pagespeed_disallow",
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "type": "pattern",
+      "values": null,
+      "field": null,
+      "default": null,
+      "defaultNote": null
+    },
+    {
+      "name": "pagespeed_hot_threshold",
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "type": "number",
+      "values": null,
+      "field": "hot_threshold",
+      "default": "5",
+      "defaultNote": null
+    },
+    {
+      "name": "pagespeed_max_age",
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "type": "number",
+      "values": null,
+      "field": "max_age_cap",
+      "default": "86400",
+      "defaultNote": null
+    },
+    {
+      "name": "pagespeed_immutable_max_age",
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "type": "number",
+      "values": null,
+      "field": "immutable_max_age_cap",
+      "default": "604800",
+      "defaultNote": null
+    },
+    {
+      "name": "pagespeed_synthesize_swr",
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "type": "flag",
+      "values": null,
+      "field": "synthesize_swr",
+      "default": "on",
+      "defaultNote": null
+    },
+    {
+      "name": "pagespeed_conditional_revalidation",
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "type": "flag",
+      "values": null,
+      "field": "conditional_revalidation",
+      "default": "on",
+      "defaultNote": null
+    },
+    {
+      "name": "pagespeed_stale_if_error_max_age",
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "type": "number",
+      "values": null,
+      "field": "stale_if_error_max_age",
+      "default": "86400",
+      "defaultNote": null
+    },
+    {
+      "name": "pagespeed_html_max_age",
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "type": "number",
+      "values": null,
+      "field": "html_max_age",
+      "default": "0",
+      "defaultNote": null
+    },
+    {
+      "name": "pagespeed_css_max_age",
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "type": "number",
+      "values": null,
+      "field": "css_max_age",
+      "default": "300 (safe) / 86400 (aggressive)",
+      "defaultNote": "depends on the resolved cache mode"
+    },
+    {
+      "name": "pagespeed_image_max_age",
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "type": "number",
+      "values": null,
+      "field": "image_max_age",
+      "default": "1800 (safe) / 86400 (aggressive)",
+      "defaultNote": "depends on the resolved cache mode"
+    },
+    {
+      "name": "pagespeed_force_refresh_html",
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "type": "flag",
+      "values": null,
+      "field": "force_refresh_html",
+      "default": "on",
+      "defaultNote": null
+    },
+    {
+      "name": "pagespeed_force_refresh",
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "type": "flag",
+      "values": null,
+      "field": "force_refresh",
+      "default": "off",
+      "defaultNote": null
+    },
+    {
+      "name": "pagespeed_trust_x_forwarded_proto",
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "type": "flag",
+      "values": null,
+      "field": "trust_x_forwarded_proto",
+      "default": "off",
+      "defaultNote": null
+    },
+    {
+      "name": "pagespeed_cache_mode",
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "type": "enum",
+      "values": [
+        "safe",
+        "aggressive"
+      ],
+      "field": "cache_mode",
+      "default": "safe",
+      "defaultNote": "unless the worker shared configuration sets aggressive"
+    },
+    {
+      "name": "pagespeed_agent_content_signal",
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "type": "string",
+      "values": null,
+      "field": "agent_content_signal",
+      "default": "",
+      "defaultNote": null
+    }
+  ]
+}

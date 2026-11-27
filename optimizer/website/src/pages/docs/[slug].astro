@@ -1,0 +1,591 @@
+---
+import { OG_DEFAULT_IMAGE } from '../../data/og-image';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import DocsSidebar from '../../components/docs/DocsSidebar.astro';
+import ShareButtons from '../../components/ShareButtons.astro';
+import OnThisPage from '../../components/OnThisPage.astro';
+import Icon from '../../components/Icon.astro';
+import ReleaseNotesDeepLink from '../../components/ReleaseNotesDeepLink.astro';
+import DirectiveFinder from '../../components/DirectiveFinder.astro';
+import ReferralOrientation from '../../components/ReferralOrientation.astro';
+import { getCollection, render } from 'astro:content';
+import { createMarkdownProcessor } from '@astrojs/markdown-remark';
+import { getRelease, dockerTag } from '../../lib/release';
+import { gitLastModified } from '../../lib/git-date';
+import { htmlToPlainText } from '../../lib/jsonld';
+import { brandedTitle } from '../../lib/page-title';
+import { FREE_TO_RUN_LINE, PRODUCT_DISPLAY_NAME } from '../../data/product-facts.mjs';
+import { productRef } from '../../data/software-jsonld';
+import { ORGANIZATION_PUBLISHER } from '../../data/organization';
+import { basename } from 'node:path';
+import { tocHeadings as pageTocHeadings } from '../../lib/toc-headings';
+
+//: the JSON-LD HowTo schema for aspnet-getting-started cites
+// the literal `dotnet add package …` command shown on the page. Source it
+// from the release manifest so HowTo + page body never drift.
+const rel20 = await getRelease('2.0');
+// The image tags in the HowTo steps come from the current release manifest.
+const rel21 = await getRelease('2.1');
+// The docs `about` node is the shared product reference (its version is the
+// manifest's exact release).
+const productAbout = await productRef();
+const nugetInstallCmd = `dotnet add package ${rel20.artifacts.nuget.package}${
+  rel20.display.nuget_install_flags ? ` ${rel20.display.nuget_install_flags}` : ''
+}`;
+
+export async function getStaticPaths() {
+  const docs = await getCollection('docs');
+  return docs.map((doc) => ({
+    params: { slug: doc.id },
+    props: { doc },
+  }));
+}
+
+const { doc } = Astro.props;
+const { Content, headings, remarkPluginFrontmatter } = await render(doc);
+
+const hasPlatformContent = doc.body?.includes('data-platform=') ?? false;
+
+// Render the page's `faq` frontmatter as a visible accordion (it was previously
+// emitted only as FAQPage JSON-LD — useful to crawlers, invisible to readers).
+// The answers carry inline markdown (code spans, links, bold), so run them
+// through Astro's own markdown engine rather than printing raw strings; the
+// same `faq` array still feeds the JSON-LD below, so the two stay in lockstep.
+const faqProcessor = doc.data.faq?.length ? await createMarkdownProcessor({ gfm: true }) : null;
+const faqItems = faqProcessor
+  ? await Promise.all(
+      doc.data.faq!.map(async (item) => {
+        const { code } = await faqProcessor.render(item.a);
+        // Answers are single-paragraph; unwrap the <p> the processor wraps them in.
+        const a = code
+          .trim()
+          .replace(/^<p>/, '')
+          .replace(/<\/p>$/, '');
+        return { q: item.q, a };
+      }),
+    )
+  : [];
+
+// "On this page" navigation: h2/h3 from the rendered body, plus the
+// frontmatter-driven FAQ section, which is rendered by this layout and so is
+// not part of the markdown `headings` export. A heading inside a
+// `:::next-release` marker is left out (src/lib/toc-headings.ts).
+const tocHeadings = [
+  ...pageTocHeadings(headings, remarkPluginFrontmatter),
+  ...(faqItems.length > 0 ? [{ depth: 2, slug: 'faq', text: 'Frequently asked questions' }] : []),
+];
+const showToc = tocHeadings.length >= 3;
+
+const allDocs = (await getCollection('docs')).sort((a, b) => a.data.order - b.data.order);
+
+const sidebarGroups: { label: string; docs: typeof allDocs }[] = [];
+{
+  let current = '';
+  for (const d of allDocs) {
+    const g = d.data.group ?? 'Other';
+    if (g !== current) {
+      current = g;
+      sidebarGroups.push({ label: g, docs: [] });
+    }
+    sidebarGroups[sidebarGroups.length - 1].docs.push(d);
+  }
+}
+
+// Previous / next: neighbours in the reading order (group, then `order`) over
+// the whole collection. The sidebar (src/lib/docs-nav.ts) lists the same pages
+// in the same order, minus the per-line release notes and plus the filter
+// reference, which is not a collection page.
+const navDocs = sidebarGroups.flatMap((g) => g.docs);
+const docIndex = navDocs.findIndex((d) => d.id === doc.id);
+const prevDoc = docIndex > 0 ? navDocs[docIndex - 1] : undefined;
+const nextDoc = docIndex >= 0 && docIndex < navDocs.length - 1 ? navDocs[docIndex + 1] : undefined;
+
+// "Last updated": the date of the last commit that touched the content file,
+// read from git at build time (the deploy builds from a fresh, full clone),
+// with the frontmatter `lastUpdated` as the fallback when history cannot
+// answer (a shallow CI checkout, an exported tree). The visible date and the
+// JSON-LD `dateModified` below are one and the same value.
+const contentFile = doc.filePath ? basename(doc.filePath) : `${doc.id}.md`;
+const lastUpdated =
+  (doc.filePath ? gitLastModified(doc.filePath) : null) ??
+  doc.data.lastUpdated?.toISOString().split('T')[0] ??
+  null;
+const lastUpdatedLabel = lastUpdated
+  ? new Date(`${lastUpdated}T00:00:00Z`).toLocaleDateString('en-GB', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+      timeZone: 'UTC',
+    })
+  : null;
+const editUrl = `https://github.com/We-Amp/pagespeed-optimizer/edit/main/website/src/content/docs/${contentFile}`;
+// The page as Markdown (src/pages/docs/[slug].md.ts): linked beside the edit
+// link and advertised in <head> as the text/markdown alternate.
+const markdownUrl = `/docs/${doc.id}.md`;
+
+// Docs have no per-page OG cards (the og-cards generator is blog-only), so the
+// schema `image` is the same /og-default.png the page's og:image meta resolves
+// to in BaseLayout — never a URL that could 404.
+const schemaImage = new URL(OG_DEFAULT_IMAGE, Astro.site ?? new URL('https://modpagespeed.com'))
+  .href;
+
+// Build HowTo JSON-LD for installation docs
+let jsonLd: Record<string, unknown> | undefined;
+
+// Default: TechArticle schema for all docs pages
+jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'TechArticle',
+  headline: doc.data.h1 ?? doc.data.title,
+  description: doc.data.description,
+  image: schemaImage,
+  author: { '@type': 'Organization', name: 'We-Amp B.V.' },
+  publisher: ORGANIZATION_PUBLISHER,
+  mainEntityOfPage: `https://modpagespeed.com/docs/${doc.id}/`,
+  ...(doc.data.datePublished && {
+    datePublished: doc.data.datePublished.toISOString().split('T')[0],
+  }),
+  ...(lastUpdated && { dateModified: lastUpdated }),
+  about: productAbout,
+};
+
+// Override with specific schema for installation docs
+if (doc.id === 'installation-docker') {
+  jsonLd = {
+    '@context': 'https://schema.org',
+    '@type': 'HowTo',
+    name: 'Install mod_pagespeed with Docker',
+    description:
+      'Deploy mod_pagespeed using Docker Compose with three containers: nginx, the optimizer worker, and your origin server.',
+    totalTime: 'PT10M',
+    ...(lastUpdated && { dateModified: lastUpdated }),
+    tool: [
+      { '@type': 'HowToTool', name: 'Docker Engine 20.10+' },
+      { '@type': 'HowToTool', name: 'Docker Compose v2' },
+    ],
+    step: [
+      {
+        '@type': 'HowToStep',
+        position: 1,
+        name: 'Create project directory',
+        text: 'Create a project directory with docker-compose.yml and nginx.conf files.',
+      },
+      {
+        '@type': 'HowToStep',
+        position: 2,
+        name: 'Configure Docker Compose',
+        text: `Create docker-compose.yml with three services: origin (your web server), worker (ghcr.io/we-amp/pagespeed-worker:${dockerTag(rel21)}), and nginx (ghcr.io/we-amp/pagespeed-nginx:${dockerTag(rel21)}). All share a named volume at /shared for the Cyclone cache; the DATA_DIR environment variable points the worker entrypoint there.`,
+      },
+      {
+        '@type': 'HowToStep',
+        position: 3,
+        name: 'Configure nginx',
+        text: 'Create nginx.conf with load_module for ngx_pagespeed_module.so, the thin nginx module bundled in the pagespeed-nginx image (not the native module of the nginx-module-pagespeed package, which shares the file name). Add pagespeed on and pagespeed_cache_path directives in your server block, and proxy_set_header Accept-Encoding "" so the origin sends uncompressed responses the module can cache.',
+      },
+      {
+        '@type': 'HowToStep',
+        position: 4,
+        name: 'Start the stack',
+        text: 'Run docker compose up -d and verify all three containers are running with docker compose ps.',
+      },
+      {
+        '@type': 'HowToStep',
+        position: 5,
+        name: 'Verify it works',
+        text: 'Send a GET request twice with curl -s -o /dev/null -D - http://localhost:8080/ (not curl -I: HEAD requests are not cached). The first response should show X-PageSpeed: MISS, the second X-PageSpeed: HIT.',
+      },
+    ],
+  };
+} else if (doc.id === 'aspnet-getting-started') {
+  jsonLd = {
+    '@context': 'https://schema.org',
+    '@type': 'HowTo',
+    name: `Install the ${PRODUCT_DISPLAY_NAME} ASP.NET Core Middleware`,
+    description:
+      'Add PageSpeed optimization to an ASP.NET Core application via the WeAmp.PageSpeed.AspNetCore NuGet package.',
+    totalTime: 'PT5M',
+    ...(lastUpdated && { dateModified: lastUpdated }),
+    tool: [
+      { '@type': 'HowToTool', name: '.NET 8 SDK or .NET 10 SDK' },
+      { '@type': 'HowToTool', name: 'ASP.NET Core application' },
+    ],
+    step: [
+      {
+        '@type': 'HowToStep',
+        position: 1,
+        name: 'Install the NuGet package',
+        text: `Run ${nugetInstallCmd}. The meta-package pulls the core abstractions and all platform-specific native binaries (linux-x64, linux-arm64, osx-arm64, win-x64) transitively.`,
+      },
+      {
+        '@type': 'HowToStep',
+        position: 2,
+        name: 'Register services and middleware',
+        text: 'Add builder.Services.AddPageSpeed() and app.UsePageSpeed() to your Program.cs. AddPageSpeed auto-binds the PageSpeed section from IConfiguration.',
+      },
+      {
+        '@type': 'HowToStep',
+        position: 3,
+        name: 'Configure via appsettings.json',
+        text: 'Add a PageSpeed section to appsettings.json with Enabled: true. Every default rewrite turns on automatically; individual toggles live under PageSpeed:Html.',
+      },
+      {
+        '@type': 'HowToStep',
+        position: 4,
+        name: 'Verify it works',
+        text: 'Run dotnet run and check for the X-PageSpeed response header (HIT or MISS) with curl -I.',
+      },
+    ],
+  };
+}
+
+// Optional FAQPage JSON-LD assembled from the same answers as the visible
+// accordion. Each answer is the plain text of its rendered HTML, so the markup
+// carries the words a reader sees, not the Markdown source (code spans, links,
+// bold). Emitted as a sibling schema (alongside TechArticle or HowTo), not a
+// replacement — Google parses each top-level JSON-LD script independently.
+const faqJsonLd =
+  faqItems.length > 0
+    ? {
+        '@context': 'https://schema.org',
+        '@type': 'FAQPage',
+        mainEntity: faqItems.map((item) => ({
+          '@type': 'Question',
+          name: item.q,
+          acceptedAnswer: {
+            '@type': 'Answer',
+            text: htmlToPlainText(item.a),
+          },
+        })),
+      }
+    : undefined;
+
+const jsonLdEntries: Record<string, unknown>[] = [];
+if (jsonLd) jsonLdEntries.push(jsonLd);
+if (faqJsonLd) jsonLdEntries.push(faqJsonLd);
+
+// <title>: an explicit seoTitle wins; otherwise the sidebar title plus the
+// product suffix (the same rule as the blog, see brandedTitle).
+const pageTitle = doc.data.seoTitle ?? brandedTitle(doc.data.title);
+const heading = doc.data.h1 ?? doc.data.title;
+// The three pages the archived PageSpeed Module docs on developers.google.com
+// send their readers to (via the legacy /doc/* redirects) carry the
+// referrer-gated orientation aside.
+const showReferralOrientation = [
+  'getting-started',
+  'installation-module',
+  'configuration',
+].includes(doc.id);
+---
+
+<BaseLayout
+  skipTarget="doc-content"
+  title={pageTitle}
+  description={doc.data.description}
+  jsonLd={jsonLdEntries}
+  breadcrumbLeafName={doc.data.title}
+  alternateMarkdown={markdownUrl}
+  wideHeader
+>
+  <div
+    class:list={[
+      'mx-auto px-4 sm:px-6 lg:px-8 py-20',
+      showToc ? 'max-w-6xl xl:max-w-7xl' : 'max-w-6xl',
+    ]}
+  >
+    <div
+      class:list={[
+        'lg:grid lg:grid-cols-[240px_minmax(0,1fr)] lg:gap-12',
+        showToc && 'xl:grid-cols-[240px_minmax(0,1fr)_200px]',
+      ]}
+    >
+      <DocsSidebar current={doc.id} />
+
+      <!-- Content -->
+      <article id="doc-content" tabindex="-1" class="min-w-0 focus:outline-none">
+        {showReferralOrientation && <ReferralOrientation />}
+        <nav
+          class="mb-6 text-sm font-mono text-text-annotation"
+          aria-label="Breadcrumb"
+          data-pagefind-ignore
+        >
+          <a href="/" class="inline-block py-1 hover:text-text-body">
+            Home
+          </a>
+          <span class="mx-1">/</span>
+          <a href="/docs/" class="inline-block py-1 hover:text-text-body">
+            Docs
+          </a>
+          <span class="mx-1">/</span>
+          <span>{doc.data.title}</span>
+        </nav>
+        <h1 class="text-3xl font-bold tracking-tight text-text-body">{heading}</h1>
+        <p
+          class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs font-mono text-text-annotation"
+          data-pagefind-ignore
+        >
+          {lastUpdated && (
+            <span>
+              Last updated <time datetime={lastUpdated}>{lastUpdatedLabel}</time>
+            </span>
+          )}
+          <a
+            href={editUrl}
+            rel="noopener noreferrer"
+            class="py-1 underline underline-offset-2 hover:text-interactive transition-colors"
+          >
+            Edit this page
+          </a>
+          <a
+            href={markdownUrl}
+            type="text/markdown"
+            class="py-1 underline underline-offset-2 hover:text-interactive transition-colors"
+          >
+            View as Markdown
+          </a>
+        </p>
+        <p class="mt-4 lede">{doc.data.description}</p>
+
+        {showToc && (
+          <div class="mt-8 xl:hidden" data-pagefind-ignore>
+            <OnThisPage variant="inline" headings={tocHeadings} />
+          </div>
+        )}
+
+        <!-- Platform selector — only shown when the page has data-platform blocks -->
+        {hasPlatformContent && (
+          <div
+            id="platform-selector"
+            class="mt-6 flex gap-1 overflow-x-auto -mx-1 px-1 sticky top-16 z-40 bg-bg-elevated py-2"
+            role="group"
+            aria-label="Select platform"
+            data-pagefind-ignore
+          >
+            <button
+              type="button"
+              data-platform-tab="nginx"
+              class="platform-tab shrink-0 rounded-full px-4 py-2 text-sm font-medium transition-colors min-h-[44px]"
+              aria-pressed="true"
+            >
+              nginx
+            </button>
+            <button
+              type="button"
+              data-platform-tab="apache"
+              class="platform-tab shrink-0 rounded-full px-4 py-2 text-sm font-medium transition-colors min-h-[44px]"
+              aria-pressed="false"
+            >
+              Apache
+            </button>
+            <button
+              type="button"
+              data-platform-tab="iis"
+              class="platform-tab shrink-0 rounded-full px-4 py-2 text-sm font-medium transition-colors min-h-[44px]"
+              aria-pressed="false"
+            >
+              IIS
+            </button>
+            <span id="platform-announce" class="sr-only" aria-live="polite" />
+          </div>
+        )}
+
+        <div class="mt-8 prose prose-stone max-w-none prose-headings:font-semibold prose-a:text-interactive prose-a:underline prose-a:underline-offset-2 prose-a:decoration-interactive hover:prose-a:decoration-interactive">
+          <Content />
+        </div>
+
+        {
+          /* Progressive enhancement for the release-notes page only (see
+            ReleaseNotesDeepLink.astro): a deep link or in-page link to a
+            release opens its collapsed <details> before scrolling to it.
+            Gated on doc.id so no other docs page pays for it. */
+          doc.id === 'release-notes' && <ReleaseNotesDeepLink />
+        }
+
+        {
+          /* The directive finder's behaviour and styles; its field is part of
+            the rendered reference on this page only. */
+          doc.id === 'configuration' && <DirectiveFinder />
+        }
+
+        {faqItems.length > 0 && (
+          <section id="faq" class="mt-16">
+            <h2 class="text-2xl font-bold tracking-tight text-text-body">
+              Frequently asked questions
+            </h2>
+            <div class="mt-6 space-y-3">
+              {faqItems.map((item) => (
+                <details class="group rounded-lg border border-border bg-bg-elevated">
+                  <summary class="flex cursor-pointer items-center justify-between gap-4 px-5 py-4 font-medium text-text-body">
+                    {item.q}
+                    <Icon
+                      name="chevron-down"
+                      class="h-5 w-5 shrink-0 text-text-annotation group-open:rotate-180"
+                    />
+                  </summary>
+                  <p
+                    class="px-5 pb-5 text-sm leading-relaxed text-text-muted [&_code]:rounded [&_code]:bg-bg-secondary [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em] [&_a]:font-medium [&_a]:text-interactive [&_a]:underline [&_strong]:font-semibold [&_strong]:text-text-body"
+                    set:html={item.a}
+                  />
+                </details>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {(prevDoc || nextDoc) && (
+          <nav
+            class="mt-12 grid gap-3 border-t border-border pt-6 sm:grid-cols-2"
+            aria-label="Previous and next pages"
+            data-pagefind-ignore
+          >
+            {prevDoc ? (
+              <a rel="prev" href={`/docs/${prevDoc.id}/`} class="card-resource">
+                <span class="eyebrow mb-1">prev</span>
+                <span class="mt-1 block text-sm font-medium text-interactive">
+                  <span aria-hidden="true">←</span> {prevDoc.data.title}
+                </span>
+              </a>
+            ) : (
+              <span aria-hidden="true" />
+            )}
+            {nextDoc && (
+              <a rel="next" href={`/docs/${nextDoc.id}/`} class="card-resource text-right">
+                <span class="eyebrow mb-1">next</span>
+                <span class="mt-1 block text-sm font-medium text-interactive">
+                  {nextDoc.data.title} <span aria-hidden="true">→</span>
+                </span>
+              </a>
+            )}
+          </nav>
+        )}
+
+        <div data-pagefind-ignore>
+          <ShareButtons
+            title={doc.data.title}
+            url={`https://modpagespeed.com/docs/${doc.id}/`}
+            surface="docs"
+          />
+        </div>
+
+        <aside
+          class="mt-12 rounded-lg border border-interactive/40 bg-interactive/10 p-6 text-center"
+          data-pagefind-ignore
+        >
+          <p class="text-sm font-semibold text-text-body">
+            Done reading? Download and run it &mdash; it optimizes immediately, free and open
+            source, in development and in production.
+          </p>
+          <p class="mt-1 text-sm text-text-muted">{FREE_TO_RUN_LINE}</p>
+          <div class="mt-5 flex flex-wrap items-center justify-center gap-x-5 gap-y-3">
+            <a
+              href="/download/"
+              data-umami-event="cta_docs_footer_install"
+              class="inline-flex items-center rounded-lg bg-interactive hover:bg-interactive-hover px-5 py-2.5 text-sm font-semibold text-on-accent transition-colors"
+            >
+              Download &amp; run
+            </a>
+            <a
+              href="/support/"
+              data-umami-event="cta_commercial"
+              data-umami-event-offer="support"
+              data-umami-event-surface="docs"
+              data-umami-event-position="footer"
+              class="text-sm font-medium text-interactive underline decoration-interactive underline-offset-2 hover:decoration-interactive transition-colors"
+            >
+              Support plans
+            </a>
+          </div>
+        </aside>
+      </article>
+
+      {showToc && (
+        <div class="hidden xl:block" data-pagefind-ignore>
+          <div class="sticky top-20 max-h-[calc(100vh-7rem)] overflow-y-auto pb-8">
+            <OnThisPage variant="rail" headings={tocHeadings} />
+          </div>
+        </div>
+      )}
+    </div>
+  </div>
+
+  <script>
+    // Platform selector
+    const tabs = document.querySelectorAll<HTMLButtonElement>('[data-platform-tab]');
+    const announce = document.getElementById('platform-announce');
+    const names: Record<string, string> = { nginx: 'nginx', apache: 'Apache', iis: 'IIS' };
+
+    function setActivePlatform(platform: string) {
+      document.documentElement.setAttribute('data-active-platform', platform);
+      try {
+        localStorage.setItem('docs-platform', platform);
+      } catch (e) {
+        // Storage may be blocked (Safari private mode, strict settings) —
+        // the tabs still work for this page load, just without persistence.
+        // Critically, this must not throw: this function also runs from the
+        // init call below, before the click listeners are attached, so an
+        // unwrapped throw here would leave the tabs permanently inert.
+      }
+      tabs.forEach((tab) => {
+        tab.setAttribute('aria-pressed', tab.dataset.platformTab === platform ? 'true' : 'false');
+      });
+      if (announce) announce.textContent = `Showing content for ${names[platform] || platform}`;
+    }
+
+    // Initialize tab states from current platform
+    const current = document.documentElement.getAttribute('data-active-platform') || 'nginx';
+    setActivePlatform(current);
+
+    tabs.forEach((tab) => {
+      tab.addEventListener('click', () => {
+        if (tab.dataset.platformTab) setActivePlatform(tab.dataset.platformTab);
+      });
+    });
+
+    // Sticky shadow
+    const selector = document.getElementById('platform-selector');
+    if (selector) {
+      const observer = new IntersectionObserver(
+        ([entry]) => selector.classList.toggle('is-sticky', !entry.isIntersecting),
+        { threshold: 1, rootMargin: '-65px 0px 0px 0px' },
+      );
+      observer.observe(selector);
+    }
+  </script>
+  <style>
+    /* FAQ accordion uses native <details>/<summary>; hide the default
+       disclosure marker so the custom chevron is the only affordance. */
+    details > summary {
+      list-style: none;
+    }
+    details > summary::-webkit-details-marker {
+      display: none;
+    }
+
+    /* Platform selector tabs — dark-only tokens (no light-mode pair). */
+    .platform-tab[aria-pressed='true'] {
+      background-color: var(--color-interactive);
+      color: var(--color-on-accent);
+    }
+    .platform-tab[aria-pressed='false'] {
+      background-color: var(--color-bg-secondary);
+      color: var(--color-text-muted);
+    }
+    .platform-tab[aria-pressed='false']:hover {
+      background-color: var(--color-border-strong);
+      color: var(--color-text-body);
+    }
+    .platform-tab:focus-visible {
+      outline: 2px solid var(--color-interactive);
+      outline-offset: 2px;
+    }
+    #platform-selector {
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+    }
+    #platform-selector::-webkit-scrollbar {
+      display: none;
+    }
+    #platform-selector.is-sticky {
+      box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1);
+    }
+  </style>
+</BaseLayout>

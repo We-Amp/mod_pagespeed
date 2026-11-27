@@ -1,0 +1,29 @@
+---
+// /privacy/ — We-Amp keeps one privacy notice for all its websites, this one
+// included, at https://we-amp.com/privacy/. Production answers /privacy/ with a
+// 301 to it from the server's redirect map; this page is what dev, preview and
+// any server without that map serve, with its canonical on we-amp.com.
+import BaseLayout from '../layouts/BaseLayout.astro';
+import PageHero from '../components/PageHero.astro';
+import { VENDOR } from '../data/product-facts.mjs';
+
+const NOTICE = 'https://we-amp.com/privacy/';
+---
+
+<BaseLayout
+  title="Privacy — mod_pagespeed"
+  description={`${VENDOR} keeps one privacy notice for all its websites, modpagespeed.com included, at we-amp.com/privacy/.`}
+  canonical={NOTICE}
+>
+  <PageHero title="Privacy" size="utility" width="prose" class="pb-16">
+    <Fragment slot="lede">
+      {VENDOR} keeps one privacy notice for all its websites, modpagespeed.com included. It covers
+      what this site and its tools do with personal data, how we handle support mail from
+      subscribers, and what the software you install does and does not send. Read it at
+      <a href={NOTICE} class="text-interactive hover:text-interactive-hover underline">
+        we-amp.com/privacy/
+      </a>
+      .
+    </Fragment>
+  </PageHero>
+</BaseLayout>

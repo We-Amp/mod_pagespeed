@@ -1,0 +1,476 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import PageHero from '../components/PageHero.astro';
+
+// Core Web Vitals pillar/hub. Consolidates the 15-post programmatic cluster
+// (fix-{cls,inp,lcp}-{aspnet-core,magento,nginx,woocommerce,wordpress}-2026)
+// into one rankable hub: a 3×5 metric × platform matrix linking each spoke,
+// plus an honest "how mod_pagespeed helps" section. The matrix is the single
+// source of truth for both the rendered table and the ItemList JSON-LD.
+
+const metrics = [
+  {
+    key: 'lcp',
+    abbr: 'LCP',
+    name: 'Largest Contentful Paint',
+  },
+  {
+    key: 'cls',
+    abbr: 'CLS',
+    name: 'Cumulative Layout Shift',
+  },
+  {
+    key: 'inp',
+    abbr: 'INP',
+    name: 'Interaction to Next Paint',
+  },
+] as const;
+
+const platforms = [
+  { key: 'wordpress', label: 'WordPress' },
+  { key: 'woocommerce', label: 'WooCommerce' },
+  { key: 'magento', label: 'Magento' },
+  { key: 'nginx', label: 'nginx' },
+  { key: 'aspnet-core', label: 'ASP.NET Core' },
+] as const;
+
+// Per-spoke short labels, keyed by `${metric}-${platform}`. Used as secondary
+// link text and the ItemList JSON-LD names. These are curated summaries of each
+// spoke's angle, not the spoke's exact frontmatter title; keep them in sync when
+// a spoke's angle changes.
+const postTitles: Record<string, string> = {
+  'lcp-wordpress': 'WordPress LCP: the server-layer fix',
+  'lcp-woocommerce': 'WooCommerce LCP: shrink the gallery first',
+  'lcp-magento': 'LCP on Magento without breaking RequireJS',
+  'lcp-nginx': 'nginx LCP: transport, not content',
+  'lcp-aspnet-core': 'ASP.NET Core LCP: Razor vs Blazor',
+  'cls-wordpress': 'WordPress CLS: dimensions at the server',
+  'cls-woocommerce': 'WooCommerce CLS: lock the gallery',
+  'cls-magento': 'Magento CLS starts with Fotorama',
+  'cls-nginx': 'nginx CLS via insert_image_dimensions',
+  'cls-aspnet-core': 'ASP.NET Core CLS: pre-size async holes',
+  'inp-wordpress': 'WordPress INP: plugin discipline',
+  'inp-woocommerce': 'INP on WooCommerce: where the cost lives',
+  'inp-magento': 'Magento INP: Hyvä matters more',
+  'inp-nginx': 'nginx INP: a CMS-agnostic plan',
+  'inp-aspnet-core': 'INP on ASP.NET Core: Razor vs Blazor',
+};
+
+const postHref = (metricKey: string, platformKey: string) =>
+  `/blog/fix-${metricKey}-${platformKey}-2026/`;
+
+// ItemList enumerating all 15 spokes in metric-major, platform-minor order so
+// the structured-data position mirrors the visual matrix (rows = metrics).
+const itemListElements = metrics.flatMap((metric, mi) =>
+  platforms.map((platform, pi) => {
+    const k = `${metric.key}-${platform.key}`;
+    return {
+      '@type': 'ListItem',
+      position: mi * platforms.length + pi + 1,
+      name: postTitles[k],
+      url: `https://modpagespeed.com${postHref(metric.key, platform.key)}`,
+    };
+  }),
+);
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'CollectionPage',
+  name: 'Core Web Vitals: fix LCP and CLS at the server layer, and where INP lives',
+  description:
+    'Diagnose and fix LCP, CLS, and INP across WordPress, WooCommerce, Magento, nginx, and ASP.NET Core. A per-platform guide for each Core Web Vital.',
+  url: 'https://modpagespeed.com/core-web-vitals/',
+  publisher: { '@id': 'https://we-amp.com/#organization' },
+  mainEntity: {
+    '@type': 'ItemList',
+    name: 'Core Web Vitals fix guides by metric and platform',
+    numberOfItems: itemListElements.length,
+    itemListElement: itemListElements,
+  },
+};
+
+// FAQ — single source of truth for both the visible <dl> and the FAQPage
+// JSON-LD below. Targets the People-Also-Ask cluster around Core Web Vitals.
+// Keep questions and answers in sync; Google requires the schema to mirror
+// user-visible content.
+const faqEntries = [
+  {
+    q: 'What are the three Core Web Vitals?',
+    a: 'Largest Contentful Paint (LCP), which measures loading; Cumulative Layout Shift (CLS), which measures visual stability; and Interaction to Next Paint (INP), which measures responsiveness. INP replaced First Input Delay as a Core Web Vital in March 2024.',
+  },
+  {
+    q: 'What is a good Core Web Vitals score?',
+    a: 'A page passes when the 75th percentile of real users meets all three thresholds: LCP under 2.5 seconds, CLS under 0.1, and INP under 200 milliseconds. Meeting these at the 75th percentile means three out of four visits are good or better.',
+  },
+  {
+    q: 'Are Core Web Vitals a Google ranking factor?',
+    a: 'Yes. Core Web Vitals are part of Google’s page experience signals and contribute to ranking, though relevance and content quality remain far stronger signals. They are most likely to be a tie-breaker between pages of comparable relevance.',
+  },
+  {
+    q: 'How do I improve my Core Web Vitals?',
+    a: 'Fix the dominant cause of each metric: preload the LCP image and remove render-blocking CSS for LCP; set explicit image dimensions and reserve space for late content for CLS; and reduce long main-thread JavaScript tasks for INP. mod_pagespeed addresses the LCP and CLS causes automatically at the server layer; INP fixes usually live in your application code.',
+  },
+  {
+    q: 'What is the difference between lab and field Core Web Vitals data?',
+    a: 'Field data comes from real Chrome users over the trailing 28 days (the CrUX dataset) and is what Google uses for ranking. Lab data is a single synthetic test from Lighthouse or PageSpeed Insights. The two routinely disagree because real visitors run slower hardware on slower connections — optimize toward the field number.',
+  },
+  {
+    q: 'Can a server-side optimizer fix Core Web Vitals?',
+    a: 'It can fix LCP and CLS directly, because those are driven by how assets and markup are delivered — image transcoding, critical CSS, and injected image dimensions all apply below the CMS. INP is driven by your own JavaScript main-thread work, so a server-layer optimizer helps only indirectly, by reducing competing startup script.',
+  },
+];
+
+const faqJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: faqEntries.map((entry) => ({
+    '@type': 'Question',
+    name: entry.q,
+    acceptedAnswer: { '@type': 'Answer', text: entry.a },
+  })),
+};
+---
+
+<BaseLayout
+  title="Fix Core Web Vitals: LCP, CLS and INP by platform"
+  description="What a server optimizer fixes for LCP and CLS, and where INP lives — with per-platform guides for WordPress, WooCommerce, Magento, nginx, and ASP.NET Core."
+  jsonLd={[jsonLd, faqJsonLd]}
+>
+  <PageHero
+    id="cwv"
+    width="prose"
+    class="max-w-5xl"
+    eyebrow="Core Web Vitals"
+    title="Fix Core Web Vitals at the server layer"
+  >
+    <nav slot="before" class="mb-6 text-small text-text-annotation" aria-label="Breadcrumb">
+      <a href="/" class="hover:text-text-body">
+        Home
+      </a>
+      <span class="mx-1">/</span>
+      <span>Core Web Vitals</span>
+    </nav>
+    <Fragment slot="lede">
+      <p>
+        Core Web Vitals are the three field metrics Google uses to score loading, visual stability,
+        and responsiveness: Largest Contentful Paint (LCP), Cumulative Layout Shift (CLS), and
+        Interaction to Next Paint (INP). Each is defined below, with the concrete fix for WordPress,
+        WooCommerce, Magento, nginx, and ASP.NET Core.
+      </p>
+    </Fragment>
+    <div class="mt-8 flex flex-wrap gap-3">
+      <a href="/analyze/" class="btn-primary" data-umami-event="cta_cwv_hero_analyze">
+        Analyze a page &rarr;
+      </a>
+      <a href="/features/" class="btn-secondary" data-umami-event="cta_cwv_hero_features">
+        See what mod_pagespeed fixes
+      </a>
+    </div>
+  </PageHero>
+
+  <article class="container-prose max-w-5xl pb-16">
+    <!-- What each metric measures -->
+    <section>
+      <h2 class="h2-section text-text-body">What the three metrics measure</h2>
+      <p class="mt-4 text-text-body">
+        Each metric has a field measurement, taken from real Chrome users over the trailing 28 days
+        in the CrUX dataset, and a lab approximation from Lighthouse or{' '}
+        <a
+          href="/pagespeed-insights/"
+          class="text-interactive hover:text-interactive-hover underline"
+        >
+          PageSpeed Insights
+        </a>
+        . The two routinely disagree, because real visitors run slower hardware on slower
+        connections than the machine you test on. Optimize toward the field number.
+      </p>
+      <div class="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
+        <div class="rounded-card border border-border bg-bg-elevated p-6">
+          <p class="text-xs font-semibold uppercase tracking-wide text-interactive">
+            Largest Contentful Paint
+          </p>
+          <p class="mt-1 text-2xl font-bold text-text-body">LCP</p>
+          <p class="mt-3 text-sm text-text-muted">
+            The render time of the largest element visible in the viewport during load &mdash; often
+            a hero image, a banner, or the first heading. Under 2.5 s is good; over 4 s is poor.
+          </p>
+          <p class="mt-3 text-sm text-text-muted">
+            <span class="font-medium text-text-body">Typical causes:</span> the hero image is not
+            preloaded, a chain of render-blocking stylesheets delays first paint, or a large
+            unoptimized image takes too long to download.
+          </p>
+          <p class="mt-4 text-sm">
+            <a
+              href="/core-web-vitals/lcp/"
+              class="font-medium text-interactive hover:text-interactive-hover underline underline-offset-4"
+            >
+              Fix LCP &rarr;
+            </a>
+          </p>
+        </div>
+        <div class="rounded-card border border-border bg-bg-elevated p-6">
+          <p class="text-xs font-semibold uppercase tracking-wide text-interactive">
+            Cumulative Layout Shift
+          </p>
+          <p class="mt-1 text-2xl font-bold text-text-body">CLS</p>
+          <p class="mt-3 text-sm text-text-muted">
+            The sum of unexpected layout shifts during load, weighted by how much of the viewport
+            moved and how far. Under 0.1 is good; 0.25 and up is poor.
+          </p>
+          <p class="mt-3 text-sm text-text-muted">
+            <span class="font-medium text-text-body">Typical causes:</span> images and embeds
+            without explicit width and height, web fonts that reflow text on swap, and content
+            injected above what the user is already reading.
+          </p>
+          <p class="mt-4 text-sm">
+            <a
+              href="/core-web-vitals/cls/"
+              class="font-medium text-interactive hover:text-interactive-hover underline underline-offset-4"
+            >
+              Fix CLS &rarr;
+            </a>
+          </p>
+        </div>
+        <div class="rounded-card border border-border bg-bg-elevated p-6">
+          <p class="text-xs font-semibold uppercase tracking-wide text-interactive">
+            Interaction to Next Paint
+          </p>
+          <p class="mt-1 text-2xl font-bold text-text-body">INP</p>
+          <p class="mt-3 text-sm text-text-muted">
+            The worst-case latency between a user input &mdash; click, tap, keypress &mdash; and the
+            next frame the browser paints in response. Under 200 ms is good; over 500 ms is poor.
+          </p>
+          <p class="mt-3 text-sm text-text-muted">
+            <span class="font-medium text-text-body">Typical causes:</span> long JavaScript tasks
+            blocking the main thread, heavy event handlers, and frameworks whose interaction model
+            requires a round-trip before paint.
+          </p>
+          <p class="mt-4 text-sm">
+            <a
+              href="/core-web-vitals/inp/"
+              class="font-medium text-interactive hover:text-interactive-hover underline underline-offset-4"
+            >
+              Fix INP &rarr;
+            </a>
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Fix matrix: 3 metrics × 5 platforms -->
+    <section class="mt-16">
+      <h2 class="h2-section text-text-body">Per-platform fix guides</h2>
+      <p class="mt-4 text-text-body">
+        The same metric fails for different reasons on different stacks. Pick your platform and your
+        metric to read the diagnosis and the concrete fix.
+      </p>
+      <div
+        class="mt-8 overflow-x-auto"
+        tabindex="0"
+        role="region"
+        aria-labelledby="cwv-matrix-caption"
+      >
+        <table class="w-full border-collapse text-sm">
+          <caption id="cwv-matrix-caption" class="sr-only">
+            Core Web Vitals fix guides by metric (rows) and platform (columns)
+          </caption>
+          <thead>
+            <tr class="border-b border-border">
+              <th scope="col" class="py-3 pr-4 text-left font-semibold text-text-body">
+                Metric
+              </th>
+              {platforms.map((platform) => (
+                <th scope="col" class="px-3 py-3 text-left font-semibold text-text-body">
+                  {platform.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {metrics.map((metric) => (
+              <tr class="border-b border-border align-top">
+                <th scope="row" class="py-4 pr-4 text-left font-semibold text-text-body">
+                  <span class="block">{metric.abbr}</span>
+                  <span class="block text-xs font-normal text-text-annotation">{metric.name}</span>
+                </th>
+                {platforms.map((platform) => {
+                  const k = `${metric.key}-${platform.key}`;
+                  return (
+                    <td class="px-3 py-4">
+                      <a
+                        href={postHref(metric.key, platform.key)}
+                        class="group inline-flex flex-col gap-0.5 text-interactive hover:text-interactive-hover"
+                      >
+                        <span class="font-medium underline-offset-4 group-hover:underline">
+                          Fix {metric.abbr} on {platform.label}
+                          <span aria-hidden="true"> &rarr;</span>
+                        </span>
+                        <span class="text-xs font-normal text-text-annotation">
+                          {postTitles[k]}
+                        </span>
+                      </a>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- How mod_pagespeed helps (honest) -->
+    <section class="mt-16">
+      <h2 class="h2-section text-text-body">How mod_pagespeed helps</h2>
+      <p class="mt-4 text-text-body">
+        mod_pagespeed optimizes responses at the server layer, below the CMS, so a single
+        configuration applies to every URL the origin serves. That maps directly onto LCP and CLS.
+        It maps less directly onto INP, and this section says exactly why. For the same split by
+        resource type, see{' '}
+        <a
+          href="/pagespeed-optimization/"
+          class="text-interactive hover:text-interactive-hover underline"
+        >
+          which PageSpeed optimizations a server can automate
+        </a>
+        .
+      </p>
+
+      <div class="mt-8 space-y-4">
+        <div class="rounded-card border border-border bg-bg-elevated p-6">
+          <h3 class="font-semibold text-text-body">LCP &mdash; materially helped</h3>
+          <p class="mt-2 text-sm text-text-muted">
+            Heuristic critical CSS extraction inlines above-the-fold rules and defers the rest,
+            removing the render-blocking stylesheet chain that delays first paint. Image transcoding
+            to WebP and AVIF, plus responsive variants sized to the viewport, shrinks the hero image
+            so it downloads sooner. The detected LCP image receives a{' '}
+            <a
+              href="/blog/server-injected-resource-hints-speculation-rules/"
+              class="text-interactive hover:text-interactive-hover underline"
+            >
+              preload hint
+            </a>{' '}
+            so the browser starts fetching it earlier. Each of these attacks a distinct part of the
+            LCP timing breakdown.
+          </p>
+        </div>
+
+        <div class="rounded-card border border-border bg-bg-elevated p-6">
+          <h3 class="font-semibold text-text-body">CLS &mdash; materially helped</h3>
+          <p class="mt-2 text-sm text-text-muted">
+            The worker injects explicit width and height on{' '}
+            <code class="text-xs bg-bg-elevated px-1 rounded">&lt;img&gt;</code> tags that lack
+            them, using dimensions read from the cached image data. That lets the browser reserve
+            the correct layout box before pixels arrive, which removes the most common source of
+            image-driven layout shift. Inlined critical CSS also stabilizes early layout by making
+            above-the-fold styling available without waiting on external stylesheets.
+          </p>
+        </div>
+
+        <div class="rounded-card border border-accent/40 bg-accent-wash p-6">
+          <h3 class="font-semibold text-text-body">
+            INP &mdash; helped less directly, and here is why
+          </h3>
+          <p class="mt-2 text-sm text-text-muted">
+            INP is a measure of JavaScript main-thread responsiveness. The dominant cause of poor
+            INP is long tasks in your own application code &mdash; event handlers, hydration,
+            framework work &mdash; and a server-layer optimizer does not rewrite that logic.
+            mod_pagespeed will not make a slow click handler fast.
+          </p>
+          <p class="mt-3 text-sm text-text-muted">
+            What it can do is reduce how much JavaScript competes for the main thread before the
+            user interacts:{' '}
+            <a
+              href="/blog/safe-javascript-minification-semicolon-insertion/"
+              class="text-interactive hover:text-interactive-hover underline"
+            >
+              minifying scripts
+            </a>{' '}
+            and deferring those it can prove are safe to defer moves parser-blocking work off the
+            critical path, which can lower INP on pages whose responsiveness was being throttled by
+            startup script execution. Where INP is structural &mdash; for example a Blazor Server
+            interaction that is a network round-trip by design, or a heavy client framework &mdash;
+            the fix lives in your application, not in the server layer. The per-platform guides
+            above are explicit about which case you are in.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- FAQ — visible Q&A mirrors the FAQPage JSON-LD -->
+    <section class="mt-16">
+      <h2 class="h2-section text-text-body">Core Web Vitals: common questions</h2>
+      <dl class="mt-8 space-y-6">
+        {faqEntries.map((entry) => (
+          <div class="border-b border-border pb-6">
+            <dt class="font-semibold text-text-body">{entry.q}</dt>
+            <dd class="mt-2 text-sm text-text-muted" set:html={entry.a} />
+          </div>
+        ))}
+      </dl>
+    </section>
+
+    <!-- CTA -->
+    <section class="mt-16">
+      <div class="rounded-card border border-border bg-bg-secondary p-6 md:p-8">
+        <h2 class="h2-section text-text-body">Measure your own pages</h2>
+        <p class="mt-3 text-text-body">
+          Start with a measurement, not a guess. Run a page through the analyzer to see what is
+          driving its Core Web Vitals, then read the matching per-platform guide. When you are ready
+          to fix it at the server layer, download and run mod_pagespeed &mdash; it optimizes
+          immediately, and it is free in development and in production.
+        </p>
+        <div class="mt-6 flex flex-wrap gap-3">
+          <a href="/analyze/" class="btn-primary" data-umami-event="cta_cwv_analyze">
+            Analyze a page
+          </a>
+          <a href="/pricing/" class="btn-secondary" data-umami-event="cta_cwv_pricing">
+            See support pricing
+            <span aria-hidden="true">&rarr;</span>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- See also -->
+    <section class="mt-16 border-t border-border pt-8">
+      <p class="text-base font-semibold uppercase tracking-wide text-text-body">See also:</p>
+      <ul class="mt-4 space-y-2 text-sm">
+        <li>
+          <a href="/features/" class="text-interactive hover:text-interactive-hover underline">
+            mod_pagespeed features
+          </a>{' '}
+          &mdash; image transcoding, critical CSS, minification, and variant-aware caching
+        </li>
+        <li>
+          <a
+            href="/blog/critical-css-heuristics/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            Critical CSS without a headless browser
+          </a>{' '}
+          &mdash; the heuristic behind the LCP and CLS wins above
+        </li>
+        <li>
+          <a
+            href="/blog/server-side-critical-css-nginx/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            Server-side critical CSS on nginx
+          </a>{' '}
+          &mdash; the same approach, configured in nginx
+        </li>
+        <li>
+          <a
+            href="/blog/reduce-ttfb-server-layer-2026/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            Reduce TTFB at the server layer
+          </a>{' '}
+          &mdash; the slow first byte that delays every Core Web Vital, fixed before you reach for a
+          CDN
+        </li>
+      </ul>
+    </section>
+  </article>
+</BaseLayout>

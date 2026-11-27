@@ -1,0 +1,74 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Copyright (c) 2024-2026 We-Amp B.V. */
+
+/* PageSpeed E2E Responsive Stylesheet - intentionally unminified */
+
+/* Base responsive styles */
+.responsive-container  {
+  width:  100%;
+  box-sizing:  border-box;
+  padding:  10px;
+}
+
+.content-section  {
+  margin:  20px  0;
+}
+
+/* Mobile styles */
+@media  ( max-width:  480px )  {
+  .responsive-container  {
+    padding:  5px;
+  }
+
+  .hero  h1  {
+    font-size:  1.5rem;
+  }
+
+  .hero  p  {
+    font-size:  1rem;
+  }
+
+  main  {
+    padding:  10px;
+  }
+
+  .desktop-only  {
+    display:  none;
+  }
+}
+
+/* Tablet styles */
+@media  ( min-width:  481px )  and  ( max-width:  1024px )  {
+  .responsive-container  {
+    padding:  15px;
+  }
+
+  .hero  h1  {
+    font-size:  2rem;
+  }
+
+  main  {
+    max-width:  720px;
+    margin:  0  auto;
+  }
+}
+
+/* Desktop styles */
+@media  ( min-width:  1025px )  {
+  .responsive-container  {
+    padding:  20px;
+  }
+
+  .hero  h1  {
+    font-size:  2.5rem;
+  }
+
+  main  {
+    max-width:  960px;
+    margin:  0  auto;
+  }
+
+  .mobile-only  {
+    display:  none;
+  }
+}

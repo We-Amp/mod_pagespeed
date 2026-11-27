@@ -1,0 +1,151 @@
+<!-- SPDX-License-Identifier: Apache-2.0
+     Copyright (c) 2024-2026 We-Amp B.V. -->
+
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <IsTrimmable>true</IsTrimmable>
+    <IsAotCompatible>true</IsAotCompatible>
+    <!--
+      Enable the Microsoft.Extensions.Configuration source generator so that
+      BindConfiguration<TOptions>() in PageSpeedServiceCollectionExtensions
+      compiles to a generated binder rather than a reflection-based one.
+      Without this, BindConfiguration trips IL2026/IL3050 under trimming/AOT.
+      net8+ only — both target TFMs qualify.
+    -->
+    <EnableConfigurationBindingGenerator>true</EnableConfigurationBindingGenerator>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <RootNamespace>WeAmp.PageSpeed.AspNetCore</RootNamespace>
+    <Title>WeAmp.PageSpeed for ASP.NET Core — Core Web Vitals middleware</Title>
+    <Description>The mod_pagespeed engine for ASP.NET Core: drop-in middleware that improves Core Web Vitals without touching your app code, with critical CSS inlining, LCP preload, lazy loading, and on-demand WebP/AVIF transcoding on every HTML response. The C++23 engine runs in-process via P/Invoke. Single-package install with transitive native binaries for linux-x64, linux-arm64, osx-arm64, and win-x64.</Description>
+    <PackageTags>aspnetcore middleware pagespeed mod-pagespeed mod_pagespeed web-performance core-web-vitals web-vitals lcp inp cls webp avif image-optimization critical-css lazy-loading lighthouse performance weamp</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="WeAmp.PageSpeed.AspNetCore.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../WeAmp.PageSpeed/WeAmp.PageSpeed.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.IO.RecyclableMemoryStream" Version="3.*" />
+  </ItemGroup>
+
+  <!--
+    Embedded /console/ SPA.
+
+    The SvelteKit web-shell builds into
+      tools/workbench/packages/web-shell/dist/
+    (relative to the repo root). We embed every file there as a manifest
+    resource under the logical name prefix "WeAmp.PageSpeed.AspNetCore.Console/"
+    so that ConsoleMiddleware can look them up by their POSIX relative path.
+
+    LogicalName needs to be a POSIX path; %(RecursiveDir) is "\"-separated
+    on Windows, so we translate it. The MSBuild property-function call is
+    evaluated per-file via metadata indirection.
+  -->
+  <PropertyGroup>
+    <WebShellRoot>$(MSBuildThisFileDirectory)..\..\..\..\tools\workbench\packages\web-shell</WebShellRoot>
+    <WebShellDist>$(WebShellRoot)\dist</WebShellDist>
+    <!-- Embedded-console size gate (bytes). The SPA is currently ~750 KB.
+         Bumping past this means somebody added a heavy asset; review first. -->
+    <WebShellSizeMaxBytes>5242880</WebShellSizeMaxBytes>
+  </PropertyGroup>
+
+  <!--
+    Build the SvelteKit SPA before the .NET compile step so the dist/
+    directory exists when we glob it for EmbeddedResource. Skipped when
+    WebShellSkipBuild=true (CI release builds set this after running the
+    workbench build out-of-band so we don't shell out to pnpm twice).
+  -->
+  <Target Name="BuildWebShell"
+          BeforeTargets="BeforeBuild;AssignTargetPaths"
+          Condition="'$(WebShellSkipBuild)' != 'true' AND !Exists('$(WebShellDist)\index.html')">
+    <Message Importance="high"
+             Text="Building workbench SPA at $(WebShellRoot) ..." />
+    <Exec Command="pnpm -C &quot;$(WebShellRoot)&quot; build"
+          WorkingDirectory="$(WebShellRoot)" />
+  </Target>
+
+  <!--
+    Hard-fail when WebShellSkipBuild=true is set but the dist/ wasn't
+    produced out-of-band. Otherwise EmbedWebShell silently no-ops and the
+    .nupkg ships without the /console/ SPA — every customer sees 503 from
+    ConsoleMiddleware at runtime. Belt-and-braces alongside the CI guard
+    in release.yml.
+  -->
+  <Target Name="RequireWebShellDist"
+          BeforeTargets="EmbedWebShell"
+          Condition="'$(WebShellSkipBuild)' == 'true' AND !Exists('$(WebShellDist)\index.html')">
+    <Error Text="WebShellSkipBuild=true but $(WebShellDist)\index.html is missing. Run 'pnpm -C $(WebShellRoot) build' before 'dotnet pack', or unset WebShellSkipBuild." />
+  </Target>
+
+  <!--
+    Pull the built files into the assembly as embedded resources with a
+    POSIX LogicalName. Evaluated dynamically so the BuildWebShell target
+    above can populate dist/ before this runs.
+
+    The MSBuild property function `[System.String]::new(...)` wraps the
+    `%(RecursiveDir)` metadata value so we can call `.Replace('\','/')`
+    on it. Replaces the obsolete `[System.String]::Copy(...)` form
+    (removed-in-.NET-7+ obsoletion). The replace is a no-op on POSIX
+    runners; needed on Windows where %(RecursiveDir) is "\"-separated.
+  -->
+  <Target Name="EmbedWebShell"
+          BeforeTargets="AssignTargetPaths;CoreResGen"
+          DependsOnTargets="BuildWebShell"
+          Condition="Exists('$(WebShellDist)\index.html')">
+    <ItemGroup>
+      <_WebShellFile Include="$(WebShellDist)\**\*.*" />
+      <EmbeddedResource Include="@(_WebShellFile)">
+        <LogicalName>WeAmp.PageSpeed.AspNetCore.Console/$([System.String]::new('%(RecursiveDir)').Replace('\','/'))%(Filename)%(Extension)</LogicalName>
+      </EmbeddedResource>
+    </ItemGroup>
+  </Target>
+
+  <UsingTask TaskName="CheckWebShellSizeTask"
+             TaskFactory="RoslynCodeTaskFactory"
+             AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <Root ParameterType="System.String" Required="true" />
+      <MaxBytes ParameterType="System.Int64" Required="true" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System.IO" />
+      <Code Type="Fragment" Language="cs"><![CDATA[
+        long total = 0;
+        if (Directory.Exists(Root))
+        {
+            foreach (var f in Directory.EnumerateFiles(Root, "*", SearchOption.AllDirectories))
+            {
+                total += new FileInfo(f).Length;
+            }
+        }
+        Log.LogMessage(MessageImportance.High,
+            $"Embedded /console/ SPA size: {total:N0} bytes (limit {MaxBytes:N0}).");
+        if (total > MaxBytes)
+        {
+            Log.LogError(
+                $"Embedded /console/ SPA is {total:N0} bytes, which exceeds the " +
+                $"WebShellSizeMaxBytes={MaxBytes:N0} ceiling. Trim assets or bump the limit deliberately.");
+        }
+      ]]></Code>
+    </Task>
+  </UsingTask>
+
+  <Target Name="CheckWebShellSize"
+          AfterTargets="EmbedWebShell"
+          Condition="Exists('$(WebShellDist)\index.html')">
+    <CheckWebShellSizeTask
+        Root="$(WebShellDist)"
+        MaxBytes="$(WebShellSizeMaxBytes)" />
+  </Target>
+
+</Project>

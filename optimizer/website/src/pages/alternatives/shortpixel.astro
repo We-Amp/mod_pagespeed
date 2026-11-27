@@ -1,0 +1,418 @@
+---
+import { OG_DEFAULT_IMAGE_URL } from '../../data/og-image';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PageHero from '../../components/PageHero.astro';
+import CompareTable from '../../components/vs/CompareTable.astro';
+import { offerJsonLd } from '../../data/offer-jsonld';
+import { productJsonLd } from '../../data/software-jsonld';
+import {
+  editionClause,
+  FREE_TO_RUN_LINE,
+  NGINX_APT_SHORT_NBSP,
+  NGINX_RPM_SHORT,
+} from '../../data/product-facts.mjs';
+
+const rows = [
+  {
+    label: 'Deployment',
+    mps: 'Self-hosted (module + optimizer worker)',
+    other: 'WordPress plugin + ShortPixel service/CDN (as of 2026)',
+  },
+  {
+    label: 'Scope',
+    mps: 'Full HTML pipeline at the server layer',
+    other: 'Image optimization first; Adaptive Images adds CSS/JS/font minification (as of 2026)',
+  },
+  {
+    label: 'Platform',
+    mps: 'Native module for Apache and nginx, reverse-proxy mode in front of any HTTP origin, or ASP.NET Core middleware. The IIS package ships as a signed installer on the mod_pagespeed GitHub release.',
+    other: 'WordPress plugins; API + PHP/.NET/Node libraries for other stacks (as of 2026)',
+  },
+  {
+    label: 'Pricing model',
+    mps: 'Free (Apache-2.0); paid support optional',
+    other: 'Credit-based; free tier, monthly, and one-time credit packs (see vendor)',
+  },
+  {
+    label: 'Image optimization',
+    mps: `${editionClause(['WebP', 'AVIF'])} &mdash; responsive variants at origin`,
+    other: 'WebP, AVIF, resizing, lazy load; can be delivered from ShortPixel&rsquo;s CDN',
+  },
+  {
+    label: 'Where images are served from',
+    mps: 'Your origin &mdash; images never leave your servers',
+    other: 'Your origin, or offloaded to ShortPixel&rsquo;s CDN (optional, as of 2026)',
+  },
+  {
+    label: 'Critical CSS injection',
+    mps: 'yes',
+    other: 'Not a primary focus (image-optimization product)',
+  },
+  {
+    label: 'JS / CSS minification',
+    mps: 'yes',
+    other: 'Yes via Adaptive Images (CSS/JS/font minify, as of 2026)',
+  },
+  {
+    label: 'HTML rewriting',
+    mps: 'yes',
+    other: 'Rewrites image markup; not a full HTML pipeline',
+  },
+  {
+    label: 'Caching',
+    mps: 'Cyclone cache, zero-copy mmap serving from nginx',
+    other: 'CDN edge caching for optimized assets (when CDN is used)',
+  },
+  {
+    label: 'CWV optimization',
+    mps: 'LCP, render-blocking, image bytes; CLS from unsized images',
+    other: 'LCP via lighter images + responsive variants; image-led',
+  },
+  {
+    label: 'Measured page-size reduction',
+    mps: '<span class="font-mono tabular-nums font-semibold text-success">&minus;68%</span> on our own pages (server-layer pipeline)',
+    other: 'Strong on image-heavy pages; depends on the image share of page weight',
+    highlight: true,
+  },
+  {
+    label: 'License',
+    mps: 'Licensed under the Apache License&nbsp;2.0. The software is free. We sell support; the software and its signed packages are the same for everyone. See the <a href="/license/" class="text-interactive hover:text-interactive-hover underline">software license</a>.',
+    other: 'Plugins open source on WordPress.org; service/API proprietary',
+  },
+  {
+    label: 'Control over data',
+    mps: 'Your servers; nothing leaves your origin',
+    other: 'Images processed by ShortPixel; CDN delivery is third-party (as of 2026)',
+  },
+  {
+    label: 'Configuration surface',
+    mps: 'nginx config + management endpoint',
+    other: 'wp-admin UI; API for non-WordPress integrations',
+  },
+];
+
+const jsonLd = [
+  await productJsonLd({
+    image: OG_DEFAULT_IMAGE_URL,
+    description:
+      'ShortPixel is a WordPress image-optimization plugin plus an Adaptive Images CDN/API. mod_pagespeed runs at the server layer (nginx/Apache), is CMS-independent, and optimizes the full HTML/CSS/JS pipeline at your origin.',
+    offers: offerJsonLd({ url: 'https://modpagespeed.com/pricing/' }),
+  }),
+];
+---
+
+<BaseLayout
+  title="mod_pagespeed vs ShortPixel: self-hosted alternative"
+  description="A self-hosted ShortPixel alternative for WordPress and any CMS: mod_pagespeed optimizes images and the whole page at your origin. No third-party CDN."
+  jsonLd={jsonLd}
+>
+  <PageHero
+    id="shortpixel-title"
+    width="prose"
+    class="max-w-3xl"
+    title="mod_pagespeed vs ShortPixel"
+  >
+    <nav slot="before" class="mb-6 text-small text-text-annotation" aria-label="Breadcrumb">
+      <a href="/" class="hover:text-text-body">
+        Home
+      </a>
+      <span class="mx-1">/</span>
+      <a href="/alternatives/" class="hover:text-text-body">
+        Alternatives
+      </a>
+      <span class="mx-1">/</span>
+      <span>vs ShortPixel</span>
+    </nav>
+  </PageHero>
+
+  <article class="container-prose max-w-3xl pb-16">
+    <section>
+      <h2 class="h2-section text-text-body">TL;DR</h2>
+      <p class="mt-4 text-text-body">
+        ShortPixel is an image-optimization product. It ships as WordPress plugins &mdash; the Image
+        Optimizer (compress, WebP/AVIF conversion) and Adaptive Images (on-the-fly resizing,
+        next-gen formats, CSS/JS/font minification, optional delivery from ShortPixel&rsquo;s CDN)
+        &mdash; plus an API and libraries for other stacks. Its center of gravity is images.
+        mod_pagespeed runs at the server layer, below the CMS, and optimizes the full HTML/CSS/JS
+        pipeline of whatever the origin emits &mdash; with images generated and served from your own
+        servers. If you mainly need image optimization on WordPress and don&rsquo;t mind a
+        credit-based service that can offload images to a third-party CDN, ShortPixel is a strong
+        fit. If you want optimization that lives in nginx, covers the whole page, and keeps every
+        byte at your origin, mod_pagespeed is the architectural alternative.
+      </p>
+    </section>
+
+    <section class="mt-12">
+      <h2 id="at-a-glance" class="h2-section text-text-body">
+        At a glance
+      </h2>
+      <div class="mt-4">
+        <CompareTable competitor="ShortPixel" rows={rows} labelledBy="at-a-glance" />
+      </div>
+    </section>
+
+    <section class="mt-12">
+      <h2 class="h2-section text-text-body">When to choose ShortPixel</h2>
+      <ul class="mt-4 space-y-2 list-disc pl-6 text-text-body">
+        <li>
+          Your pages are image-heavy and image weight is the main thing standing between you and
+          your Core Web Vitals targets. ShortPixel is purpose-built for that.
+        </li>
+        <li>
+          You&rsquo;re on WordPress and want a plugin you can install and configure from wp-admin.
+          No nginx editing, no Docker.
+        </li>
+        <li>
+          You want optimized images served from a global CDN and are happy to offload image delivery
+          to ShortPixel&rsquo;s edge network rather than serve from your own origin.
+        </li>
+        <li>
+          A credit-based model fits your traffic &mdash; a free tier to start, with monthly or
+          one-time credit packs as you grow (see the vendor for current limits).
+        </li>
+        <li>
+          You don&rsquo;t need server-level critical CSS or a full HTML pipeline; lighter images
+          plus Adaptive Images&rsquo; CSS/JS minification are enough for your goals.
+        </li>
+      </ul>
+    </section>
+
+    <section class="mt-12">
+      <h2 class="h2-section text-text-body">When to choose mod_pagespeed</h2>
+      <ul class="mt-4 space-y-2 list-disc pl-6 text-text-body">
+        <li>
+          You want the whole page optimized, not just images &mdash; critical CSS extraction,
+          render-blocking deferral, JS/CSS rewriting, and image variants in one{' '}
+          <a href="/features/" class="text-interactive hover:text-interactive-hover underline">
+            server-layer pipeline
+          </a>
+          .
+        </li>
+        <li>
+          You&rsquo;re not on WordPress, or you run a mix of platforms. mod_pagespeed works on any
+          CMS because it operates below the CMS.
+        </li>
+        <li>
+          You want images generated and served from your own origin. With mod_pagespeed, image bytes
+          never leave your servers &mdash; there is no third-party CDN in the request path unless
+          you add one.
+        </li>
+        <li>
+          You prefer no per-request or per-GB bill at all — the software is free — rather than a
+          credit balance that tracks traffic or optimization volume.
+        </li>
+        <li>
+          You care about origin-side image variant generation &mdash; WebP and AVIF &mdash; and want
+          the format chosen from the request&rsquo;s
+          <code>Accept</code> header, not predetermined at upload time.
+        </li>
+      </ul>
+    </section>
+
+    <section class="mt-12">
+      <h2 class="h2-section text-text-body">How they overlap</h2>
+      <p class="mt-4 text-text-body">
+        Both products convert images to WebP and{' '}
+        <a
+          href="/blog/avif-vs-webp-2026/"
+          class="text-interactive hover:text-interactive-hover underline"
+        >
+          AVIF
+        </a>
+        , generate responsive variants, and can lazy load below-the-fold images. ShortPixel&rsquo;s
+        Adaptive Images also minifies CSS and JS, which overlaps with mod_pagespeed&rsquo;s asset
+        rewriting. For an image-heavy WordPress page, the before/after numbers can land in a similar
+        range.
+      </p>
+      <p class="mt-4 text-text-body">
+        The difference shows up in scope and location. ShortPixel is image-led and can serve those
+        images from its own CDN; mod_pagespeed optimizes the full HTML/CSS/JS pipeline and keeps
+        every byte at your origin. The gap widens when image weight is only part of your page-size
+        problem, or when you want one optimization layer that applies to every response your server
+        emits.
+      </p>
+      <p class="mt-4 text-text-body">
+        You can also run them together: ShortPixel handling images inside WordPress, mod_pagespeed
+        in nginx for the rest of the pipeline. They don&rsquo;t conflict if configured to avoid
+        double-processing the same images. Most operators pick one.
+      </p>
+    </section>
+
+    <section class="mt-12">
+      <h2 id="migrating-from-shortpixel-to-modpagespeed" class="h2-section text-text-body">
+        Migrating from ShortPixel to mod_pagespeed
+      </h2>
+      <p class="mt-4 text-text-body">
+        Migration is reasonable if your stack diversified beyond WordPress, if you want optimization
+        that covers the whole page rather than mainly images, or if you want image generation and
+        delivery to stay at your own origin instead of a third-party CDN.
+      </p>
+      <p class="mt-4 text-text-body">
+        mod_pagespeed is the better fit when the optimization layer needs to outlive any one CMS,
+        apply to non-image and non-WordPress responses, or keep image bytes on infrastructure you
+        control.
+      </p>
+      <p class="mt-4 text-text-body">If you do migrate:</p>
+      <ol class="mt-3 space-y-2 list-decimal pl-6 text-text-body">
+        <li>
+          Disable ShortPixel&rsquo;s image rewriting (and Adaptive Images&rsquo; CSS/JS
+          minification) before enabling mod_pagespeed, so the two don&rsquo;t double-process the
+          same assets.
+        </li>
+        <li>
+          If you used ShortPixel&rsquo;s CDN for image delivery, decide whether you still want a
+          CDN. mod_pagespeed serves optimized images from your origin; you can put any CDN in front
+          of nginx if you want edge caching.
+        </li>
+        <li>
+          Verify mod_pagespeed&rsquo;s filter set produces the optimizations you relied on (WebP and
+          AVIF conversion, responsive variants, lazy load) plus the ones ShortPixel didn&rsquo;t
+          cover (critical CSS). The{' '}
+          <a
+            href="/blog/server-side-critical-css-nginx/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            server-side critical CSS in nginx
+          </a>{' '}
+          post walks through the setup.
+        </li>
+        <li>
+          Keep WordPress&rsquo;s own object cache and database cache; mod_pagespeed doesn&rsquo;t
+          replace those.
+        </li>
+      </ol>
+    </section>
+
+    <section class="mt-12">
+      <h2 class="h2-section text-text-body">Code &amp; config side-by-side</h2>
+      <p class="mt-4 text-text-body">
+        <strong>Enabling image optimization in ShortPixel</strong>: install the plugin and connect a
+        ShortPixel API key in <code>wp-admin &rarr; Settings &rarr; ShortPixel</code>, then choose
+        WebP/AVIF and (for Adaptive Images) CDN delivery. No server config.
+      </p>
+      <p id="config-1" class="mt-4 text-text-body">
+        <strong>Equivalent in mod_pagespeed.</strong> Install the nginx module on
+        {NGINX_APT_SHORT_NBSP} (amd64 + arm64), or AlmaLinux/RHEL/Rocky&nbsp;{NGINX_RPM_SHORT}:
+      </p>
+      <pre
+        tabindex="0"
+        role="region"
+        aria-labelledby="config-1"
+        class="mt-3 overflow-x-auto rounded bg-bg-secondary p-4 text-sm sm:text-xs leading-snug text-text-body"
+      ><code>curl -fsSL https://packages.modpagespeed.com/install.sh | sudo sh
+sudo apt install nginx-module-pagespeed   # or: sudo dnf install nginx-module-pagespeed</code></pre>
+      <p id="config-2" class="mt-4 text-text-body">
+        Then enable the filters (nginx config; images are optimized and served from your origin,
+        alongside the rest of the pipeline):
+      </p>
+      <pre
+        tabindex="0"
+        role="region"
+        aria-labelledby="config-2"
+        class="mt-3 overflow-x-auto rounded bg-bg-secondary p-4 text-sm sm:text-xs leading-snug text-text-body"
+      ><code>pagespeed on;
+pagespeed RewriteLevel CoreFilters;
+pagespeed EnableFilters convert_jpeg_to_webp,recompress_images,resize_images,lazyload_images,prioritize_critical_css;
+pagespeed FileCachePath /var/cache/pagespeed;</code></pre>
+      <p class="mt-4 text-text-body">
+        Both produce next-gen image formats and responsive variants. The difference is where the
+        work happens &mdash; a connected service that can serve from ShortPixel&rsquo;s CDN, or an
+        nginx module that keeps every byte at your origin and optimizes the whole page.
+      </p>
+    </section>
+
+    <section class="mt-12">
+      <div class="rounded-card border border-border bg-bg-secondary p-6 md:p-7">
+        <h2 class="h2-section text-text-body">Switching from ShortPixel</h2>
+        <p class="mt-3 text-text-body">
+          Server-layer optimization that covers the whole page &mdash; not just images &mdash; and
+          keeps every byte at your origin. On our own pages it measures
+          <span class="font-mono tabular-nums font-semibold text-success">&minus;68%</span> page
+          size. Install and run it. {FREE_TO_RUN_LINE}
+        </p>
+        <div class="mt-5 flex flex-wrap gap-3">
+          <a href="/download/" class="btn-primary" data-umami-event="cta_vs_shortpixel_install">
+            Download &amp; run
+          </a>
+          <a
+            href="/pricing/"
+            class="rounded-md border border-border-strong px-4 py-2 text-sm font-medium text-text-body hover:border-border-strong"
+            data-umami-event="cta_vs_shortpixel_buy"
+          >
+            Support pricing
+          </a>
+          <a
+            href="#migrating-from-shortpixel-to-modpagespeed"
+            class="rounded-md border border-border-strong px-4 py-2 text-sm font-medium text-text-body hover:border-border-strong"
+            data-umami-event="cta_vs_shortpixel_migrate"
+          >
+            See the migration steps &rarr;
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <section class="mt-12 border-t border-border pt-8">
+      <p class="text-base font-semibold uppercase tracking-wide text-text-body">See also:</p>
+      <ul class="mt-4 space-y-2 text-sm">
+        <li>
+          <a
+            href="/alternatives/imgix/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            mod_pagespeed vs imgix
+          </a>{' '}
+          &mdash; managed image-CDN alternative
+        </li>
+        <li>
+          <a
+            href="/alternatives/cloudinary/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            mod_pagespeed vs Cloudinary
+          </a>{' '}
+          &mdash; media optimization SaaS alternative
+        </li>
+        <li>
+          <a
+            href="/self-hosted-image-optimization/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            Self-hosted image optimization
+          </a>{' '}
+          &mdash; image work that keeps every byte at your origin
+        </li>
+        <li>
+          <a
+            href="/alternatives/wp-rocket/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            mod_pagespeed vs WP Rocket
+          </a>{' '}
+          &mdash; WordPress performance plugin alternative
+        </li>
+        <li>
+          <a href="/wordpress/" class="text-interactive hover:text-interactive-hover underline">
+            mod_pagespeed on WordPress
+          </a>{' '}
+          &mdash; server-layer image and page optimization behind any WordPress site
+        </li>
+        <li>
+          <a
+            href="/alternatives/mod-pagespeed/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            Alternatives to mod_pagespeed
+          </a>{' '}
+          &mdash; for readers searching for a mod_pagespeed replacement
+        </li>
+      </ul>
+    </section>
+
+    <p class="mt-10 text-xs text-text-annotation">
+      ShortPixel and other product names are trademarks of their respective owners. Comparisons
+      reflect publicly available information as of 2026 and are provided for evaluation; We-Amp B.V.
+      is not affiliated with or endorsed by ShortPixel.
+    </p>
+  </article>
+</BaseLayout>

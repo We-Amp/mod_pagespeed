@@ -1,0 +1,96 @@
+# Regenerate the /examples/ gallery's before/after data from the live
+# mod_pagespeed 1.1 demo, on demand. Run this after editing the demo example
+# pages or upgrading 1.1 on the demo host — the only things that change the data.
+#
+# Manual (workflow_dispatch) by design, NOT scheduled: the demo content is static,
+# so an unprompted run has nothing to refresh — and a cold-cache run measures
+# `settled`/`diff` differently from the warm-generated committed baseline, which
+# would file false-positive drift issues every week. Instead we warm the demo
+# cache first, then measure, so a deliberate run is reproducible.
+#
+# The generator ignores measurement jitter (poll counts + summed subresource
+# bytes wobble as nested CSS/image optimizations settle), so the file only
+# changes on a *material* signal — source diff, `settled`, or the requests delta.
+# When that happens we file/refresh a single idempotent ISSUE (Actions can't open
+# PRs here, and issues beat red-run emails); a human re-runs the
+# generator locally, commits, and redeploys.
+#
+# First-party actions only (actions/*), GitHub-hosted runner: a lightweight
+# network-only job.
+name: Refresh examples gallery data
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: refresh-examples-gallery
+  cancel-in-progress: false
+
+env:
+  # Opt into the Node 24 action runtime ahead of GitHub's forced 2026-06-16
+  # Node 20 cutover. Drop once all actions target Node 24+.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  DRIFT_TITLE: 'Examples gallery data has drifted from the live demo'
+
+jobs:
+  refresh:
+    permissions:
+      contents: read
+      issues: write
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24' # native TypeScript import of examples.ts (no build step needed)
+
+      # Warm the demo's cache first (resource filters settle on a second view),
+      # then discard this pass's output so the real measurement below compares
+      # against the committed baseline — not against its own cold-cache run.
+      - name: Warm the demo cache
+        run: |
+          node tools/examples-gallery/generate.mjs || true
+          git checkout -- website/src/data/examples-data.json
+
+      - name: Regenerate examples-data.json from the warm demo
+        run: node tools/examples-gallery/generate.mjs
+
+      - name: Detect material drift
+        id: drift
+        run: |
+          if git diff --quiet -- website/src/data/examples-data.json; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No material change in examples-data.json — nothing to do."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git --no-pager diff --stat -- website/src/data/examples-data.json
+          fi
+
+      - name: File / refresh the drift issue
+        if: steps.drift.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          body="The scheduled refresh found a materially different before/after for one or more /examples/ filters (source diff, \`settled\`, or requests delta changed — measurement-byte jitter is ignored). To apply: run \`node tools/examples-gallery/generate.mjs\` from the repository root, commit \`website/src/data/examples-data.json\`, then redeploy the site. Auto-closes on the next clean run; see this run's logs for the changed entries."
+          existing=$(gh issue list --state open --search "${DRIFT_TITLE} in:title" --json number --jq '.[0].number' || true)
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "Still drifting as of $(date -u +%Y-%m-%dT%H:%MZ)."
+          else
+            gh issue create --title "$DRIFT_TITLE" --body "$body"
+          fi
+
+      - name: Close the drift issue on a clean run
+        if: steps.drift.outputs.changed == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          n=$(gh issue list --state open --search "${DRIFT_TITLE} in:title" --json number --jq '.[0].number' || true)
+          if [ -n "$n" ]; then
+            gh issue close "$n" --comment "Clean run — gallery data matches the live demo again. Auto-closing."
+          fi

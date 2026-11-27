@@ -1,0 +1,63 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// Renders a compatibility-matrix snippet (web-server versions / OS / distros)
+// for a given release line, sourced from the release manifest.
+// Used by docs pages that previously hand-maintained these strings.
+//
+// `surface` filters which row to show:
+//   "nginx"  → nginx version label
+//   "apache" → Apache version label + supported distros
+//   "iis"    → IIS version label + Windows Server versions
+//   "all"    → bullet list across nginx + Apache + IIS
+
+import { getRelease } from '../../lib/release';
+
+interface Props {
+  line: '1.1' | '2.0';
+  surface?: 'nginx' | 'apache' | 'iis' | 'all';
+  /** Render as a plain inline string instead of a bullet list. */
+  inline?: boolean;
+}
+
+const { line, surface = 'all', inline = false } = Astro.props;
+const rel = await getRelease(line);
+
+// nginx version: the 1.15 native module is built per-distro, each .so pinned to
+// that distribution's stock nginx (Debian 11 / Ubuntu 22.04 = 1.18.0 LTS through
+// Debian 13 = 1.26.3) — nginx's --with-compat does not relax the exact-version
+// check, so there is no single "1.26+" range. See product-facts.mjs
+// NGINX_APT_DISTROS for the matrix. NOTE: this component is currently unused; if
+// revived, make this line-aware (2.0 bundles nginx 1.30.2 in its image).
+const nginxVersion = '1.18.0–1.26.3 (per-distro, exact-pinned)';
+
+const lines: Record<'nginx' | 'apache' | 'iis', string> = {
+  nginx: `nginx ${nginxVersion}`,
+  apache: `Apache ${rel.compat.apache.apache_versions.join('/')} on ${[
+    ...rel.compat.apache.deb_distros,
+    ...rel.compat.apache.rpm_distros,
+  ].join(', ')}`,
+  iis: `IIS ${rel.compat.iis.iis_versions.join('/')} on ${rel.compat.iis.os.join(', ')}`,
+};
+---
+
+{surface === 'all' && !inline && (
+  <ul>
+    <li>
+      <strong>nginx:</strong> {lines.nginx}
+    </li>
+    <li>
+      <strong>Apache:</strong> {lines.apache}
+    </li>
+    <li>
+      <strong>IIS:</strong> {lines.iis}
+    </li>
+  </ul>
+)}
+{surface === 'all' && inline && (
+  <Fragment>
+    {lines.nginx} &middot; {lines.apache} &middot; {lines.iis}
+  </Fragment>
+)}
+{surface !== 'all' && <Fragment>{lines[surface]}</Fragment>}

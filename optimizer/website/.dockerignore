@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.git/
+tests/
+.env
+.env.*
+*.log
+.astro/
+.vscode/
+.idea/
+playwright-report/
+test-results/

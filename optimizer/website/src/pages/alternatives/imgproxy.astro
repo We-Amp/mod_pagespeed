@@ -1,0 +1,353 @@
+---
+import { OG_DEFAULT_IMAGE_URL } from '../../data/og-image';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PageHero from '../../components/PageHero.astro';
+import CompareTable from '../../components/vs/CompareTable.astro';
+import { offerJsonLd } from '../../data/offer-jsonld';
+import { productJsonLd } from '../../data/software-jsonld';
+import {
+  editionClause,
+  FREE_TO_RUN_LINE,
+  NGINX_APT_SHORT_NBSP,
+  NGINX_RPM_SHORT,
+} from '../../data/product-facts.mjs';
+
+const rows = [
+  {
+    label: 'Deployment',
+    mps: 'Self-hosted (module + optimizer worker)',
+    other: 'Self-hosted (Docker / Linux packages)',
+  },
+  { label: 'Scope', mps: 'Full HTML pipeline', other: 'Image processing only' },
+  {
+    label: 'Platform',
+    mps: 'Native module for Apache and nginx, reverse-proxy mode in front of any HTTP origin, or ASP.NET Core middleware. The IIS package ships as a signed installer on the mod_pagespeed GitHub release.',
+    other: 'Any HTTP frontend',
+  },
+  {
+    label: 'Pricing model',
+    mps: 'Free (Apache-2.0); paid support optional',
+    other: 'Open-source core; paid Pro tier',
+  },
+  {
+    label: 'Image optimization',
+    mps: `${editionClause(['WebP', 'AVIF'])} &mdash; JPEG, PNG, GIF + responsive variants`,
+    other: 'WebP, AVIF, JPEG, PNG, GIF, JPEG XL',
+  },
+  { label: 'Critical CSS injection', mps: 'yes', other: 'no' },
+  { label: 'JS / CSS minification', mps: 'yes', other: 'no' },
+  {
+    label: 'HTML rewriting',
+    mps: 'Yes (URL rewriting, inline, prefetch)',
+    other: 'no',
+  },
+  {
+    label: 'Caching',
+    mps: 'Cyclone cache, zero-copy mmap serving',
+    other: 'Stateless; you bring the cache',
+  },
+  {
+    label: 'CWV optimization',
+    mps: 'LCP, render-blocking, image bytes; CLS from unsized images',
+    other: 'LCP (image-side only)',
+  },
+  {
+    label: 'Measured page-size reduction',
+    mps: '<span class="font-mono tabular-nums font-semibold text-success">&minus;68%</span> on our own pages (full pipeline)',
+    other: 'Image bytes only &mdash; no HTML/CSS/JS in scope',
+    highlight: true,
+  },
+  {
+    label: 'License',
+    mps: 'Licensed under the Apache License&nbsp;2.0. The software is free. We sell support; the software and its signed packages are the same for everyone. See the <a href="/license/" class="text-interactive hover:text-interactive-hover underline">software license</a>.',
+    other: 'MIT (OSS) / commercial (Pro)',
+  },
+  {
+    label: 'Control over data',
+    mps: 'Your servers, no third party',
+    other: 'Your servers, no third party',
+  },
+];
+
+const jsonLd = [
+  await productJsonLd({
+    image: OG_DEFAULT_IMAGE_URL,
+    description:
+      'mod_pagespeed includes image transcoding plus critical CSS, JS/CSS minification, and HTML rewriting in one worker — imgproxy is image-only.',
+    offers: offerJsonLd({ url: 'https://modpagespeed.com/pricing/' }),
+  }),
+];
+---
+
+<BaseLayout
+  title="mod_pagespeed vs imgproxy: image proxy vs full pipeline"
+  description="Both self-hosted; imgproxy is image-only while mod_pagespeed is a full HTML pipeline (images, CSS, JS, critical CSS). Where each tool actually shines."
+  jsonLd={jsonLd}
+>
+  <PageHero id="imgproxy-title" width="prose" class="max-w-3xl" title="mod_pagespeed vs imgproxy">
+    <nav slot="before" class="mb-6 text-small text-text-annotation" aria-label="Breadcrumb">
+      <a href="/" class="hover:text-text-body">
+        Home
+      </a>
+      <span class="mx-1">/</span>
+      <a href="/alternatives/" class="hover:text-text-body">
+        Alternatives
+      </a>
+      <span class="mx-1">/</span>
+      <span>vs imgproxy</span>
+    </nav>
+  </PageHero>
+
+  <article class="container-prose max-w-3xl pb-16">
+    <!-- TL;DR -->
+    <section>
+      <h2 class="h2-section text-text-body">TL;DR</h2>
+      <p class="mt-4 text-text-body">
+        imgproxy is a focused, self-hosted image processing server. mod_pagespeed is a self-hosted
+        optimization pipeline that includes image work plus critical CSS, JS/CSS minification, and
+        HTML rewriting. If image transformations are all you need, imgproxy is a smaller, sharper
+        tool. If you want the{' '}
+        <a href="/features/" class="text-interactive hover:text-interactive-hover underline">
+          full page-level optimization layer
+        </a>{' '}
+        that the original mod_pagespeed provided, the current mod_pagespeed is the closer fit.
+      </p>
+    </section>
+
+    <!-- At a glance -->
+    <section class="mt-12">
+      <h2 id="at-a-glance" class="h2-section text-text-body">
+        At a glance
+      </h2>
+      <div class="mt-4">
+        <CompareTable competitor="imgproxy" rows={rows} labelledBy="at-a-glance" />
+      </div>
+    </section>
+
+    <!-- When to choose imgproxy -->
+    <section class="mt-12">
+      <h2 class="h2-section text-text-body">When to choose imgproxy</h2>
+      <ul class="mt-4 space-y-2 list-disc pl-6 text-text-body">
+        <li>You only need image processing &mdash; resizing, format conversion, smart cropping.</li>
+        <li>
+          You already have your own caching layer (Varnish, nginx, a CDN) and prefer to wire image
+          processing in as a discrete service.
+        </li>
+        <li>You want a stateless URL-based transform API where every parameter is in the URL.</li>
+        <li>
+          Your stack isn't HTML-centric &mdash; you're serving images to native apps, signed URLs,
+          or storage pipelines.
+        </li>
+        <li>You like the operational model of one binary, one Dockerfile, one job.</li>
+      </ul>
+    </section>
+
+    <!-- When to choose mod_pagespeed -->
+    <section class="mt-12">
+      <h2 class="h2-section text-text-body">When to choose mod_pagespeed</h2>
+      <ul class="mt-4 space-y-2 list-disc pl-6 text-text-body">
+        <li>
+          You want one process that handles images, CSS, JS, and HTML &mdash; the way mod_pagespeed
+          used to.
+        </li>
+        <li>
+          You're on nginx and want optimization wired into the response path, not as a separate
+          service.
+        </li>
+        <li>
+          You care about critical CSS extraction and inlining for LCP &mdash; that's not in
+          imgproxy's scope.
+        </li>
+        <li>
+          You want the cache and the optimizer to share a model of the request (viewport, format
+          support, save-data) rather than wiring that into URLs yourself.
+        </li>
+        <li>You're migrating from mod_pagespeed and want the closest functional successor.</li>
+      </ul>
+    </section>
+
+    <!-- How they overlap -->
+    <section class="mt-12">
+      <h2 class="h2-section text-text-body">How they overlap</h2>
+      <p class="mt-4 text-text-body">
+        Both tools convert source images to modern formats and produce resized variants; on the
+        mod_pagespeed side that is WebP and AVIF. Both run on your servers with no third-party data
+        path. Both are pull-based: the image gets optimized when it's first requested, then served
+        from cache.
+      </p>
+      <p class="mt-4 text-text-body">
+        The genuine overlap is image format conversion and responsive sizing. For everything outside
+        images, the products don't compete &mdash; they solve different problems.
+      </p>
+    </section>
+
+    <!-- Migrating -->
+    <section class="mt-12">
+      <h2 id="migrating-from-imgproxy-to-modpagespeed" class="h2-section text-text-body">
+        Migrating from imgproxy to mod_pagespeed
+      </h2>
+      <p class="mt-4 text-text-body">
+        Migration is reasonable if imgproxy was a partial solution and you ended up writing scripts
+        to minify CSS, generate critical CSS, or rewrite HTML around it. mod_pagespeed collapses
+        those layers into one process.
+      </p>
+      <p class="mt-4 text-text-body">
+        If you're collapsing multiple optimization layers into one, mod_pagespeed handles the whole
+        HTML response &mdash; images, CSS, JS, critical CSS &mdash; from a single worker, with
+        decision-time format selection driven by the client's <code>Accept</code> header.
+      </p>
+      <p class="mt-4 text-text-body">If you do migrate:</p>
+      <ol class="mt-3 space-y-2 list-decimal pl-6 text-text-body">
+        <li>
+          Identify the imgproxy URL patterns your templates emit. mod_pagespeed rewrites image URLs
+          at the HTML layer, so template changes may be unnecessary.
+        </li>
+        <li>
+          Decide whether you still want a separate transform endpoint for signed URLs (e.g., user
+          uploads). mod_pagespeed handles HTML-referenced images; user-upload pipelines may still
+          belong in a dedicated service.
+        </li>
+        <li>
+          Point nginx at the mod_pagespeed module and verify the cache directory has write access
+          from both nginx and the worker. The{' '}
+          <a
+            href="/blog/run-with-docker-compose/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            Docker Compose walkthrough
+          </a>{' '}
+          covers a working baseline.
+        </li>
+      </ol>
+    </section>
+
+    <!-- Code & config -->
+    <section class="mt-12">
+      <h2 class="h2-section text-text-body">Code &amp; config side-by-side</h2>
+      <p id="config-1" class="mt-4 text-text-body">
+        <strong>WebP conversion in imgproxy</strong> (URL-based):
+      </p>
+      <pre
+        tabindex="0"
+        role="region"
+        aria-labelledby="config-1"
+        class="mt-3 overflow-x-auto rounded bg-bg-secondary p-4 text-sm sm:text-xs leading-snug text-text-body"
+      ><code>/insecure/rs:fit:800:600/f:webp/plain/https://example.com/photo.jpg</code></pre>
+      <p id="config-2" class="mt-4 text-text-body">
+        <strong>WebP conversion in mod_pagespeed.</strong> Install the nginx module on
+        {NGINX_APT_SHORT_NBSP} (amd64 + arm64), or AlmaLinux/RHEL/Rocky&nbsp;{NGINX_RPM_SHORT}:
+      </p>
+      <pre
+        tabindex="0"
+        role="region"
+        aria-labelledby="config-2"
+        class="mt-3 overflow-x-auto rounded bg-bg-secondary p-4 text-sm sm:text-xs leading-snug text-text-body"
+      ><code>curl -fsSL https://packages.modpagespeed.com/install.sh | sudo sh
+sudo apt install nginx-module-pagespeed   # or: sudo dnf install nginx-module-pagespeed</code></pre>
+      <p id="config-3" class="mt-4 text-text-body">
+        Then enable the filter (nginx config; it decides per-request from the client's
+        <code>Accept</code> header):
+      </p>
+      <pre
+        tabindex="0"
+        role="region"
+        aria-labelledby="config-3"
+        class="mt-3 overflow-x-auto rounded bg-bg-secondary p-4 text-sm sm:text-xs leading-snug text-text-body"
+      ><code>pagespeed on;
+pagespeed EnableFilters convert_jpeg_to_webp;
+pagespeed FileCachePath /var/cache/pagespeed;</code></pre>
+      <p class="mt-4 text-text-body">
+        The difference is where the decision lives. imgproxy requires per-URL parameters in
+        templates or signed URLs. mod_pagespeed makes the decision at HTML-rewrite time based on the
+        client's <code>Accept</code> header.
+      </p>
+    </section>
+
+    <section class="mt-12">
+      <div class="rounded-card border border-border bg-bg-secondary p-6 md:p-7">
+        <h2 class="h2-section text-text-body">Outgrowing an image-only layer</h2>
+        <p class="mt-3 text-text-body">
+          If you ended up scripting CSS minification and critical CSS around imgproxy, one pipeline
+          handles images plus CSS, JS, and HTML. On our own pages the full pipeline measures
+          <span class="font-mono tabular-nums font-semibold text-success">&minus;68%</span> page
+          size. Install and run it. {FREE_TO_RUN_LINE}
+        </p>
+        <div class="mt-5 flex flex-wrap gap-3">
+          <a href="/download/" class="btn-primary" data-umami-event="cta_vs_imgproxy_install">
+            Download &amp; run
+          </a>
+          <a
+            href="/pricing/"
+            class="rounded-md border border-border-strong px-4 py-2 text-sm font-medium text-text-body hover:border-border-strong"
+            data-umami-event="cta_vs_imgproxy_buy"
+          >
+            Support pricing
+          </a>
+          <a
+            href="#migrating-from-imgproxy-to-modpagespeed"
+            class="rounded-md border border-border-strong px-4 py-2 text-sm font-medium text-text-body hover:border-border-strong"
+            data-umami-event="cta_vs_imgproxy_migrate"
+          >
+            See the migration steps &rarr;
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- See also -->
+    <section class="mt-12 border-t border-border pt-8">
+      <p class="text-base font-semibold uppercase tracking-wide text-text-body">See also:</p>
+      <ul class="mt-4 space-y-2 text-sm">
+        <li>
+          <a
+            href="/alternatives/thumbor/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            mod_pagespeed vs Thumbor
+          </a>{' '}
+          &mdash; Thumbor is closer to imgproxy than to mod_pagespeed
+        </li>
+        <li>
+          <a
+            href="/alternatives/cloudinary/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            mod_pagespeed vs Cloudinary
+          </a>{' '}
+          &mdash; managed SaaS alternative to imgproxy
+        </li>
+        <li>
+          <a
+            href="/self-hosted-image-optimization/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            Self-hosted image optimization
+          </a>{' '}
+          &mdash; the broader case for keeping image work on your own servers
+        </li>
+        <li>
+          <a
+            href="/alternatives/mod-pagespeed/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            Alternatives to mod_pagespeed
+          </a>{' '}
+          &mdash; for readers searching for a mod_pagespeed replacement
+        </li>
+        <li>
+          <a href="/" class="text-interactive hover:text-interactive-hover underline">
+            mod_pagespeed
+          </a>{' '}
+          &mdash; drop-in continuation with native modules for Apache and nginx. The IIS package
+          ships as a signed installer on the mod_pagespeed GitHub release.
+        </li>
+      </ul>
+    </section>
+
+    <p class="mt-10 text-xs text-text-annotation">
+      imgproxy and other product names are trademarks of their respective owners. Comparisons
+      reflect publicly available information as of 2026 and are provided for evaluation; We-Amp B.V.
+      is not affiliated with or endorsed by imgproxy.
+    </p>
+  </article>
+</BaseLayout>

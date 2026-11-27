@@ -1,0 +1,26 @@
+# Formatted by hand, not by Prettier: the Astro formatter restructures this
+# file incorrectly (it moved </head> above the <title> and JSON-LD block, and
+# </html> ahead of <body>), so it is excluded to keep the document structure
+# intact.
+src/layouts/BaseLayout.astro
+
+# The layout's parts are hand-formatted too. The build does not compress HTML,
+# so the indentation in these files is the whitespace of every page; they keep
+# the indentation their markup has inside the layout's <head> and <body>.
+src/layouts/parts/
+
+# Prettier rewrites the tile fragment in a way the Astro compiler output
+# does not round-trip cleanly; the file is kept in its hand-formatted shape.
+src/components/scan/ResultsView.astro
+
+# Markdown content is never run through Prettier: its Markdown pass rewrites
+# emphasis inside identifiers, changes code samples whose point is their exact
+# text, and re-indents front matter. The format globs already exclude .md; this
+# keeps it that way for an ad-hoc `prettier --write .`.
+src/content/
+src/data/*.md
+
+# The home page sections are hand-formatted for the same reason: each keeps the
+# indentation its markup has inside the page layout, which is the whitespace
+# of the built home page.
+src/components/home/

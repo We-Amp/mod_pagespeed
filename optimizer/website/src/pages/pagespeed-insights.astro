@@ -1,0 +1,561 @@
+---
+import { ORGANIZATION_PUBLISHER } from '../data/organization';
+import { OG_DEFAULT_IMAGE_URL } from '../data/og-image';
+import BaseLayout from '../layouts/BaseLayout.astro';
+import PageHero from '../components/PageHero.astro';
+import { PSI_MPS_MAPPING, type AuditMapping, type Coverage } from '../data/psi-mps-mapping';
+import { MAX_VARIANTS, FREE_TO_RUN_LINE } from '../data/product-facts.mjs';
+
+// PageSpeed Insights / Lighthouse intercept hub. Every audit row, badge, and
+// snippet on this page is derived from PSI_MPS_MAPPING (the single legally
+// vetted audit->filter map) — no coverage is claimed beyond what an entry says.
+// The page targets the audit-string queries devs paste into search after a
+// failing PSI run ("eliminate render-blocking resources", "serve images in
+// next-gen formats", "properly size images", "efficiently encode images",
+// "serve static assets with an efficient cache policy") and the head term
+// "improve pagespeed insights score". It links to /analyze/ for the live tool
+// rather than rebuilding it, and to /examples/ for real before/after output.
+
+// The audits worth showing on this page, in the order people meet them in a
+// PSI report: the high-search-volume opportunity audits first (these are the
+// keyword targets), then the metrics, then the rest. We curate audit IDs from
+// the map so the page mirrors a real report without listing every diagnostic.
+const featuredAuditIds = [
+  // The five keyword-target opportunity strings.
+  'render-blocking-insight',
+  'modern-image-formats',
+  'uses-responsive-images',
+  'uses-optimized-images',
+  'cache-insight',
+  // Adjacent audits MPS addresses, in PSI weight order.
+  'largest-contentful-paint',
+  'total-byte-weight',
+  'unminified-css',
+  'unminified-javascript',
+  'unsized-images',
+  'cumulative-layout-shift',
+  'offscreen-images',
+  'unused-css-rules',
+];
+
+// The audits MPS does not address — the honesty spine. Listed so the page is
+// explicit about what stays in the application layer.
+const clientSideAuditIds = [
+  'interaction-to-next-paint',
+  'unused-javascript',
+  'third-parties-insight',
+  'font-display-insight',
+  'legacy-javascript-insight',
+  'duplicated-javascript-insight',
+  'dom-size-insight',
+];
+
+const byId = (id: string): AuditMapping => {
+  const m = PSI_MPS_MAPPING.find((x) => x.auditId === id);
+  if (!m) throw new Error(`pagespeed-insights: no mapping for audit "${id}"`);
+  return m;
+};
+
+const featured = featuredAuditIds.map(byId);
+const clientSide = clientSideAuditIds.map(byId);
+
+// Coverage -> badge label + class. These map directly onto the site's status
+// chip tokens: success = auto-fix, accent = assistive/caution, muted on
+// elevated = out of scope. The label IS the honesty claim.
+const coverageBadge: Record<Coverage, { label: string; cls: string }> = {
+  full: {
+    label: 'Auto-fix',
+    cls: 'bg-success-wash text-success',
+  },
+  partial: {
+    label: 'Assistive',
+    cls: 'bg-accent-wash text-accent',
+  },
+  none: {
+    label: 'Client-side',
+    cls: 'bg-bg-elevated text-text-muted',
+  },
+};
+
+// Real /examples/ before/after pages keyed to an audit. Only slugs verified to
+// exist in src/data/examples.ts are referenced.
+const auditExamples: Record<string, { slug: string; label: string }> = {
+  'render-blocking-insight': { slug: 'prioritize_critical_css', label: 'prioritize_critical_css' },
+  'modern-image-formats': { slug: 'rewrite_images', label: 'rewrite_images' },
+  'uses-responsive-images': {
+    slug: 'resize_rendered_image_dimensions',
+    label: 'resize_rendered_image_dimensions',
+  },
+  'uses-optimized-images': { slug: 'rewrite_images', label: 'rewrite_images' },
+  'cache-insight': { slug: 'extend_cache', label: 'extend_cache' },
+  'unminified-css': { slug: 'rewrite_css', label: 'rewrite_css' },
+  'unminified-javascript': { slug: 'rewrite_javascript', label: 'rewrite_javascript' },
+  'offscreen-images': { slug: 'lazyload_images', label: 'lazyload_images' },
+};
+
+const title = 'Improve your PageSpeed Insights score at the server layer';
+const description =
+  'Which PageSpeed Insights audits mod_pagespeed fixes at the server — render-blocking, next-gen images, caching — and which stay in your code. Free to run.';
+
+// TechArticle first (seo.spec.ts asserts the first script block's @type),
+// FAQPage second. BaseLayout appends the auto BreadcrumbList last.
+const articleJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'TechArticle',
+  headline: 'Improve your PageSpeed Insights score at the server layer',
+  description,
+  url: 'https://modpagespeed.com/pagespeed-insights/',
+  about: featured.map((m) => ({ '@type': 'Thing', name: m.auditTitle })),
+  image: OG_DEFAULT_IMAGE_URL,
+  author: { '@type': 'Organization', name: 'We-Amp B.V.' },
+  publisher: ORGANIZATION_PUBLISHER,
+};
+
+// FAQ — single source of truth for both the visible <dl> and the FAQPage
+// JSON-LD. Plain-text answers (no HTML), so no stripHtml needed. At least one
+// question is the verbatim canonical searcher query.
+const faqEntries = [
+  {
+    q: 'What does PageSpeed Insights actually measure?',
+    a: 'Two different things in one report. The lab section runs a single synthetic Lighthouse test on a throttled machine and produces the 0–100 Performance score and the opportunity audits. The field section, when there is enough traffic, shows Core Web Vitals from real Chrome users over the trailing 28 days (the CrUX dataset). Google ranks on the field data, not the lab score — the lab audits are a diagnostic for what to fix, not the thing being ranked.',
+  },
+  {
+    q: 'How do I improve my PageSpeed Insights score?',
+    a: 'Fix the opportunity audits the report flags, weighted by their impact. The byte-weight and delivery audits — render-blocking resources, next-gen image formats, properly sized images, efficient encoding, and cache policy — are delivery problems below the application, which is where a server-layer optimizer like mod_pagespeed applies. Audits rooted in your own JavaScript, such as INP, unused JavaScript, and third-party code, have to be fixed in the application or build step.',
+  },
+  {
+    q: 'How do I eliminate render-blocking resources?',
+    a: 'A render-blocking resource is a stylesheet or script in the &lt;head&gt; that the browser must fetch and parse before it paints. mod_pagespeed extracts the above-the-fold CSS rules, inlines them, defers the rest, and inlines small scripts, so the first paint no longer waits on the external stylesheet chain. This is an auto-fix in the audit map: prioritize_critical_css plus inline_css and inline_javascript.',
+  },
+  {
+    q: 'How do I serve images in next-gen formats?',
+    a: 'Next-gen formats means WebP and AVIF instead of JPEG, PNG, and GIF. mod_pagespeed transcodes images to WebP and AVIF when the requesting browser advertises support via the Accept header, and falls back to the original for browsers that do not. You do not re-author the markup; the server negotiates the format per request. Typical image savings are 40 to 70 percent at visually equivalent quality.',
+  },
+  {
+    q: 'Does mod_pagespeed fix INP and CLS?',
+    a: 'INP, no. Interaction to Next Paint is dominated by event-handler and framework JavaScript on the main thread, which a server-layer optimizer cannot rewrite without breaking the application. CLS, partly: the common case of layout shift from images without width and height is auto-fixed by injecting the dimensions, but shifts from late-loading fonts, injected ads, or content added by JavaScript after first paint are application-level and stay in your code.',
+  },
+  {
+    q: 'Is the lab score or the field data what Google ranks on?',
+    a: 'The field data. Core Web Vitals from real users (CrUX) are the page-experience signal; the lab Performance score is not a ranking factor on its own. The two routinely disagree because real visitors run slower hardware on slower connections than a lab test. Use the lab audits to find what to fix, but optimize toward the field number.',
+  },
+];
+
+const faqJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: faqEntries.map((entry) => ({
+    '@type': 'Question',
+    name: entry.q,
+    acceptedAnswer: { '@type': 'Answer', text: entry.a },
+  })),
+};
+
+// Counts for the lede, derived from the curated set so prose can't drift.
+const autoFixCount = featured.filter((m) => m.coverage === 'full').length;
+---
+
+<BaseLayout
+  title={title}
+  description={description}
+  jsonLd={[articleJsonLd, faqJsonLd]}
+  breadcrumbLeafName="PageSpeed Insights"
+>
+  <PageHero
+    id="psi"
+    width="prose"
+    eyebrow="Lighthouse audit reference"
+    title="Improve your PageSpeed Insights score at the server layer"
+  >
+    <nav slot="before" class="mb-6 text-small text-text-annotation" aria-label="Breadcrumb">
+      <a href="/" class="hover:text-text-body">
+        Home
+      </a>
+      <span class="mx-1">/</span>
+      <span>PageSpeed Insights</span>
+    </nav>
+    <Fragment slot="lede">
+      <p>
+        PageSpeed Insights runs the Lighthouse audits and reports which ones a page fails. Some of
+        those failures are delivery problems that live below your application &mdash;
+        render-blocking CSS, oversized images, weak cache headers &mdash; where a server-layer
+        optimizer applies. Others are in your own JavaScript. This page maps each common audit onto
+        what mod_pagespeed does about it, marks every claim{' '}
+        <span class="text-success">auto-fix</span>,<span class="text-accent">assistive</span>, or
+        <span class="text-text-muted">client-side</span>, and links a real before/after for the ones
+        it fixes. No report yet? Start with{' '}
+        <a
+          href="/pagespeed-optimization/"
+          class="text-interactive hover:text-interactive-hover underline"
+        >
+          what PageSpeed optimization covers
+        </a>
+        , organised by resource type.
+      </p>
+    </Fragment>
+    <div class="mt-8 flex flex-wrap gap-3">
+      <a href="/analyze/" class="btn-primary" data-umami-event="cta_psi_analyze_hero">
+        Analyze a page
+      </a>
+      <a href="/download/" class="btn-secondary" data-umami-event="cta_psi_download_hero">
+        Download &amp; run <span aria-hidden="true">&rarr;</span>
+      </a>
+    </div>
+    <p class="mt-4 text-xs text-text-annotation max-w-3xl">
+      PageSpeed Insights and Lighthouse are products of Google LLC. mod_pagespeed is built by We-Amp
+      B.V. and is not affiliated with or endorsed by Google. The{' '}
+      <a href="/analyze/" class="text-interactive hover:text-interactive-hover underline">
+        Analyze tool
+      </a>{' '}
+      calls Google's public PageSpeed Insights API and reports its results.
+    </p>
+  </PageHero>
+
+  <article class="container-prose pb-16">
+    <!-- Lab vs field framing -->
+    <section>
+      <h2 class="h2-section text-text-body">Lab score versus field data</h2>
+      <p class="mt-4 text-text-body">
+        A PageSpeed Insights report has two halves, and it matters which one you optimize toward.
+        The lab half runs a single synthetic Lighthouse test on a throttled machine: it produces the
+        0&ndash;100 Performance score and the opportunity audits below. The field half &mdash; shown
+        when a URL has enough traffic &mdash; reports Core Web Vitals from real Chrome users over
+        the trailing 28 days, the CrUX dataset. Google ranks on the field data. The lab audits are a
+        diagnostic for <span class="italic">what</span> to fix; they are not themselves the ranking
+        signal.
+      </p>
+      <p class="mt-4 text-text-body">
+        The two routinely disagree, because real visitors run slower hardware on slower connections
+        than a lab run. Use the lab audits to find the problem, then verify the change moved the
+        field number. The
+        <a href="/core-web-vitals/" class="text-interactive hover:text-interactive-hover underline">
+          Core Web Vitals hub
+        </a>{' '}
+        covers the field metrics in detail.
+      </p>
+    </section>
+
+    <hr class="rule-ticked my-14" />
+
+    <!-- The audit map: coverage-badged table -->
+    <section>
+      <h2 class="h2-section text-text-body">The audit map: what the server layer fixes</h2>
+      <p class="mt-4 text-text-body">
+        Each row is a Lighthouse audit and whether mod_pagespeed addresses it. Of the audits below,
+        {autoFixCount} are auto-fixes: mod_pagespeed handles them with no change to your markup. The
+        rest are assistive (it helps but cannot fully resolve the audit) or client-side (the fix
+        lives in your application or build step).
+      </p>
+
+      <div class="mt-8 flex flex-wrap gap-3 text-xs">
+        <span class="inline-flex items-center gap-2">
+          <span
+            class={`inline-flex items-center rounded-md px-2 py-0.5 font-semibold uppercase tracking-wide ${coverageBadge.full.cls}`}
+          >
+            Auto-fix
+          </span>
+          <span class="text-text-muted">handled at the server, no markup change</span>
+        </span>
+        <span class="inline-flex items-center gap-2">
+          <span
+            class={`inline-flex items-center rounded-md px-2 py-0.5 font-semibold uppercase tracking-wide ${coverageBadge.partial.cls}`}
+          >
+            Assistive
+          </span>
+          <span class="text-text-muted">helps, but cannot fully resolve it</span>
+        </span>
+        <span class="inline-flex items-center gap-2">
+          <span
+            class={`inline-flex items-center rounded-md px-2 py-0.5 font-semibold uppercase tracking-wide ${coverageBadge.none.cls}`}
+          >
+            Client-side
+          </span>
+          <span class="text-text-muted">application or build-step fix</span>
+        </span>
+      </div>
+
+      <div
+        class="mt-8 overflow-x-auto"
+        tabindex="0"
+        role="region"
+        aria-labelledby="psi-map-caption"
+      >
+        <table class="w-full border-collapse text-sm">
+          <caption id="psi-map-caption" class="sr-only">
+            Lighthouse audits and how mod_pagespeed addresses each, with coverage and the filter
+            that applies
+          </caption>
+          <thead>
+            <tr class="border-b border-border">
+              <th scope="col" class="py-3 pr-4 text-left font-semibold text-text-body">
+                Audit
+              </th>
+              <th scope="col" class="px-3 py-3 text-left font-semibold text-text-body">
+                Coverage
+              </th>
+              <th scope="col" class="px-3 py-3 text-left font-semibold text-text-body">
+                What mod_pagespeed does
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {featured.map((m) => {
+              const badge = coverageBadge[m.coverage];
+              const ex = auditExamples[m.auditId];
+              return (
+                <tr class="border-b border-border align-top">
+                  <th scope="row" class="py-4 pr-4 text-left font-medium text-text-body">
+                    {m.auditTitle}
+                    {m.filters.length > 0 && (
+                      <span class="mt-1 block font-mono text-xs font-normal text-text-annotation">
+                        {m.filters.slice(0, 3).join(', ')}
+                      </span>
+                    )}
+                  </th>
+                  <td class="px-3 py-4">
+                    <span
+                      class={`inline-flex items-center rounded-md px-2 py-0.5 text-micro font-semibold uppercase tracking-wide ${badge.cls}`}
+                    >
+                      {badge.label}
+                    </span>
+                  </td>
+                  <td class="px-3 py-4 text-text-muted">
+                    {m.explanation}
+                    {m.caveats && (
+                      <span class="mt-2 block text-xs text-text-annotation">
+                        Caveat: {m.caveats}
+                      </span>
+                    )}
+                    {ex && (
+                      <span class="mt-2 block text-xs">
+                        <a
+                          href={`/examples/${ex.slug}/`}
+                          class="text-interactive hover:text-interactive-hover underline"
+                        >
+                          Before/after: {ex.label}
+                          <span aria-hidden="true"> &rarr;</span>
+                        </a>
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <hr class="rule-ticked my-14" />
+
+    <!-- The five keyword-target audits, each with a config snippet -->
+    <section>
+      <h2 class="h2-section text-text-body">The auto-fix audits, configured</h2>
+      <p class="mt-4 text-text-body">
+        For the audits mod_pagespeed fixes outright, here is the configuration that turns each on
+        and a link to the rewritten output. The module exposes each optimization as a named filter
+        directive; the optimizer worker has no filter directives — image transcoding, CSS/JS
+        minification and
+        <a
+          href="/blog/server-side-critical-css-nginx/"
+          class="text-interactive hover:text-interactive-hover underline"
+        >
+          critical-CSS extraction
+        </a>{' '}
+        run from the master switch, so the snippet is the same minimal block.
+      </p>
+
+      <div class="mt-8 space-y-8">
+        {featured
+          .filter((m) => m.coverage === 'full' && (m.snippet11 || m.snippet20))
+          .map((m) => {
+            const ex = auditExamples[m.auditId];
+            return (
+              <div class="rounded-card border border-border bg-bg-elevated p-6">
+                <div class="flex flex-wrap items-center gap-3">
+                  <h3 class="font-semibold text-text-body">{m.auditTitle}</h3>
+                  <span
+                    class={`inline-flex items-center rounded-md px-2 py-0.5 text-micro font-semibold uppercase tracking-wide ${coverageBadge.full.cls}`}
+                  >
+                    Auto-fix
+                  </span>
+                </div>
+                <p class="mt-3 text-sm text-text-muted">{m.explanation}</p>
+                {m.snippet11 && (
+                  <>
+                    <p class="mt-4 font-mono text-xs uppercase tracking-wide text-text-annotation">
+                      Module (named filters)
+                    </p>
+                    <pre class="mt-2 overflow-x-auto rounded-md bg-bg-recessed p-4 text-xs sm:text-sm">
+                        <code class="text-text-body">{m.snippet11}</code>
+                      </pre>
+                  </>
+                )}
+                {m.snippet20 && (
+                  <>
+                    <p class="mt-4 font-mono text-xs uppercase tracking-wide text-text-annotation">
+                      Optimizer worker (nginx)
+                    </p>
+                    <pre class="mt-2 overflow-x-auto rounded-md bg-bg-recessed p-4 text-xs sm:text-sm">
+                        <code class="text-text-body">{m.snippet20}</code>
+                      </pre>
+                  </>
+                )}
+                {ex && (
+                  <p class="mt-4 text-sm">
+                    <a
+                      href={`/examples/${ex.slug}/`}
+                      class="text-interactive hover:text-interactive-hover underline"
+                    >
+                      See the measured before/after for {ex.label}
+                      <span aria-hidden="true"> &rarr;</span>
+                    </a>
+                  </p>
+                )}
+              </div>
+            );
+          })}
+      </div>
+
+      <p class="mt-6 text-sm text-text-muted">
+        The optimizer worker generates up to {MAX_VARIANTS} variants per image (format, viewport,
+        pixel density, and a Save-Data path) and serves the right one per request, so the image
+        audits clear for every device class, not just the one Lighthouse tested. The full set of
+        transforms is on the
+        <a href="/features/" class="text-interactive hover:text-interactive-hover underline">
+          features
+        </a>{' '}
+        page, and each optimization has a live before/after under
+        <a href="/examples/" class="text-interactive hover:text-interactive-hover underline">
+          examples
+        </a>
+        .
+      </p>
+    </section>
+
+    <hr class="rule-ticked my-14" />
+
+    <!-- What it does NOT fix — the honesty section -->
+    <section>
+      <h2 class="h2-section text-text-body">What stays in your code</h2>
+      <p class="mt-4 text-text-body">
+        A server-layer optimizer rewrites bytes and markup as they pass through. It does not rewrite
+        your application logic, so the audits below are out of scope. No server-layer module can fix
+        INP for you; the fix is in your event handlers and framework code.
+      </p>
+      <div class="mt-8 rounded-card border border-accent/40 bg-accent-wash p-6">
+        <dl class="space-y-5">
+          {clientSide.map((m) => (
+            <div>
+              <dt class="font-semibold text-text-body">{m.auditTitle}</dt>
+              <dd class="mt-1 text-sm text-text-muted">{m.explanation}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+      <p class="mt-4 text-sm text-text-muted">
+        mod_pagespeed can reduce the <span class="italic">competing</span> startup script by
+        minifying it and deferring what it can prove is safe to defer, which frees main-thread time
+        around an interaction. It will not make a slow click handler fast. The
+        <a
+          href="/core-web-vitals/inp/"
+          class="text-interactive hover:text-interactive-hover underline"
+        >
+          INP guide
+        </a>{' '}
+        covers the application-side fixes.
+      </p>
+    </section>
+
+    <hr class="rule-ticked my-14" />
+
+    <!-- CTA -->
+    <section>
+      <div class="rounded-card border border-border bg-bg-secondary p-6 md:p-8">
+        <h2 class="h2-section text-text-body">Score your own page first</h2>
+        <p class="mt-3 text-text-body">
+          Run a URL through our analyzer &mdash; it scores the page via Google's PageSpeed Insights
+          API and badges each audit auto-fix, assistive, or client-side. Then install mod_pagespeed
+          and clear the ones it owns. It optimizes immediately.
+        </p>
+        <div class="mt-6 flex flex-wrap gap-3">
+          <a href="/analyze/" class="btn-primary" data-umami-event="cta_psi_analyze">
+            Analyze a page
+          </a>
+          <a href="/download/" class="btn-secondary" data-umami-event="cta_psi_download">
+            Download &amp; run <span aria-hidden="true">&rarr;</span>
+          </a>
+        </div>
+        <p class="mt-3 text-xs text-text-annotation">{FREE_TO_RUN_LINE}</p>
+      </div>
+    </section>
+
+    <!-- FAQ — visible Q&A mirrors the FAQPage JSON-LD verbatim -->
+    <section class="mt-16">
+      <h2 class="h2-section text-text-body">PageSpeed Insights: common questions</h2>
+      <dl class="mt-8 space-y-6">
+        {faqEntries.map((entry) => (
+          <div class="border-b border-border pb-6">
+            <dt class="font-semibold text-text-body">{entry.q}</dt>
+            <dd class="mt-2 text-sm text-text-muted" set:html={entry.a} />
+          </div>
+        ))}
+      </dl>
+    </section>
+
+    <!-- See also -->
+    <section class="mt-16 border-t border-border pt-8">
+      <p class="text-base font-semibold uppercase tracking-wide text-text-body">See also:</p>
+      <ul class="mt-4 space-y-2 text-sm">
+        <li>
+          <a href="/analyze/" class="text-interactive hover:text-interactive-hover underline">
+            Analyze a URL
+          </a>{' '}
+          &mdash; score any page and see which findings the module fixes, live.
+        </li>
+        <li>
+          <a
+            href="/self-hosted-image-optimization/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            Self-hosted image optimization
+          </a>{' '}
+          &mdash; the image side: WebP/AVIF on your own origin, no per-transform fee.
+        </li>
+        <li>
+          <a
+            href="/aspnet-core-performance/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            ASP.NET Core performance
+          </a>{' '}
+          &mdash; the same audits fixed in-process for .NET, via NuGet middleware.
+        </li>
+        <li>
+          <a
+            href="/core-web-vitals/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            Core Web Vitals
+          </a>{' '}
+          &mdash; what the field metrics measure and which ones the server layer moves.
+        </li>
+        <li>
+          <a href="/examples/" class="text-interactive hover:text-interactive-hover underline">
+            Optimization examples
+          </a>{' '}
+          &mdash; a measured before/after for every filter referenced above.
+        </li>
+        <li>
+          <a
+            href="/blog/economics-of-image-optimization/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            The economics of image optimization
+          </a>{' '}
+          &mdash; why the next-gen-image and encoding audits are the biggest byte-weight wins.
+        </li>
+      </ul>
+    </section>
+  </article>
+</BaseLayout>

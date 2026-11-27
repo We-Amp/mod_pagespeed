@@ -1,0 +1,1001 @@
+{
+  "source": {
+    "repo": "https://github.com/We-Amp/pagespeed-optimizer",
+    "path": "src/worker/main.cc"
+  },
+  "generator": "website/scripts/generate-references.mjs",
+  "flags": [
+    {
+      "name": "--socket",
+      "arg": "PATH",
+      "default": "/run/pagespeed-optimizer/notify.sock",
+      "description": "Unix socket path (default: /run/pagespeed-optimizer/notify.sock)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--cache-dir",
+      "arg": "DIR",
+      "default": "/var/cache/pagespeed-optimizer/v3",
+      "description": "Cache directory; the volume, shared config and serve-stats live inside it (default: /var/cache/pagespeed-optimizer/v3)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--cache-path",
+      "arg": "PATH",
+      "default": null,
+      "description": "Expert override: full cache volume file STEM (deliberately extensionless); wins over --cache-dir",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--cache-size",
+      "arg": "BYTES",
+      "default": "1073741824",
+      "description": "Cache size in bytes (default: 1073741824)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--ram-cache-size",
+      "arg": "BYTES",
+      "default": "67108864",
+      "description": "RAM cache size in bytes, 0 to disable (default: 67108864)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--read-lease-duration",
+      "arg": "MS",
+      "default": "5000",
+      "description": "Cache read-lease duration for wrap deferral, 0 to disable leases (default: 5000)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--lease-wrap-ceiling",
+      "arg": "MS",
+      "default": "60000",
+      "description": "Max continuous wrap deferral before a wrap is forced (default: 60000)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--num-threads",
+      "arg": "N",
+      "default": "auto",
+      "description": "Thread pool size for notification processing (default: auto)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--max-connections",
+      "arg": "N",
+      "default": "128",
+      "description": "Max simultaneous connections (default: 128)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--max-buffer-size",
+      "arg": "BYTES",
+      "default": "1048576",
+      "description": "Max per-client buffer size (default: 1048576)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--connection-timeout",
+      "arg": "MS",
+      "default": "30000",
+      "description": "Idle connection timeout in ms (default: 30000)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--shutdown-timeout",
+      "arg": "MS",
+      "default": "5000",
+      "description": "Graceful shutdown timeout in ms (default: 5000)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--html-mode",
+      "arg": "MODE",
+      "default": "full",
+      "description": "What the worker does with HTML: off, markdown-static, markdown-rendered or full (default: full)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--disable-html",
+      "arg": null,
+      "default": null,
+      "description": "Disable HTML optimization",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--disable-css",
+      "arg": null,
+      "default": null,
+      "description": "Disable CSS minification",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--disable-js",
+      "arg": null,
+      "default": null,
+      "description": "Disable JS minification",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--disable-image",
+      "arg": null,
+      "default": null,
+      "description": "Disable image transcoding",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--proactive-image-variants",
+      "arg": null,
+      "default": "off",
+      "description": "Enable proactive multi-format image generation (default: off)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--no-proactive-viewport-variants",
+      "arg": null,
+      "default": null,
+      "description": "Disable proactive viewport sibling generation",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--no-proactive-savedata-variants",
+      "arg": null,
+      "default": null,
+      "description": "Disable proactive Save-Data sibling generation",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--no-proactive-density-variants",
+      "arg": null,
+      "default": null,
+      "description": "Disable proactive pixel density sibling generation",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--enable-warmup",
+      "arg": null,
+      "default": "off",
+      "description": "Enable hot URL variant warmup (default: off)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--no-lazy-load-images",
+      "arg": null,
+      "default": null,
+      "description": "Disable loading=\"lazy\" injection",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--no-image-dimensions",
+      "arg": null,
+      "default": null,
+      "description": "Disable image width/height injection",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--no-lcp-preload",
+      "arg": null,
+      "default": null,
+      "description": "Disable LCP image preload injection",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--no-preconnect-injection",
+      "arg": null,
+      "default": null,
+      "description": "Disable preconnect hint injection",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--no-async-css",
+      "arg": null,
+      "default": null,
+      "description": "Disable async CSS loading (keep stylesheets render-blocking and inline no above-the-fold CSS)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--async-css-min-coverage",
+      "arg": "F",
+      "default": "0.10",
+      "description": "Min critical/total CSS coverage to defer a stylesheet, 0-1 (default: 0.10; 0 disables the gate)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--async-css-min-deferred-bytes",
+      "arg": "N",
+      "default": "15000",
+      "description": "Sheets below this size always defer regardless of coverage (default: 15000)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--enable-speculation-rules",
+      "arg": null,
+      "default": "off",
+      "description": "Enable speculation rules injection (default: off)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--no-content-analysis",
+      "arg": null,
+      "default": null,
+      "description": "Disable content-aware quality presets",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--no-preserve-c2pa",
+      "arg": null,
+      "default": null,
+      "description": "Disable C2PA/Content Credentials provenance preservation (on by default)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--c2pa-carry",
+      "arg": null,
+      "default": null,
+      "description": "Recompress manifest-bearing PNGs and re-splice C2PA chunks (PNG only; default: off, serve original)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--denoise-threshold",
+      "arg": "LEVEL",
+      "default": null,
+      "description": "Deprecated and ignored (accepted so existing command lines keep working)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--denoise-sigma-spatial",
+      "arg": "F",
+      "default": null,
+      "description": "Deprecated and ignored",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--denoise-sigma-range",
+      "arg": "F",
+      "default": null,
+      "description": "Deprecated and ignored",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--no-quality-verify",
+      "arg": null,
+      "default": null,
+      "description": "Disable SSIMULACRA2 quality verification",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--target-ssimulacra2",
+      "arg": "SCORE",
+      "default": "70",
+      "description": "Target SSIMULACRA2 score 0-100 (default: 70)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--ssimulacra2-tolerance",
+      "arg": "F",
+      "default": "5.0",
+      "description": "Acceptable score deviation (default: 5.0)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--no-learned-quality",
+      "arg": null,
+      "default": null,
+      "description": "Disable ML quality prediction",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--no-learned-quality-jpeg",
+      "arg": null,
+      "default": null,
+      "description": "Disable ML prediction for JPEG",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--no-learned-quality-webp",
+      "arg": null,
+      "default": null,
+      "description": "Disable ML prediction for WebP",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--no-learned-quality-avif",
+      "arg": null,
+      "default": null,
+      "description": "Disable ML prediction for AVIF",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--savedata-score-reduction",
+      "arg": "F",
+      "default": "15.0",
+      "description": "Target SSIMULACRA2 reduction for Save-Data (default: 15.0)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--gzip-level",
+      "arg": "N",
+      "default": "6",
+      "description": "Gzip compression level 1-9 (default: 6, 0=disable)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--brotli-level",
+      "arg": "N",
+      "default": "6",
+      "description": "Brotli compression quality 1-11 (default: 6, 0=disable)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--no-css-import-flattening",
+      "arg": null,
+      "default": null,
+      "description": "Disable CSS @import flattening",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--mobile-width",
+      "arg": "PIXELS",
+      "default": "480",
+      "description": "Mobile viewport resize width (default: 480, 0=disable)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--tablet-width",
+      "arg": "PIXELS",
+      "default": "768",
+      "description": "Tablet viewport resize width (default: 768, 0=disable)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--desktop-width",
+      "arg": "PIXELS",
+      "default": "0 (no resize)",
+      "description": "Desktop viewport resize width (default: 0=no resize)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--jpeg-quality",
+      "arg": "N",
+      "default": "85",
+      "description": "JPEG output quality 1-100 (default: 85)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--webp-quality",
+      "arg": "N",
+      "default": "75",
+      "description": "WebP output quality 0-100 (default: 75)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--avif-quality",
+      "arg": "N",
+      "default": "60",
+      "description": "AVIF output quality 0-100 (default: 60)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--savedata-jpeg-quality",
+      "arg": "N",
+      "default": "60",
+      "description": "Save-Data JPEG quality (default: 60)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--savedata-webp-quality",
+      "arg": "N",
+      "default": "50",
+      "description": "Save-Data WebP quality (default: 50)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--savedata-avif-quality",
+      "arg": "N",
+      "default": "45",
+      "description": "Save-Data AVIF quality (default: 45)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--max-url-length",
+      "arg": "BYTES",
+      "default": "8192",
+      "description": "Max URL length (default: 8192)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--max-html-size",
+      "arg": "BYTES",
+      "default": "5242880",
+      "description": "Max HTML size (default: 5242880)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--max-css-size",
+      "arg": "BYTES",
+      "default": "2097152",
+      "description": "Max CSS size (default: 2097152)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--max-js-size",
+      "arg": "BYTES",
+      "default": "2097152",
+      "description": "Max JS size (default: 2097152)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--max-image-size",
+      "arg": "BYTES",
+      "default": "10485760",
+      "description": "Max image size (default: 10485760)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--log-level",
+      "arg": "LEVEL",
+      "default": "info",
+      "description": "Log level: debug|info|warning|error (default: info)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--log-format",
+      "arg": "FORMAT",
+      "default": "text",
+      "description": "Log format: text|json (default: text)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--service",
+      "arg": null,
+      "default": null,
+      "description": "Run under the Service Control Manager",
+      "section": "Windows service",
+      "platform": "windows"
+    },
+    {
+      "name": "--log-file",
+      "arg": "PATH",
+      "default": null,
+      "description": "With --service: append the log to PATH",
+      "section": "Windows service",
+      "platform": "windows"
+    },
+    {
+      "name": "--api-socket",
+      "arg": "[PATH]",
+      "default": "/run/pagespeed-optimizer/api.sock",
+      "description": "Serve the management API over a unix socket, mode 0660 (default path: /run/pagespeed-optimizer/api.sock)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--api-port",
+      "arg": "PORT",
+      "default": "0 (disabled)",
+      "description": "HTTP management API TCP port (default: 0=disabled)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--api-bind",
+      "arg": "ADDRESS",
+      "default": "127.0.0.1",
+      "description": "API bind address (default: 127.0.0.1)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--api-allow-remote",
+      "arg": null,
+      "default": null,
+      "description": "Permit a non-loopback --api-bind (a token is still required)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--api-no-auth",
+      "arg": null,
+      "default": null,
+      "description": "Permit a tokenless API on loopback or the unix socket",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--api-token",
+      "arg": "TOKEN",
+      "default": null,
+      "description": "API auth token (or set PAGESPEED_API_TOKEN env var)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--api-read-open",
+      "arg": null,
+      "default": null,
+      "description": "Allow unauthenticated access to the allow-listed GET routes and the stats/events streams (public console reads; the log stays token-only)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--no-security-headers",
+      "arg": null,
+      "default": null,
+      "description": "Omit security headers on console responses (reverse proxy handles them)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--console-dir",
+      "arg": "PATH",
+      "default": null,
+      "description": "Web console SPA directory (optional)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--enable-browser-analysis",
+      "arg": null,
+      "default": "off",
+      "description": "Enable browser-based analysis (default: off)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--browser-sandbox",
+      "arg": "MODE",
+      "default": "require",
+      "description": "Headless Chrome sandbox: require|off (default: require; `require` refuses browser analysis rather than running an unsandboxed browser -- the daemon keeps serving)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--browser-user-data-dir",
+      "arg": "PATH",
+      "default": "<runtime dir>/chrome",
+      "description": "Chrome profile directory (default: <runtime dir>/chrome)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--chrome-binary",
+      "arg": "PATH",
+      "default": "/usr/bin/chrome-headless-shell",
+      "description": "Chrome executable path (default: /usr/bin/chrome-headless-shell)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--chrome-recycle-interval",
+      "arg": "N",
+      "default": "100",
+      "description": "Pages before Chrome restart (default: 100)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--chrome-page-timeout",
+      "arg": "MS",
+      "default": "60000",
+      "description": "Per-page CDP timeout (default: 60000)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--chrome-max-memory",
+      "arg": "MB",
+      "default": "512",
+      "description": "Chrome RSS kill threshold (default: 512)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--chrome-startup-timeout",
+      "arg": "MS",
+      "default": "10000",
+      "description": "Chrome startup timeout (default: 10000)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--no-browser-critical-css",
+      "arg": null,
+      "default": null,
+      "description": "Disable browser CSS (keep heuristic)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--no-browser-lazy-loading",
+      "arg": null,
+      "default": null,
+      "description": "Disable browser fold detection",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--no-browser-lcp-preload",
+      "arg": null,
+      "default": null,
+      "description": "Disable browser LCP detection",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--no-browser-image-sizing",
+      "arg": null,
+      "default": null,
+      "description": "Disable browser image dimensions",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--browser-queue-size",
+      "arg": "N",
+      "default": "1000",
+      "description": "Max pending analysis items (default: 1000)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--browser-profile-ttl",
+      "arg": "SEC",
+      "default": "86400",
+      "description": "Profile expiry in seconds (default: 86400)",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--allow-private-urls",
+      "arg": null,
+      "default": null,
+      "description": "Allow capture endpoints to target private/loopback URLs",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--strip-query-extensions",
+      "arg": "EXT",
+      "default": null,
+      "description": "Comma-separated extensions (e.g., .jpg,.png,.css)",
+      "section": "Cache Key Normalization",
+      "platform": null
+    },
+    {
+      "name": "--strip-query-groups",
+      "arg": "GROUPS",
+      "default": null,
+      "description": "Comma-separated group names (e.g., images,static)",
+      "section": "Cache Key Normalization",
+      "platform": null
+    },
+    {
+      "name": "--strip-query-params",
+      "arg": "PARAMS",
+      "default": null,
+      "description": "Comma-separated param names (e.g., utm_source,fbclid)",
+      "section": "Cache Key Normalization",
+      "platform": null
+    },
+    {
+      "name": "--host-alias",
+      "arg": "SRC=DST",
+      "default": null,
+      "description": "Host alias mapping (repeatable)",
+      "section": "Cache Key Normalization",
+      "platform": null
+    },
+    {
+      "name": "--svg-mode",
+      "arg": "MODE",
+      "default": "detect",
+      "description": "detect, preview, or auto (default: detect)",
+      "section": "SVG Auto-Vectorization",
+      "platform": null
+    },
+    {
+      "name": "--svg-candidacy-threshold",
+      "arg": "N",
+      "default": "50",
+      "description": "Score threshold 0-100 (default: 50)",
+      "section": "SVG Auto-Vectorization",
+      "platform": null
+    },
+    {
+      "name": "--svg-max-pixels",
+      "arg": "N",
+      "default": "65536",
+      "description": "Max decoded pixels (default: 65536)",
+      "section": "SVG Auto-Vectorization",
+      "platform": null
+    },
+    {
+      "name": "--svg-max-paths",
+      "arg": "N",
+      "default": "500",
+      "description": "Max <path> elements (default: 500)",
+      "section": "SVG Auto-Vectorization",
+      "platform": null
+    },
+    {
+      "name": "--svg-max-svg-bytes",
+      "arg": "N",
+      "default": "262144",
+      "description": "Max uncompressed SVG bytes (default: 262144)",
+      "section": "SVG Auto-Vectorization",
+      "platform": null
+    },
+    {
+      "name": "--svg-fidelity-threshold",
+      "arg": "F",
+      "default": "55.0",
+      "description": "SSIMULACRA2 minimum (default: 55.0) [reserved]",
+      "section": "SVG Auto-Vectorization",
+      "platform": null
+    },
+    {
+      "name": "--svg-exclude-lcp",
+      "arg": "BOOL",
+      "default": "true",
+      "description": "Skip LCP images (default: true)",
+      "section": "SVG Auto-Vectorization",
+      "platform": null
+    },
+    {
+      "name": "--svg-timeout-ms",
+      "arg": "N",
+      "default": "500",
+      "description": "Vectorization timeout (default: 500) [reserved]",
+      "section": "SVG Auto-Vectorization",
+      "platform": null
+    },
+    {
+      "name": "--svg-preset",
+      "arg": "N",
+      "default": "1",
+      "description": "0=bw, 1=poster, 2=photo (default: 1) [reserved]",
+      "section": "SVG Auto-Vectorization",
+      "platform": null
+    },
+    {
+      "name": "--svg-color-precision",
+      "arg": "N",
+      "default": "0",
+      "description": "0=adaptive, 1-8=fixed (default: 0)",
+      "section": "SVG Auto-Vectorization",
+      "platform": null
+    },
+    {
+      "name": "--svg-filter-speckle",
+      "arg": "N",
+      "default": "4",
+      "description": "Min cluster area (default: 4)",
+      "section": "SVG Auto-Vectorization",
+      "platform": null
+    },
+    {
+      "name": "--agent-optimize",
+      "arg": null,
+      "default": null,
+      "description": "Serve a rendered-markdown variant to AI agents (Accept: text/markdown). Behavior may change.",
+      "section": "Agent Optimize (EXPERIMENTAL — off by default)",
+      "platform": null
+    },
+    {
+      "name": "--agent-optimize-paths",
+      "arg": "LIST",
+      "default": null,
+      "description": "Comma-separated path prefixes to enable",
+      "section": "Agent Optimize (EXPERIMENTAL — off by default)",
+      "platform": null
+    },
+    {
+      "name": "--agent-optimize-llms-txt",
+      "arg": null,
+      "default": null,
+      "description": "Publish a synthesized /llms.txt site index (requires --agent-optimize)",
+      "section": "Agent Optimize (EXPERIMENTAL — off by default)",
+      "platform": null
+    },
+    {
+      "name": "--agent-optimize-sitemap-url",
+      "arg": "URL",
+      "default": null,
+      "description": "Sitemap to build /llms.txt from",
+      "section": "Agent Optimize (EXPERIMENTAL — off by default)",
+      "platform": null
+    },
+    {
+      "name": "--[no-]agent-optimize-respect-ai-directives",
+      "arg": null,
+      "default": "on",
+      "description": "Honor robots AI rules (default: on)",
+      "section": "Agent Optimize (EXPERIMENTAL — off by default)",
+      "platform": null
+    },
+    {
+      "name": "--agent-optimize-llms-summary-fetch-cap",
+      "arg": "N",
+      "default": "200",
+      "description": "Max summary fetches (default: 200)",
+      "section": "Agent Optimize (EXPERIMENTAL — off by default)",
+      "platform": null
+    },
+    {
+      "name": "--agent-optimize-cache-ttl",
+      "arg": "SEC",
+      "default": "86400",
+      "description": "/llms.txt cache TTL (default: 86400)",
+      "section": "Agent Optimize (EXPERIMENTAL — off by default)",
+      "platform": null
+    },
+    {
+      "name": "--agent-render-allow-hosts",
+      "arg": "HOSTS",
+      "default": "none",
+      "description": "Third-party hosts the agent render may fetch: comma-separated, exact host names (no wildcards), still SSRF-guarded (default: none)",
+      "section": "Agent Optimize (EXPERIMENTAL — off by default)",
+      "platform": null
+    },
+    {
+      "name": "--agent-render-private-origins",
+      "arg": "ORIGINS",
+      "default": "none",
+      "description": "Own origins the agent render may fetch at a loopback or private address: comma-separated scheme://host[:port] or host[:port], no wildcards; repeatable (default: none)",
+      "section": "Agent Optimize (EXPERIMENTAL — off by default)",
+      "platform": null
+    },
+    {
+      "name": "--web-bot-auth",
+      "arg": null,
+      "default": null,
+      "description": "Classify RFC 9421-signed agent requests (label + counter only; never changes request handling)",
+      "section": "Web Bot Auth (observe-only — off by default)",
+      "platform": null
+    },
+    {
+      "name": "--web-bot-auth-key-directory",
+      "arg": "URL",
+      "default": null,
+      "description": "https JWKS key-directory URL to warm-fetch periodically (repeatable)",
+      "section": "Web Bot Auth (observe-only — off by default)",
+      "platform": null
+    },
+    {
+      "name": "--web-bot-auth-verified-bots",
+      "arg": "LIST",
+      "default": null,
+      "description": "keyid=name pairs (comma-separated) promoting a verified signature to a named bot",
+      "section": "Web Bot Auth (observe-only — off by default)",
+      "platform": null
+    },
+    {
+      "name": "--web-bot-auth-public-counter",
+      "arg": "MODE",
+      "default": null,
+      "description": "opt-in verified-crawl counter (experimental): off (default) | private | public. Enabling a non-off mode publishes a discoverable marker at /.well-known/webbotauth-counter. The exact doc is gated by the PAGESPEED_WEB_BOT_AUTH_COUNTER_TOKEN env bearer token.",
+      "section": "Web Bot Auth (observe-only — off by default)",
+      "platform": null
+    },
+    {
+      "name": "--rsl-cap-enforcement",
+      "arg": null,
+      "default": null,
+      "description": "Validate Authorization: License capability tokens and answer 401, 402 or pass (status codes only; never settles or meters payment)",
+      "section": "RSL-CAP Enforcement (EXPERIMENTAL — off by default)",
+      "platform": null
+    },
+    {
+      "name": "--rsl-cap-key-directory",
+      "arg": "URL",
+      "default": null,
+      "description": "https JWKS key-directory URL of a token issuer to warm-fetch periodically (repeatable)",
+      "section": "RSL-CAP Enforcement (EXPERIMENTAL — off by default)",
+      "platform": null
+    },
+    {
+      "name": "--rsl-cap-requested-license",
+      "arg": "ID",
+      "default": null,
+      "description": "License id a token must grant (empty: every valid token is refused with 402)",
+      "section": "RSL-CAP Enforcement (EXPERIMENTAL — off by default)",
+      "platform": null
+    },
+    {
+      "name": "--rsl-cap-requested-scope",
+      "arg": "SCOPE",
+      "default": null,
+      "description": "Scope a token must grant (empty: every valid token is refused with 402)",
+      "section": "RSL-CAP Enforcement (EXPERIMENTAL — off by default)",
+      "platform": null
+    },
+    {
+      "name": "--rsl-cap-issuer",
+      "arg": "ISSUER",
+      "default": null,
+      "description": "Accept tokens from this issuer only; others are rejected as an unknown issuer (401). Empty: any issuer in the key directories",
+      "section": "RSL-CAP Enforcement (EXPERIMENTAL — off by default)",
+      "platform": null
+    },
+    {
+      "name": "--version",
+      "arg": null,
+      "default": null,
+      "description": "Show version and exit",
+      "section": "Options",
+      "platform": null
+    },
+    {
+      "name": "--help",
+      "arg": null,
+      "default": null,
+      "description": "Show this help",
+      "section": "Options",
+      "platform": null
+    }
+  ]
+}

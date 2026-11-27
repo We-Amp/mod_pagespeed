@@ -1,0 +1,9 @@
+203.0.113.5 - - [10/Oct/2026:13:55:36 +0000] "GET /guide/ HTTP/1.1" 200 5120 "https://chatgpt.com/" "Mozilla/5.0 (Macintosh) Chrome/130"
+203.0.113.6 - - [10/Oct/2026:13:56:01 +0000] "GET /guide/ HTTP/1.1" 200 5120 "-" "Mozilla/5.0 (compatible; GPTBot/1.2; +https://openai.com/gptbot)"
+203.0.113.6 - - [10/Oct/2026:13:56:02 +0000] "GET /static/app.js HTTP/1.1" 200 20480 "-" "Mozilla/5.0 (compatible; GPTBot/1.2; +https://openai.com/gptbot)"
+203.0.113.7 - - [10/Oct/2026:14:00:00 +0000] "GET /pricing/ HTTP/1.1" 200 3000 "-" "Mozilla/5.0 (compatible; ClaudeBot/1.0; +claudebot@anthropic.com)"
+203.0.113.8 - - [10/Oct/2026:14:01:00 +0000] "GET /guide/ HTTP/1.1" 200 5120 "-" "Mozilla/5.0 AppleWebKit/537.36; compatible; ChatGPT-User/1.0; +https://openai.com/bot"
+203.0.113.9 - - [10/Oct/2026:14:02:00 +0000] "GET /guide/?utm_source=chatgpt.com HTTP/1.1" 200 5120 "-" "Mozilla/5.0 (Windows NT 10.0) Firefox/131"
+203.0.113.10 - - [10/Oct/2026:14:03:00 +0000] "GET /favicon.ico HTTP/1.1" 200 1200 "https://www.perplexity.ai/" "Mozilla/5.0 Safari"
+203.0.113.11 - - [10/Oct/2026:14:04:00 +0000] "GET /old/ HTTP/1.1" 404 150 "-" "Mozilla/5.0 (compatible; GPTBot/1.2; +https://openai.com/gptbot)"
+this is not a log line

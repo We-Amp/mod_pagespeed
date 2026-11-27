@@ -1,0 +1,2725 @@
+{
+  "crawl_date": "2026-09-01",
+  "headline": {
+    "change_first_to_latest_pct": -46.1,
+    "crawl_date": "2026-09-01",
+    "current": 22,
+    "detection": {
+      "both": 28742,
+      "header_only": 6769,
+      "wappalyzer_only": 1
+    },
+    "first_date": "2020-12-01",
+    "first_share": 0.009352,
+    "first_total": 73404,
+    "google_era": 16421,
+    "hidden_total": 18939,
+    "incubator_era": 4182,
+    "latest_share": 0.00245,
+    "latest_total": 39564,
+    "peak_date": "2022-11-01",
+    "peak_total": 103800,
+    "share_change_pct": -73.8,
+    "share_google_of_versioned": 0.7962,
+    "share_incubator_of_versioned": 0.2028,
+    "share_out_of_fixes": 0.9989,
+    "versioned_total": 20625
+  },
+  "tables": {
+    "cooccurrence": [
+      {
+        "cpanel_origins": "0",
+        "cpanel_share": "0.000000",
+        "origins": "39564",
+        "segment": "pagespeed",
+        "wordpress_origins": "19596",
+        "wordpress_share": "0.495299"
+      },
+      {
+        "cpanel_origins": "1606",
+        "cpanel_share": "0.000099",
+        "origins": "16150624",
+        "segment": "all",
+        "wordpress_origins": "5060141",
+        "wordpress_share": "0.313309"
+      }
+    ],
+    "detection": [
+      {
+        "origins": "28742",
+        "signal": "both"
+      },
+      {
+        "origins": "6769",
+        "signal": "header_only"
+      },
+      {
+        "origins": "1",
+        "signal": "wappalyzer_only"
+      }
+    ],
+    "disagreements": [
+      {
+        "date": "2020-12-01",
+        "disagreements": "69",
+        "origins": "73404"
+      },
+      {
+        "date": "2021-01-01",
+        "disagreements": "80",
+        "origins": "73085"
+      },
+      {
+        "date": "2021-02-01",
+        "disagreements": "1006",
+        "origins": "74937"
+      },
+      {
+        "date": "2021-03-01",
+        "disagreements": "70",
+        "origins": "73874"
+      },
+      {
+        "date": "2021-04-01",
+        "disagreements": "60",
+        "origins": "72678"
+      },
+      {
+        "date": "2021-05-01",
+        "disagreements": "58",
+        "origins": "74116"
+      },
+      {
+        "date": "2021-06-01",
+        "disagreements": "50",
+        "origins": "74328"
+      },
+      {
+        "date": "2021-07-01",
+        "disagreements": "57",
+        "origins": "73128"
+      },
+      {
+        "date": "2021-08-01",
+        "disagreements": "75",
+        "origins": "76754"
+      },
+      {
+        "date": "2021-09-01",
+        "disagreements": "45",
+        "origins": "69087"
+      },
+      {
+        "date": "2021-10-01",
+        "disagreements": "46",
+        "origins": "68545"
+      },
+      {
+        "date": "2021-11-01",
+        "disagreements": "42",
+        "origins": "68404"
+      },
+      {
+        "date": "2021-12-01",
+        "disagreements": "42",
+        "origins": "68660"
+      },
+      {
+        "date": "2022-01-01",
+        "disagreements": "36",
+        "origins": "67406"
+      },
+      {
+        "date": "2022-02-01",
+        "disagreements": "39",
+        "origins": "63278"
+      },
+      {
+        "date": "2022-03-01",
+        "disagreements": "6",
+        "origins": "65428"
+      },
+      {
+        "date": "2022-04-01",
+        "disagreements": "23",
+        "origins": "62674"
+      },
+      {
+        "date": "2022-05-01",
+        "disagreements": "5",
+        "origins": "60182"
+      },
+      {
+        "date": "2022-06-01",
+        "disagreements": "5",
+        "origins": "60402"
+      },
+      {
+        "date": "2022-07-01",
+        "disagreements": "6",
+        "origins": "75858"
+      },
+      {
+        "date": "2022-08-01",
+        "disagreements": "7",
+        "origins": "100455"
+      },
+      {
+        "date": "2022-09-01",
+        "disagreements": "13",
+        "origins": "98845"
+      },
+      {
+        "date": "2022-10-01",
+        "disagreements": "20",
+        "origins": "100151"
+      },
+      {
+        "date": "2022-11-01",
+        "disagreements": "25",
+        "origins": "103800"
+      },
+      {
+        "date": "2022-12-01",
+        "disagreements": "16",
+        "origins": "102893"
+      },
+      {
+        "date": "2023-01-01",
+        "disagreements": "9",
+        "origins": "102286"
+      },
+      {
+        "date": "2023-02-01",
+        "disagreements": "8",
+        "origins": "96053"
+      },
+      {
+        "date": "2023-03-01",
+        "disagreements": "16",
+        "origins": "102632"
+      },
+      {
+        "date": "2023-04-01",
+        "disagreements": "5",
+        "origins": "101878"
+      },
+      {
+        "date": "2023-05-01",
+        "disagreements": "3",
+        "origins": "96750"
+      },
+      {
+        "date": "2023-06-01",
+        "disagreements": "3",
+        "origins": "90223"
+      },
+      {
+        "date": "2023-07-01",
+        "disagreements": "4",
+        "origins": "87475"
+      },
+      {
+        "date": "2023-08-01",
+        "disagreements": "4",
+        "origins": "84045"
+      },
+      {
+        "date": "2023-09-01",
+        "disagreements": "4",
+        "origins": "84224"
+      },
+      {
+        "date": "2023-10-01",
+        "disagreements": "4",
+        "origins": "85015"
+      },
+      {
+        "date": "2023-11-01",
+        "disagreements": "3",
+        "origins": "84102"
+      },
+      {
+        "date": "2023-12-01",
+        "disagreements": "2",
+        "origins": "80662"
+      },
+      {
+        "date": "2024-01-01",
+        "disagreements": "3",
+        "origins": "75703"
+      },
+      {
+        "date": "2024-02-01",
+        "disagreements": "3",
+        "origins": "79371"
+      },
+      {
+        "date": "2024-03-01",
+        "disagreements": "5",
+        "origins": "78964"
+      },
+      {
+        "date": "2024-04-01",
+        "disagreements": "2",
+        "origins": "77633"
+      },
+      {
+        "date": "2024-05-01",
+        "disagreements": "2",
+        "origins": "74948"
+      },
+      {
+        "date": "2024-06-01",
+        "disagreements": "4",
+        "origins": "72694"
+      },
+      {
+        "date": "2024-07-01",
+        "disagreements": "6",
+        "origins": "69977"
+      },
+      {
+        "date": "2024-08-01",
+        "disagreements": "6",
+        "origins": "65742"
+      },
+      {
+        "date": "2024-09-01",
+        "disagreements": "2",
+        "origins": "66094"
+      },
+      {
+        "date": "2024-10-01",
+        "disagreements": "11",
+        "origins": "67063"
+      },
+      {
+        "date": "2024-11-01",
+        "disagreements": "3",
+        "origins": "66195"
+      },
+      {
+        "date": "2024-12-01",
+        "disagreements": "9",
+        "origins": "64144"
+      },
+      {
+        "date": "2025-01-01",
+        "disagreements": "1",
+        "origins": "59569"
+      },
+      {
+        "date": "2025-02-01",
+        "disagreements": "0",
+        "origins": "62849"
+      },
+      {
+        "date": "2025-03-01",
+        "disagreements": "4",
+        "origins": "61976"
+      },
+      {
+        "date": "2025-04-01",
+        "disagreements": "1",
+        "origins": "55064"
+      },
+      {
+        "date": "2025-05-01",
+        "disagreements": "2",
+        "origins": "59352"
+      },
+      {
+        "date": "2025-06-01",
+        "disagreements": "1",
+        "origins": "58579"
+      },
+      {
+        "date": "2025-07-01",
+        "disagreements": "3",
+        "origins": "56965"
+      },
+      {
+        "date": "2025-08-01",
+        "disagreements": "2",
+        "origins": "56530"
+      },
+      {
+        "date": "2025-09-01",
+        "disagreements": "2",
+        "origins": "56530"
+      },
+      {
+        "date": "2025-10-01",
+        "disagreements": "2",
+        "origins": "56415"
+      },
+      {
+        "date": "2025-11-01",
+        "disagreements": "1",
+        "origins": "55375"
+      },
+      {
+        "date": "2025-12-01",
+        "disagreements": "1",
+        "origins": "53839"
+      },
+      {
+        "date": "2026-01-01",
+        "disagreements": "1",
+        "origins": "49425"
+      },
+      {
+        "date": "2026-02-01",
+        "disagreements": "3",
+        "origins": "50332"
+      },
+      {
+        "date": "2026-03-01",
+        "disagreements": "2",
+        "origins": "49895"
+      },
+      {
+        "date": "2026-04-01",
+        "disagreements": "1",
+        "origins": "48060"
+      },
+      {
+        "date": "2026-05-01",
+        "disagreements": "1",
+        "origins": "47117"
+      },
+      {
+        "date": "2026-06-01",
+        "disagreements": "1",
+        "origins": "45523"
+      },
+      {
+        "date": "2026-07-01",
+        "disagreements": "1",
+        "origins": "42401"
+      },
+      {
+        "date": "2026-08-01",
+        "disagreements": "0",
+        "origins": "39620"
+      },
+      {
+        "date": "2026-09-01",
+        "disagreements": "1",
+        "origins": "39564"
+      }
+    ],
+    "distribution": [
+      {
+        "bucket": "hidden",
+        "origins": "18939",
+        "version": "(hidden)"
+      },
+      {
+        "bucket": "google-era",
+        "origins": "12725",
+        "version": "1.13.35.2"
+      },
+      {
+        "bucket": "incubator-era",
+        "origins": "4182",
+        "version": "1.14.36.1"
+      },
+      {
+        "bucket": "google-era",
+        "origins": "2073",
+        "version": "1.4.26.5"
+      },
+      {
+        "bucket": "google-era",
+        "origins": "1011",
+        "version": "1.11.33.4"
+      },
+      {
+        "bucket": "google-era",
+        "origins": "343",
+        "version": "1.9.32.14"
+      },
+      {
+        "bucket": "google-era",
+        "origins": "71",
+        "version": "1.11.33.2"
+      },
+      {
+        "bucket": "google-era",
+        "origins": "42",
+        "version": "1.12.34.2"
+      },
+      {
+        "bucket": "google-era",
+        "origins": "37",
+        "version": "1.9.32.3"
+      },
+      {
+        "bucket": "google-era",
+        "origins": "24",
+        "version": "1.11.33.5"
+      },
+      {
+        "bucket": "current",
+        "origins": "21",
+        "version": "1.15.0"
+      },
+      {
+        "bucket": "google-era",
+        "origins": "14",
+        "version": "1.8.31.4"
+      },
+      {
+        "bucket": "google-era",
+        "origins": "13",
+        "version": "1.7.30.4"
+      },
+      {
+        "bucket": "google-era",
+        "origins": "10",
+        "version": "1.11.33.1"
+      },
+      {
+        "bucket": "google-era",
+        "origins": "10",
+        "version": "1.12.34.1"
+      },
+      {
+        "bucket": "google-era",
+        "origins": "8",
+        "version": "1.9.32.4"
+      },
+      {
+        "bucket": "google-era",
+        "origins": "7",
+        "version": "1.9.32.11"
+      },
+      {
+        "bucket": "google-era",
+        "origins": "5",
+        "version": "1.9.32.10"
+      },
+      {
+        "bucket": "google-era",
+        "origins": "5",
+        "version": "1.9.32.13"
+      },
+      {
+        "bucket": "google-era",
+        "origins": "4",
+        "version": "1.6.29.2"
+      },
+      {
+        "bucket": "google-era",
+        "origins": "3",
+        "version": "0.8.1.5"
+      },
+      {
+        "bucket": "google-era",
+        "origins": "3",
+        "version": "1.4.26.3"
+      },
+      {
+        "bucket": "google-era",
+        "origins": "3",
+        "version": "1.8.31.5"
+      },
+      {
+        "bucket": "google-era",
+        "origins": "2",
+        "version": "1.9.32.2"
+      },
+      {
+        "bucket": "google-era",
+        "origins": "2",
+        "version": "1.9.32.6"
+      },
+      {
+        "bucket": "google-era",
+        "origins": "1",
+        "version": "1.1.23.2"
+      },
+      {
+        "bucket": "google-era",
+        "origins": "1",
+        "version": "1.11.33.0"
+      },
+      {
+        "bucket": "current",
+        "origins": "1",
+        "version": "1.16.0"
+      },
+      {
+        "bucket": "google-era",
+        "origins": "1",
+        "version": "1.4.26.4"
+      },
+      {
+        "bucket": "google-era",
+        "origins": "1",
+        "version": "1.5.27.2"
+      },
+      {
+        "bucket": "google-era",
+        "origins": "1",
+        "version": "1.6.29.7"
+      },
+      {
+        "bucket": "google-era",
+        "origins": "1",
+        "version": "1.8.31.2"
+      }
+    ],
+    "networks_top10": [
+      {
+        "asn": "13335",
+        "network": "CLOUDFLARENET - Cloudflare, Inc., US",
+        "share_pct": "14.5"
+      },
+      {
+        "asn": "131965",
+        "network": "XSERVER - Xserver Inc., JP",
+        "share_pct": "9.4"
+      },
+      {
+        "asn": "200000",
+        "network": "Ukraine-AS - Hosting Ukraine LTD, UA",
+        "share_pct": "9.2"
+      },
+      {
+        "asn": "24940",
+        "network": "HETZNER-AS - Hetzner Online GmbH, DE",
+        "share_pct": "7.8"
+      },
+      {
+        "asn": "15967",
+        "network": "NETARTGROUP - Nazwa.pl Sp.z.o.o., PL",
+        "share_pct": "6.1"
+      },
+      {
+        "asn": "7506",
+        "network": "GMO-I-R1 - GMO Internet, Inc., JP",
+        "share_pct": "6.0"
+      },
+      {
+        "asn": "16509",
+        "network": "AMAZON-02 - Amazon.com, Inc., US",
+        "share_pct": "5.0"
+      },
+      {
+        "asn": "58791",
+        "network": "GMO-I-R2 - GMO Internet, Inc., JP",
+        "share_pct": "3.7"
+      },
+      {
+        "asn": "14618",
+        "network": "AMAZON-AES - Amazon.com, Inc., US",
+        "share_pct": "2.9"
+      },
+      {
+        "asn": "4694",
+        "network": "IDCF - IDC Frontier Inc., JP",
+        "share_pct": "2.6"
+      }
+    ],
+    "ranks": [
+      {
+        "all_origins": "772",
+        "pagespeed_origins": "0",
+        "rank": "top 1k",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "3060",
+        "pagespeed_origins": "9",
+        "rank": "top 5k",
+        "share": "0.002941"
+      },
+      {
+        "all_origins": "3814",
+        "pagespeed_origins": "5",
+        "rank": "top 10k",
+        "share": "0.001311"
+      },
+      {
+        "all_origins": "30373",
+        "pagespeed_origins": "54",
+        "rank": "top 50k",
+        "share": "0.001778"
+      },
+      {
+        "all_origins": "38526",
+        "pagespeed_origins": "86",
+        "rank": "top 100k",
+        "share": "0.002232"
+      },
+      {
+        "all_origins": "318986",
+        "pagespeed_origins": "888",
+        "rank": "top 500k",
+        "share": "0.002784"
+      },
+      {
+        "all_origins": "412641",
+        "pagespeed_origins": "1146",
+        "rank": "top 1M",
+        "share": "0.002777"
+      },
+      {
+        "all_origins": "3472144",
+        "pagespeed_origins": "9939",
+        "rank": "top 5M",
+        "share": "0.002862"
+      },
+      {
+        "all_origins": "4504092",
+        "pagespeed_origins": "11537",
+        "rank": "top 10M",
+        "share": "0.002561"
+      },
+      {
+        "all_origins": "7366216",
+        "pagespeed_origins": "15900",
+        "rank": "top 50M",
+        "share": "0.002159"
+      },
+      {
+        "all_origins": "0",
+        "pagespeed_origins": "0",
+        "rank": "unranked",
+        "share": "0.000000"
+      }
+    ],
+    "series": [
+      {
+        "all_origins": "7849064",
+        "bucket": "google-era",
+        "date": "2020-12-01",
+        "origins": "61334",
+        "share": "0.007814"
+      },
+      {
+        "all_origins": "7849064",
+        "bucket": "incubator-era",
+        "date": "2020-12-01",
+        "origins": "131",
+        "share": "0.000017"
+      },
+      {
+        "all_origins": "7849064",
+        "bucket": "current",
+        "date": "2020-12-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "7849064",
+        "bucket": "hidden",
+        "date": "2020-12-01",
+        "origins": "11939",
+        "share": "0.001521"
+      },
+      {
+        "all_origins": "7783625",
+        "bucket": "google-era",
+        "date": "2021-01-01",
+        "origins": "60935",
+        "share": "0.007829"
+      },
+      {
+        "all_origins": "7783625",
+        "bucket": "incubator-era",
+        "date": "2021-01-01",
+        "origins": "156",
+        "share": "0.000020"
+      },
+      {
+        "all_origins": "7783625",
+        "bucket": "current",
+        "date": "2021-01-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "7783625",
+        "bucket": "hidden",
+        "date": "2021-01-01",
+        "origins": "11994",
+        "share": "0.001541"
+      },
+      {
+        "all_origins": "8070267",
+        "bucket": "google-era",
+        "date": "2021-02-01",
+        "origins": "49392",
+        "share": "0.006120"
+      },
+      {
+        "all_origins": "8070267",
+        "bucket": "incubator-era",
+        "date": "2021-02-01",
+        "origins": "146",
+        "share": "0.000018"
+      },
+      {
+        "all_origins": "8070267",
+        "bucket": "current",
+        "date": "2021-02-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "8070267",
+        "bucket": "hidden",
+        "date": "2021-02-01",
+        "origins": "25399",
+        "share": "0.003147"
+      },
+      {
+        "all_origins": "7992668",
+        "bucket": "google-era",
+        "date": "2021-03-01",
+        "origins": "48030",
+        "share": "0.006009"
+      },
+      {
+        "all_origins": "7992668",
+        "bucket": "incubator-era",
+        "date": "2021-03-01",
+        "origins": "142",
+        "share": "0.000018"
+      },
+      {
+        "all_origins": "7992668",
+        "bucket": "current",
+        "date": "2021-03-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "7992668",
+        "bucket": "hidden",
+        "date": "2021-03-01",
+        "origins": "25702",
+        "share": "0.003216"
+      },
+      {
+        "all_origins": "7943374",
+        "bucket": "google-era",
+        "date": "2021-04-01",
+        "origins": "46893",
+        "share": "0.005903"
+      },
+      {
+        "all_origins": "7943374",
+        "bucket": "incubator-era",
+        "date": "2021-04-01",
+        "origins": "150",
+        "share": "0.000019"
+      },
+      {
+        "all_origins": "7943374",
+        "bucket": "current",
+        "date": "2021-04-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "7943374",
+        "bucket": "hidden",
+        "date": "2021-04-01",
+        "origins": "25635",
+        "share": "0.003227"
+      },
+      {
+        "all_origins": "8119977",
+        "bucket": "google-era",
+        "date": "2021-05-01",
+        "origins": "47326",
+        "share": "0.005828"
+      },
+      {
+        "all_origins": "8119977",
+        "bucket": "incubator-era",
+        "date": "2021-05-01",
+        "origins": "191",
+        "share": "0.000024"
+      },
+      {
+        "all_origins": "8119977",
+        "bucket": "current",
+        "date": "2021-05-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "8119977",
+        "bucket": "hidden",
+        "date": "2021-05-01",
+        "origins": "26599",
+        "share": "0.003276"
+      },
+      {
+        "all_origins": "8207414",
+        "bucket": "google-era",
+        "date": "2021-06-01",
+        "origins": "47814",
+        "share": "0.005826"
+      },
+      {
+        "all_origins": "8207414",
+        "bucket": "incubator-era",
+        "date": "2021-06-01",
+        "origins": "190",
+        "share": "0.000023"
+      },
+      {
+        "all_origins": "8207414",
+        "bucket": "current",
+        "date": "2021-06-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "8207414",
+        "bucket": "hidden",
+        "date": "2021-06-01",
+        "origins": "26324",
+        "share": "0.003207"
+      },
+      {
+        "all_origins": "8190212",
+        "bucket": "google-era",
+        "date": "2021-07-01",
+        "origins": "60661",
+        "share": "0.007407"
+      },
+      {
+        "all_origins": "8190212",
+        "bucket": "incubator-era",
+        "date": "2021-07-01",
+        "origins": "268",
+        "share": "0.000033"
+      },
+      {
+        "all_origins": "8190212",
+        "bucket": "current",
+        "date": "2021-07-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "8190212",
+        "bucket": "hidden",
+        "date": "2021-07-01",
+        "origins": "12199",
+        "share": "0.001489"
+      },
+      {
+        "all_origins": "8627806",
+        "bucket": "google-era",
+        "date": "2021-08-01",
+        "origins": "63650",
+        "share": "0.007377"
+      },
+      {
+        "all_origins": "8627806",
+        "bucket": "incubator-era",
+        "date": "2021-08-01",
+        "origins": "472",
+        "share": "0.000055"
+      },
+      {
+        "all_origins": "8627806",
+        "bucket": "current",
+        "date": "2021-08-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "8627806",
+        "bucket": "hidden",
+        "date": "2021-08-01",
+        "origins": "12632",
+        "share": "0.001464"
+      },
+      {
+        "all_origins": "7928116",
+        "bucket": "google-era",
+        "date": "2021-09-01",
+        "origins": "56674",
+        "share": "0.007148"
+      },
+      {
+        "all_origins": "7928116",
+        "bucket": "incubator-era",
+        "date": "2021-09-01",
+        "origins": "461",
+        "share": "0.000058"
+      },
+      {
+        "all_origins": "7928116",
+        "bucket": "current",
+        "date": "2021-09-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "7928116",
+        "bucket": "hidden",
+        "date": "2021-09-01",
+        "origins": "11952",
+        "share": "0.001508"
+      },
+      {
+        "all_origins": "8182054",
+        "bucket": "google-era",
+        "date": "2021-10-01",
+        "origins": "55664",
+        "share": "0.006803"
+      },
+      {
+        "all_origins": "8182054",
+        "bucket": "incubator-era",
+        "date": "2021-10-01",
+        "origins": "443",
+        "share": "0.000054"
+      },
+      {
+        "all_origins": "8182054",
+        "bucket": "current",
+        "date": "2021-10-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "8182054",
+        "bucket": "hidden",
+        "date": "2021-10-01",
+        "origins": "12438",
+        "share": "0.001520"
+      },
+      {
+        "all_origins": "8415605",
+        "bucket": "google-era",
+        "date": "2021-11-01",
+        "origins": "55208",
+        "share": "0.006560"
+      },
+      {
+        "all_origins": "8415605",
+        "bucket": "incubator-era",
+        "date": "2021-11-01",
+        "origins": "492",
+        "share": "0.000058"
+      },
+      {
+        "all_origins": "8415605",
+        "bucket": "current",
+        "date": "2021-11-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "8415605",
+        "bucket": "hidden",
+        "date": "2021-11-01",
+        "origins": "12704",
+        "share": "0.001510"
+      },
+      {
+        "all_origins": "8526431",
+        "bucket": "google-era",
+        "date": "2021-12-01",
+        "origins": "54973",
+        "share": "0.006447"
+      },
+      {
+        "all_origins": "8526431",
+        "bucket": "incubator-era",
+        "date": "2021-12-01",
+        "origins": "538",
+        "share": "0.000063"
+      },
+      {
+        "all_origins": "8526431",
+        "bucket": "current",
+        "date": "2021-12-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "8526431",
+        "bucket": "hidden",
+        "date": "2021-12-01",
+        "origins": "13149",
+        "share": "0.001542"
+      },
+      {
+        "all_origins": "8470080",
+        "bucket": "google-era",
+        "date": "2022-01-01",
+        "origins": "53520",
+        "share": "0.006319"
+      },
+      {
+        "all_origins": "8470080",
+        "bucket": "incubator-era",
+        "date": "2022-01-01",
+        "origins": "546",
+        "share": "0.000064"
+      },
+      {
+        "all_origins": "8470080",
+        "bucket": "current",
+        "date": "2022-01-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "8470080",
+        "bucket": "hidden",
+        "date": "2022-01-01",
+        "origins": "13340",
+        "share": "0.001575"
+      },
+      {
+        "all_origins": "8196933",
+        "bucket": "google-era",
+        "date": "2022-02-01",
+        "origins": "49837",
+        "share": "0.006080"
+      },
+      {
+        "all_origins": "8196933",
+        "bucket": "incubator-era",
+        "date": "2022-02-01",
+        "origins": "554",
+        "share": "0.000068"
+      },
+      {
+        "all_origins": "8196933",
+        "bucket": "current",
+        "date": "2022-02-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "8196933",
+        "bucket": "hidden",
+        "date": "2022-02-01",
+        "origins": "12887",
+        "share": "0.001572"
+      },
+      {
+        "all_origins": "8718873",
+        "bucket": "google-era",
+        "date": "2022-03-01",
+        "origins": "52183",
+        "share": "0.005985"
+      },
+      {
+        "all_origins": "8718873",
+        "bucket": "incubator-era",
+        "date": "2022-03-01",
+        "origins": "593",
+        "share": "0.000068"
+      },
+      {
+        "all_origins": "8718873",
+        "bucket": "current",
+        "date": "2022-03-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "8718873",
+        "bucket": "hidden",
+        "date": "2022-03-01",
+        "origins": "12652",
+        "share": "0.001451"
+      },
+      {
+        "all_origins": "8532900",
+        "bucket": "google-era",
+        "date": "2022-04-01",
+        "origins": "51020",
+        "share": "0.005979"
+      },
+      {
+        "all_origins": "8532900",
+        "bucket": "incubator-era",
+        "date": "2022-04-01",
+        "origins": "560",
+        "share": "0.000066"
+      },
+      {
+        "all_origins": "8532900",
+        "bucket": "current",
+        "date": "2022-04-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "8532900",
+        "bucket": "hidden",
+        "date": "2022-04-01",
+        "origins": "11094",
+        "share": "0.001300"
+      },
+      {
+        "all_origins": "8338936",
+        "bucket": "google-era",
+        "date": "2022-05-01",
+        "origins": "50637",
+        "share": "0.006072"
+      },
+      {
+        "all_origins": "8338936",
+        "bucket": "incubator-era",
+        "date": "2022-05-01",
+        "origins": "584",
+        "share": "0.000070"
+      },
+      {
+        "all_origins": "8338936",
+        "bucket": "current",
+        "date": "2022-05-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "8338936",
+        "bucket": "hidden",
+        "date": "2022-05-01",
+        "origins": "8961",
+        "share": "0.001075"
+      },
+      {
+        "all_origins": "8388540",
+        "bucket": "google-era",
+        "date": "2022-06-01",
+        "origins": "50206",
+        "share": "0.005985"
+      },
+      {
+        "all_origins": "8388540",
+        "bucket": "incubator-era",
+        "date": "2022-06-01",
+        "origins": "646",
+        "share": "0.000077"
+      },
+      {
+        "all_origins": "8388540",
+        "bucket": "current",
+        "date": "2022-06-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "8388540",
+        "bucket": "hidden",
+        "date": "2022-06-01",
+        "origins": "9550",
+        "share": "0.001138"
+      },
+      {
+        "all_origins": "10744826",
+        "bucket": "google-era",
+        "date": "2022-07-01",
+        "origins": "62210",
+        "share": "0.005790"
+      },
+      {
+        "all_origins": "10744826",
+        "bucket": "incubator-era",
+        "date": "2022-07-01",
+        "origins": "808",
+        "share": "0.000075"
+      },
+      {
+        "all_origins": "10744826",
+        "bucket": "current",
+        "date": "2022-07-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "10744826",
+        "bucket": "hidden",
+        "date": "2022-07-01",
+        "origins": "12840",
+        "share": "0.001195"
+      },
+      {
+        "all_origins": "15586166",
+        "bucket": "google-era",
+        "date": "2022-08-01",
+        "origins": "82883",
+        "share": "0.005318"
+      },
+      {
+        "all_origins": "15586166",
+        "bucket": "incubator-era",
+        "date": "2022-08-01",
+        "origins": "1124",
+        "share": "0.000072"
+      },
+      {
+        "all_origins": "15586166",
+        "bucket": "current",
+        "date": "2022-08-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "15586166",
+        "bucket": "hidden",
+        "date": "2022-08-01",
+        "origins": "16448",
+        "share": "0.001055"
+      },
+      {
+        "all_origins": "15527743",
+        "bucket": "google-era",
+        "date": "2022-09-01",
+        "origins": "81147",
+        "share": "0.005226"
+      },
+      {
+        "all_origins": "15527743",
+        "bucket": "incubator-era",
+        "date": "2022-09-01",
+        "origins": "1327",
+        "share": "0.000085"
+      },
+      {
+        "all_origins": "15527743",
+        "bucket": "current",
+        "date": "2022-09-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "15527743",
+        "bucket": "hidden",
+        "date": "2022-09-01",
+        "origins": "16371",
+        "share": "0.001054"
+      },
+      {
+        "all_origins": "16067267",
+        "bucket": "google-era",
+        "date": "2022-10-01",
+        "origins": "81845",
+        "share": "0.005094"
+      },
+      {
+        "all_origins": "16067267",
+        "bucket": "incubator-era",
+        "date": "2022-10-01",
+        "origins": "1829",
+        "share": "0.000114"
+      },
+      {
+        "all_origins": "16067267",
+        "bucket": "current",
+        "date": "2022-10-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "16067267",
+        "bucket": "hidden",
+        "date": "2022-10-01",
+        "origins": "16477",
+        "share": "0.001026"
+      },
+      {
+        "all_origins": "16932074",
+        "bucket": "google-era",
+        "date": "2022-11-01",
+        "origins": "84584",
+        "share": "0.004995"
+      },
+      {
+        "all_origins": "16932074",
+        "bucket": "incubator-era",
+        "date": "2022-11-01",
+        "origins": "2339",
+        "share": "0.000138"
+      },
+      {
+        "all_origins": "16932074",
+        "bucket": "current",
+        "date": "2022-11-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "16932074",
+        "bucket": "hidden",
+        "date": "2022-11-01",
+        "origins": "16877",
+        "share": "0.000997"
+      },
+      {
+        "all_origins": "16887341",
+        "bucket": "google-era",
+        "date": "2022-12-01",
+        "origins": "83464",
+        "share": "0.004942"
+      },
+      {
+        "all_origins": "16887341",
+        "bucket": "incubator-era",
+        "date": "2022-12-01",
+        "origins": "2544",
+        "share": "0.000151"
+      },
+      {
+        "all_origins": "16887341",
+        "bucket": "current",
+        "date": "2022-12-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "16887341",
+        "bucket": "hidden",
+        "date": "2022-12-01",
+        "origins": "16885",
+        "share": "0.001000"
+      },
+      {
+        "all_origins": "16852542",
+        "bucket": "google-era",
+        "date": "2023-01-01",
+        "origins": "62085",
+        "share": "0.003684"
+      },
+      {
+        "all_origins": "16852542",
+        "bucket": "incubator-era",
+        "date": "2023-01-01",
+        "origins": "2174",
+        "share": "0.000129"
+      },
+      {
+        "all_origins": "16852542",
+        "bucket": "current",
+        "date": "2023-01-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "16852542",
+        "bucket": "hidden",
+        "date": "2023-01-01",
+        "origins": "38027",
+        "share": "0.002256"
+      },
+      {
+        "all_origins": "16061997",
+        "bucket": "google-era",
+        "date": "2023-02-01",
+        "origins": "57755",
+        "share": "0.003596"
+      },
+      {
+        "all_origins": "16061997",
+        "bucket": "incubator-era",
+        "date": "2023-02-01",
+        "origins": "2184",
+        "share": "0.000136"
+      },
+      {
+        "all_origins": "16061997",
+        "bucket": "current",
+        "date": "2023-02-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "16061997",
+        "bucket": "hidden",
+        "date": "2023-02-01",
+        "origins": "36114",
+        "share": "0.002248"
+      },
+      {
+        "all_origins": "17411652",
+        "bucket": "google-era",
+        "date": "2023-03-01",
+        "origins": "61461",
+        "share": "0.003530"
+      },
+      {
+        "all_origins": "17411652",
+        "bucket": "incubator-era",
+        "date": "2023-03-01",
+        "origins": "2909",
+        "share": "0.000167"
+      },
+      {
+        "all_origins": "17411652",
+        "bucket": "current",
+        "date": "2023-03-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "17411652",
+        "bucket": "hidden",
+        "date": "2023-03-01",
+        "origins": "38262",
+        "share": "0.002197"
+      },
+      {
+        "all_origins": "17360056",
+        "bucket": "google-era",
+        "date": "2023-04-01",
+        "origins": "59391",
+        "share": "0.003421"
+      },
+      {
+        "all_origins": "17360056",
+        "bucket": "incubator-era",
+        "date": "2023-04-01",
+        "origins": "3061",
+        "share": "0.000176"
+      },
+      {
+        "all_origins": "17360056",
+        "bucket": "current",
+        "date": "2023-04-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "17360056",
+        "bucket": "hidden",
+        "date": "2023-04-01",
+        "origins": "39426",
+        "share": "0.002271"
+      },
+      {
+        "all_origins": "17429050",
+        "bucket": "google-era",
+        "date": "2023-05-01",
+        "origins": "55453",
+        "share": "0.003182"
+      },
+      {
+        "all_origins": "17429050",
+        "bucket": "incubator-era",
+        "date": "2023-05-01",
+        "origins": "2668",
+        "share": "0.000153"
+      },
+      {
+        "all_origins": "17429050",
+        "bucket": "current",
+        "date": "2023-05-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "17429050",
+        "bucket": "hidden",
+        "date": "2023-05-01",
+        "origins": "38629",
+        "share": "0.002216"
+      },
+      {
+        "all_origins": "17389739",
+        "bucket": "google-era",
+        "date": "2023-06-01",
+        "origins": "53648",
+        "share": "0.003085"
+      },
+      {
+        "all_origins": "17389739",
+        "bucket": "incubator-era",
+        "date": "2023-06-01",
+        "origins": "2745",
+        "share": "0.000158"
+      },
+      {
+        "all_origins": "17389739",
+        "bucket": "current",
+        "date": "2023-06-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "17389739",
+        "bucket": "hidden",
+        "date": "2023-06-01",
+        "origins": "33830",
+        "share": "0.001945"
+      },
+      {
+        "all_origins": "17109596",
+        "bucket": "google-era",
+        "date": "2023-07-01",
+        "origins": "52319",
+        "share": "0.003058"
+      },
+      {
+        "all_origins": "17109596",
+        "bucket": "incubator-era",
+        "date": "2023-07-01",
+        "origins": "2733",
+        "share": "0.000160"
+      },
+      {
+        "all_origins": "17109596",
+        "bucket": "current",
+        "date": "2023-07-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "17109596",
+        "bucket": "hidden",
+        "date": "2023-07-01",
+        "origins": "32423",
+        "share": "0.001895"
+      },
+      {
+        "all_origins": "17037616",
+        "bucket": "google-era",
+        "date": "2023-08-01",
+        "origins": "51283",
+        "share": "0.003010"
+      },
+      {
+        "all_origins": "17037616",
+        "bucket": "incubator-era",
+        "date": "2023-08-01",
+        "origins": "2745",
+        "share": "0.000161"
+      },
+      {
+        "all_origins": "17037616",
+        "bucket": "current",
+        "date": "2023-08-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "17037616",
+        "bucket": "hidden",
+        "date": "2023-08-01",
+        "origins": "30017",
+        "share": "0.001762"
+      },
+      {
+        "all_origins": "17219947",
+        "bucket": "google-era",
+        "date": "2023-09-01",
+        "origins": "49894",
+        "share": "0.002897"
+      },
+      {
+        "all_origins": "17219947",
+        "bucket": "incubator-era",
+        "date": "2023-09-01",
+        "origins": "2835",
+        "share": "0.000165"
+      },
+      {
+        "all_origins": "17219947",
+        "bucket": "current",
+        "date": "2023-09-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "17219947",
+        "bucket": "hidden",
+        "date": "2023-09-01",
+        "origins": "31495",
+        "share": "0.001829"
+      },
+      {
+        "all_origins": "17543230",
+        "bucket": "google-era",
+        "date": "2023-10-01",
+        "origins": "49893",
+        "share": "0.002844"
+      },
+      {
+        "all_origins": "17543230",
+        "bucket": "incubator-era",
+        "date": "2023-10-01",
+        "origins": "2988",
+        "share": "0.000170"
+      },
+      {
+        "all_origins": "17543230",
+        "bucket": "current",
+        "date": "2023-10-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "17543230",
+        "bucket": "hidden",
+        "date": "2023-10-01",
+        "origins": "32134",
+        "share": "0.001832"
+      },
+      {
+        "all_origins": "17477615",
+        "bucket": "google-era",
+        "date": "2023-11-01",
+        "origins": "48847",
+        "share": "0.002795"
+      },
+      {
+        "all_origins": "17477615",
+        "bucket": "incubator-era",
+        "date": "2023-11-01",
+        "origins": "3160",
+        "share": "0.000181"
+      },
+      {
+        "all_origins": "17477615",
+        "bucket": "current",
+        "date": "2023-11-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "17477615",
+        "bucket": "hidden",
+        "date": "2023-11-01",
+        "origins": "32095",
+        "share": "0.001836"
+      },
+      {
+        "all_origins": "16659092",
+        "bucket": "google-era",
+        "date": "2023-12-01",
+        "origins": "46733",
+        "share": "0.002805"
+      },
+      {
+        "all_origins": "16659092",
+        "bucket": "incubator-era",
+        "date": "2023-12-01",
+        "origins": "3170",
+        "share": "0.000190"
+      },
+      {
+        "all_origins": "16659092",
+        "bucket": "current",
+        "date": "2023-12-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "16659092",
+        "bucket": "hidden",
+        "date": "2023-12-01",
+        "origins": "30759",
+        "share": "0.001846"
+      },
+      {
+        "all_origins": "15768437",
+        "bucket": "google-era",
+        "date": "2024-01-01",
+        "origins": "43751",
+        "share": "0.002775"
+      },
+      {
+        "all_origins": "15768437",
+        "bucket": "incubator-era",
+        "date": "2024-01-01",
+        "origins": "3028",
+        "share": "0.000192"
+      },
+      {
+        "all_origins": "15768437",
+        "bucket": "current",
+        "date": "2024-01-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "15768437",
+        "bucket": "hidden",
+        "date": "2024-01-01",
+        "origins": "28924",
+        "share": "0.001834"
+      },
+      {
+        "all_origins": "16919465",
+        "bucket": "google-era",
+        "date": "2024-02-01",
+        "origins": "45836",
+        "share": "0.002709"
+      },
+      {
+        "all_origins": "16919465",
+        "bucket": "incubator-era",
+        "date": "2024-02-01",
+        "origins": "3312",
+        "share": "0.000196"
+      },
+      {
+        "all_origins": "16919465",
+        "bucket": "current",
+        "date": "2024-02-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "16919465",
+        "bucket": "hidden",
+        "date": "2024-02-01",
+        "origins": "30223",
+        "share": "0.001786"
+      },
+      {
+        "all_origins": "17049193",
+        "bucket": "google-era",
+        "date": "2024-03-01",
+        "origins": "45296",
+        "share": "0.002657"
+      },
+      {
+        "all_origins": "17049193",
+        "bucket": "incubator-era",
+        "date": "2024-03-01",
+        "origins": "3351",
+        "share": "0.000197"
+      },
+      {
+        "all_origins": "17049193",
+        "bucket": "current",
+        "date": "2024-03-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "17049193",
+        "bucket": "hidden",
+        "date": "2024-03-01",
+        "origins": "30317",
+        "share": "0.001778"
+      },
+      {
+        "all_origins": "17073262",
+        "bucket": "google-era",
+        "date": "2024-04-01",
+        "origins": "43359",
+        "share": "0.002540"
+      },
+      {
+        "all_origins": "17073262",
+        "bucket": "incubator-era",
+        "date": "2024-04-01",
+        "origins": "3452",
+        "share": "0.000202"
+      },
+      {
+        "all_origins": "17073262",
+        "bucket": "current",
+        "date": "2024-04-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "17073262",
+        "bucket": "hidden",
+        "date": "2024-04-01",
+        "origins": "30822",
+        "share": "0.001805"
+      },
+      {
+        "all_origins": "17026966",
+        "bucket": "google-era",
+        "date": "2024-05-01",
+        "origins": "43523",
+        "share": "0.002556"
+      },
+      {
+        "all_origins": "17026966",
+        "bucket": "incubator-era",
+        "date": "2024-05-01",
+        "origins": "3526",
+        "share": "0.000207"
+      },
+      {
+        "all_origins": "17026966",
+        "bucket": "current",
+        "date": "2024-05-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "17026966",
+        "bucket": "hidden",
+        "date": "2024-05-01",
+        "origins": "27899",
+        "share": "0.001639"
+      },
+      {
+        "all_origins": "16935654",
+        "bucket": "google-era",
+        "date": "2024-06-01",
+        "origins": "42199",
+        "share": "0.002492"
+      },
+      {
+        "all_origins": "16935654",
+        "bucket": "incubator-era",
+        "date": "2024-06-01",
+        "origins": "3675",
+        "share": "0.000217"
+      },
+      {
+        "all_origins": "16935654",
+        "bucket": "current",
+        "date": "2024-06-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "16935654",
+        "bucket": "hidden",
+        "date": "2024-06-01",
+        "origins": "26820",
+        "share": "0.001584"
+      },
+      {
+        "all_origins": "16780212",
+        "bucket": "google-era",
+        "date": "2024-07-01",
+        "origins": "40243",
+        "share": "0.002398"
+      },
+      {
+        "all_origins": "16780212",
+        "bucket": "incubator-era",
+        "date": "2024-07-01",
+        "origins": "3781",
+        "share": "0.000225"
+      },
+      {
+        "all_origins": "16780212",
+        "bucket": "current",
+        "date": "2024-07-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "16780212",
+        "bucket": "hidden",
+        "date": "2024-07-01",
+        "origins": "25953",
+        "share": "0.001547"
+      },
+      {
+        "all_origins": "16494898",
+        "bucket": "google-era",
+        "date": "2024-08-01",
+        "origins": "37788",
+        "share": "0.002291"
+      },
+      {
+        "all_origins": "16494898",
+        "bucket": "incubator-era",
+        "date": "2024-08-01",
+        "origins": "3994",
+        "share": "0.000242"
+      },
+      {
+        "all_origins": "16494898",
+        "bucket": "current",
+        "date": "2024-08-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "16494898",
+        "bucket": "hidden",
+        "date": "2024-08-01",
+        "origins": "23960",
+        "share": "0.001453"
+      },
+      {
+        "all_origins": "16693209",
+        "bucket": "google-era",
+        "date": "2024-09-01",
+        "origins": "37195",
+        "share": "0.002228"
+      },
+      {
+        "all_origins": "16693209",
+        "bucket": "incubator-era",
+        "date": "2024-09-01",
+        "origins": "4405",
+        "share": "0.000264"
+      },
+      {
+        "all_origins": "16693209",
+        "bucket": "current",
+        "date": "2024-09-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "16693209",
+        "bucket": "hidden",
+        "date": "2024-09-01",
+        "origins": "24494",
+        "share": "0.001467"
+      },
+      {
+        "all_origins": "17256575",
+        "bucket": "google-era",
+        "date": "2024-10-01",
+        "origins": "37134",
+        "share": "0.002152"
+      },
+      {
+        "all_origins": "17256575",
+        "bucket": "incubator-era",
+        "date": "2024-10-01",
+        "origins": "4923",
+        "share": "0.000285"
+      },
+      {
+        "all_origins": "17256575",
+        "bucket": "current",
+        "date": "2024-10-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "17256575",
+        "bucket": "hidden",
+        "date": "2024-10-01",
+        "origins": "25006",
+        "share": "0.001449"
+      },
+      {
+        "all_origins": "17100918",
+        "bucket": "google-era",
+        "date": "2024-11-01",
+        "origins": "36083",
+        "share": "0.002110"
+      },
+      {
+        "all_origins": "17100918",
+        "bucket": "incubator-era",
+        "date": "2024-11-01",
+        "origins": "5088",
+        "share": "0.000298"
+      },
+      {
+        "all_origins": "17100918",
+        "bucket": "current",
+        "date": "2024-11-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "17100918",
+        "bucket": "hidden",
+        "date": "2024-11-01",
+        "origins": "25024",
+        "share": "0.001463"
+      },
+      {
+        "all_origins": "16896798",
+        "bucket": "google-era",
+        "date": "2024-12-01",
+        "origins": "34472",
+        "share": "0.002040"
+      },
+      {
+        "all_origins": "16896798",
+        "bucket": "incubator-era",
+        "date": "2024-12-01",
+        "origins": "5146",
+        "share": "0.000305"
+      },
+      {
+        "all_origins": "16896798",
+        "bucket": "current",
+        "date": "2024-12-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "16896798",
+        "bucket": "hidden",
+        "date": "2024-12-01",
+        "origins": "24526",
+        "share": "0.001452"
+      },
+      {
+        "all_origins": "15760497",
+        "bucket": "google-era",
+        "date": "2025-01-01",
+        "origins": "31396",
+        "share": "0.001992"
+      },
+      {
+        "all_origins": "15760497",
+        "bucket": "incubator-era",
+        "date": "2025-01-01",
+        "origins": "5016",
+        "share": "0.000318"
+      },
+      {
+        "all_origins": "15760497",
+        "bucket": "current",
+        "date": "2025-01-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "15760497",
+        "bucket": "hidden",
+        "date": "2025-01-01",
+        "origins": "23157",
+        "share": "0.001469"
+      },
+      {
+        "all_origins": "16961363",
+        "bucket": "google-era",
+        "date": "2025-02-01",
+        "origins": "33222",
+        "share": "0.001959"
+      },
+      {
+        "all_origins": "16961363",
+        "bucket": "incubator-era",
+        "date": "2025-02-01",
+        "origins": "5371",
+        "share": "0.000317"
+      },
+      {
+        "all_origins": "16961363",
+        "bucket": "current",
+        "date": "2025-02-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "16961363",
+        "bucket": "hidden",
+        "date": "2025-02-01",
+        "origins": "24256",
+        "share": "0.001430"
+      },
+      {
+        "all_origins": "17015438",
+        "bucket": "google-era",
+        "date": "2025-03-01",
+        "origins": "32471",
+        "share": "0.001908"
+      },
+      {
+        "all_origins": "17015438",
+        "bucket": "incubator-era",
+        "date": "2025-03-01",
+        "origins": "5361",
+        "share": "0.000315"
+      },
+      {
+        "all_origins": "17015438",
+        "bucket": "current",
+        "date": "2025-03-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "17015438",
+        "bucket": "hidden",
+        "date": "2025-03-01",
+        "origins": "24144",
+        "share": "0.001419"
+      },
+      {
+        "all_origins": "16797695",
+        "bucket": "google-era",
+        "date": "2025-04-01",
+        "origins": "31846",
+        "share": "0.001896"
+      },
+      {
+        "all_origins": "16797695",
+        "bucket": "incubator-era",
+        "date": "2025-04-01",
+        "origins": "5344",
+        "share": "0.000318"
+      },
+      {
+        "all_origins": "16797695",
+        "bucket": "current",
+        "date": "2025-04-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "16797695",
+        "bucket": "hidden",
+        "date": "2025-04-01",
+        "origins": "17874",
+        "share": "0.001064"
+      },
+      {
+        "all_origins": "16517760",
+        "bucket": "google-era",
+        "date": "2025-05-01",
+        "origins": "30400",
+        "share": "0.001840"
+      },
+      {
+        "all_origins": "16517760",
+        "bucket": "incubator-era",
+        "date": "2025-05-01",
+        "origins": "5261",
+        "share": "0.000319"
+      },
+      {
+        "all_origins": "16517760",
+        "bucket": "current",
+        "date": "2025-05-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "16517760",
+        "bucket": "hidden",
+        "date": "2025-05-01",
+        "origins": "23691",
+        "share": "0.001434"
+      },
+      {
+        "all_origins": "16495511",
+        "bucket": "google-era",
+        "date": "2025-06-01",
+        "origins": "29787",
+        "share": "0.001806"
+      },
+      {
+        "all_origins": "16495511",
+        "bucket": "incubator-era",
+        "date": "2025-06-01",
+        "origins": "5245",
+        "share": "0.000318"
+      },
+      {
+        "all_origins": "16495511",
+        "bucket": "current",
+        "date": "2025-06-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "16495511",
+        "bucket": "hidden",
+        "date": "2025-06-01",
+        "origins": "23547",
+        "share": "0.001427"
+      },
+      {
+        "all_origins": "16212864",
+        "bucket": "google-era",
+        "date": "2025-07-01",
+        "origins": "28585",
+        "share": "0.001763"
+      },
+      {
+        "all_origins": "16212864",
+        "bucket": "incubator-era",
+        "date": "2025-07-01",
+        "origins": "5156",
+        "share": "0.000318"
+      },
+      {
+        "all_origins": "16212864",
+        "bucket": "current",
+        "date": "2025-07-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "16212864",
+        "bucket": "hidden",
+        "date": "2025-07-01",
+        "origins": "23224",
+        "share": "0.001432"
+      },
+      {
+        "all_origins": "16293929",
+        "bucket": "google-era",
+        "date": "2025-08-01",
+        "origins": "27906",
+        "share": "0.001713"
+      },
+      {
+        "all_origins": "16293929",
+        "bucket": "incubator-era",
+        "date": "2025-08-01",
+        "origins": "5146",
+        "share": "0.000316"
+      },
+      {
+        "all_origins": "16293929",
+        "bucket": "current",
+        "date": "2025-08-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "16293929",
+        "bucket": "hidden",
+        "date": "2025-08-01",
+        "origins": "23478",
+        "share": "0.001441"
+      },
+      {
+        "all_origins": "16608952",
+        "bucket": "google-era",
+        "date": "2025-09-01",
+        "origins": "27834",
+        "share": "0.001676"
+      },
+      {
+        "all_origins": "16608952",
+        "bucket": "incubator-era",
+        "date": "2025-09-01",
+        "origins": "5253",
+        "share": "0.000316"
+      },
+      {
+        "all_origins": "16608952",
+        "bucket": "current",
+        "date": "2025-09-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "16608952",
+        "bucket": "hidden",
+        "date": "2025-09-01",
+        "origins": "23443",
+        "share": "0.001411"
+      },
+      {
+        "all_origins": "16767257",
+        "bucket": "google-era",
+        "date": "2025-10-01",
+        "origins": "27317",
+        "share": "0.001629"
+      },
+      {
+        "all_origins": "16767257",
+        "bucket": "incubator-era",
+        "date": "2025-10-01",
+        "origins": "5452",
+        "share": "0.000325"
+      },
+      {
+        "all_origins": "16767257",
+        "bucket": "current",
+        "date": "2025-10-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "16767257",
+        "bucket": "hidden",
+        "date": "2025-10-01",
+        "origins": "23646",
+        "share": "0.001410"
+      },
+      {
+        "all_origins": "16608148",
+        "bucket": "google-era",
+        "date": "2025-11-01",
+        "origins": "26561",
+        "share": "0.001599"
+      },
+      {
+        "all_origins": "16608148",
+        "bucket": "incubator-era",
+        "date": "2025-11-01",
+        "origins": "5375",
+        "share": "0.000324"
+      },
+      {
+        "all_origins": "16608148",
+        "bucket": "current",
+        "date": "2025-11-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "16608148",
+        "bucket": "hidden",
+        "date": "2025-11-01",
+        "origins": "23439",
+        "share": "0.001411"
+      },
+      {
+        "all_origins": "16577176",
+        "bucket": "google-era",
+        "date": "2025-12-01",
+        "origins": "25829",
+        "share": "0.001558"
+      },
+      {
+        "all_origins": "16577176",
+        "bucket": "incubator-era",
+        "date": "2025-12-01",
+        "origins": "5395",
+        "share": "0.000325"
+      },
+      {
+        "all_origins": "16577176",
+        "bucket": "current",
+        "date": "2025-12-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "16577176",
+        "bucket": "hidden",
+        "date": "2025-12-01",
+        "origins": "22615",
+        "share": "0.001364"
+      },
+      {
+        "all_origins": "15406264",
+        "bucket": "google-era",
+        "date": "2026-01-01",
+        "origins": "23341",
+        "share": "0.001515"
+      },
+      {
+        "all_origins": "15406264",
+        "bucket": "incubator-era",
+        "date": "2026-01-01",
+        "origins": "4939",
+        "share": "0.000321"
+      },
+      {
+        "all_origins": "15406264",
+        "bucket": "current",
+        "date": "2026-01-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "15406264",
+        "bucket": "hidden",
+        "date": "2026-01-01",
+        "origins": "21145",
+        "share": "0.001372"
+      },
+      {
+        "all_origins": "16552848",
+        "bucket": "google-era",
+        "date": "2026-02-01",
+        "origins": "23991",
+        "share": "0.001449"
+      },
+      {
+        "all_origins": "16552848",
+        "bucket": "incubator-era",
+        "date": "2026-02-01",
+        "origins": "5250",
+        "share": "0.000317"
+      },
+      {
+        "all_origins": "16552848",
+        "bucket": "current",
+        "date": "2026-02-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "16552848",
+        "bucket": "hidden",
+        "date": "2026-02-01",
+        "origins": "21091",
+        "share": "0.001274"
+      },
+      {
+        "all_origins": "16641251",
+        "bucket": "google-era",
+        "date": "2026-03-01",
+        "origins": "23186",
+        "share": "0.001393"
+      },
+      {
+        "all_origins": "16641251",
+        "bucket": "incubator-era",
+        "date": "2026-03-01",
+        "origins": "5150",
+        "share": "0.000309"
+      },
+      {
+        "all_origins": "16641251",
+        "bucket": "current",
+        "date": "2026-03-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "16641251",
+        "bucket": "hidden",
+        "date": "2026-03-01",
+        "origins": "21559",
+        "share": "0.001296"
+      },
+      {
+        "all_origins": "16421822",
+        "bucket": "google-era",
+        "date": "2026-04-01",
+        "origins": "21953",
+        "share": "0.001337"
+      },
+      {
+        "all_origins": "16421822",
+        "bucket": "incubator-era",
+        "date": "2026-04-01",
+        "origins": "4923",
+        "share": "0.000300"
+      },
+      {
+        "all_origins": "16421822",
+        "bucket": "current",
+        "date": "2026-04-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "16421822",
+        "bucket": "hidden",
+        "date": "2026-04-01",
+        "origins": "21184",
+        "share": "0.001290"
+      },
+      {
+        "all_origins": "16406072",
+        "bucket": "google-era",
+        "date": "2026-05-01",
+        "origins": "21275",
+        "share": "0.001297"
+      },
+      {
+        "all_origins": "16406072",
+        "bucket": "incubator-era",
+        "date": "2026-05-01",
+        "origins": "4789",
+        "share": "0.000292"
+      },
+      {
+        "all_origins": "16406072",
+        "bucket": "current",
+        "date": "2026-05-01",
+        "origins": "0",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "16406072",
+        "bucket": "hidden",
+        "date": "2026-05-01",
+        "origins": "21053",
+        "share": "0.001283"
+      },
+      {
+        "all_origins": "16460775",
+        "bucket": "google-era",
+        "date": "2026-06-01",
+        "origins": "20205",
+        "share": "0.001227"
+      },
+      {
+        "all_origins": "16460775",
+        "bucket": "incubator-era",
+        "date": "2026-06-01",
+        "origins": "4757",
+        "share": "0.000289"
+      },
+      {
+        "all_origins": "16460775",
+        "bucket": "current",
+        "date": "2026-06-01",
+        "origins": "1",
+        "share": "0.000000"
+      },
+      {
+        "all_origins": "16460775",
+        "bucket": "hidden",
+        "date": "2026-06-01",
+        "origins": "20560",
+        "share": "0.001249"
+      },
+      {
+        "all_origins": "16230241",
+        "bucket": "google-era",
+        "date": "2026-07-01",
+        "origins": "18086",
+        "share": "0.001114"
+      },
+      {
+        "all_origins": "16230241",
+        "bucket": "incubator-era",
+        "date": "2026-07-01",
+        "origins": "4419",
+        "share": "0.000272"
+      },
+      {
+        "all_origins": "16230241",
+        "bucket": "current",
+        "date": "2026-07-01",
+        "origins": "35",
+        "share": "0.000002"
+      },
+      {
+        "all_origins": "16230241",
+        "bucket": "hidden",
+        "date": "2026-07-01",
+        "origins": "19861",
+        "share": "0.001224"
+      },
+      {
+        "all_origins": "16004083",
+        "bucket": "google-era",
+        "date": "2026-08-01",
+        "origins": "16672",
+        "share": "0.001042"
+      },
+      {
+        "all_origins": "16004083",
+        "bucket": "incubator-era",
+        "date": "2026-08-01",
+        "origins": "4272",
+        "share": "0.000267"
+      },
+      {
+        "all_origins": "16004083",
+        "bucket": "current",
+        "date": "2026-08-01",
+        "origins": "27",
+        "share": "0.000002"
+      },
+      {
+        "all_origins": "16004083",
+        "bucket": "hidden",
+        "date": "2026-08-01",
+        "origins": "18649",
+        "share": "0.001165"
+      },
+      {
+        "all_origins": "16150624",
+        "bucket": "google-era",
+        "date": "2026-09-01",
+        "origins": "16421",
+        "share": "0.001017"
+      },
+      {
+        "all_origins": "16150624",
+        "bucket": "incubator-era",
+        "date": "2026-09-01",
+        "origins": "4182",
+        "share": "0.000259"
+      },
+      {
+        "all_origins": "16150624",
+        "bucket": "current",
+        "date": "2026-09-01",
+        "origins": "22",
+        "share": "0.000001"
+      },
+      {
+        "all_origins": "16150624",
+        "bucket": "hidden",
+        "date": "2026-09-01",
+        "origins": "18939",
+        "share": "0.001173"
+      }
+    ],
+    "servers": [
+      {
+        "engine": "apache-module",
+        "origins": "11061",
+        "server_family": "apache"
+      },
+      {
+        "engine": "apache-module",
+        "origins": "6549",
+        "server_family": "nginx"
+      },
+      {
+        "engine": "apache-module",
+        "origins": "2774",
+        "server_family": "cloudflare"
+      },
+      {
+        "engine": "apache-module",
+        "origins": "662",
+        "server_family": "other"
+      },
+      {
+        "engine": "apache-module",
+        "origins": "608",
+        "server_family": "hidden"
+      },
+      {
+        "engine": "apache-module",
+        "origins": "7",
+        "server_family": "litespeed"
+      },
+      {
+        "engine": "apache-module",
+        "origins": "1",
+        "server_family": "iis"
+      },
+      {
+        "engine": "nginx-module",
+        "origins": "11156",
+        "server_family": "nginx"
+      },
+      {
+        "engine": "nginx-module",
+        "origins": "2363",
+        "server_family": "cloudflare"
+      },
+      {
+        "engine": "nginx-module",
+        "origins": "232",
+        "server_family": "other"
+      },
+      {
+        "engine": "nginx-module",
+        "origins": "79",
+        "server_family": "hidden"
+      },
+      {
+        "engine": "nginx-module",
+        "origins": "18",
+        "server_family": "iis"
+      },
+      {
+        "engine": "nginx-module",
+        "origins": "1",
+        "server_family": "litespeed"
+      }
+    ]
+  }
+}

@@ -1,0 +1,478 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import PageHero from '../components/PageHero.astro';
+import { offerJsonLd } from '../data/offer-jsonld';
+import { productJsonLd } from '../data/software-jsonld';
+import {
+  MAX_VARIANTS,
+  PKG_ASPNETCORE,
+  PRODUCT_DISPLAY_NAME,
+  PKG_SIDECAR,
+  SIDECAR_NGINX_VERSION,
+  ASPNETCORE_RIDS,
+  V2_GA_DATE,
+  FREE_TO_RUN_LINE,
+} from '../data/product-facts.mjs';
+import { getMappingByAuditId } from '../data/psi-mps-mapping';
+import { stripHtml } from '../data/faq-shared';
+
+// /aspnet-core-performance/ — the .NET storefront page (SEO doc P1#8, the
+// "category nobody fills"). nginx and Apache have had a server-side page
+// optimizer for a decade; the official .NET advice is response compression
+// plus a CDN, neither of which transcodes images or inlines critical CSS.
+// This page documents the WeAmp.PageSpeed.AspNetCore in-process middleware,
+// the signed IIS MSI for classic IIS, and the IISpeed migration path, scoped
+// honestly to what server-side optimization does and does not fix.
+//
+// Single concrete artifact (anti-doorway): a real Program.cs middleware snippet
+// plus the audit->filter coverage table driven from psi-mps-mapping.ts, so the
+// scoping is the legally-vetted source, not a hand-written claim.
+
+// RIDs prose, derived from product-facts so a RID change can't drift here.
+const ridList = ASPNETCORE_RIDS.join(', ');
+
+// Audit coverage rows for the honesty table. Each entry is read from the
+// shared mapping; coverage drives the badge so the page can't overclaim.
+const coverageAuditIds = [
+  'image-delivery-insight',
+  'render-blocking-insight',
+  'unminified-css',
+  'unminified-javascript',
+  'cache-insight',
+  'unsized-images',
+  'largest-contentful-paint',
+  'interaction-to-next-paint',
+  'font-display-insight',
+  'third-parties-insight',
+];
+const coverageRows = coverageAuditIds
+  .map((id) => getMappingByAuditId(id))
+  .filter((m) => m !== undefined);
+
+// full -> auto-fix, partial -> assistive, none -> client-side / out of scope.
+const coverageLabel = {
+  full: 'Auto-fix',
+  partial: 'Assistive',
+  none: 'Client-side',
+};
+
+const faqEntries = [
+  {
+    q: 'How do I improve PageSpeed on ASP.NET Core?',
+    a: `Optimize the response after Kestrel renders it, the same way nginx and Apache shops have for years. Add the ${PKG_ASPNETCORE} middleware with one <code class="rounded bg-bg-elevated px-1 py-0.5 text-xs">dotnet add package</code>; it transcodes images to WebP and AVIF, resizes them to their rendered size, inlines critical CSS, minifies CSS and JavaScript, and cache-extends static assets. Response compression and a CDN move bytes faster but do not change what those bytes are; this middleware changes the bytes.`,
+  },
+  {
+    q: 'Is there an ASP.NET Core image optimization middleware?',
+    a: `Yes. ${PKG_ASPNETCORE} is the in-process ASP.NET Core middleware for mod_pagespeed, published and indexed on nuget.org. It transcodes JPEG, PNG, and GIF to WebP and AVIF, resizes images to their rendered display size, and serves the right variant per request from a shared cache. The native worker is bundled per runtime identifier (${ridList}), so a single <code class="rounded bg-bg-elevated px-1 py-0.5 text-xs">dotnet add package</code> installs everything — no separate native module to compile or register.`,
+  },
+  {
+    q: 'What is the IIS PageSpeed module?',
+    a: `On Windows, mod_pagespeed ships the module as a native IIS module, installed from a signed MSI. It loads into the IIS pipeline in-process and applies the classic filter set — WebP image transcoding, critical-CSS inlining, CSS and JavaScript minification, and content-hashed cache extension — using the same configuration the Apache and nginx modules use. It continues the optimizer that powered IISpeed: the IISpeed codebase was adopted into the IIS port and put through a series of security-hardening fixes before release.`,
+  },
+  {
+    q: 'I have an IISpeed license. What do I move to?',
+    a: `IISpeed is deprecated, and its license transfers free to mod_pagespeed. Install the signed IIS MSI if you want to stay on classic IIS and run the module there. If you are on ASP.NET Core, the ${PKG_ASPNETCORE} NuGet middleware — the ASP.NET Core form of mod_pagespeed — is the documented path. The IIS port adopted the IISpeed codebase wholesale, so the optimization behavior is the one you already ran.`,
+  },
+  {
+    q: 'Will a server-side optimizer fix my INP or layout shift?',
+    a: `Not directly. INP is dominated by your own JavaScript main-thread work — event handlers, Blazor interactivity, hydration — which a server-layer optimizer does not rewrite. Layout shift (CLS) from injected content or late-loading fonts is also application-level. What the middleware fixes reliably is byte weight, render-blocking CSS, image delivery, and caching: the load-time costs that sit below your application code. It will not make a slow click handler fast.`,
+  },
+  {
+    q: 'Does it work outside IIS, on Linux or in containers?',
+    a: `Yes. ${PKG_ASPNETCORE} runs wherever ASP.NET Core runs: the native worker is bundled for ${ridList}, so the same middleware works on Linux containers, Windows, and macOS development machines. It does not require IIS. The signed IIS MSI is a separate option for teams running classic IIS who want a native module rather than middleware.`,
+  },
+];
+
+const jsonLd = [
+  await productJsonLd({
+    description: `The ASP.NET Core form of ${PRODUCT_DISPLAY_NAME}: in-process middleware (${PKG_ASPNETCORE}) for server-side web optimization — WebP and AVIF image transcoding, critical-CSS inlining, CSS and JavaScript minification, and content-hashed cache extension. One dotnet add package; native worker bundled per runtime identifier.`,
+    downloadUrl: `https://www.nuget.org/packages/${PKG_ASPNETCORE}/`,
+    softwareHelp: 'https://modpagespeed.com/docs/aspnet-configuration/',
+    offers: offerJsonLd({ url: 'https://modpagespeed.com/pricing/' }),
+  }),
+  {
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: faqEntries.map((entry) => ({
+      '@type': 'Question',
+      name: entry.q,
+      acceptedAnswer: { '@type': 'Answer', text: stripHtml(entry.a) },
+    })),
+  },
+];
+
+const programCs = `// Program.cs
+using WeAmp.PageSpeed.AspNetCore;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Binds the "PageSpeed" section from IConfiguration (appsettings.json,
+// env vars, user secrets).
+builder.Services.AddPageSpeed();
+
+var app = builder.Build();
+
+// Optimize responses before they leave Kestrel. Put it early in the
+// pipeline, before anything that writes the response body.
+app.UsePageSpeed();
+
+app.MapStaticAssets();
+app.MapRazorPages();
+
+app.Run();`;
+---
+
+<BaseLayout
+  title="ASP.NET Core performance: server-side optimization for .NET"
+  description="Server-side optimization for ASP.NET Core and IIS: image transcoding, critical CSS, and minification below your app — NuGet middleware or IIS module."
+  jsonLd={jsonLd}
+  breadcrumbLeafName="ASP.NET Core performance"
+>
+  <PageHero
+    id="aspnet"
+    width="prose"
+    eyebrow="Server-side optimization for .NET"
+    title="ASP.NET Core performance, optimized at the server layer"
+  >
+    <nav slot="before" class="mb-6 text-small text-text-annotation" aria-label="Breadcrumb">
+      <a href="/" class="hover:text-text-body">
+        Home
+      </a>
+      <span class="mx-1">/</span>
+      <span>ASP.NET Core performance</span>
+    </nav>
+    <Fragment slot="lede">
+      <p>
+        nginx and Apache shops have had a server-side page optimizer for over a decade. The official
+        .NET performance advice stops at response compression and a CDN, neither of which transcodes
+        an image or inlines critical CSS.{' '}
+        <code class="rounded bg-bg-elevated px-1 py-0.5 text-base">{PKG_ASPNETCORE}</code>, the
+        ASP.NET Core form of mod_pagespeed, is the in-process middleware that closes that gap: one{' '}
+        <code class="rounded bg-bg-elevated px-1 py-0.5 text-base">dotnet add package</code>,
+        optimization applied to the responses Kestrel already renders.
+      </p>
+    </Fragment>
+    <div class="mt-8 flex flex-wrap gap-3">
+      <a href="/go/nuget/?pkg=aspnetcore" class="btn-primary" data-umami-event="cta_aspnet_nuget">
+        Get it on NuGet
+      </a>
+      <a
+        href="/docs/aspnet-configuration/"
+        class="btn-secondary"
+        data-umami-event="cta_aspnet_docs"
+      >
+        Read the .NET docs
+        <span aria-hidden="true">&rarr;</span>
+      </a>
+    </div>
+    <p class="mt-3 text-small text-text-annotation">{FREE_TO_RUN_LINE}</p>
+  </PageHero>
+
+  <article class="container-prose pb-16">
+    <!-- The gap -->
+    <section>
+      <h2 class="h2-section text-text-body">The category .NET never had</h2>
+      <p class="mt-4 text-text-body">
+        Response compression shrinks text bytes on the wire. A CDN moves bytes closer to the user.
+        Both are real wins, and both leave the page contents unchanged: the JPEG is still a JPEG,
+        the stylesheet still blocks first paint, the unsized image still shifts the layout. A
+        server-side optimizer works one layer down. It rewrites the response itself &mdash; it
+        <a
+          href="/self-hosted-image-optimization/"
+          class="text-interactive hover:text-interactive-hover underline"
+        >
+          transcodes each image to a smaller format
+        </a>
+        , extracts the above-the-fold CSS and defers the rest, and adds a content hash so a repeat
+        visit skips the network. That category has existed for nginx and Apache since 2010. On .NET
+        it has been a blind spot.
+      </p>
+      <p class="mt-4 text-text-body">
+        ModPageSpeed 2.0 went GA on {V2_GA_DATE}, and its ASP.NET Core middleware shipped the same
+        day. That middleware is now the ASP.NET Core form of mod_pagespeed: it calls the native
+        optimization library through P/Invoke from inside your .NET app instead of sitting in front
+        of it, and starts a worker process alongside it for the expensive work.
+      </p>
+    </section>
+
+    <!-- Two ways to run it on the Microsoft stack -->
+    <section class="mt-16">
+      <h2 class="h2-section text-text-body">Two ways to run it on the Microsoft stack</h2>
+      <div class="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+        <div class="rounded-card border border-border bg-bg-elevated p-6">
+          <p class="text-xs font-semibold uppercase tracking-wide text-interactive">
+            ASP.NET Core middleware
+          </p>
+          <p class="mt-1 break-words font-mono text-lg text-text-body">{PKG_ASPNETCORE}</p>
+          <p class="mt-3 text-sm text-text-muted">
+            The in-process middleware for mod_pagespeed. It runs inside your ASP.NET Core app, no
+            reverse-proxy hop and no separate container. The native worker is bundled per runtime
+            identifier ({ridList}), so a single{' '}
+            <code class="text-xs bg-bg-elevated px-1 rounded">dotnet add package</code> pulls
+            everything &mdash; on Linux, Windows, or macOS. Does WebP and AVIF transcoding, critical
+            CSS, minification, and cache extension.
+          </p>
+          <p class="mt-4 text-sm">
+            <a
+              href="/docs/aspnet-configuration/"
+              class="font-medium text-interactive hover:text-interactive-hover underline underline-offset-4"
+            >
+              Configure the middleware &rarr;
+            </a>
+          </p>
+        </div>
+        <div class="rounded-card border border-border bg-bg-elevated p-6">
+          <p class="text-xs font-semibold uppercase tracking-wide text-interactive">
+            Native IIS module
+          </p>
+          <p class="mt-1 font-mono text-lg text-text-body">The module for IIS</p>
+          <p class="mt-3 text-sm text-text-muted">
+            For classic IIS sites, the module loads into IIS as a native module from a signed MSI.
+            Same filters and configuration as the Apache and nginx modules. WebP and AVIF image
+            transcoding, critical CSS, and minification, applied in the IIS pipeline. It continues
+            the optimizer behind IISpeed: that codebase was adopted into the IIS port and put
+            through a numbered set of security-hardening fixes before release.
+          </p>
+          <p class="mt-4 text-sm">
+            <a
+              href="/alternatives/iispeed/"
+              class="font-medium text-interactive hover:text-interactive-hover underline underline-offset-4"
+            >
+              IISpeed migration &rarr;
+            </a>
+          </p>
+        </div>
+      </div>
+      <p class="mt-4 text-sm text-text-annotation">
+        The worker the middleware starts adds viewport- and density-aware variants. The native IIS
+        module does WebP and AVIF transcoding without them. The IIS package ships as a signed
+        installer on the mod_pagespeed GitHub release.
+        <a
+          href="/blog/aspnet-core-image-optimization-c-sharp/"
+          class="text-interactive hover:text-interactive-hover underline"
+        >
+          How the C# image pipeline works &rarr;
+        </a>
+      </p>
+    </section>
+
+    <!-- The concrete artifact: a real middleware wire-up -->
+    <section class="mt-16">
+      <h2 class="h2-section text-text-body">Wiring it into Program.cs</h2>
+      <p class="mt-4 text-text-body">
+        Add the package, then register the middleware early in the pipeline so it wraps the
+        responses your endpoints produce.
+      </p>
+      <pre class="mt-4 overflow-x-auto rounded-md bg-bg-recessed p-4 text-xs sm:text-sm"><code class="text-text-body">dotnet add package {PKG_ASPNETCORE}</code></pre>
+      <pre class="mt-4 overflow-x-auto rounded-md bg-bg-recessed p-4 text-xs sm:text-sm"><code class="text-text-body">{programCs}</code></pre>
+      <p class="mt-4 text-text-body">
+        That is the whole integration for the common case. Optimization runs out of band: a worker
+        process starts automatically alongside your app, reads originals from a shared cache,
+        generates up to {MAX_VARIANTS} variants per image (format, viewport, pixel density, and
+        Save-Data), and writes them back. The middleware serves the matching variant per request.
+        The trade-off is that the first request for a URL returns the original while the worker
+        builds the variants in the background; subsequent requests serve the optimized version from
+        cache. Worker flags and per-transform switches live in the
+        <a
+          href="/docs/aspnet-configuration/"
+          class="text-interactive hover:text-interactive-hover underline"
+        >
+          configuration reference
+        </a>
+        .
+      </p>
+    </section>
+
+    <!-- Honesty: what it fixes, scoped from psi-mps-mapping -->
+    <section class="mt-16">
+      <h2 class="h2-section text-text-body">
+        What server-side optimization fixes &mdash; and what it does not
+      </h2>
+      <p class="mt-4 text-text-body">
+        A server-layer optimizer attacks the load-time costs that sit below your application code:
+        byte weight, render-blocking resources, image delivery, and caching. It does not touch your
+        JavaScript runtime behavior. The table maps the common PageSpeed Insights findings to what
+        the middleware actually does, scoped honestly.
+      </p>
+      <div
+        class="mt-8 overflow-x-auto"
+        tabindex="0"
+        role="region"
+        aria-labelledby="aspnet-map-caption"
+      >
+        <table class="w-full border-collapse text-sm">
+          <caption id="aspnet-map-caption" class="sr-only">
+            PageSpeed Insights findings mapped to WeAmp.PageSpeed coverage on ASP.NET Core
+          </caption>
+          <thead>
+            <tr class="border-b border-border">
+              <th scope="col" class="py-3 pr-4 text-left font-semibold text-text-body">
+                Finding
+              </th>
+              <th scope="col" class="px-3 py-3 text-left font-semibold text-text-body">
+                Coverage
+              </th>
+              <th scope="col" class="px-3 py-3 text-left font-semibold text-text-body">
+                How
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {coverageRows.map((m) => (
+              <tr class="border-b border-border align-top">
+                <th scope="row" class="py-4 pr-4 text-left font-medium text-text-body">
+                  {m.auditTitle}
+                </th>
+                <td class="px-3 py-4 whitespace-nowrap">
+                  {m.coverage === 'full' && <span class="badge-success">{coverageLabel.full}</span>}
+                  {m.coverage === 'partial' && (
+                    <span class="badge-accent">{coverageLabel.partial}</span>
+                  )}
+                  {m.coverage === 'none' && (
+                    <span class="text-xs text-text-annotation">{coverageLabel.none}</span>
+                  )}
+                </td>
+                <td class="px-3 py-4 text-text-muted">
+                  {m.caveats ? `${m.explanation} ${m.caveats}` : m.explanation}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="mt-8 rounded-card border border-accent/40 bg-accent-wash p-6">
+        <h3 class="font-semibold text-text-body">
+          INP and most layout shift are your application's job
+        </h3>
+        <p class="mt-2 text-sm text-text-muted">
+          Interaction to Next Paint is driven by event-handler JavaScript, Blazor interactivity, and
+          hydration &mdash; main-thread work the middleware cannot rewrite without changing what
+          your app does. Layout shift from content injected after first paint, or from late-loading
+          web fonts, is application-level too. The middleware can reduce how much script competes
+          for the main thread before the user interacts (minify, defer what is safe to defer), but
+          it will not make a slow click handler fast. If INP is your problem, the fix lives in your
+          C# and JavaScript, not the server layer.
+          <a
+            href="/blog/fix-inp-aspnet-core-2026/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            Fixing INP on ASP.NET Core &rarr;
+          </a>
+        </p>
+      </div>
+    </section>
+
+    <!-- FAQ — visible Q&A mirrors the FAQPage JSON-LD -->
+    <section class="mt-16">
+      <h2 class="h2-section text-text-body">ASP.NET Core performance: common questions</h2>
+      <dl class="mt-8 space-y-6">
+        {faqEntries.map((entry) => (
+          <div class="border-b border-border pb-6">
+            <dt class="font-semibold text-text-body">{entry.q}</dt>
+            <dd class="mt-2 text-sm text-text-muted" set:html={entry.a} />
+          </div>
+        ))}
+      </dl>
+    </section>
+
+    <!-- CTA -->
+    <section class="mt-16">
+      <div class="rounded-card border border-border bg-bg-secondary p-6 md:p-8">
+        <h2 class="h2-section text-text-body">Add it to your .NET app</h2>
+        <p class="mt-3 text-text-body">
+          One{' '}
+          <code class="rounded bg-bg-elevated px-1 py-0.5 text-sm">
+            dotnet add package {PKG_ASPNETCORE}
+          </code>
+          , one <code class="rounded bg-bg-elevated px-1 py-0.5 text-sm">app.UsePageSpeed()</code>,
+          and the responses Kestrel renders get optimized before they leave the process. It
+          optimizes immediately.
+        </p>
+        <div class="mt-6 flex flex-wrap gap-3">
+          <a
+            href="/go/nuget/?pkg=aspnetcore"
+            class="btn-primary"
+            data-umami-event="cta_aspnet_nuget_footer"
+          >
+            Get it on NuGet
+          </a>
+          <a href="/pricing/" class="btn-secondary" data-umami-event="cta_aspnet_pricing">
+            See pricing
+            <span aria-hidden="true">&rarr;</span>
+          </a>
+        </div>
+        <p class="mt-3 text-xs text-text-annotation">{FREE_TO_RUN_LINE}</p>
+      </div>
+    </section>
+
+    <!-- See also -->
+    <section class="mt-16 border-t border-border pt-8">
+      <p class="text-base font-semibold uppercase tracking-wide text-text-body">See also:</p>
+      <ul class="mt-4 space-y-2 text-sm">
+        <li>
+          <a
+            href="/docs/aspnet-configuration/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            ASP.NET Core configuration
+          </a>{' '}
+          &mdash; middleware options, worker flags, and per-transform switches
+        </li>
+        <li>
+          <a
+            href="/blog/aspnet-core-image-optimization-c-sharp/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            ASP.NET Core image optimization in C#
+          </a>{' '}
+          &mdash; how the WebP and AVIF pipeline works from .NET
+        </li>
+        <li>
+          <a
+            href="/blog/aspnet-core-middleware/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            The ASP.NET Core middleware
+          </a>{' '}
+          &mdash; where it sits in the request pipeline
+        </li>
+        <li>
+          <a
+            href="/alternatives/iispeed/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            IISpeed alternative
+          </a>{' '}
+          &mdash; the free license-transfer path for IISpeed customers
+        </li>
+        <li>
+          <a
+            href="/core-web-vitals/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            Core Web Vitals
+          </a>{' '}
+          &mdash; which metrics the server layer moves, and which it does not
+        </li>
+        <li>
+          <a
+            href="/go/nuget/?pkg=sidecar"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            {PKG_SIDECAR} on NuGet
+          </a>{' '}
+          &mdash; the out-of-process sidecar (bundles nginx {SIDECAR_NGINX_VERSION}): the current
+          mod_pagespeed module, run behind Kestrel
+        </li>
+      </ul>
+
+      <p class="mt-8 text-xs text-text-annotation">
+        ASP.NET Core, IIS, and Windows are trademarks of Microsoft Corporation; other product names
+        are trademarks of their respective owners. We-Amp B.V. is not affiliated with or endorsed by
+        Microsoft. We-Amp helped maintain mod_pagespeed and prepared its last couple of releases
+        across the Google and Apache incubator eras.
+      </p>
+    </section>
+  </article>
+</BaseLayout>

@@ -1,0 +1,8 @@
+<!-- SPDX-License-Identifier: Apache-2.0
+     Copyright (c) 2024-2026 We-Amp B.V. -->
+
+<Project>
+  <!-- Windows native binaries don't need chmod. This file is a placeholder
+       for consistency with the Linux/macOS NativeAssets packages and to
+       ensure buildTransitive is included in the NuGet package. -->
+</Project>

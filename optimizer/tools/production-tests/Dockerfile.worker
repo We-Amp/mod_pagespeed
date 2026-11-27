@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
+# Worker image for production readiness tests.
+# Reuses the E2E multi-stage build pattern.
+
+FROM pagespeed2-dev AS builder
+
+WORKDIR /workspace
+COPY . /workspace/
+
+# Add GitHub to known hosts (needed for Cyclone fetch via SSH).
+RUN mkdir -p /root/.ssh && ssh-keyscan github.com >> /root/.ssh/known_hosts
+
+# Build the factory worker binary
+# --mount=type=ssh: forwards host SSH agent for private repo access (Cyclone).
+RUN --mount=type=ssh bazel build --config=docker //src/worker:factory_worker
+
+# ---- Runtime image ----
+FROM pagespeed2-base-runtime
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Chromium from Debian bookworm (with fonts for headed tests).
+COPY docker/install-chromium.sh /tmp/install-chromium.sh
+RUN /tmp/install-chromium.sh --with-fonts && rm /tmp/install-chromium.sh
+
+COPY --from=builder /workspace/bazel-bin/src/worker/factory_worker \
+     /usr/local/bin/factory_worker
+
+COPY docker/entrypoint-worker.sh /docker/entrypoint-worker.sh
+COPY tools/production-tests/entrypoint-worker.sh /entrypoint-worker.sh
+RUN chmod +x /docker/entrypoint-worker.sh /entrypoint-worker.sh
+
+VOLUME /shared
+
+HEALTHCHECK --interval=2s --timeout=2s --retries=15 \
+    CMD test -S /shared/pagespeed.sock || exit 1
+
+ENTRYPOINT ["/entrypoint-worker.sh"]

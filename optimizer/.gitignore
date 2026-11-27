@@ -1,0 +1,102 @@
+# Bazel
+/bazel-*
+*.runfiles/
+*.runfiles_manifest
+MODULE.bazel.lock
+
+# Build outputs
+*.o
+*.a
+*.so
+*.dylib
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+._*
+Thumbs.db
+
+# Test outputs
+/test-output/
+/t/servroot/
+
+# Reference repositories (not part of build)
+/reference/
+
+# Node.js
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+
+# Measurement tool Python venv
+tools/measure-demo/.venv/
+
+# Stress test generated data and logs
+tools/stress/testdata/generated/
+tools/stress/stress_test_logs.txt
+tools/stress/.pytest_cache/
+
+# Benchmark generated data and profiling artifacts
+tools/benchmark/benchdata/
+tools/benchmark/FlameGraph/
+tools/benchmark/profiles/
+
+# Generated test fixtures (too large for git, run tools/generate-test-fixtures.sh)
+tools/e2e/testdata/large.html
+tools/http-compliance/testdata/large.html
+
+# .NET build artifacts
+**/bin/Debug/
+**/bin/Release/
+**/obj/
+
+# Playwright / test artifacts
+**/test-results/
+**/test-output/
+**/playwright-report/
+
+# Production test ephemeral output
+tools/production-tests/test-logs.txt
+tools/production-tests/origin/testdata/
+tools/production-tests/FAILURE_TRACKING.md
+
+# Untracked design docs (working drafts)
+docs/fulfillment.md
+docs/fulfillment-implementation-prompt.md
+docs/http-cache-compliance.md
+
+# Coverage reports
+coverage-html/
+
+# Claude Code
+.claude/settings.local.json
+
+# Serena (LSP-based code intelligence for Claude Code)
+.serena/
+compile_commands.json
+
+# Environment files (may contain secrets — use .env.example as template)
+**/.env
+vendor/
+
+# Dependency scan (report-only) — generated reports, never committed
+sbom/scan/
+# Blocking vulnerability gate — job-local pinned grype DB cache (CI provisions it)
+.grype-db-pinned/
+
+# Local bazel overrides (remote-cache endpoint etc.) — never committed
+.bazelrc.user
+
+# Apache RAT report left behind by a local tools/ci/rat.sh run
+rat-report.txt
+
+# Local tool caches
+/.cache/

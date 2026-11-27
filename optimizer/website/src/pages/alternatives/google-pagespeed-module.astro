@@ -1,0 +1,480 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PageHero from '../../components/PageHero.astro';
+import { offerJsonLd } from '../../data/offer-jsonld';
+import { FREE_TO_RUN_LINE, LICENSE_CLAUSE } from '../../data/product-facts.mjs';
+import { stripHtml } from '../../data/faq-shared';
+import { productJsonLd } from '../../data/software-jsonld';
+
+// `html`, when set, is the visible answer with links; the FAQPage JSON-LD
+// carries its text, so the structured data and the page say the same thing.
+const faq: Array<{ q: string; a: string; html?: string }> = [
+  {
+    q: 'Is the Google PageSpeed Module the same as PageSpeed Insights?',
+    a: 'No. The PageSpeed Module (mod_pagespeed / ngx_pagespeed) was a server-side optimization module that rewrote HTML, CSS, JS, and images at request time. PageSpeed Insights (pagespeed.web.dev) is a diagnostic tool that scores a URL on Core Web Vitals. The first is deprecated; the second is active.',
+  },
+  {
+    q: 'Is the Google PageSpeed module still available?',
+    a: 'Only as an archive. The original code is read-only on GitHub (apache/incubator-pagespeed-mod), and the 1.13.35.2 binaries still install, without security patches. The maintained continuation, the current mod_pagespeed, installs from signed apt and yum packages for Apache and nginx, with the same directives and filter names.',
+  },
+  {
+    q: 'Where did the PageSpeed browser extension go?',
+    a: '',
+    html: 'It was retired. Google no longer offers the PageSpeed browser extensions for Chrome and Firefox; the same audits now run in PageSpeed Insights at <a href="https://pagespeed.web.dev/" rel="noopener noreferrer">pagespeed.web.dev</a> and in Lighthouse, which is built into Chrome DevTools. For a free test that maps each failing audit to the mod_pagespeed filter that fixes it, use <a href="/analyze/">our PageSpeed analyzer</a>.',
+  },
+  {
+    q: 'Is the Google PageSpeed Module still maintained?',
+    a: 'No. Google donated the project to the Apache Software Foundation in 2017. The Apache Incubator podling retired in 2023, and the GitHub repositories were marked read-only in 2025. The 1.13.35.2 binaries still install but have not received security patches in years.',
+  },
+  {
+    q: 'What replaces the Google PageSpeed Module?',
+    a: 'The current mod_pagespeed, actively maintained by We-Amp: the native in-process module for Apache and nginx, with the same configuration syntax, the classic filter set, and the built-in admin console, plus an optimizer worker, paired with the Apache or nginx module or in the reverse-proxy deployment, for variant-aware caching and zero-copy serving, and for SVG auto-vectorization in the reverse-proxy deployment. The IIS package ships as a signed installer on the mod_pagespeed GitHub release.',
+  },
+  {
+    q: 'Should I still use PageSpeed Insights?',
+    a: 'Yes. PSI is still actively maintained and remains the canonical reference for "does my page pass Core Web Vitals." Use it to identify problems; use a server-side module like mod_pagespeed to fix them.',
+  },
+  {
+    q: 'Can mod_pagespeed fix the issues that PageSpeed Insights flags?',
+    a: "Most of the technical ones — yes. mod_pagespeed minifies CSS/JS, serves WebP and AVIF image variants, serves viewport-matched image sizes, auto-vectorizes eligible images to SVG with the Apache module or the reverse-proxy deployment, and caches per client capability. The remaining items PSI flags are typically application-level (third-party scripts, slow server responses, heavy JavaScript) which a server module can't address.",
+  },
+  {
+    q: 'What is the best Google PageSpeed module alternative in 2026?',
+    a: 'The most direct alternative is a maintained continuation of the same module rather than a different product. The current mod_pagespeed from We-Amp keeps the pagespeed directive surface and the classic filter names of open-source mod_pagespeed and ngx_pagespeed, so an existing configuration carries over — swap the packages and keep your config. It installs as a native in-process module on Apache and nginx from the signed apt/yum repository, or runs as a Docker / nginx reverse proxy in front of any HTTP origin, with ongoing CVE patches and support for current server releases. The IIS package ships as a signed installer on the mod_pagespeed GitHub release.',
+  },
+  {
+    q: "Is there a maintained Google PageSpeed alternative that's a drop-in replacement?",
+    a: 'Yes. Because the current mod_pagespeed continues the original codebase, it is a drop-in path for stranded mod_pagespeed and ngx_pagespeed deployments: the native module loads in-process, keeps the pagespeed directive surface and the classic filter names, and runs your existing configuration. The difference from the archived Google binaries is that it builds against current Apache and nginx, receives security patches, and is actively developed. If you want measurement rather than optimization, route to /analyze instead, a separate, complementary tool.',
+  },
+];
+
+const jsonLd = [
+  await productJsonLd({
+    description:
+      'Maintained continuation of the Google PageSpeed Module: the native in-process module for Apache and nginx with the optimizer worker alongside it. Zero-copy cache serving, variant-aware fan-out, AVIF + WebP.',
+    offers: offerJsonLd({ url: 'https://modpagespeed.com/pricing/' }),
+  }),
+  {
+    '@context': 'https://schema.org',
+    '@type': 'WebApplication',
+    name: 'PageSpeed Insights',
+    url: 'https://pagespeed.web.dev/',
+    applicationCategory: 'DeveloperApplication',
+    description:
+      "Google's Lighthouse-powered diagnostic tool that scores a URL on Core Web Vitals and a long list of best-practice audits. Distinct from the deprecated PageSpeed Module.",
+    publisher: {
+      '@type': 'Organization',
+      name: 'Google',
+      url: 'https://www.google.com/',
+    },
+  },
+  {
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: faq.map((entry) => ({
+      '@type': 'Question',
+      name: entry.q,
+      acceptedAnswer: { '@type': 'Answer', text: entry.html ? stripHtml(entry.html) : entry.a },
+    })),
+  },
+];
+---
+
+<BaseLayout
+  title="What is the Google PageSpeed module, and what replaced it"
+  description="The Google PageSpeed module (mod_pagespeed, ngx_pagespeed) optimized pages on the server. It is archived; the current mod_pagespeed carries it on."
+  jsonLd={jsonLd}
+>
+  <PageHero
+    id="google-pagespeed-module-title"
+    width="prose"
+    class="max-w-3xl"
+    title="What is the Google PageSpeed module, and what replaced it"
+  >
+    <Fragment slot="lede">
+      <p>
+        The Google PageSpeed module is an open-source web server module, originally developed at
+        Google, that optimizes pages as the server sends them: it rewrites HTML, CSS, JavaScript and
+        images at request time. It shipped as <code>mod_pagespeed</code> for Apache and
+        <code>ngx_pagespeed</code> for nginx. The original project is archived; its maintained
+        continuation is mod_pagespeed 2.
+      </p>
+    </Fragment>
+    <p class="mt-4 max-w-2xl text-text-muted">
+      Two different Google products share the "PageSpeed" name. One is the server-side module that
+      rewrites your pages; the other is PageSpeed Insights, a diagnostic tool that scores them. Here
+      is what the module was, what continues it, and how not to confuse the two.
+    </p>
+    <div class="mt-6 flex flex-wrap gap-3">
+      <a href="/download/" class="btn-primary" data-umami-event="cta_alternatives_google_download">
+        Download &amp; run
+      </a>
+      <a
+        href="/pricing/"
+        data-umami-event="cta_alternatives_google_buy"
+        class="rounded-md border border-border-strong px-4 py-2 text-sm font-medium text-text-body hover:border-border-strong"
+      >
+        Support pricing
+      </a>
+    </div>
+    <p class="mt-3 text-small text-text-annotation">{FREE_TO_RUN_LINE}</p>
+  </PageHero>
+
+  <article class="container-prose max-w-3xl pb-16">
+    <div class="prose prose-stone max-w-none prose-headings:font-semibold prose-a:text-interactive dark:prose-invert">
+      <table tabindex="0" aria-labelledby="google-pagespeed-module-title">
+        <thead>
+          <tr>
+            <th>What</th>
+            <th>Status</th>
+            <th>What it does</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>
+              <strong>PageSpeed Module</strong> (<code>mod_pagespeed</code>,{' '}
+              <code>ngx_pagespeed</code>)
+            </td>
+            <td>Deprecated (last release 2020)</td>
+            <td>
+              Server-side optimization module that rewrites HTML/CSS/JS/images at request time
+            </td>
+          </tr>
+          <tr>
+            <td>
+              <strong>PageSpeed Insights</strong> (PSI, <code>pagespeed.web.dev</code>)
+            </td>
+            <td>Active</td>
+            <td>Diagnostic web tool that scores a URL on performance, accessibility, SEO</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p>
+        The first one is the deprecated server module. The second one is a diagnostic tool that's
+        still running and still useful. They are not the same product. The module was the fix; PSI
+        tells you whether you need one.
+      </p>
+
+      <h2>Is it still available?</h2>
+      <p>
+        Only as an archive. The original code is read-only on GitHub at
+        <a
+          href="https://github.com/apache/incubator-pagespeed-mod"
+          rel="noopener noreferrer external"
+        >
+          apache/incubator-pagespeed-mod
+        </a>
+        , and the last 1.13.35.2 binaries still install and run. They have not had a security patch
+        in years, and ngx_pagespeed does not build against current nginx.
+      </p>
+      <p>
+        The maintained version is the current mod_pagespeed: signed apt and yum packages for Apache
+        and nginx, a Docker image and a Helm chart, with the same directives and filter names, so an
+        existing configuration carries over. <a href="/docs/getting-started/">Install it</a>, or
+        read
+        <a href="/docs/migrate-from-google-mod-pagespeed/">migrating from the archived module</a>.
+      </p>
+
+      <h2>The deprecated module</h2>
+      <p>
+        Google released <code>mod_pagespeed</code> in 2010 as an Apache module. The
+        <code>ngx_pagespeed</code> nginx port followed in 2013. The original landing page lived at
+        <code>developers.google.com/speed/pagespeed/module</code> and the code shipped under the
+        Apache 2.0 license.
+      </p>
+      <p>
+        Google donated the project to the Apache Software Foundation in 2017. The Apache Incubator
+        podling retired in 2023, and the GitHub repositories were marked read-only in 2025. The
+        archived code now lives at
+        <a
+          href="https://github.com/apache/incubator-pagespeed-mod"
+          rel="noopener noreferrer external"
+        >
+          apache/incubator-pagespeed-mod
+        </a>
+        .
+      </p>
+      <p>
+        The archived 1.13.35.2 binaries still install and still run. They also haven't received a
+        security patch in years, don't build against newer Apache releases, don't ship AVIF, and
+        don't emit Core Web Vitals telemetry. For the longer answer on what happened to the project
+        and what development resumed, see
+        <a href="/mod-pagespeed-still-maintained/">is mod_pagespeed still maintained?</a>.
+      </p>
+
+      <h2>The maintained continuation: the current mod_pagespeed</h2>
+      <p>
+        We-Amp B.V. &mdash; the team that helped build ngx_pagespeed, maintained mod_pagespeed, and
+        drove the project's Apache incubation &mdash; develops it. The optimization libraries that
+        served billions of pages through the original module are the same ones inside it: the PSOL
+        core and the Cyclone cache, on a modernized, secured filter stack with new optimizers. What
+        changed is how it is packaged and how it runs, not whose code it is.
+      </p>
+
+      <h2>The native module and the optimizer worker</h2>
+      <p>
+        mod_pagespeed loads into your server as a native in-process module on Apache and nginx. It
+        keeps the <code>pagespeed</code> directive surface, the classic filter set &mdash;
+        <code>combine_css</code>, <code>combine_javascript</code>, image spriting, in-place resource
+        optimization, domain mapping &mdash; and the built-in admin console, so an existing
+        configuration carries over: swap the packages and keep your config. It builds against
+        current Apache 2.4+ and current nginx, and it takes CVE patches again. Image optimization
+        covers WebP and AVIF alongside JPEG, PNG, and GIF.
+      </p>
+      <p>
+        Paired with the Apache or nginx module, or in the reverse-proxy deployment, the
+        <code>pagespeed-optimizer</code> worker runs alongside and takes the heavy work off the
+        request path: image transcoding, ML-predicted image quality, and the variant-aware cache the
+        module then serves from with zero-copy <code>mmap</code>, plus critical CSS and SVG
+        auto-vectorization in the reverse-proxy deployment. Up to 37 variants per asset are
+        generated per client capability. The Apache packages install and upgrade the module and
+        worker together, and a version mismatch between them is reported loudly rather than
+        absorbed. The nginx module package does not pull the worker in: install
+        <code>pagespeed-optimizer</code> first, as its own command, then point the native nginx
+        module at it with two directives, as the
+        <a href="/docs/installation-module/#native-nginx-module">nginx install steps</a> show.
+      </p>
+
+      <pre><code>{`# Apache — the native mod_pagespeed module
+# The package enables it; on Debian/Ubuntu run sudo a2enmod pagespeed if it was disabled
+ModPagespeed on`}</code></pre>
+
+      <h2>Apache, nginx, Docker, Kubernetes &mdash; which integration fits</h2>
+      <p>
+        One product, four ways in. The decision in front of you is about your stack, not about which
+        version to bet on:
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>Your stack</th>
+            <th>How mod_pagespeed installs</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Apache httpd 2.4+</td>
+            <td>
+              Native in-process module from the signed
+              <code>packages.modpagespeed.com</code> repository, with the worker as a matching
+              package
+            </td>
+          </tr>
+          <tr>
+            <td>nginx on Debian, Ubuntu, or Enterprise Linux</td>
+            <td>
+              Native dynamic module from the same signed repository, built against your
+              distribution's stock nginx &mdash; no rebuild, no traffic detour
+            </td>
+          </tr>
+          <tr>
+            <td>Containers, in front of any HTTP origin</td>
+            <td>
+              The Docker / nginx reverse proxy: the nginx and worker images sharing a Cyclone cache
+              volume, with your origin untouched behind them
+            </td>
+          </tr>
+          <tr>
+            <td>Kubernetes</td>
+            <td>The Helm chart &mdash; nginx and worker as one pod, from the same images</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        Three further integrations are available separately, outside those packages. The IIS package
+        ships as a signed installer on the mod_pagespeed GitHub release. For ASP.NET Core there is
+        the
+        <code>WeAmp.PageSpeed.AspNetCore</code> middleware, added in two lines of
+        <code>Program.cs</code>, and the <code>WeAmp.PageSpeed.Sidecar</code> package, which runs a
+        bundled nginx optimizer on loopback behind your Kestrel app.
+      </p>
+
+      <pre><code>{`# ASP.NET Core — the middleware package
+dotnet add package WeAmp.PageSpeed.AspNetCore`}</code></pre>
+
+      <h2>PageSpeed Insights is a different product</h2>
+      <p>
+        <a href="https://pagespeed.web.dev/" rel="noopener noreferrer">
+          pagespeed.web.dev
+        </a>{' '}
+        is Google's Lighthouse-powered diagnostic tool. It loads a URL in a headless Chrome, scores
+        it on Core Web Vitals (LCP, INP, CLS) and a long list of best-practice audits, and returns
+        suggestions.
+      </p>
+      <p>
+        PSI is not deprecated. It's still actively maintained and still the canonical reference for
+        "does my page pass Core Web Vitals." Use it to identify problems.
+      </p>
+
+      <h2>PSI tells you the problem, the module fixes it</h2>
+      <p>PSI and mod_pagespeed are complementary, not competing:</p>
+      <table>
+        <thead>
+          <tr>
+            <th>PSI (diagnostic)</th>
+            <th>mod_pagespeed (server-side fix)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Reports LCP is 4.2 seconds</td>
+            <td>Inlines critical CSS so first paint happens before non-blocking resources load</td>
+          </tr>
+          <tr>
+            <td>Flags "Serve images in next-gen formats"</td>
+            <td>Generates WebP and AVIF variants, served by client capability</td>
+          </tr>
+          <tr>
+            <td>Flags "Properly size images"</td>
+            <td>
+              Generates viewport-matched variants &mdash; 480px for mobile, 1280px for desktop
+            </td>
+          </tr>
+          <tr>
+            <td>Flags "Minify CSS/JS"</td>
+            <td>Runs whitespace-collapsing, comment-stripping minifiers in the worker</td>
+          </tr>
+          <tr>
+            <td>Flags "Eliminate render-blocking resources"</td>
+            <td>Defers non-critical CSS, inlines what's needed for first paint</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        The workflow is: PSI scores the page, mod_pagespeed applies the optimizations on the server,
+        PSI re-scores. Repeat until the score plateaus and the remaining items are application-level
+        work the module can't touch (third-party scripts, server response time, JS execution).
+      </p>
+
+      <h2>Which one fits</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>You're looking for</th>
+            <th>Use</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>A server-side optimization module to fix Core Web Vitals</td>
+            <td>
+              <a href="/">mod_pagespeed</a>
+            </td>
+          </tr>
+          <tr>
+            <td>To know whether a URL passes Core Web Vitals</td>
+            <td>
+              <a href="https://pagespeed.web.dev/" rel="noopener noreferrer">
+                PageSpeed Insights
+              </a>
+            </td>
+          </tr>
+          <tr>
+            <td>Both</td>
+            <td>Run PSI before and after deploying mod_pagespeed</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h2>A maintained, drop-in alternative to the Google PageSpeed module</h2>
+      <p>
+        If you arrived here because the module you were running is no longer maintained &mdash; the
+        archived <code>mod_pagespeed</code> or <code>ngx_pagespeed</code> binaries won't build
+        against a newer nginx or Apache, the version-pinned <code>.so</code> stopped loading after
+        an upgrade, or the GitHub repositories went read-only &mdash; the directly comparable
+        alternative to the deprecated Google PageSpeed module is a maintained continuation of the
+        same module, not a different category of tool.
+      </p>
+      <p>
+        That continuation is the current mod_pagespeed, developed by We-Amp B.V. (the team that
+        helped build ngx_pagespeed, maintained mod_pagespeed, and drove the project's Apache
+        incubation). It is the same optimization core, the same directive surface, and the same
+        classic filter names, with ongoing CVE patches, a current toolchain, and support for current
+        Apache 2.4+ and nginx releases. An existing configuration carries over: swap the packages,
+        keep your config. The native module installs from the signed apt/yum repository for Apache
+        and nginx. The IIS package ships as a signed installer on the mod_pagespeed GitHub release.
+        The <a href="/pagespeed-optimization/">guide to PageSpeed optimization</a> lists what that
+        core automates and what it leaves to your code.
+      </p>
+      <p>
+        If you're standing up a new deployment rather than rescuing an old one, the same product has
+        a container-native shape: the Docker / nginx reverse proxy in front of any HTTP origin, with
+        the optimizer worker doing SVG auto-vectorization and
+        <a href="/features/">variant-aware caching and image optimization</a> off the request path.
+        Either way the lineage is continuous: this is the maintained version of the module you were
+        already running, kept self-hosted rather than moved behind a CDN.
+      </p>
+      <p>
+        Looking instead for a tool to <em>measure</em> a URL's score, a PageSpeed Insights or
+        GTmetrix-style report? That's a different job, and the module isn't it. Head to
+        <a href="/analyze/">our analyzer</a> for testing intent; this page is about the server-side
+        optimization software that fixes what those reports flag.
+      </p>
+
+      <h2>Frequently asked questions</h2>
+      {faq.map((entry) => (
+        <>
+          <h3>{entry.q}</h3>
+          {entry.html ? <p set:html={entry.html} /> : <p>{entry.a}</p>}
+        </>
+      ))}
+
+      <h2>Get mod_pagespeed</h2>
+      <p>
+        Install and run it &mdash; mod_pagespeed is {LICENSE_CLAUSE}, free in development and in
+        production.
+      </p>
+      <ul>
+        <li>
+          <strong>Native module (Apache, nginx)</strong> &mdash;
+          <a href="https://packages.modpagespeed.com/" rel="noopener noreferrer external">
+            package repos
+          </a>{' '}
+          &middot; <a href="/download/apt-yum/">apt / yum install</a>
+        </li>
+        <li>
+          <strong>Docker and Kubernetes</strong> &mdash;
+          <a href="/docs/installation-docker/">Docker guide</a> &middot;
+          <a href="/docs/helm-deployment/">Helm chart</a>
+        </li>
+        <li>
+          <strong>ASP.NET Core</strong> &mdash;
+          <code>dotnet add package WeAmp.PageSpeed.AspNetCore</code> &middot;
+          <a href="/docs/aspnet-getting-started/">.NET quickstart</a> &middot;
+          <a href="/pricing/">pricing</a>
+        </li>
+      </ul>
+
+      <h2>Related</h2>
+      <ul>
+        <li>
+          <a href="/mod-pagespeed-still-maintained/">
+            Is mod_pagespeed still maintained? &mdash; the current state of the project
+          </a>
+        </li>
+        <li>
+          <a href="/blog/mod-pagespeed-deprecated-2026/">
+            Is mod_pagespeed deprecated? &mdash; what changed and what to use
+          </a>
+        </li>
+        <li>
+          <a href="/alternatives/mod-pagespeed/">mod_pagespeed alternative</a>
+        </li>
+        <li>
+          <a href="/alternatives/ngx-pagespeed/">ngx_pagespeed alternative</a>
+        </li>
+        <li>
+          <a href="/alternatives/iispeed/">IISpeed alternative</a>
+        </li>
+      </ul>
+
+      <p class="text-xs text-text-annotation">
+        PageSpeed Module, PageSpeed Insights, and other product names are trademarks of their
+        respective owners. Comparisons reflect publicly available information as of 2026 and are
+        provided for evaluation; We-Amp B.V. is not affiliated with or endorsed by Google.
+      </p>
+    </div>
+  </article>
+</BaseLayout>

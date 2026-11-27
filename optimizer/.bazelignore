@@ -1,0 +1,8 @@
+reference
+website
+tools/e2e/.venv
+tools/workbench
+compile_commands.json
+.serena
+.claude
+vendor

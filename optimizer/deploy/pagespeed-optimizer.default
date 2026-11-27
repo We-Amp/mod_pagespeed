@@ -1,0 +1,220 @@
+# /etc/default/pagespeed-optimizer -- host overrides for the
+# pagespeed-optimizer daemon. Every value has a working default in the unit;
+# uncomment to change.
+#
+# Secrets (PAGESPEED_API_TOKEN, PAGESPEED_PURGE_TOKEN) do NOT belong here.
+# They live in /etc/pagespeed-optimizer/daemon.env (0640 root:pagespeed,
+# read by systemd AFTER this file, so a value there overrides one set here)
+# so they stay out of /proc/<pid>/cmdline. This file is pinned to 0640
+# root:pagespeed as well -- the package re-asserts that on every install and
+# upgrade (#1486) -- but it is configuration, not the secret store.
+
+# Where the cache volume, shared config and serve-stats live. The daemon
+# runs unprivileged as user `pagespeed` and must OWN the directory and
+# everything in it; it refuses to start (loudly) on a missing, unwritable,
+# or foreign-owned cache directory. Relocating it (to a dedicated cache
+# mount, say) takes THREE steps: the unit's sandbox keeps the rest of the
+# filesystem read-only, and its ReadWritePaths cannot name a directory that
+# does not exist yet.
+#   1. Create the directory first:  install -d -m 3770 -o pagespeed -g pagespeed /your/new/cache/dir
+#   2. Extend the sandbox:          systemctl edit pagespeed-optimizer
+#        [Service]
+#        ReadWritePaths=/your/new/cache/dir
+#   3. Set CACHE_DIR below, then:   systemctl restart pagespeed-optimizer
+# Package purge removes only the default /var/cache/pagespeed-optimizer; a
+# relocated cache directory is yours to remove. The old pre-2.1.0 location
+# /var/lib/pagespeed-optimizer is never touched by the package: a
+# pre-existing root-owned cache there is abandoned in place (cold start;
+# no content is migrated or chowned).
+# CACHE_DIR=/var/cache/pagespeed-optimizer/v3
+
+# Notify/health/mgmt socket location. The default lives in the service's
+# RuntimeDirectory (/run/pagespeed-optimizer, 0750 pagespeed:pagespeed);
+# the serving module learns the real path from pagespeed-shared.conf, so a
+# relocated socket needs no module-side change.
+# SOCKET_PATH=/run/pagespeed-optimizer/notify.sock
+
+# Cache volume size in bytes.
+# CACHE_SIZE=536870912
+
+# debug | info | warning | error
+# LOG_LEVEL=info
+
+# Extra flags appended verbatim to the daemon command line. Never put
+# secrets here -- see the note at the top.
+#
+# The HTTP management API is OFF by default and is enabled
+# from here. The credentials it needs were generated into
+# /etc/pagespeed-optimizer/daemon.env when the package installed, so
+# enabling it is one line:
+#
+#   OPTIMIZER_OPTS=--api-socket
+#
+# That serves HTTP/1.1 over /run/pagespeed-optimizer/api.sock, mode 0660
+# pagespeed:pagespeed. Membership in group `pagespeed` IS the credential for
+# local peers: a connection accepted on that socket is an authenticated peer,
+# so no bearer token is asked for -- nothing to provision to the web server,
+# nothing to rotate -- and the daemon binds no TCP port at all, so "listens on
+# localhost only" is something `ss -ltn` can prove rather than something you
+# read off a config. That one line is the whole enablement; the generated
+# token in daemon.env is there for the TCP case and is simply unused here.
+#
+# A TCP bind is still available for the deliberate remote case, and the
+# daemon enforces one invariant at startup with a fatal, named refusal:
+# REMOTE IS NEVER UNAUTHENTICATED, AND UNAUTHENTICATED IS NEVER REMOTE.
+#
+#   --api-port 9880                     loopback (127.0.0.1) by default;
+#                                       mutually exclusive with --api-socket
+#   --api-bind <addr>                   IPv4 literal only (no hostnames, no
+#                                       IPv6); non-loopback needs BOTH a token
+#                                       in daemon.env AND --api-allow-remote
+#   --api-allow-remote                  confirm a deliberate off-host bind
+#   --api-no-auth                       confirm a deliberate tokenless TCP
+#                                       loopback API (the socket never needs
+#                                       this -- its group scope is the auth)
+#   --api-read-open                     open an explicit allow-list of GET
+#                                       routes + the stats/events WS streams
+#                                       without a credential (cached-URL
+#                                       inventory, origin hosts, cooldown
+#                                       table, live event stream); this is a
+#                                       CHOICE, not something an absent
+#                                       token does for you, and the log
+#                                       stays token-only. Use only behind a
+#                                       proxy that authenticates -- never
+#                                       expose directly
+#
+# Publishing the API off-host? Put your reverse proxy's own authentication
+# in front of it as well.
+# OPTIMIZER_OPTS=
+
+# Headless-Chrome sandbox: require | off.
+#   require (default) -- if the kernel cannot give this service an
+#     unprivileged user namespace, browser analysis REFUSES to start and says
+#     so; the daemon keeps serving without it. It never falls back to an
+#     unsandboxed browser.
+#   off -- deliberate opt-out. --no-sandbox is passed, a WARNING banner is
+#     logged on every browser start, and GET /v1/health reports
+#     browser_sandbox: "off".
+# There is no "auto": a mode that silently degrades is the defect this
+# setting exists to remove. (Browser analysis is itself off by default.)
+# PAGESPEED_BROWSER_SANDBOX=require
+
+# Browser analysis on a host install. The package ships NO browser; it
+# suggests one. Provide a Chromium/Chrome the `pagespeed` user can execute
+# and point the daemon at it -- the compiled-in default path
+# (/usr/bin/chrome-headless-shell) exists only in the container images:
+#
+#   Debian 12:                    apt-get install chromium
+#                                 -> /usr/bin/chromium
+#   Ubuntu 24.04: there is NO apt chromium -- `chromium-browser` is a stub
+#                 that installs the snap, and a snap cannot run under this
+#                 unit's sandbox. Use Google Chrome's .deb
+#                                 -> /usr/bin/google-chrome-stable
+#                 or pin Debian bookworm's chromium package (the recipe the
+#                 product's container images use).
+#   Google Chrome (.deb/.rpm), any distro:
+#                                 -> /usr/bin/google-chrome-stable
+#   EL9 (EPEL):                   dnf install chromium
+#                                 -> /usr/bin/chromium-browser
+#                                 (not exercised by the package's own
+#                                 verification; the two above are)
+#
+#   OPTIMIZER_OPTS="--api-socket --enable-browser-analysis --chrome-binary /usr/bin/chromium"
+#
+# (Quote it: the value is split on whitespace into separate flags.) Then
+# `systemctl restart pagespeed-optimizer` and read GET /v1/health over the
+# API socket: browser_sandbox must be "on" and browser.chrome_running true.
+# The shipped unit already runs Chrome sandboxed as-is -- PrivateUsers= is
+# left unset and RestrictNamespaces= is not in the default unit for exactly
+# this reason -- and the sandbox requires unprivileged user namespaces; on
+# Ubuntu 24.04 and derivatives check
+# kernel.apparmor_restrict_unprivileged_userns if the daemon reports the
+# sandbox unavailable. Chrome writes its profile under the service's
+# RuntimeDirectory (/run/pagespeed-optimizer), so no extra ReadWritePaths=
+# is needed. With the enforcing syscall drop-in installed, install the 20-
+# browser-analysis drop-in too (below).
+
+# ---------------------------------------------------------------------------
+# Syscall filtering. NOT set from here -- and that is not
+# an oversight.
+#
+# systemd resolves security directives when it LOADS the unit, before any
+# EnvironmentFile= is read, and SystemCallFilter= does no variable
+# expansion. A value in this file therefore cannot turn the filter on or
+# off; a setting here that appeared to would be a lie. The switch is a
+# drop-in.
+#
+# The shipped unit ENFORCES (since 2.1.0): the daemon may make the calls in
+# systemd's @system-service group minus @privileged and @resources, and the
+# kernel kills it with SIGSYS on the first call outside that set. The list
+# is in the unit itself -- nothing to install to get it, and no drop-in that
+# can be installed "alone" by mistake. SystemCallLog=~@system-service stays
+# alongside it, so calls outside the group are still recorded.
+#
+# Browser analysis works under it with no extra step: Chrome's own sandbox
+# needs a handful of calls the daemon's list does not admit, and the package
+# ships that re-admission list INSTALLED AND ACTIVE as a vendor drop-in next
+# to the unit (20-browser-analysis.conf under /usr/lib/systemd/system/
+# pagespeed-optimizer.service.d/, /lib/systemd/... on Debian-family hosts).
+# It only adds to the unit's allow-list. A host that does not run browser
+# analysis can take the narrower daemon-only profile back by MASKING it --
+# an empty file of the same name under /etc replaces the vendor one:
+#
+#   install -D -m 0644 /dev/null \
+#     /etc/systemd/system/pagespeed-optimizer.service.d/20-browser-analysis.conf
+#   systemctl daemon-reload && systemctl restart pagespeed-optimizer
+#
+# With it masked the daemon still starts and still serves; browser analysis
+# refuses to initialize and names the restriction. It never falls back to an
+# unsandboxed browser. Masking tightens; it is not the opt-out (below).
+#
+# OPT-OUT (back to the pre-2.1.0 log-only posture), surviving every package
+# upgrade because the package never writes under /etc/systemd:
+#
+#   install -D -m 0644 \
+#     /usr/share/doc/pagespeed-optimizer/90-syscall-filter-off.conf.example \
+#     /etc/systemd/system/pagespeed-optimizer.service.d/90-syscall-filter-off.conf
+#   systemctl daemon-reload && systemctl restart pagespeed-optimizer
+#
+# The file resets SystemCallFilter= and RestrictNamespaces=; the 90- prefix
+# makes it sort after every vendor drop-in, which is what lets the reset
+# win -- do not rename it. Remove it and repeat the two commands to go back
+# to enforcing. Do not edit the unit under /usr/lib or /lib instead: an
+# upgrade overwrites it.
+#
+# To confirm the posture, ask systemd -- not the daemon:
+#
+#   systemctl show -p SystemCallFilter pagespeed-optimizer
+#     enforcing -> a long allow-list (no leading ~)
+#     opted out -> SystemCallFilter=~   (an empty deny-list: nothing filtered)
+#   systemd-analyze security pagespeed-optimizer
+#
+# The daemon's own "syscall_filter" field is NOT the confirmation: it reports
+# "filtered" in both postures, because SystemCallLog= is itself a seccomp
+# filter. It answers "is a filter attached", not "is this profile
+# enforcing". (Reading it at all needs the management API enabled --
+# OPTIMIZER_OPTS=--api-socket above; a stock install binds no API.)
+#
+# DIAGNOSING A KILL: `systemctl status` says `code=dumped, status=31/SYS`
+# (daemon killed; no dump is written under LimitCORE=0), or the journal says
+# `Chrome exited (status=0, signal=31)` (browser killed). The kernel's audit
+# record (type 1326) names the call by NUMBER; where it lands depends on
+# auditd, and an empty journal on a host that runs auditd means nothing:
+#
+#   systemctl is-active auditd
+#     active   -> ausearch -m SECCOMP -ts recent -i   (-i names the call)
+#                 (auditd owns the audit socket; the journal has NOTHING)
+#     inactive -> journalctl -k | grep 'type=1326'    (the kernel ring; audit
+#                 records carry no unit field, `journalctl -u` finds none)
+#   a KILL reads sig=31 (code=0x8...); sig=0 code=0x7ffc0000 = log-filter record
+#   ausyscall <N>                                     (number -> name)
+#
+# Report the name (with the Chrome version if the victim was the browser):
+# a name missing from the browser profile is a bug in the shipped file, and
+# the fix is a name in it, not a host that stays opted out.
+#
+# In a CONTAINER there is no systemd and none of the above applies: the
+# container runtime's own profile is the filter, and /v1/health will say so.
+# /usr/share/doc/pagespeed-optimizer/chrome-seccomp.json is the runtime
+# profile to use (docker run --security-opt seccomp=...) when headless
+# Chrome needs to build its own sandbox there.

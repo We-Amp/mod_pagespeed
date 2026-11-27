@@ -1,0 +1,683 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import CTAButton from '../components/CTAButton.astro';
+import PageHero from '../components/PageHero.astro';
+import Readout from '../components/instrument/Readout.astro';
+import ReadoutPanel from '../components/instrument/ReadoutPanel.astro';
+import ByteDelta from '../components/instrument/ByteDelta.astro';
+import { monthYear } from '../lib/instrument';
+import metricsData from '../data/demo-metrics.json';
+
+const sites = metricsData.sites;
+const generatedAt = metricsData.generated_at;
+// The e-commerce readout is the store; the other three panels cover the
+// remaining demo sites. Same date, same source file.
+const measuredOnStore = `Measured on our demo store, ${monthYear(generatedAt)}.`;
+const measuredOnSites = `Measured on our demo sites, ${monthYear(generatedAt)}.`;
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + ' MB';
+  if (bytes >= 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return bytes + ' B';
+}
+
+// Pre-compute totals for each site using real measured totals
+const siteData = sites.map((site) => {
+  const r = site.resources;
+  const imgBefore = r.images.totalJpeg;
+  const imgWebp = r.images.totalWebp;
+  const imgAvif = r.images.totalAvif;
+  const totalBefore = r.html.before + r.css.before + r.js.before + imgBefore;
+  const totalWebp = r.html.before + r.css.minified + r.js.minified + imgWebp;
+  const totalAvif = r.html.before + r.css.minified + r.js.minified + imgAvif;
+  return { ...site, imgBefore, imgWebp, imgAvif, totalBefore, totalWebp, totalAvif };
+});
+---
+
+<BaseLayout
+  title="Live demo — see mod_pagespeed optimize real sites"
+  description="Watch mod_pagespeed cut real sites 48–69% smaller: measured CSS/JS minification and WebP/AVIF transcoding, with modeled load-time projections."
+>
+  {/* Demo site preview with tabs */}
+  <PageHero
+    id="demo"
+    size="utility"
+    eyebrow="Live demo"
+    title="See mod_pagespeed optimize real sites"
+  >
+    <Fragment slot="lede">
+      <p>
+        Four real sites — an e-commerce store, a blog, a news portal, and a portfolio — each built
+        from original, unoptimized assets. mod_pagespeed cuts total page weight by 48&ndash;69%
+        across them; on the image-heavy store,
+        <a class="text-interactive underline underline-offset-2" href="/blog/avif-vs-webp-2026/">
+          AVIF transcoding
+        </a>{' '}
+        alone takes the catalog images from 99.7&nbsp;KB down to 23.7&nbsp;KB (76% smaller). Every
+        number below is measured.
+      </p>
+      <p class="mt-4 text-small text-text-annotation">
+        This is mod_pagespeed optimizing whole sites: the optimizer worker doing the heavy work
+        behind the module. The module is the other half — in-process inside Apache, nginx or IIS,
+        with granular per-filter control so you switch each optimization on or off yourself. See
+        that filter-by-filter on the
+        <a class="text-interactive underline underline-offset-2" href="/examples/">
+          filter examples
+        </a>
+        .
+      </p>
+      <p class="mt-3 text-small text-text-annotation" data-live-console-pointer>
+        Want the real thing?
+        <a
+          class="text-interactive underline underline-offset-2"
+          href="https://we-amp.com/pagespeed_global_admin/"
+          rel="noopener"
+          data-umami-event="cta_live_console_demo"
+        >
+          The live admin console on our own sites
+        </a>
+        .
+      </p>
+    </Fragment>
+  </PageHero>
+
+  <section class="pb-20">
+    <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+      {/* Tab bar */}
+      <div class="border-b border-border" id="demo-tabs" role="tablist" aria-label="Demo sites">
+        <div class="flex flex-wrap gap-1 -mb-px">
+          {[
+            { id: 'ecommerce', label: 'E-commerce', desc: 'ShopGrid' },
+            { id: 'blog', label: 'Blog', desc: 'ByteWise' },
+            { id: 'news', label: 'News', desc: 'The Dispatch' },
+            { id: 'portfolio', label: 'Portfolio', desc: 'Lena Voss' },
+          ].map((tab, i) => (
+            <button
+              role="tab"
+              id={`tab-${tab.id}`}
+              aria-selected={i === 0 ? 'true' : 'false'}
+              aria-controls={`preview-${tab.id}`}
+              tabindex={i === 0 ? 0 : -1}
+              data-demo-tab={tab.id}
+              data-demo-src={`/demos/${tab.id}/index.html`}
+              class:list={[
+                'relative px-5 py-3 text-sm font-medium transition-colors rounded-t-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-interactive',
+                i === 0
+                  ? 'border border-border border-b-bg-primary bg-bg-elevated text-text-body'
+                  : 'text-text-annotation hover:text-text-body hover:bg-bg-secondary',
+              ]}
+            >
+              <span class="block">{tab.label}</span>
+              <span class="block text-xs font-normal text-text-annotation">{tab.desc}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Info note */}
+      <details class="mt-6 rounded-md border border-accent/45 bg-accent-wash px-4 py-3">
+        <summary class="text-sm font-medium text-accent cursor-pointer">
+          About this demo's optimization baseline
+        </summary>
+        <p class="mt-2 text-sm text-accent">
+          These pages ship deliberately unoptimized assets so mod_pagespeed has real work to do: CSS
+          is verbose with longhand properties, JavaScript is unminified, and images are served as
+          uncompressed JPEGs.
+        </p>
+      </details>
+
+      {/* Iframe preview area */}
+      <div class="mt-6 rounded-lg border border-border bg-bg-elevated overflow-hidden">
+        <div class="flex items-center justify-between px-4 py-2 border-b border-border bg-bg-secondary">
+          <div class="flex items-center gap-2">
+            <div class="flex gap-1.5">
+              <span class="block h-3 w-3 rounded-full bg-border-strong"></span>
+              <span class="block h-3 w-3 rounded-full bg-border-strong"></span>
+              <span class="block h-3 w-3 rounded-full bg-border-strong"></span>
+            </div>
+            <span id="demo-url-bar" class="ml-2 text-xs text-text-annotation font-mono">
+              /demos/ecommerce/index.html
+            </span>
+          </div>
+          <a
+            id="demo-open-link"
+            href="/demos/ecommerce/index.html"
+            target="_blank"
+            rel="noopener"
+            class="text-xs text-interactive hover:underline"
+          >
+            Open in new tab
+          </a>
+        </div>
+        {[
+          { id: 'ecommerce', label: 'E-commerce', src: '/demos/ecommerce/index.html' },
+          { id: 'blog', label: 'Blog', src: '/demos/blog/index.html' },
+          { id: 'news', label: 'News', src: '/demos/news/index.html' },
+          { id: 'portfolio', label: 'Portfolio', src: '/demos/portfolio/index.html' },
+        ].map((site, i) => (
+          <div
+            id={`preview-${site.id}`}
+            role="tabpanel"
+            aria-labelledby={`tab-${site.id}`}
+            class:list={[i !== 0 && 'hidden']}
+          >
+            <iframe
+              src={i === 0 ? site.src : undefined}
+              data-src={site.src}
+              class="w-full bg-white h-[min(700px,80vh)]"
+              title={`${site.label} demo site preview`}
+              loading="lazy"
+              sandbox="allow-scripts allow-same-origin"
+            />
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  {/* Optimization analysis */}
+  <section class="py-16 bg-bg-secondary">
+    <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+      <div>
+        <h2 class="h2-section text-text-body">Optimization analysis</h2>
+        <p class="lede mt-4 max-w-2xl">
+          Real measurements from the demo sites above, produced by the actual module + optimizer
+          worker + cache stack. CSS/JS sizes are measured before and after minification, image sizes
+          are measured before and after transcoding to WebP and AVIF.
+        </p>
+      </div>
+
+      {/* Site picker */}
+      <div
+        class="mt-10 flex gap-2 flex-wrap"
+        id="site-picker"
+        role="group"
+        aria-label="Choose demo site to analyze"
+      >
+        {siteData.map((site, i) => (
+          <button
+            data-site={site.id}
+            aria-pressed={i === 0 ? 'true' : 'false'}
+            class="product-tab rounded-md px-4 py-2 text-sm font-medium transition-colors"
+          >
+            {site.name}
+          </button>
+        ))}
+      </div>
+
+      {/* Site panels */}
+      {siteData.map((site, i) => (
+        <div
+          id={`panel-${site.id}`}
+          class:list={['mt-10', i !== 0 && 'hidden']}
+          data-panel={site.id}
+        >
+          {/* Top metrics — the site's before → after measurements on a
+                readout plate; the resource ByteDeltas below carry the breakdown. */}
+          <ReadoutPanel
+            id={`metrics-${site.id}`}
+            title={`Readout · ${site.name}`}
+            source={site.id === 'ecommerce' ? measuredOnStore : measuredOnSites}
+          >
+            <Readout
+              label="Total page weight"
+              before={formatBytes(site.totalBefore)}
+              after={formatBytes(site.totalAvif)}
+              gauge={{
+                min: 0,
+                max: site.totalBefore,
+                before: site.totalBefore,
+                after: site.totalAvif,
+              }}
+            />
+            <Readout
+              label="Load time (3G)"
+              before={`${site.loadTime.before}s`}
+              after={`${site.loadTime.after}s`}
+              gauge={{
+                min: 0,
+                max: Math.ceil(site.loadTime.before),
+                before: site.loadTime.before,
+                after: site.loadTime.after,
+              }}
+            />
+            <Readout
+              label="Lighthouse Performance"
+              before={String(site.lighthouse.before)}
+              after={String(site.lighthouse.after)}
+              gauge={{
+                min: 0,
+                max: 100,
+                before: site.lighthouse.before,
+                after: site.lighthouse.after,
+              }}
+            />
+          </ReadoutPanel>
+
+          {/* Resource breakdown — one ByteDelta per resource class, before →
+                after, from the same measured demo-metrics numbers. The URL bar
+                above names the demo page each panel's source points at. */}
+          <h3 class="mt-8 text-sm font-semibold text-text-body">Resource breakdown</h3>
+          {/* Each plate keeps its base-page table row label verbatim, so the
+                resource class a plate measures stays named. Two columns from
+                md up: below ~314px of plate width the fixed label/number
+                tracks leave no room for the bar column. */}
+          <div class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div>
+              <h4 class="eyebrow mb-3">Total</h4>
+              <ByteDelta
+                rows={[
+                  { label: 'original', bytes: site.totalBefore },
+                  { label: 'optimized', bytes: site.totalAvif },
+                ]}
+                source={site.src}
+                deltaNote="in size"
+              />
+            </div>
+            <div>
+              <h4 class="eyebrow mb-3">HTML + critical CSS</h4>
+              <ByteDelta
+                rows={[{ label: 'HTML', bytes: site.resources.html.before }]}
+                source={site.src}
+                deltaNote="in size"
+              />
+            </div>
+            <div>
+              <h4 class="eyebrow mb-3">CSS (minified)</h4>
+              <ByteDelta
+                rows={[
+                  { label: 'original', bytes: site.resources.css.before },
+                  { label: 'minified', bytes: site.resources.css.minified },
+                ]}
+                source={site.src}
+                deltaNote="in size"
+              />
+            </div>
+            <div>
+              <h4 class="eyebrow mb-3">JavaScript (minified)</h4>
+              <ByteDelta
+                rows={[
+                  { label: 'original', bytes: site.resources.js.before },
+                  { label: 'minified', bytes: site.resources.js.minified },
+                ]}
+                source={site.src}
+                deltaNote="in size"
+              />
+            </div>
+            <div>
+              <h4 class="eyebrow mb-3">{site.resources.images.label} &rarr; AVIF</h4>
+              <ByteDelta
+                rows={[
+                  { label: 'JPEG', bytes: site.imgBefore },
+                  { label: 'WebP', bytes: site.imgWebp },
+                  { label: 'AVIF', bytes: site.imgAvif },
+                ]}
+                source={site.src}
+                deltaNote="in size"
+              />
+            </div>
+          </div>
+
+          {/* CSS minification sample */}
+          <div class="mt-8 rounded-lg border border-border bg-bg-elevated overflow-hidden">
+            <div class="px-6 py-4 border-b border-border bg-bg-secondary">
+              <h3 class="text-sm font-semibold text-text-body">CSS minification example</h3>
+              <p class="text-xs text-text-muted mt-1">
+                Actual code from the {site.name.toLowerCase()} demo. Comments removed, whitespace
+                stripped, shorthand properties collapsed.
+              </p>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-border">
+              <div class="p-4">
+                <p class="text-xs font-semibold uppercase tracking-wider text-text-annotation mb-2">
+                  Before &mdash; {formatBytes(site.resources.css.before)}
+                </p>
+                <pre
+                  tabindex="0"
+                  class="text-xs text-text-muted bg-bg-secondary rounded p-3 overflow-x-auto max-h-56 overflow-y-auto"
+                >
+                    <code>{site.cssSnippet.before}</code>
+                  </pre>
+              </div>
+              <div class="p-4">
+                <p class="text-xs font-semibold uppercase tracking-wider text-success mb-2">
+                  After &mdash; {formatBytes(site.resources.css.minified)}
+                </p>
+                <pre
+                  tabindex="0"
+                  class="text-xs text-text-muted bg-success-wash rounded p-3 overflow-x-auto max-h-56 overflow-y-auto"
+                >
+                    <code set:text={site.cssSnippet.after} />
+                  </pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  </section>
+
+  {/* Methodology */}
+  <section class="py-16">
+    <div class="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8">
+      <h2 class="h2-section text-text-body">Methodology</h2>
+      <p class="mt-3 text-text-muted">
+        We separate what we directly measure from what we model. The byte sizes below are measured
+        from the actual optimization pipeline running against the demo sites above — real pipeline
+        output, not marketing math. The load-time and Lighthouse figures are projections we derive
+        from those measured savings, and we say so explicitly. The percentages on this page compare
+        file sizes before and after optimization. The optimizer's savings in the admin console are a
+        different measure: measured in transfer bytes, includes compression.
+      </p>
+      <p class="mt-4 text-sm font-semibold text-text-body">Directly measured</p>
+      <ul class="mt-2 space-y-2 text-sm text-text-muted list-disc list-inside">
+        <li>
+          <strong>CSS/JS sizes</strong> are measured by fetching the external
+          <code class="text-xs bg-bg-secondary rounded px-1">style.css</code> and
+          <code class="text-xs bg-bg-secondary rounded px-1">app.js</code> files from the origin
+          server (before) and from the PageSpeed nginx proxy (after). Minified sizes reflect our
+          actual CSS/JS minifier output.
+        </li>
+        <li>
+          <strong>Image sizes</strong> are measured by fetching each JPEG from the origin and the
+          corresponding WebP and AVIF variants from the PageSpeed proxy. Totals are the real sum of
+          all images per demo site.
+        </li>
+      </ul>
+      <p class="mt-4 text-sm font-semibold text-text-body">Modeled from those measurements</p>
+      <ul class="mt-2 space-y-2 text-sm text-text-muted list-disc list-inside">
+        <li>
+          <strong>Load times</strong> are a model, not a stopwatch reading: we project transfer time
+          for a simulated 3G connection (1.6 Mbps, 300ms RTT) from the measured total transfer size.
+        </li>
+        <li>
+          <strong>Lighthouse scores</strong> shown here are projected from the measured resource
+          savings and critical CSS injection, not captured from a live audit. For a live audit of
+          your own site, use our <a href="/analyze/">analyzer</a> — it runs Google's PageSpeed
+          Insights and maps each finding to the mod_pagespeed filter that fixes it.
+        </li>
+      </ul>
+      <p class="mt-4 text-xs text-text-annotation">
+        Measurements generated:{' '}
+        {new Date(generatedAt).toLocaleDateString('en-US', {
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+        })}
+      </p>
+    </div>
+  </section>
+
+  {/* Live consoles */}
+  <section class="py-16">
+    <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+      <h2 class="h2-section text-text-body text-center">See the live consoles</h2>
+      <p class="mt-4 text-text-muted text-center max-w-2xl mx-auto">
+        Both are the module's admin console, the same one you get with a mod_pagespeed install. They
+        are real, publicly reachable instances running on our own infrastructure, so open them and
+        click around.
+      </p>
+      <div class="mt-10 grid gap-8 lg:grid-cols-2">
+        <div>
+          <a
+            href="https://we-amp.com/pagespeed_global_admin/#/savings"
+            data-umami-event="live_2_0_console_demo"
+            class="block group"
+          >
+            <picture>
+              <source srcset="/images/console-savings.avif" type="image/avif" />
+              <source srcset="/images/console-savings.webp" type="image/webp" />
+              <img
+                src="/images/console-savings.png"
+                alt="Admin console Savings page with bytes saved by module rewrites and by optimizer cache serves, a breakdown by file type, and a table of savings per hosted site"
+                width="1440"
+                height="900"
+                loading="lazy"
+                class="rounded-lg border border-border group-hover:border-interactive/40 transition-colors"
+              />
+            </picture>
+          </a>
+          <p class="mt-3 text-sm font-medium text-text-body">
+            The admin console on our production sites
+          </p>
+          <p class="mt-1 text-sm text-text-muted">
+            Live savings from our own production deployment: bytes saved by the module and the
+            optimizer worker, by file type and by hosted site (the optimizer's figures are measured
+            in transfer bytes and include compression). The console is read-only here.{' '}
+            <a
+              href="https://we-amp.com/pagespeed_global_admin/#/savings"
+              class="text-interactive underline underline-offset-2"
+            >
+              Open the production console →
+            </a>
+          </p>
+        </div>
+        <div>
+          <a
+            href="https://demo-httpd-1.1.modpagespeed.com/pagespeed_global_admin/#/statistics"
+            data-umami-event="live_1_1_console_demo"
+            class="block group"
+          >
+            <picture>
+              <source srcset="/images/console-statistics.avif" type="image/avif" />
+              <source srcset="/images/console-statistics.webp" type="image/webp" />
+              <img
+                src="/images/console-statistics.png"
+                alt="The module's admin console Statistics table, listing cache counters with a description, a value column and a delta-since-open column"
+                width="1440"
+                height="900"
+                loading="lazy"
+                class="rounded-lg border border-border group-hover:border-interactive/40 transition-colors"
+              />
+            </picture>
+          </a>
+          <p class="mt-3 text-sm font-medium text-text-body">
+            The admin console on the Apache demo
+          </p>
+          <p class="mt-1 text-sm text-text-muted">
+            The same console, built into the native module and running on our public Apache demo:
+            live statistics, graphs, caches and histograms, served in-process with no separate
+            worker.{' '}
+            <a
+              href="https://demo-httpd-1.1.modpagespeed.com/pagespeed_global_admin/#/statistics"
+              class="text-interactive underline underline-offset-2"
+            >
+              Open the Apache demo console →
+            </a>
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  {/* Try it yourself */}
+  <section class="py-16 bg-bg-secondary">
+    <div class="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8">
+      <h2 class="h2-section text-text-body text-center">Verify on your own content</h2>
+      <p class="mt-4 text-text-muted text-center max-w-2xl mx-auto">
+        Run mod_pagespeed locally with Docker and measure the difference on your own site.
+      </p>
+      <div class="mt-8 rounded-lg bg-bg-elevated border border-border p-6">
+        <p class="text-sm font-medium text-text-body mb-3">Quick start:</p>
+        <pre
+          tabindex="0"
+          class="rounded-md bg-bg-recessed text-text-body p-4 text-sm overflow-x-auto"
+        ><code>docker compose -f deploy/docker-compose.yml up -d
+curl -I http://localhost:8080/          # X-PageSpeed: MISS (original)
+sleep 2                                 # Wait for worker optimization
+curl -I http://localhost:8080/          # X-PageSpeed: HIT  (optimized)</code></pre>
+        <p class="mt-4 text-sm text-text-muted">
+          See the{' '}
+          <a
+            href="/docs/getting-started/"
+            class="text-interactive underline hover:text-interactive"
+          >
+            getting started guide
+          </a>
+          for full installation instructions.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  {/* CTA */}
+  <section class="bg-interactive py-16">
+    <div class="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 text-center">
+      <h2 class="h2-section text-on-accent">Free to run. See these results on your own site.</h2>
+      <p class="mt-4 text-on-accent/80">
+        Apache-2.0 &mdash; free to install and run, in development and in production.
+      </p>
+      <div class="mt-6 flex flex-col sm:flex-row items-center justify-center gap-3">
+        <CTAButton
+          variant="inverse"
+          href="/download/"
+          label="Download & run"
+          event="cta_demo_bottom"
+        />
+        <a
+          href="/pricing/"
+          data-umami-event="cta_demo_bottom_buy"
+          class="inline-flex items-center justify-center gap-2 rounded-lg border border-on-accent/40 bg-transparent px-6 py-3 text-sm font-semibold text-on-accent hover:bg-interactive-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-on-accent transition-colors"
+        >
+          Support pricing
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <script>
+    // Demo site tab navigation
+    (function () {
+      var tabContainer = document.getElementById('demo-tabs');
+      var urlBar = document.getElementById('demo-url-bar');
+      var openLink = document.getElementById('demo-open-link');
+
+      // Classes that represent the active/inactive chrome-tab visual.
+      // Kept as token lists so focus-visible:* utilities set declaratively on
+      // the element markup are never blown away by className overwrites.
+      var ACTIVE_TOKENS = [
+        'border',
+        'border-border',
+        'border-b-bg-primary',
+        'bg-bg-elevated',
+        'text-text-body',
+      ];
+      var INACTIVE_TOKENS = [
+        'text-text-annotation',
+        'hover:text-text-body',
+        'hover:bg-bg-secondary',
+      ];
+
+      function applyActive(el: Element) {
+        INACTIVE_TOKENS.forEach(function (t) {
+          el.classList.remove(t);
+        });
+        ACTIVE_TOKENS.forEach(function (t) {
+          el.classList.add(t);
+        });
+      }
+      function applyInactive(el: Element) {
+        ACTIVE_TOKENS.forEach(function (t) {
+          el.classList.remove(t);
+        });
+        INACTIVE_TOKENS.forEach(function (t) {
+          el.classList.add(t);
+        });
+      }
+
+      if (tabContainer) {
+        var tabs = Array.prototype.slice.call(
+          tabContainer.querySelectorAll('button[data-demo-tab]'),
+        ) as HTMLButtonElement[];
+
+        // Activate a tab: update visual chrome, aria-selected, roving tabindex,
+        // the controlled panel (lazy-loading its iframe), and the URL bar.
+        // role="tab" uses aria-selected; aria-pressed is invalid on tabs
+        // (axe: aria-allowed-attr).
+        function selectTab(tab: HTMLButtonElement, moveFocus: boolean) {
+          var siteId = tab.getAttribute('data-demo-tab');
+          var src = tab.getAttribute('data-demo-src');
+
+          tabs.forEach(function (t) {
+            applyInactive(t);
+            t.setAttribute('aria-selected', 'false');
+            t.setAttribute('tabindex', '-1');
+          });
+          applyActive(tab);
+          tab.setAttribute('aria-selected', 'true');
+          tab.setAttribute('tabindex', '0');
+          if (moveFocus) tab.focus();
+
+          document.querySelectorAll('[role="tabpanel"]').forEach(function (panel) {
+            if (panel.id === 'preview-' + siteId) {
+              panel.classList.remove('hidden');
+              var iframe = panel.querySelector('iframe');
+              if (iframe && !(iframe as HTMLIFrameElement).src) {
+                (iframe as HTMLIFrameElement).src = iframe.getAttribute('data-src') || '';
+              }
+            } else {
+              panel.classList.add('hidden');
+            }
+          });
+
+          if (urlBar) urlBar.textContent = src;
+          if (openLink && src) openLink.setAttribute('href', src);
+
+          (window as any).umami?.track('demo_preview_tab_switch', { site: siteId });
+        }
+
+        tabs.forEach(function (tab) {
+          tab.addEventListener('click', function () {
+            selectTab(tab, false);
+          });
+        });
+
+        // WAI-ARIA APG tablist keyboard: Left/Right move + activate with wrap,
+        // Home/End jump to the first/last tab.
+        tabContainer.addEventListener('keydown', function (e: KeyboardEvent) {
+          var current = document.activeElement as HTMLButtonElement;
+          var idx = tabs.indexOf(current);
+          if (idx === -1) return;
+          var next = -1;
+          if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = (idx + 1) % tabs.length;
+          else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp')
+            next = (idx - 1 + tabs.length) % tabs.length;
+          else if (e.key === 'Home') next = 0;
+          else if (e.key === 'End') next = tabs.length - 1;
+          if (next === -1) return;
+          e.preventDefault();
+          selectTab(tabs[next], true);
+        });
+      }
+    })();
+
+    // Optimization analysis site picker
+    (function () {
+      var picker = document.getElementById('site-picker');
+      if (picker) {
+        var buttons = picker.querySelectorAll('button[data-site]');
+        buttons.forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            var siteId = btn.getAttribute('data-site');
+            // Update pressed state — .product-tab utility keys off aria-pressed
+            buttons.forEach(function (b) {
+              b.setAttribute('aria-pressed', 'false');
+            });
+            btn.setAttribute('aria-pressed', 'true');
+            // Show/hide panels
+            document.querySelectorAll('[data-panel]').forEach(function (panel) {
+              if (panel.getAttribute('data-panel') === siteId) {
+                panel.classList.remove('hidden');
+              } else {
+                panel.classList.add('hidden');
+              }
+            });
+
+            // Analytics (Umami — umami.track(name, props) form)
+            (window as any).umami?.track('demo_site_switch', { site: siteId });
+          });
+        });
+      }
+    })();
+  </script>
+</BaseLayout>

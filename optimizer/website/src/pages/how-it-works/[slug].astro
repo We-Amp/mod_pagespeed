@@ -1,0 +1,222 @@
+---
+import { OG_DEFAULT_IMAGE } from '../../data/og-image';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import OnThisPage from '../../components/OnThisPage.astro';
+import Icon from '../../components/Icon.astro';
+import SectionHeader from '../../components/instrument/SectionHeader.astro';
+import { getCollection, render } from 'astro:content';
+import { createMarkdownProcessor } from '@astrojs/markdown-remark';
+import { FREE_TO_RUN_LINE } from '../../data/product-facts.mjs';
+import { productRef } from '../../data/software-jsonld';
+import { brandedTitle } from '../../lib/page-title';
+import { tocHeadings as pageTocHeadings } from '../../lib/toc-headings';
+
+export async function getStaticPaths() {
+  const pages = await getCollection('how-it-works');
+  return pages.map((doc) => ({ params: { slug: doc.id }, props: { doc } }));
+}
+
+const { doc } = Astro.props;
+const { Content, headings, remarkPluginFrontmatter } = await render(doc);
+
+// FAQ accordion + FAQPage JSON-LD from frontmatter `faq` (mirrors docs/[slug]).
+// Answers carry inline markdown, so render them through Astro's markdown engine.
+const faqProcessor = doc.data.faq?.length ? await createMarkdownProcessor({ gfm: true }) : null;
+const faqItems = faqProcessor
+  ? await Promise.all(
+      doc.data.faq!.map(async (item) => {
+        const { code } = await faqProcessor.render(item.a);
+        const a = code
+          .trim()
+          .replace(/^<p>/, '')
+          .replace(/<\/p>$/, '');
+        return { q: item.q, a };
+      }),
+    )
+  : [];
+
+const tocHeadings = [
+  ...pageTocHeadings(headings, remarkPluginFrontmatter),
+  ...(faqItems.length > 0 ? [{ depth: 2, slug: 'faq', text: 'Frequently asked questions' }] : []),
+];
+const showToc = tocHeadings.length >= 3;
+
+// Sibling explainers for the "More on how it works" footer.
+const siblings = (await getCollection('how-it-works'))
+  .filter((d) => d.id !== doc.id)
+  .sort((a, b) => a.data.order - b.data.order);
+
+const schemaImage = new URL(OG_DEFAULT_IMAGE, Astro.site ?? new URL('https://modpagespeed.com'))
+  .href;
+
+const jsonLd: Record<string, unknown> = {
+  '@context': 'https://schema.org',
+  '@type': 'TechArticle',
+  headline: doc.data.title,
+  description: doc.data.description,
+  image: schemaImage,
+  author: { '@type': 'Organization', name: 'We-Amp B.V.' },
+  publisher: {
+    '@type': 'Organization',
+    name: 'We-Amp B.V.',
+    logo: { '@type': 'ImageObject', url: 'https://modpagespeed.com/logo.svg' },
+  },
+  mainEntityOfPage: `https://modpagespeed.com/how-it-works/${doc.id}/`,
+  ...(doc.data.datePublished && {
+    datePublished: doc.data.datePublished.toISOString().split('T')[0],
+  }),
+  ...(doc.data.lastUpdated && {
+    dateModified: doc.data.lastUpdated.toISOString().split('T')[0],
+  }),
+  about: await productRef(),
+};
+
+const faqJsonLd =
+  doc.data.faq && doc.data.faq.length > 0
+    ? {
+        '@context': 'https://schema.org',
+        '@type': 'FAQPage',
+        mainEntity: doc.data.faq.map((item) => ({
+          '@type': 'Question',
+          name: item.q,
+          acceptedAnswer: { '@type': 'Answer', text: item.a },
+        })),
+      }
+    : undefined;
+
+const jsonLdEntries: Record<string, unknown>[] = [jsonLd];
+if (faqJsonLd) jsonLdEntries.push(faqJsonLd);
+---
+
+<BaseLayout
+  title={brandedTitle(doc.data.title)}
+  description={doc.data.description}
+  jsonLd={jsonLdEntries}
+  breadcrumbLeafName={doc.data.title}
+>
+  <div
+    class:list={[
+      'mx-auto px-4 sm:px-6 lg:px-8 py-20',
+      showToc ? 'max-w-5xl xl:max-w-6xl' : 'max-w-3xl',
+    ]}
+  >
+    <div class:list={['xl:grid xl:gap-12', showToc && 'xl:grid-cols-[minmax(0,1fr)_200px]']}>
+      <article class="min-w-0">
+        <nav class="mb-6 font-mono text-xs text-text-annotation" aria-label="Breadcrumb">
+          <a href="/" class="hover:text-text-body">
+            Home
+          </a>
+          <span class="mx-1">/</span>
+          <a href="/how-it-works/" class="hover:text-text-body">
+            How it works
+          </a>
+          <span class="mx-1">/</span>
+          <span>{doc.data.title}</span>
+        </nav>
+        <SectionHeader
+          id="how-it-works-article"
+          as="h1"
+          eyebrow="How it works"
+          title={doc.data.title}
+        >
+          <p class="lede">{doc.data.description}</p>
+        </SectionHeader>
+
+        {showToc && (
+          <div class="mt-8 xl:hidden">
+            <OnThisPage variant="inline" headings={tocHeadings} />
+          </div>
+        )}
+
+        <div class="mt-8 prose prose-stone max-w-none prose-headings:font-semibold prose-a:text-interactive prose-a:underline prose-a:underline-offset-2 prose-a:decoration-interactive hover:prose-a:decoration-interactive">
+          <Content />
+        </div>
+
+        {faqItems.length > 0 && (
+          <section id="faq" class="mt-16">
+            <h2 class="text-2xl font-bold tracking-tight text-text-body">
+              Frequently asked questions
+            </h2>
+            <div class="mt-6 space-y-3">
+              {faqItems.map((item) => (
+                <details class="group rounded-lg border border-border bg-bg-elevated">
+                  <summary class="flex cursor-pointer items-center justify-between gap-4 px-5 py-4 font-medium text-text-body">
+                    {item.q}
+                    <Icon
+                      name="chevron-down"
+                      class="h-5 w-5 shrink-0 text-text-annotation group-open:rotate-180"
+                    />
+                  </summary>
+                  <p
+                    class="px-5 pb-5 text-sm leading-relaxed text-text-muted [&_code]:rounded [&_code]:bg-bg-secondary [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em] [&_a]:font-medium [&_a]:text-interactive [&_a]:underline [&_strong]:font-semibold [&_strong]:text-text-body"
+                    set:html={item.a}
+                  />
+                </details>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {siblings.length > 0 && (
+          <section class="mt-14 border-t border-border pt-8">
+            <p class="eyebrow">More on how it works</p>
+            <ul class="mt-4 space-y-2 text-sm">
+              {siblings.map((d) => (
+                <li>
+                  <a
+                    href={`/how-it-works/${d.id}/`}
+                    class="text-interactive hover:text-interactive-hover underline"
+                  >
+                    {d.data.title}
+                  </a>{' '}
+                  &mdash; {d.data.summary ?? d.data.description}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        <aside class="mt-12 rounded-lg border border-interactive/45 bg-interactive-wash p-6 text-center">
+          <p class="text-sm font-semibold text-text-body">
+            This is the optimization core behind mod_pagespeed. Download and run it &mdash; it
+            optimizes immediately, free to run.
+          </p>
+          <p class="mt-1 text-sm text-text-muted">{FREE_TO_RUN_LINE}</p>
+          <div class="mt-5 flex flex-wrap items-center justify-center gap-x-5 gap-y-3">
+            <a
+              href="/download/"
+              data-umami-event="cta_howitworks_install"
+              class="inline-flex items-center rounded-lg bg-interactive hover:bg-interactive-hover px-5 py-2.5 text-sm font-semibold text-on-accent transition-colors"
+            >
+              Download &amp; run
+            </a>
+            <a
+              href="/features/"
+              data-umami-event="cta_howitworks_features"
+              class="text-sm font-medium text-interactive underline decoration-interactive underline-offset-2 hover:decoration-interactive transition-colors"
+            >
+              See the feature list
+            </a>
+          </div>
+        </aside>
+      </article>
+
+      {showToc && (
+        <div class="hidden xl:block">
+          <div class="sticky top-20 max-h-[calc(100vh-7rem)] overflow-y-auto pb-8">
+            <OnThisPage variant="rail" headings={tocHeadings} />
+          </div>
+        </div>
+      )}
+    </div>
+  </div>
+
+  <style>
+    details > summary {
+      list-style: none;
+    }
+    details > summary::-webkit-details-marker {
+      display: none;
+    }
+  </style>
+</BaseLayout>

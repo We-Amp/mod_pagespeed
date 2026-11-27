@@ -1,0 +1,5 @@
+---
+# Disable all checks for machine-generated predictor code.
+# These files are auto-generated and not meant to be edited or analyzed.
+InheritParentConfig: false
+Checks: '-*'

@@ -1,0 +1,116 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// Home section 04: the specification. The six capability cards as readout
+// panels, each readout restating its own card text.
+//
+// The markup keeps the indentation it has inside the page layout: the build
+// does not compress HTML, so this indentation is the whitespace of the page.
+// The class names are styled by the page's global style block in
+// src/pages/index.astro. Keep the component imports below in this order: it
+// decides the order of the inline style blocks in <head> (see the note in
+// src/pages/index.astro).
+
+import SectionHeader from '../instrument/SectionHeader.astro';
+import { MAX_VARIANTS } from '../../data/product-facts.mjs';
+---
+
+  <section class="home-band-y border-border bg-bg-secondary py-13 sm:py-18">
+    <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+      <SectionHeader
+        id="s-spec"
+        index="04"
+        eyebrow="Specification"
+        title="What runs on your server."
+      />
+      <div class="mt-10 grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div class="panel">
+          <p class="card-ro">
+            <span>images</span>
+            <b>&le; {MAX_VARIANTS} variants</b>
+          </p>
+          <h3 class="mt-4 font-semibold text-text-body">
+            One decode pass, up to {MAX_VARIANTS} variants out
+          </h3>
+          <p class="mt-2 text-body text-text-muted">
+            Automatic WebP and AVIF transcoding with viewport-aware resizing. Every variant is
+            verified against the original with SSIMULACRA2 before it reaches the cache, using
+            ML-predicted per-format quality. The optimizer worker can{' '}
+            <a
+              href="/blog/svg-auto-vectorization/"
+              class="text-interactive hover:text-interactive-hover underline"
+            >
+              auto-vectorize eligible images to SVG
+            </a>
+            . Content-aware compression adapts to photos, screenshots, and illustrations
+            differently.
+          </p>
+        </div>
+
+        <div class="panel">
+          <p class="card-ro">
+            <span>css</span>
+            <b>103 Early Hints</b>
+          </p>
+          <h3 class="mt-4 font-semibold text-text-body">Render-blocking CSS eliminated</h3>
+          <p class="mt-2 text-body text-text-muted">
+            Heuristic-based critical CSS extraction and injection. CSS/JS minification. Early Hints
+            (103) for preloading. No headless browser required. Optional browser pipeline for
+            Lighthouse validation, waterfall capture, and visual comparison.
+          </p>
+        </div>
+
+        <div class="panel">
+          <p class="card-ro">
+            <span>cache</span>
+            <b>hash + mmap</b>
+          </p>
+          <h3 class="mt-4 font-semibold text-text-body">
+            Cache hits are a pointer, not a pipeline
+          </h3>
+          <p class="mt-2 text-body text-text-muted">
+            The Cyclone cache serves optimized content from a memory-mapped file &mdash; a hash
+            lookup and a pointer, no re-optimization on the request path.
+          </p>
+        </div>
+
+        <div class="panel">
+          <p class="card-ro">
+            <span>egress</span>
+            <b>0 third parties</b>
+          </p>
+          <h3 class="mt-4 font-semibold text-text-body">Self-hosted by design</h3>
+          <p class="mt-2 text-body text-text-muted">
+            Visitor data never leaves your origin, and nothing in the request path talks to us. Open
+            source you can audit, running entirely on infrastructure you control.
+          </p>
+        </div>
+
+        <div class="panel">
+          <p class="card-ro">
+            <span>js</span>
+            <b>fallback: original</b>
+          </p>
+          <h3 class="mt-4 font-semibold text-text-body">Deliberately conservative</h3>
+          <p class="mt-2 text-body text-text-muted">
+            JS minification strips whitespace and comments only. No variable renaming, no AST
+            transforms. The design falls back to the original when an optimization step fails.
+          </p>
+        </div>
+
+        <div class="panel">
+          <p class="card-ro">
+            <span>variants</span>
+            <b>AVIF &middot; WebP &middot; DPR &middot; Save-Data</b>
+          </p>
+          <h3 class="mt-4 font-semibold text-text-body">The right bytes for every client</h3>
+          <p class="mt-2 text-body text-text-muted">
+            Per-URL cache variants tuned to each client &mdash; image format (AVIF / WebP /
+            original), viewport size, pixel density, Save-Data, and pre-compressed encoding &mdash;
+            so each request gets the smallest appropriate bytes off the cache.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>

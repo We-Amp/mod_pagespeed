@@ -1,0 +1,674 @@
+---
+title: 'Run in production'
+description: 'Run mod_pagespeed in production: Docker Compose, Kubernetes with or without the chart, the packaged systemd unit, permissions, logs and cache sizing.'
+order: 50
+group: 'Operate'
+lastUpdated: 2026-10-22
+---
+
+import ImageTag from '../../components/release/ImageTag.astro';
+
+mod_pagespeed runs as two cooperating processes: the optimizer worker,
+which optimizes content, and a serving side (nginx with the module in the
+reverse proxy, or the Apache, nginx or IIS module on a host install) that
+serves it from a shared cache. This page covers the three ways to run that
+pair in production, Docker Compose, Kubernetes and the packaged systemd unit on
+bare metal or a VM, along with file permissions, logging, image verification
+and cache sizing. The install pages get the pair running; this page starts
+where they end.
+
+:::note[One worker, two names]
+The optimizer worker is one program under two names. The container images and
+the NuGet package ship the binary as `factory_worker`; the deb and rpm packages
+install it as `/usr/bin/pagespeed-optimizer`, with the
+`pagespeed-optimizer.service` unit, host overrides in
+`/etc/default/pagespeed-optimizer` and its cache under
+`/var/cache/pagespeed-optimizer/v3`. Compose files and container logs say
+`factory_worker`; `systemctl` and `journalctl` say `pagespeed-optimizer`. Same
+process.
+:::
+
+## Docker Compose
+
+The recommended production setup uses two containers sharing a named volume:
+the worker and nginx with the PageSpeed module. Your origin server runs
+separately (on the same host, a different host, or behind a load balancer).
+
+**Every process that shares the cache volume must share one host, and should
+share one PID namespace.** The cache is safe across PID namespaces, but older
+builds recover a cross-process write lock from a holder whose process the
+kernel reports gone, and a live holder in another container's PID namespace
+looks gone to them, so during an upgrade that mixes builds two writes could
+overlap undetected. The compose file
+puts both containers in the PID namespace of `pidns`, a container that runs
+the Kubernetes pause image and only holds the namespace: if the worker held
+it instead, restarting the worker would also stop nginx. Its image is pinned
+by digest and never follows the release tag, so an upgrade does not recreate
+it. Stopping `pidns` itself stops both; `docker compose up -d` brings them
+back.
+
+### Environment file
+
+Copy the example environment file and adjust for your setup:
+
+```bash
+cp deploy/.env.example deploy/.env
+```
+
+Edit `deploy/.env`:
+
+<pre>
+  <code class="language-bash">
+    {`# Image version tag (the worker and nginx images publish version tags only;
+# there is no latest tag for them)
+PAGESPEED_VERSION=`}
+    <ImageTag line="2.1" />
+    {`
+
+# Your origin server, as nginx inside its container reaches it:
+# host.docker.internal is the Docker host, or use a hostname or IP
+BACKEND_HOST=host.docker.internal
+BACKEND_PORT=8081
+
+# Cache size in bytes (512 MB)
+CACHE_SIZE=536870912
+
+# Exposed ports
+NGINX_PORT=80
+NGINX_SSL_PORT=443`}
+  </code>
+</pre>
+
+### Docker Compose file
+
+The production `deploy/docker-compose.yml` runs the worker and nginx (shown
+with abridged comments):
+
+```yaml
+services:
+  pidns:
+    image: registry.k8s.io/pause:3.10.1@sha256:278fb9dbcca9518083ad1e11276933a2e96f23de604a3a08cc3c80002767d24c
+    user: '65535:65535'
+    network_mode: none
+    read_only: true
+    cap_drop: ['ALL']
+    security_opt: ['no-new-privileges:true']
+    restart: unless-stopped
+
+  worker:
+    image: ghcr.io/we-amp/pagespeed-worker:${PAGESPEED_VERSION:-2.10.0}
+    pid: 'service:pidns'
+    depends_on:
+      pidns:
+        condition: service_started
+    volumes:
+      - pagespeed-data:/data
+    environment:
+      - CACHE_SIZE=${CACHE_SIZE:-1073741824}
+    restart: unless-stopped
+    # The image ships socat, not python3. The probe only reads the one status
+    # line the worker writes on connect; -T 4 bounds the wait inside timeout.
+    healthcheck:
+      test: ['CMD-SHELL', "socat -u -T 4 UNIX-CONNECT:/data/pagespeed.sock.health - | grep -q '^OK'"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+  nginx:
+    image: ghcr.io/we-amp/pagespeed-nginx:${PAGESPEED_VERSION:-2.10.0}
+    pid: 'service:pidns'
+    ports:
+      - '${NGINX_PORT:-80}:80'
+      - '${NGINX_SSL_PORT:-443}:443'
+    volumes:
+      - pagespeed-data:/data
+    environment:
+      - BACKEND_HOST=${BACKEND_HOST:-host.docker.internal}
+      - BACKEND_PORT=${BACKEND_PORT:-8081}
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    depends_on:
+      pidns:
+        condition: service_started
+      worker:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'curl', '-sf', 'http://localhost/health']
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 3s
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '5'
+
+volumes:
+  pagespeed-data:
+    driver: local
+```
+
+### Starting the stack
+
+The compose file pulls the published images; nothing is built locally.
+
+```bash
+# Start in detached mode
+docker compose -f deploy/docker-compose.yml up -d
+
+# Verify both containers are healthy
+docker compose -f deploy/docker-compose.yml ps
+```
+
+Optional: to run images you built yourself instead. `docker/build-release.sh`
+(a long build) tags its output `modpagespeed/worker:<version>` and
+`modpagespeed/nginx:<version>`, not the published names the compose file
+pulls, so retag them to those names, set `PAGESPEED_VERSION` to the same
+version in `deploy/.env`, and start the stack as above:
+
+<pre>
+  <code class="language-bash">
+    {`V=`}
+    <ImageTag line="2.1" />
+    {`
+docker/build-release.sh "$V"
+docker tag "modpagespeed/worker:$V" "ghcr.io/we-amp/pagespeed-worker:$V"
+docker tag "modpagespeed/nginx:$V" "ghcr.io/we-amp/pagespeed-nginx:$V"`}
+  </code>
+</pre>
+
+### SSL configuration
+
+To enable HTTPS, mount your certificate and key files into the nginx container
+and provide a custom nginx config:
+
+```yaml
+nginx:
+  volumes:
+    - pagespeed-data:/data
+    - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    - ./ssl/cert.pem:/etc/nginx/ssl/cert.pem:ro
+    - ./ssl/key.pem:/etc/nginx/ssl/key.pem:ro
+```
+
+### Updating
+
+An upgrade is a tag change in `deploy/.env` followed by
+`docker compose pull` and `docker compose up -d`; both images move together and
+the cache volume survives. See [Upgrade](/docs/upgrade/#docker).
+
+## Kubernetes (Helm)
+
+The official Helm chart deploys the worker and nginx as sidecar containers in a
+single pod, sharing an `emptyDir` volume for the Cyclone cache and one PID
+namespace (`shareProcessNamespace: true`). It is published
+to a Helm repository hosted on `modpagespeed.com`. See the dedicated
+[Helm deployment guide](/docs/helm-deployment/) for the full configuration
+reference.
+
+### Install
+
+```bash
+helm repo add weamp https://modpagespeed.com/charts
+helm repo update
+
+helm install pagespeed weamp/pagespeed \
+  --set backend.host=<your-origin>.default.svc.cluster.local \
+  --set backend.port=8080
+```
+
+### Common overrides
+
+```bash
+helm install pagespeed weamp/pagespeed \
+  --set backend.host=<your-origin> \
+  --set backend.port=8080 \
+  --set worker.cacheSize=1073741824 \
+  --set replicaCount=3 \
+  --set ingress.enabled=true \
+  --set ingress.hosts[0].host=<your-domain> \
+  --set ingress.hosts[0].paths[0].path=/ \
+  --set ingress.hosts[0].paths[0].pathType=Prefix
+```
+
+### Architecture
+
+Each pod contains two containers:
+
+- **worker** — Reads/writes the shared cache, processes notifications
+- **nginx** — Serves traffic, sends notifications to the worker
+
+Both containers mount the same `emptyDir` volume at `/data`. The worker
+creates the cache file and Unix sockets; nginx reads the cache and connects
+to the sockets.
+
+### Autoscaling
+
+Enable HPA-based autoscaling:
+
+```bash
+helm install pagespeed weamp/pagespeed \
+  --set autoscaling.enabled=true \
+  --set autoscaling.minReplicas=2 \
+  --set autoscaling.maxReplicas=10
+```
+
+### Without the chart
+
+Without Helm, run nginx and the worker as two containers in one pod, sharing an
+`emptyDir` volume and one PID namespace (`shareProcessNamespace: true`; the
+reason is the cross-process cache lock described under
+[Install with Docker](/docs/installation-docker/#docker-compose-configuration)):
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pagespeed
+spec:
+  shareProcessNamespace: true
+  securityContext:
+    fsGroup: 918 # the volume arrives group-owned by group pagespeed
+  containers:
+    - name: worker
+      image: ghcr.io/we-amp/pagespeed-worker:2.10.0
+      env:
+        - name: CACHE_SIZE
+          value: '536870912' # 512 MB; keep it inside the emptyDir sizeLimit
+      volumeMounts:
+        - name: data
+          mountPath: /data
+      readinessProbe:
+        exec:
+          command:
+            - sh
+            - -c
+            - "socat -u -T 4 UNIX-CONNECT:/data/pagespeed.sock.health - | grep -q '^OK'"
+        periodSeconds: 5
+        timeoutSeconds: 5
+
+    - name: nginx
+      image: ghcr.io/we-amp/pagespeed-nginx:2.10.0
+      env:
+        # Your origin; the image renders its nginx config from these two
+        - name: BACKEND_HOST
+          value: <your-origin>.default.svc.cluster.local
+        - name: BACKEND_PORT
+          value: '8080'
+      ports:
+        - containerPort: 80
+      volumeMounts:
+        - name: data
+          mountPath: /data
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 80
+        periodSeconds: 5
+
+  volumes:
+    - name: data
+      emptyDir:
+        sizeLimit: 1Gi
+```
+
+Both containers share the network namespace and, with
+`shareProcessNamespace: true`, the PID namespace. The pod's pause container is
+then PID 1; each container's main process still receives its own stop signal.
+Both containers can see each other's processes, the worker's command line
+included, so keep secrets in environment variables, not arguments. Do not
+split nginx and the worker into separate pods that mount the same volume:
+separate pods usually do not share a node, and never a PID namespace. Both
+images expect the volume at `/data`, nginx listens on port 80, and
+`securityContext.fsGroup: 918` makes the mounted volume arrive group-owned by
+the `pagespeed` group.
+
+## Verify the images
+
+The images are signed with [keyless cosign](https://docs.sigstore.dev/) and
+carry an SBOM attestation and SLSA build provenance. The signing identity is
+one workflow on one branch: `publish-images.yml` on `main` of
+`We-Amp/modpagespeed-images`. Check that exact identity, not a pattern that
+would also accept another workflow or branch of the repository. To verify a
+pull:
+
+```bash
+# Signature (keyless — no public key to manage)
+cosign verify \
+  --certificate-identity https://github.com/We-Amp/modpagespeed-images/.github/workflows/publish-images.yml@refs/heads/main \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  ghcr.io/we-amp/pagespeed-combined:latest
+
+# SBOM + build provenance
+gh attestation verify oci://ghcr.io/we-amp/pagespeed-combined:latest \
+  --repo We-Amp/modpagespeed-images
+```
+
+The same commands work for `pagespeed-worker` and `pagespeed-nginx` with a
+pinned tag.
+
+## systemd service
+
+On bare metal or a VM without Docker, the deb and rpm packages are the
+production setup. `pagespeed-optimizer` installs `/usr/bin/pagespeed-optimizer`,
+the `pagespeed-optimizer.service` unit, a sysusers.d drop-in for the
+`pagespeed` user and group, and a tmpfiles.d entry for the versioned cache
+directory. Nothing is hand-rolled:
+
+<a id="service-file"></a><a id="enable-and-start"></a>
+
+```bash
+sudo systemctl enable --now pagespeed-optimizer
+sudo systemctl status pagespeed-optimizer
+```
+
+### Host overrides
+
+The unit reads `/etc/default/pagespeed-optimizer` on every distribution. Every
+value has a working default in the unit, so uncomment only what you change:
+
+```bash
+# /etc/default/pagespeed-optimizer
+# CACHE_DIR=/var/cache/pagespeed-optimizer/v3
+# SOCKET_PATH=/run/pagespeed-optimizer/notify.sock
+# CACHE_SIZE=536870912
+# LOG_LEVEL=info
+# OPTIMIZER_OPTS=--api-socket
+```
+
+Secrets (`PAGESPEED_API_TOKEN`, `PAGESPEED_PURGE_TOKEN`) live in
+`/etc/pagespeed-optimizer/daemon.env` (0640 `root:pagespeed`), which the
+package generates at install time and systemd reads after the defaults file,
+so they stay off the command line.
+
+### Drop-in overrides
+
+Change the unit with a drop-in, never by editing the file under
+`/usr/lib/systemd` (an upgrade overwrites it). Relocating the cache to a
+dedicated disk takes three steps, because the unit keeps the rest of the
+filesystem read-only and `ReadWritePaths=` cannot name a directory that does
+not exist yet:
+
+```bash
+sudo install -d -m 3770 -o pagespeed -g pagespeed /srv/pagespeed-cache
+sudo systemctl edit pagespeed-optimizer
+```
+
+```ini
+[Service]
+ReadWritePaths=/srv/pagespeed-cache
+```
+
+Then set `CACHE_DIR=/srv/pagespeed-cache` in `/etc/default/pagespeed-optimizer`
+and run `systemctl restart pagespeed-optimizer`. A web server that runs under
+another unit name than `apache2`, `httpd` or `nginx` is not ordered after the
+worker; give it an ordering drop-in of its own with
+`After=pagespeed-optimizer.service`.
+
+### Key settings in the packaged unit {#key-systemd-settings}
+
+- **`User=pagespeed` / `Group=pagespeed`**: the worker runs unprivileged, with
+  an empty capability set and `NoNewPrivileges=yes`. The web-server user joins
+  group `pagespeed` (the module package's postinst does the join), and that
+  shared group is the entire access boundary for the cache and sockets.
+- **`UMask=0007`**: a backstop only. Every security-relevant mode (sockets
+  0660, volume 0660, shared config 0640, serve-stats 0660) is set explicitly
+  by the worker.
+- **`ProtectSystem=strict`** with **`ReadWritePaths=/var/cache/pagespeed-optimizer`**:
+  the worker can write nowhere else.
+- **`SystemCallFilter=`**, enforcing since 2.1.0: the worker may make the calls
+  in systemd's `@system-service` group (minus `@privileged` and `@resources`,
+  plus `mincore`), and the kernel stops it with `SIGSYS` on anything else;
+  `systemctl status` then shows `status=31/SYS`. The package ships an opt-out
+  drop-in example under `/usr/share/doc/pagespeed-optimizer/` and installs a
+  browser-analysis drop-in that admits what the Chrome sandbox needs.
+- **`Before=apache2.service httpd.service nginx.service`**: ordering only, no
+  dependency. The unit counts as started once its notification socket exists
+  (it waits up to 30 seconds), so at boot the web server is released after the
+  worker answers.
+- **`Restart=on-failure`** with a start limit of 5 in 60 seconds: a permanent
+  refusal to start (cache directory missing, unwritable, or holding
+  foreign-owned files) latches `failed` instead of looping, so monitoring sees
+  it.
+- **`LimitNOFILE=65536`**: enough descriptors for large caches and many
+  connections.
+
+A worker outside the packages, a binary you built yourself, should mirror
+`deploy/pagespeed-optimizer.service` and the tmpfiles.d drop-in from the
+repository rather than recreate the modes by hand.
+
+### Do not expose the worker HTTP API
+
+The worker's HTTP API (cache inspection, purge, workbench WebSocket) is **disabled
+by default**, and when you enable it the worker enforces one rule while parsing
+its configuration: **remote is never unauthenticated, and unauthenticated is
+never remote.** Any combination that breaks it is a refusal to start, not a
+warning.
+
+Prefer the unix socket: `--api-socket` serves the API on
+`/run/pagespeed-optimizer/api.sock`, mode 0660 `pagespeed:pagespeed`. Your web
+server reaches it through group membership — the same boundary that already
+governs the cache — so there is no credential to distribute, and no TCP port is
+bound at all.
+
+If you do bind TCP, it defaults to `127.0.0.1`; keep it that way. A
+non-loopback bind requires **both** `--api-allow-remote` and a token
+(`PAGESPEED_API_TOKEN`), and even then belongs behind a reverse proxy with its
+own authentication. Package installs generate the token into
+`/etc/pagespeed-optimizer/daemon.env` (0640 `root:pagespeed`), so enabling the
+API does not mean inventing a credential. See
+[HTTP API Reference](/docs/http-api/) for the auth model.
+
+## File permissions
+
+Cross-process cache sharing between nginx and the worker is scoped to one
+shared group. The worker runs as the unprivileged `pagespeed` user and owns
+every file it creates; nginx worker processes (`nobody`, `www-data`,
+`apache`, ...) reach those files through membership in group `pagespeed`.
+Nothing is world-accessible, and no mode is umask-derived — the optimizer worker sets
+each one explicitly after creating the file.
+
+### Required permissions
+
+| Path                                   | Owner:group           | Mode | Reason                                                                                                                                           |
+| -------------------------------------- | --------------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `/var/cache/pagespeed-optimizer/v3/`   | `pagespeed:pagespeed` | 3770 | Cache dir (tmpfiles.d) — setgid so the group is inherited by everything created inside, sticky so one group member cannot delete another's files |
+| volume files (`cache-*`)               | `pagespeed:pagespeed` | 0660 | Both processes read and write cache entries                                                                                                      |
+| `pagespeed-shared.conf`                | `pagespeed:pagespeed` | 0640 | nginx reads socket path / sizing / toggles                                                                                                       |
+| `.pagespeed-serve-stats`               | `pagespeed:pagespeed` | 0660 | Shared serve-stats mmap                                                                                                                          |
+| `/run/pagespeed-optimizer/notify.sock` | `pagespeed:pagespeed` | 0660 | nginx sends notifications to the worker                                                                                                          |
+| `notify.sock.health`                   | `pagespeed:pagespeed` | 0660 | Health check access                                                                                                                              |
+| `notify.sock.mgmt`                     | `pagespeed:pagespeed` | 0660 | Management socket access (PURGE)                                                                                                                 |
+| `/etc/pagespeed-optimizer/daemon.env`  | `root:pagespeed`      | 0640 | API token, off the command line                                                                                                                  |
+
+### Ensuring correct permissions
+
+The packaged `pagespeed-optimizer` deb/rpm does all of this: sysusers.d
+creates the identity, tmpfiles.d creates the versioned cache directory, the
+unit drops privileges, and the module package's postinst adds the web-server
+user to group `pagespeed`. For a hand-rolled install, mirror the packaged
+unit (`deploy/pagespeed-optimizer.service`) and the tmpfiles.d drop-in
+rather than recreating the modes by hand.
+
+### Upgrading from an earlier release
+
+The worker's default cache and socket paths moved to
+`/var/cache/pagespeed-optimizer/v3/cache` and
+`/run/pagespeed-optimizer/notify.sock`; a web-server configuration that still
+names the old paths attaches to an abandoned cache and reports the socket as
+absent. The worker also refuses to start, naming the cause, when its cache
+directory is missing, unwritable or holds content owned by another uid; no
+install path ever chowns or migrates pre-existing content. The upgrade steps
+per shape are on [Upgrade](/docs/upgrade/), and the move from the 2.0 images
+on [Migrate from ModPageSpeed 2.0](/docs/migrating-to-2-1/).
+
+### Verifying permissions
+
+If you see persistent `MISS` responses or worker processing errors, check
+permissions:
+
+```bash
+ls -la /var/cache/pagespeed-optimizer/v3/
+# Expected:
+# drwxrws---  pagespeed pagespeed  .
+# -rw-rw----  pagespeed pagespeed  cache-1-....dat
+# -rw-r-----  pagespeed pagespeed  pagespeed-shared.conf
+# -rw-rw----  pagespeed pagespeed  .pagespeed-serve-stats
+
+ls -la /run/pagespeed-optimizer/
+# Expected:
+# srw-rw----  pagespeed pagespeed  notify.sock
+# srw-rw----  pagespeed pagespeed  notify.sock.health
+# srw-rw----  pagespeed pagespeed  notify.sock.mgmt
+
+# and the web side must be in the group:
+id www-data   # (or apache / nginx) — must list "pagespeed"
+```
+
+## Log rotation
+
+### systemd (journald)
+
+When using `--log-format json` with systemd, logs go to journald by default.
+Journald manages its own rotation. View logs with:
+
+```bash
+# Follow worker logs
+sudo journalctl -u pagespeed-optimizer -f
+
+# Last 100 lines
+sudo journalctl -u pagespeed-optimizer -n 100
+
+# Since last hour
+sudo journalctl -u pagespeed-optimizer --since "1 hour ago"
+
+# JSON output for parsing
+sudo journalctl -u pagespeed-optimizer -o cat | jq .
+```
+
+### nginx log rotation
+
+Install the logrotate configuration at `/etc/logrotate.d/pagespeed`:
+
+```text
+/var/log/nginx/pagespeed*.log {
+    daily
+    missingok
+    rotate 14
+    compress
+    delaycompress
+    notifempty
+    create 0644 www-data adm
+    sharedscripts
+    postrotate
+        [ -f /var/run/nginx.pid ] && kill -USR1 $(cat /var/run/nginx.pid) || true
+    endscript
+}
+```
+
+This rotates PageSpeed-related nginx logs daily, keeping 14 days of compressed
+history.
+
+### Docker log rotation
+
+The Docker Compose configuration includes built-in log rotation:
+
+```yaml
+logging:
+  driver: json-file
+  options:
+    max-size: '10m' # Rotate at 10 MB
+    max-file: '3' # Keep 3 rotated files
+```
+
+View Docker logs with:
+
+```bash
+docker compose -f deploy/docker-compose.yml logs -f worker
+docker compose -f deploy/docker-compose.yml logs -f nginx
+```
+
+## Monitoring
+
+<a id="health-check"></a><a id="management-socket-stats"></a><a id="prometheus-metrics"></a><a id="monitoring-script"></a><a id="key-metrics-to-watch"></a>Health probes, metrics and logs have their own page:
+[Monitoring](/docs/monitoring/). The short version: probe the health socket
+(the notification socket path with `.health` appended, which answers one line
+starting with `OK`, or `DEGRADED` when the cache is unavailable) or
+`GET /v1/health`; scrape `GET /v1/metrics` for Prometheus; and alert on a
+rising `errors.total`, a cache near its configured size, connections near the
+maximum, and, in the container images, an entrypoint exit status of 78.
+
+## Cache sizing recommendations
+
+The cache stores both original content and optimized variants. With proactive
+variant generation enabled, each image can produce many variants.
+
+### Estimating cache size
+
+A rough formula:
+
+```text
+cache_size = num_unique_urls * avg_original_size * variant_multiplier
+```
+
+Where `variant_multiplier` depends on your content mix:
+
+| Content Type     | Variant Multiplier | Notes                                           |
+| ---------------- | ------------------ | ----------------------------------------------- |
+| HTML             | 2x                 | Original + critical CSS variant                 |
+| CSS / JS         | 2x                 | Original + minified                             |
+| Images (default) | 10-20x             | Multiple formats, viewports, density, Save-Data |
+| Images (minimal) | 3-4x               | With all proactive flags disabled               |
+
+### Recommended sizes
+
+| Deployment Size            | Cache Size | Flag Value   |
+| -------------------------- | ---------- | ------------ |
+| Small (< 100 images)       | 256 MB     | `268435456`  |
+| Medium (100-1000 images)   | 1 GB       | `1073741824` |
+| Large (1000-10000 images)  | 4 GB       | `4294967296` |
+| Very large (10000+ images) | 8+ GB      | `8589934592` |
+
+Keep the cache size within physical RAM where you can. Cyclone's memory-mapped
+reads stay fast while the volume file is resident in memory; a cache sized far
+past RAM pages to disk instead. A [head-to-head benchmark of Cyclone against the
+file-per-entry cache](/blog/cyclone-cache-vs-file-cache-benchmark/) measures that
+effect and the concurrency and eviction gains.
+
+### Signs the cache is too small
+
+- Frequent `MISS` responses for previously-seen URLs (evicted content)
+- `cache.entries` in STATS is stable while `notifications.received` keeps
+  growing (cache is full, new entries evict old ones)
+- Worker processing the same URL repeatedly (check logs for duplicate URLs)
+
+### Signs the cache is oversized
+
+- `cache.size` is consistently well below `--cache-size` — you are
+  allocating disk space that is never used
+- Not a problem per se, but the pre-allocated cache file consumes disk space
+
+## Next steps
+
+- [Monitoring](/docs/monitoring/) — Health probes, metrics, logs and alerts
+- [Upgrade](/docs/upgrade/) — Moving to a new release, per shape
+- [Uninstall and rollback](/docs/uninstall/) — Removing it, or going back a
+  release
+- [Configuration Reference](/docs/configuration/) — All worker flags and nginx
+  directives
+- [Troubleshooting](/docs/troubleshooting/) — Common issues and solutions
+- [API reference](/docs/api-reference/) — IPC protocol, health endpoint, and
+  management socket details
+- [HTTP API Reference](/docs/http-api/) — REST and WebSocket endpoints
+- [Web Console](/docs/workbench/) — Visual cache inspector and real-time
+  monitoring
+- [Helm Deployment](/docs/helm-deployment/) — Kubernetes-specific deployment
+  guide

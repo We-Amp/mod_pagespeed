@@ -1,0 +1,39 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://we-amp.com/vex/mod_pagespeed-2.1",
+  "author": "We-Amp B.V.",
+  "role": "vendor",
+  "timestamp": "2026-10-27T18:00:00Z",
+  "version": 2,
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "GHSA-ch52-4w7c-c8xp",
+        "aliases": ["CVE-2026-93748"]
+      },
+      "timestamp": "2026-10-03T09:00:00Z",
+      "products": [
+        {
+          "@id": "pkg:npm/http-cache-semantics@4.2.0"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Expires: 2026-12-02. Surface: website/package-lock.json only; path website -> astro@7.3.3 (dependencies) -> http-cache-semantics ^4.2.0; no other consumer in the lockfile. No fix exists: 4.2.0 is the latest release, the advisory range is <= 4.2.0 with first_patched_version null, and the upstream fix (kornelski/http-cache-semantics PR #58) is open and unmerged. The vulnerable path is CachePolicy.satisfiesWithoutRevalidation() honouring a client-supplied Cache-Control: max-stale on a shared-cache entry whose maxAge() was zeroed for Set-Cookie / proxy-revalidate, which lets one client read another client's cached response. In astro the module is imported by exactly one file, dist/assets/build/remote.js, which only calls policy.storable() and policy.timeToLive() on a Request astro constructs itself (new Request(src), no client headers) while fetching REMOTE images for astro:assets during the static build; nothing in astro/dist/runtime, astro/dist/core/app or @astrojs/node references it, so it is never loaded by the Node adapter process that serves the prerendered site. The site itself never reaches even that build-time code: website/src has no astro:assets import (no <Image>/<Picture>/getImage()) and astro.config.mjs declares no image.domains / image.remotePatterns, so no remote image is ever fetched. Re-evaluate on expiry, when astro bumps or drops the dependency, or when a patched http-cache-semantics (> 4.2.0) is published (then bump via an npm override instead of extending this statement)."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-85091"
+      },
+      "timestamp": "2026-10-27T18:00:00Z",
+      "products": [
+        {
+          "@id": "pkg:github/madler/zlib@1.3.2"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Expires: 2026-12-27. The advisory describes a heap overflow in zlib 1.3.1.2 through 1.3.2 in the gzip file API write path (gz_vacate, reached through gzwrite, gzprintf and gzvprintf after a stalled write). This product uses zlib only through the in-memory deflate and inflate API (src/worker/text_compressor.cc: deflateInit2, deflate, inflateInit2, inflate), crc32 (lib/image/png_optimizer.cc) and the libpng 1.6.58 and optipng 0.7.8 (opngreduc) sources it builds, none of which call any gz* function (gzopen, gzdopen, gzwrite, gzfwrite, gzprintf, gzvprintf, gzputs, gzputc, gzflush, gzread, gzgets, gzgetc, gzclose, gzbuffer, gzsetparams); a search of the first-party sources and of the libpng and optipng sources finds no use of the gzFile API. zlib is linked statically, and the shipped worker binary contains no gz* symbol, so the vulnerable code is not present in the executable. Re-evaluate on expiry, when zlib is bumped to a release that fixes the advisory (then drop this statement), or if any code starts using the gz* file API."
+    }
+  ]
+}

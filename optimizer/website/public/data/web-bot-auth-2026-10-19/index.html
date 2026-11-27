@@ -1,0 +1,31 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright (c) 2026 We-Amp B.V. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Web Bot Auth key directory probe, 19 October 2026</title>
+<style>body{font:16px/1.5 system-ui,sans-serif;max-width:46rem;margin:2rem auto;padding:0 1rem;color:#1f2937}code{background:#f3f4f6;padding:0 .2em}pre{overflow-x:auto}</style>
+</head>
+<body>
+<h1>Web Bot Auth key directory probe, 19 October 2026</h1>
+<p>Data behind <a href="/blog/which-ai-crawlers-sign-their-requests/">55 of 150 AI crawler operators publish Web Bot Auth keys</a>. One GET per target URL at 2026-10-19T18:30Z.</p>
+<ul>
+<li><a href="probe.py">probe.py</a>: the probe. <code>probe.py targets.csv &gt; results.tsv</code>. Needs Python 3 and curl.</li>
+<li><a href="build_targets.py">build_targets.py</a>: builds the operator population and the target list from the two sources below, with the operator-to-domain mapping used.</li>
+<li><a href="targets-excluded.csv">targets-excluded.csv</a>: the entries left out, with the reason.</li>
+<li><a href="results.tsv">results.tsv</a>: 396 rows, one per URL, timestamped. Columns are documented in the probe's header comment.</li>
+</ul>
+<h2>Sources</h2>
+<ul>
+<li><a href="https://github.com/ai-robots-txt/ai.robots.txt">ai.robots.txt</a> <code>robots.json</code> at commit <code>6abe630</code> (18 October 2026). Fetch it from that repository at that commit.</li>
+<li><a href="https://radar.cloudflare.com/bots">Cloudflare Radar bots directory</a>, categories AI crawler, AI assistant and AI search. The raw Radar dataset is not republished here; pull it from the Radar API (<code>GET /client/v4/radar/bots</code>) with your own token. Only the fields the builder reads (bot slug, operator, category, signature agent URL) feed the target list.</li>
+</ul>
+<h2>Rerun</h2>
+<pre tabindex="0">python3 build_targets.py robots.json radar-details.json targets.csv
+python3 probe.py targets.csv &gt; results.tsv</pre>
+<p>Counts move; rerun before relying on any row.</p>
+</body>
+</html>

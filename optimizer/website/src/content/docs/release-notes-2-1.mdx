@@ -1,0 +1,665 @@
+---
+title: 'Release notes: 2.1'
+description: 'mod_pagespeed 2.1.0 release notes: the first release of the module and the optimizer worker as one product (packages 1.16.0), with hardened defaults.'
+order: 81
+group: 'Release notes by line'
+lastUpdated: 2026-10-19
+---
+
+import ReleaseNotesDeepLink from '../../components/ReleaseNotesDeepLink.astro';
+
+<ReleaseNotesDeepLink />
+
+mod_pagespeed 2.1.0 was the first release of the module and the optimizer worker as one product. It carries package version 1.16.0 in the apt and yum repositories and 2.1.0 on the NuGet package; no container images or Helm chart were published for it, so those deployments go from the 2.0.41 images and chart 0.3.4 to [2.2.0](/docs/release-notes-2-2/). The [release notes index](/docs/release-notes/) lists every release of every line, and [Security updates](/docs/release-notes/#security-updates) lists every security fix we have published with the release that carried it. The entry below is collapsed; open it to read it in place.
+
+## Releases
+
+<span id="v1-16-0" class="rn-alias" aria-hidden="true"></span>
+<span id="hardened-by-default" class="rn-alias" aria-hidden="true"></span>
+<span id="210-" class="rn-alias" aria-hidden="true"></span>
+<details id="v2-1-0" class="rn-entry">
+<summary><span class="rn-ver">2.1.0</span> <span class="rn-date">2026-09-17</span> <span class="rn-badge rn-badge-pair">module + optimizer worker</span> <span class="rn-lede">Security update: the module and the optimizer worker as one product, with hardened defaults, an image-decoding fix and a web console dependency update. Update recommended.</span></summary>
+
+**mod_pagespeed 2.1.0 is the module and the optimizer worker, released
+together and installed as a matching pair** — the first general-availability
+release of the converged line, in which the two are parts of one product. In
+the signed apt and yum repositories both parts carry the package version
+1.16.0; 2.1.0 is the version stamped on the NuGet package. No container
+images or Helm chart were published for 2.1.0: its container and Helm
+changes reach those deployments with [mod_pagespeed 2.2.0](/docs/release-notes-2-2/#v2-2-0).
+
+Changed (plan for this before you upgrade): start the optimizer
+worker before you restart the web server. The worker owns the shared cache
+volume, and an Apache restarted after the worker package is upgraded but
+before the worker itself has restarted and created the volume in the new
+on-disk format refuses to start and says so, rather than quietly running a
+cache of its own; starting the worker and then restarting Apache clears it.
+At boot there is nothing to do — the worker service is ordered ahead of
+Apache and nginx and counts as started only once its notification socket
+exists, so a web server that uses the worker comes up and finds it ready
+instead of retrying. The ordering never makes one service require the
+other, so each still starts without the other. nginx ordering is new in
+2.1: a host still carrying a 2.0-era worker package orders Apache alone. A
+web server running under some other unit name is not ordered against the
+worker and needs an ordering drop-in of its own.
+
+Changed: restart the web server after upgrading. The module
+packages add the web server's user to the worker's group in their
+post-install step, and group membership only takes effect in a fresh
+web-server process.
+
+Changed: the cache now refuses a single object larger than 64 MiB
+(67,108,864 bytes). The cache library enforces a per-object ceiling it
+previously declared but never applied, and this release has no directive to
+raise or disable it. Most deployments cannot reach it:
+`ModPagespeedMaxCacheableContentLength` defaults to 16777216 (16 MiB) and
+excludes larger responses well before the new ceiling, so you are exposed
+only if you raised it above 67108864 or set it to `-1`. An affected response
+is never cached, so it is fetched from the origin on every request —
+permanently, not as part of a post-upgrade warm-up — while everything else
+caches normally; that asymmetry is how it is told apart from a full cache,
+which fails every write. Each refusal counts in `cyclone_cache_failures`,
+and the sampled log warning now names the size limit instead of reporting
+that the cache may be full. If you were relying on caching larger objects,
+set `ModPagespeedMaxCacheableContentLength` to 67108864 or less so those
+responses are excluded before they reach the cache.
+
+Changed: on Red Hat family hosts running SELinux in Enforcing
+mode, set `httpd_can_network_connect`. The stock policy denies the web
+server outbound network connections — including to the server itself over
+loopback — and the module fetches subresources over HTTP, so on RHEL,
+AlmaLinux and Rocky the fetcher is blocked and resources are served
+unoptimized. Set the boolean persistently with
+`sudo setsebool -P httpd_can_network_connect 1`; it is the same setting
+other Apache modules that fetch over HTTP require. The restriction is not
+new in this release — it applies to earlier versions on the same hosts — and
+it does not affect Debian and Ubuntu, which confine with AppArmor rather
+than SELinux.
+
+Security: the bundled apr-util is updated to 1.6.5, picking up the
+upstream fixes published 2026-08-06 for CVE-2026-32327 (CVSS 9.1),
+CVE-2026-34191 (CVSS 9.1), CVE-2025-49506 (CVSS 7.5), CVE-2026-34501
+(CVSS 7.5) and CVE-2026-34502 (CVSS 7.5); the affected upstream versions are
+apr-util 1.6.3 and earlier. The affected apr-util components are not built
+into or called by any mod_pagespeed release, so no earlier release is
+believed to be exposed; the bundle is updated so that it carries no
+known-vulnerable version. Update recommended.
+
+Added: the Apache module packages install the configuration that
+points the module at the optimizer worker. The Apache deb and rpm ship
+`pagespeed_daemon.conf` — under `/etc/apache2/conf-available/` on Debian and
+Ubuntu, enabled by the package and disabled again when it is removed, and
+under `/etc/httpd/conf.d/` on the Red Hat family — which sets
+`ModPagespeedDaemonSocketPath` and `ModPagespeedDaemonVolumePath` to the
+worker package's own defaults, so an upgrade from 1.15 reaches the worker
+without editing any configuration. The package manager treats it as a
+configuration file, so edits to it survive later upgrades, and commenting
+out both directives returns the module to its own in-place path. A server
+that already carries the two directives in a file of its own keeps working:
+both files are read, and the packaged one, whose name deliberately sorts
+later, is the effective value. A file created by hand earlier at the
+packaged file's own path is treated as a locally modified configuration
+file: on Debian and Ubuntu dpkg asks what to do with it, which stops an
+unattended upgrade at that question, so remove such a copy before upgrading
+(or install with `--force-confold` to keep it); on the Red Hat family the
+packaged copy is written beside it as `pagespeed_daemon.conf.rpmnew`. If the
+worker is not running when the web server starts, in-place optimization is
+off for that web-server process and one startup line names the cause. The
+wiring is supported as a matched pair: the module checks the worker's
+published interface at startup, and against an older worker it leaves
+in-place optimization off and says so in one line rather than running a
+pairing it cannot trust.
+
+Added: the Apache module serves in-place-optimized responses from
+the optimizer worker's shared cache, and records origin responses into it. A
+request the cache can answer is answered with the variant the worker
+produced for that request's own capabilities: a variant in an image format
+the request did not advertise is never served, and where no variant fits,
+the origin's own bytes come back from the cache — which saves a trip to the
+origin but is not an optimized response and is not counted as one. Where
+neither exists, or the entry has aged out, or the client asked for a reload,
+the request is served by the ordinary path exactly as it would be on a
+server with no worker configured. Responses carry an `Age` stating how old
+the stored copy is, so a cache in front of the server does not add the full
+lifetime again; a weak `ETag` that answers an `If-None-Match`; and
+`Vary: Accept` where the bytes were chosen from the request's `Accept` or
+where the origin negotiates on `Accept` itself. A response carrying headers
+this path cannot reproduce — a `Set-Cookie`, a CORS or security header, a
+`Vary` on another axis — is served by the ordinary path instead:
+unoptimized, but complete, rather than served later with those headers
+missing. Two counters, `ipro_daemon_served` and `ipro_daemon_fallthrough`,
+report how many in-place-eligible requests this path answered and how many
+it passed through.
+
+Added: the Enterprise Linux module rpm ships and installs the
+optimizer worker's SELinux policy. On a stock enforcing host the
+distribution policy gives the web server no access to the worker's cache
+volume and notification socket, so in-place optimization could never be
+turned on there; previously that confinement had to be built by hand. The
+rpm now carries a policy module and installs it in its post-install step:
+the worker runs confined in its own domain, its cache directory and runtime
+sockets get their own file contexts — registered in the policy store, so
+they survive a relabel — and the web-server domains get exactly the access
+the module needs: the cache volume, and the notification socket only, not
+the worker's management sockets. Installation happens only where SELinux is
+enabled on the host — Permissive counts as enabled — and a failure there
+does not fail the package install —
+the module logs its degraded state at startup instead. Removing the rpm
+removes the policy again. The deb packages are unchanged: Debian and Ubuntu
+confine with AppArmor, not SELinux.
+
+Added: the Linux module and optimizer packages now install a
+`THIRD-PARTY-NOTICES` file alongside the package's existing notice files,
+listing every bundled third-party component with its version, its upstream
+location and the terms it is distributed under — including the components
+statically linked into the worker, so they travel with the binaries the way
+the container images and the NuGet packages already carried them. The Apache
+and nginx deb and rpm packages carry it, including the cPanel EasyApache 4
+build, and the attribution notices themselves were corrected in the same pass
+so that they cover every component actually present in the shipped binaries
+and nothing that is not. The bundled Cyclone cache library carries the Apache
+License 2.0 as well, matching the rest of the distribution.
+
+Added: the admin console can show the optimizer worker alongside
+the module. Three read-only panels — worker status (health, version, uptime,
+checks, browser-analysis state), worker cache (entries, size, serve-savings
+counters) and back-pressure (thread-pool occupancy, dropped notifications,
+cache cooldowns) — read the worker's management API over a unix socket named
+by a new `DaemonApiSocketPath` directive, available on Apache and nginx and
+disabled by setting it empty. The path behind those panels is
+read-only by construction: GET and HEAD only, a fixed allow-list of upstream
+paths, and no client query string, header or body reaches the worker. Where
+the worker is unreachable or not configured the panels say so plainly, and
+the module's own pages are unaffected.
+
+Added: the worker's cache-console panel shows live serve
+statistics when the module serves in place. In the topology where the worker
+only writes optimized variants and the module answers requests from the
+shared cache, the worker never responds to a request itself, so its
+serve-savings counters — original against optimized bytes, and hit counts,
+per content type — stayed at zero forever. The module now records each
+optimized in-place serve through the worker's published client interface, so
+those counters reflect real traffic and the panel has live data in this
+topology. Only serves of worker-produced optimized variants with a recorded
+origin size are counted, matching the gate the worker's own front ends
+apply. The serve-class note further down says what all-zero counters mean
+under a front end that does not record them.
+
+Improved: the admin console's graphs page can plot per-interval
+change instead of cumulative totals. A "Show per-interval deltas" checkbox
+next to the refresh controls switches every graph from the raw cumulative
+counter to how much that counter moved during each sample interval, so the
+curves read as traffic rather than as ever-climbing totals. Restarting the
+server resets the statistics counters, and in this view such a reset is
+drawn as a gap rather than as a drop to zero or a negative spike. The
+cumulative view remains the default, and the choice is remembered in the
+browser.
+
+Improved: the admin console's statistics page now explains what
+the counters mean. Hovering a counter name shows a plain-language
+description of what it counts, when it moves and what a non-zero value
+suggests; an optional description column shows the same text inline, and the
+choice is remembered in the browser. The search box matches the descriptions
+as well as the names, so searching for "in-place" or "certificate" finds the
+relevant counters without knowing the naming scheme. Clicking "Value" now
+sorts biggest-first on the first click, so the counters that are actually
+moving come to the top instead of the hundreds that sit at zero; "Name"
+still sorts A to Z first.
+
+Fixed: after content was re-optimized, replaced or purged, the
+in-memory cache tier could keep serving the copy it had replaced until that
+copy happened to be evicted. The stale in-memory entry is now dropped when
+the content behind it is re-recorded or removed, so a refresh takes effect
+immediately instead of after an unpredictable delay.
+
+Fixed: two JavaScript minifier misreadings that could break a
+script or leave it unminified. A `let` declaration whose binding is preceded
+by an HTML-style comment marker lost a required line break, producing a
+syntax error that breaks the entire script; and a script that spreads the
+result of a function call inside an object literal — `{...f(), key: value}`,
+a common shape in bundler output — was not minified at all, and because a
+script that fails to minify does not count as optimized, it could not be
+moved onto the rewrite domain either. Both are fixed, in the module and in
+the worker's own copy of the minifier, so scripts served through in-place
+optimization are minified exactly as the module minifies them. Spread in
+every other position was never affected, those comment forms are rare in
+modern JavaScript, and output for all other valid JavaScript is unchanged.
+One deliberate change on invalid input: a spread element carrying a property
+colon is refused rather than tolerated, which again leaves the script byte
+for byte as received. Affects all earlier releases of both parts. Update
+recommended if you serve JavaScript through the optimizer or the ASP.NET Core
+middleware.
+
+Fixed: an image in a format the client did not ask for is no
+longer served from cache. Two separate cache paths could hand an AVIF
+representation to a request that never advertised `image/avif` — a cached
+response an origin had selected by content negotiation, and an optimized
+AVIF resource reused from a warm cache for a later, differently capable
+client — and the affected client received an image it cannot decode, a
+broken image rather than a slower one. Because the representation is chosen
+once and then cached, one capable client's request could decide what later
+clients got for the cached lifetime of that resource, including through a
+shared cache or CDN. Separately, the check that keeps format-negotiated
+images from crossing clients did not recognise every legal spelling of the
+origin's `Vary` header, so a stored WebP or AVIF response could reach a
+client whose own request would not have selected it. Both cache paths now
+check the request's own `Accept` header before reusing an entry, and the
+header check recognises the legal spellings. Nothing changes for clients
+that do advertise the format, no response gains a `Vary` header it did not
+already have, and `.pagespeed.` resource URLs were never affected, because
+their format is committed in the URL. Update recommended for any deployment
+that serves AVIF or that sits behind an origin that negotiates on
+`Accept`.
+
+Fixed: a converted image is no longer served with the origin's
+media type. When a request was answered from the worker's cache with a
+variant in a different image format from the one the origin sent, the
+response carried the origin's `Content-Type` — AVIF or WebP bytes labelled
+`image/png`. The negotiation itself was right, since the format served was
+one the request had advertised, but a client decodes by the declared media
+type, so the response fails in the consumer: a shared cache or CDN stores
+the mislabelling and repeats it to everyone, and any client that trusts the
+declared type rather than sniffing the bytes cannot use the response. The
+media type now describes the bytes actually being sent; a response whose
+format did not change, and any format outside the four this path can
+produce, keeps the origin's own field exactly as before. Update recommended
+for any deployment serving from the worker's cache with image-format
+conversion in play.
+
+Fixed: a `304 Not Modified` now states the same `Vary` as the
+`200` it revalidates, on the path that serves from the worker's cache and on
+the classic in-place path alike. The two responses could disagree about
+which request headers the response varies on — the 200 listing
+`Accept-Encoding` where the 304 listed nothing, or listed `Accept` alone —
+and because a cache updates its stored headers from the 304, it could be
+left believing the response varies on fewer request headers than it had
+keyed on. Both emitters now state
+the same set, for the media types the module's own compressor predicate
+selects. Nothing about a 200 changes. Update recommended for deployments
+with a shared cache or CDN in front of a server using in-place
+optimization.
+
+Fixed: the module now attaches to the worker's cache volume in
+cases where it previously gave up. A volume path carrying a file extension,
+or one whose name ends in a dot, made the module look for a filename the
+worker never writes, so it concluded the volume did not exist and logged the
+misleading advice to start the worker first while the worker was running and
+healthy — with in-place optimization silently off. The packaged default path
+was never affected. Where an attach genuinely fails, the log line now
+carries the reason the worker reports alongside the error class, and the
+attach is retried on a widening backoff for about six minutes instead of
+being tried once per worker process and left off for that process's whole
+lifetime. The module also reports a permission problem distinctly from an
+absent artefact, naming the likely missing group membership and its
+one-command fix, and a mismatch between the cache layout the module is built
+for and the one the worker publishes is now a loud startup failure with
+in-place optimization off, never a quiet attach to a layout that shares
+nothing.
+
+Fixed: an image optimized in place at its original URL no longer
+falls back to the origin permanently once its cache entry ages out. An
+optimized URL was served from cache only until its freshness lifetime
+elapsed; after that, every request went back to the origin and was never
+re-optimized, because the worker treated the URL as already processed. The
+server now tells the worker when it declines an aged-out variant for genuine
+expiry, so the worker discards the stale variants and rebuilds them from the
+freshly fetched original. Client reloads and origin `no-cache` responses do
+not trigger this, so a plain browser reload can never evict a URL's
+optimized variants. Only deployments running the optimizer worker were
+affected; the classic in-place cache was not.
+
+Fixed: the built-in help for `AgentOptimize` no longer describes a
+gate that does not exist. The feature is gated by its operator flag alone,
+which is what the rest of the feature already said, and the help text now
+agrees.
+
+Note for operators: the Debian 11 (bullseye) apt suite stays
+available and keeps serving the final 1.15 packages, so existing bullseye
+systems continue to work as they do today. The 2.1 serving components
+require glibc 2.34 or newer, which Debian 11 does not provide, so new
+releases are published for Debian 12 (bookworm) and newer, where the package
+names and configuration are unchanged. Update (November 2026): Debian 11 is now end of life
+and no longer supported, and the bullseye suite no longer carries packages;
+upgrade to Debian 12 or later.
+
+Security and hardening — update recommended for every
+deployment:
+
+- **Hardened: the optimizer worker no longer runs as root** on
+  package installs. It runs as an unprivileged system user, the cache and
+  socket permissions are owner-plus-group, and the API token is no longer
+  passed on the process command line. This shrinks the impact of any future
+  compromise of the worker.
+- **Hardened: new defaults in 2.1 — the management API fails
+  closed without a credential, and headless Chrome runs sandboxed.** Both are
+  default flips with operator-visible remedies; the
+  [migration guide](/docs/migrating-to-2-1/) lists them.
+- **Hardened: the packaged worker enforces its system-call allow-list** by
+  default, terminating on the first call outside it instead of only logging.
+  Browser analysis ships a companion allow-list and works under enforcement
+  with no extra step.
+
+Changed (plan for this before you upgrade): **the disk cache starts empty.**
+This release moves the optimizer to a new on-disk cache format. Every
+deployment begins with a cold cache that refills as traffic arrives, so
+expect a temporary drop in cache hit rate and a matching rise in origin
+fetches. Check that the cache directory has room for the old and new volumes
+to coexist during the upgrade — keeping the old file is what makes a
+rollback warm. A running worker holds the old cache file open, so
+deleting it does not return the space until the worker restarts.
+On package installs the worker keeps its cache in a versioned directory, and
+a package upgrade starts that cache cold by design. The
+[migration guide](/docs/migrating-to-2-1/) has the full checklist.
+
+Changed: **mod_pagespeed 2.1 is licensed under the Apache License 2.0** —
+the same license the original codebase carried — and the relicensing is
+retroactive across the line. The source is published at
+[github.com/We-Amp/mod_pagespeed](https://github.com/We-Amp/mod_pagespeed).
+Every feature is available to everyone, and the standard signed
+packages are free.
+
+The optimizer makes no outbound request of its own accord; the only
+egress is what you configure.
+
+Added: the deb and rpm packages carry the hardened `pagespeed-optimizer`
+worker — its service unit, permission model, and the client library the
+serving module binds — so the module and the worker upgrade as a matching
+pair.
+
+The converged engine also carries cache-overwrite staleness fixes
+(a refreshed, replaced, or purged resource can no longer keep serving its
+superseded copy from memory), JavaScript and CSS minifier correctness fixes
+carried into both parts, image-quality verification hardening, and
+browser-analysis robustness under the unprivileged worker.
+
+Action required only if you configured the module's daemon paths
+by hand: the worker's default cache and socket paths move with the
+unprivileged user. The module packages install a configuration file that
+points at the new defaults, so a package upgrade needs no edit; a
+hand-written configuration that names the old paths must be repointed, after
+which restart the web server. Until then in-place optimization stays off and
+the log reports the socket as absent even though the worker is running. The
+[migration guide](/docs/migrating-to-2-1/) lists both paths.
+
+Check this before you upgrade if you use the management API: an
+absent token now fails closed, so a deployment that relied on an unset token
+answering requests has to set one, and opening the read endpoints is an
+explicit choice rather than a consequence of leaving the token unset. A
+group-scoped unix socket is the recommended local transport — reaching the
+socket already means being in the worker's group, so nothing further is asked
+for and no TCP port is bound. A TCP bind stays available and is loopback-only
+unless remote access and a token are both set. Package installs generate an
+API token and a purge token once, at install time, into a file readable only
+by root and the worker's group, and never overwrite a value you set.
+
+Check this before you upgrade if browser analysis is enabled: where
+the kernel does not permit an unprivileged sandbox, browser analysis refuses
+to initialize, names the cause in the health output, and the worker keeps
+serving without it. It never falls back to an unsandboxed browser, and there
+is deliberately no mode that does; the documented opt-out warns at startup and
+on every browser start. In containers the runtime's default system-call
+profile has to permit user namespaces. The health and statistics endpoints
+report the resolved sandbox state, and whether a kernel system-call filter is
+attached, so a monitoring check can see an unsandboxed browser without reading
+logs or unit files.
+
+What enforcement of the system-call allow-list means on a host
+upgrade: the package restarts the service on install, and the host enforces
+from that moment. Browser analysis needs no extra step, and a documented
+opt-out example ships with the package for hosts that want to soak first. The
+same unit closes off host surfaces the worker never needs — kernel tunables,
+modules and the kernel log, control groups, the system clock and the hostname,
+other users' processes, SUID/SGID bits, realtime scheduling — restricts the
+socket families it may open, and disables core dumps. If you depend on one of
+those — a core dump for crash triage being the realistic case — restore it
+with a drop-in of your own.
+
+Container and Helm deployments: the optimizer runs as an
+unprivileged user and the images share the cache through a fixed group instead
+of a world-writable volume, so a deployment that pins an explicit user, sets a
+Kubernetes group for the volume, or mounts the cache into a second container
+has to match that identity. A volume from an earlier release is adopted in
+place on first start and keeps its contents; where that cannot be done safely
+the container refuses to start, names the path and prints a one-line remedy
+rather than looping. The management API binds loopback and requires a token,
+and with the API enabled and no token supplied the entrypoint generates one
+per container start and prints it once to the container log — set your own to
+keep credentials out of shipped logs and stable across restarts. The Helm
+chart now sets a seccomp profile on the optimizer pod, which a workload
+needing a call the runtime's default profile blocks can remove in its own
+values. The [migration guide](/docs/migrating-to-2-1/) has the exact values
+and every opt-out.
+
+Security (denial of service): the optimizer worker no longer
+terminates on an image it cannot decode; such input is now rejected cleanly.
+Deployments that optimize images reachable from untrusted sources are the
+exposed case. Update recommended.
+
+Security (dependency advisory, GHSA-29g2-3rmr-qm68, medium
+severity): the ASP.NET Core packages carried the web console's SvelteKit dependency
+update from 2.0.42; container and Helm deployments receive it with
+[mod_pagespeed 2.2.0](/docs/release-notes-2-2/#v2-2-0). No optimization or serving code is affected and no configuration
+change is needed. Update recommended.
+
+Changed: a cache purge, and the automatic recovery the serving
+module runs when it cannot open the cache, no longer delete a cache file
+written in an earlier release's on-disk format — either could silently remove
+the volume an operator was keeping in order to roll back. Files from another
+format are left alone, which also means they stay on disk until you delete
+them yourself.
+
+Changed: the same-URL markdown variant for AI agents, the
+synthesized `/llms.txt` index and the browser-analysis suite are enabled by
+their operator flags alone. Monitoring that keyed on the per-feature health
+entry this release removes should key on the overall `ready` and `status`
+fields instead.
+
+Added: the statistics endpoint and its stream carry a serve-class
+block whenever the shared serve-statistics file is available — the five-class
+serve partition (optimized, or original bytes because the optimized copy was
+cold, still being produced, declined, or a version mismatch was detected) plus
+the drop counters that keep the partition honest — and the file records how
+busy the optimizer's work queue is, as a running sum, a sample count and a
+high-water mark, so a monitoring tool can report average and peak backlog over
+an interval instead of guessing from a single poll. The serve classes are
+written by the serving front end: live where the module fronts the cache, and
+all-zero under an nginx 2.0 or ASP.NET front end, where all-zero means "not
+instrumented", not "nothing happened". Note for operators: this bumps the
+file's version, which resets its counters once on upgrade, and a front end
+left on the older version stops recording until it is upgraded — the optimizer
+now logs a warning naming both versions instead of leaving flat counters as
+the only symptom.
+
+Added: version skew between the optimizer and the components that
+notify it is reported instead of being absorbed. Refused notifications are
+counted by cause, and a version disagreement is logged with both versions
+named, rate-limited so a misconfigured sender cannot flood the log. A new
+health check covers the shared configuration file the worker writes and the
+serving module reads: if that file declares a schema version the running build
+cannot read, the build falls back to its compiled-in defaults, and the health
+endpoint now reports that as failing with both versions named instead of
+leaving an install running on settings nobody chose.
+
+Changed: the management API serves the web console's static bundle —
+`GET` and `HEAD` under `/console` — without requiring the API token, matching
+the documented behaviour; the bundle carries no operational data, and every
+data endpoint and every non-GET request still requires the token when one is
+configured. The health and statistics endpoints now report the connection
+figures of the management API listener itself rather than the notification
+listener's separate limit.
+
+Fixed: a URL whose optimized variants were re-recorded many times
+could permanently stop accepting new ones. Every re-record left the earlier
+copy linked behind the new one, so the stored chain grew on every refresh
+until it hit its limit and further writes were refused. Reads kept succeeding,
+so nothing looked wrong, but the browser was served an increasingly stale
+version that was never replaced. The earlier copy is now unlinked as its
+replacement is written; a URL that already reached the limit, or whose
+variants can no longer be replaced or removed, has its cache entry cleared at
+the next revalidation and is optimized again from the fresh origin response.
+The same chain growth reached the content-hash record, the `/llms.txt` pair
+and the agent markdown variant, and is fixed with it.
+
+Fixed: a URL whose optimized variants were evicted while the
+optimizer still remembered processing them is no longer skipped forever, with
+the front end falling through to the unoptimized original and no path back. A
+duplicate-work hit is now validated against the cache, and where nothing
+servable remains the stale record is dropped and the URL re-optimized, bounded
+to at most once every ten seconds so a terminal decision cannot become a
+per-request re-optimization loop. An origin-content refresh can also no longer
+rebuild a URL's optimized variants from stale bytes and republish them as
+freshly optimized; where the refreshed origin has not been recorded yet, the
+rebuild is deferred until the fresh content arrives.
+
+Fixed: an origin refresh no longer purges and rebuilds a URL whose
+origin has not changed. Both front ends signal a refresh on every age-expired
+re-fetch and the optimizer purged the whole variant set on arrival, so every
+expiry cost a purge plus a deferred re-optimization of identical bytes — and
+where the module never serves stale, a recurring window with nothing optimized
+to serve at all. The optimizer now decides changed-versus-unchanged first,
+against the stored content hash, and restamps an unchanged variant set in
+place; a genuinely changed origin purges and rebuilds exactly as before. Text
+resources carry no content hash and keep the per-cycle purge. Update
+recommended — deployments without far-future origin cache headers benefit the
+most.
+
+Fixed: a resource whose origin negotiates on `Accept` is now cached
+and served faithfully, and is excluded from optimization. Such a response used
+to be optimized from whichever representation the first visitor's `Accept`
+elicited, and every later visitor was served from that capture; on the way out
+the origin's own `Vary` was dropped from a cache-served response, so a shared
+cache or CDN in front of the install could store it keyed without `Accept` and
+hand one visitor's representation to another. The response is now stored as
+the origin sent it, never handed to the optimizer, and served with `Accept` in
+`Vary` wherever the entry records that the origin negotiated on it — and only
+there, so resources that do not vary are not multiplied downstream. Expect a
+one-time revalidation for affected resources: entries recorded as
+Accept-negotiated carry a different entity tag, so each visitor costs one full
+response, once, after which conditional requests resume as normal.
+
+Fixed, with wider reach: an expired resource is re-cached after it
+is refreshed. The serving stage attached its own `Vary` to a response before
+it was known whether the response would come from cache or from the origin; on
+an expired resource it came back attached to the origin's reply, where the
+cache read it as the origin's own and judged the refreshed image uncacheable.
+Such an image was fetched from the origin again on every request and never
+re-optimized. This reached images whose origin does not support conditional
+requests, or whose content had changed; images from an origin that answers
+`304 Not Modified` were never affected.
+
+Fixed: a request whose `Accept` header advertised no image format at
+all could be answered with a WebP or AVIF variant it never said it could
+decode, and which of the two it received depended on cache listing order. A
+stored WebP or AVIF variant is now served only to a request whose negotiated
+formats name it, with the original format remaining the universal fallback;
+where no variant is compatible the request falls through to re-optimization,
+the same as a cache miss, and ties no longer resolve by listing order. This is
+strict in one direction: a client that sent `image/*` or `*/*` and could in
+fact decode a stored AVIF may now miss the cache where it previously hit,
+because acceptance cannot be proven from that header. A request that sends no
+`Accept` header at all is now classified as `*/*`, per RFC 9110 — it was the
+only shape that resolved differently from the wildcard it stands for.
+
+Fixed: lossy WebP images are optimized rather than passed through. A
+WebP origin encoded above the quality this pipeline targets used to be served
+as it arrived; it now re-encodes, with the result kept only when it is
+strictly smaller than the origin, the same rule JPEG and PNG already get.
+Lossless WebP origins keep the earlier behaviour, because every WebP encoder
+here is lossy and a size gate cannot see a fidelity change. One gap remains: a
+client whose `Accept` names AVIF finds no AVIF variant for a WebP origin and
+is served the origin's own bytes rather than the smaller WebP sibling it also
+accepts. Separately, an image whose pixel decode fails — some GIFs, for
+example — is no longer stored only under a format-specific variant it was
+never converted to, so it is served from cache instead of falling through to
+the origin's copy for every client that does not advertise that
+format.
+
+Fixed: a stored image variant is bound to its quality-verification
+verdict. A WebP or AVIF candidate measured below the configured acceptance
+floor is declined instead of stored, and serving falls back to the remaining
+variants and the original; a candidate whose quality cannot be measured at all
+— which previously fired for every monochrome image — is declined on every
+format arm rather than shipped unverified. Re-encoding a lossy WebP in its own
+format is bound to the same verdict, and so is the re-encode of the
+original-format slot on a resized viewport. A failure inside the measurement
+itself is reported on its own channel, so a decline no longer cites a score
+that was never produced, and refused variants are remembered per source image,
+so repeated notifications no longer re-run the whole attempt ladder. Update
+recommended where quality verification is enabled.
+
+Fixed: AVIF candidates were shipped without the verify-and-re-encode
+quality check that guards the other formats, so a badly degraded encode could
+ship instead of being caught and re-encoded; they are now decoded and verified
+like the other formats. Enabling that decode path also makes origin-served
+AVIF decodable and transcodable for the first time; decode is capped at 50 MB
+of pixels and runs in the isolated worker process, not in the web server.
+Re-optimizing a JPEG could also encode it at a higher quality than the
+original was saved at, producing a larger file with no visible improvement; a
+JPEG re-encode is now capped at the quality detected in the source.
+The `no_quality_cap` setting turns the cap off and now takes effect;
+`quality_cap_margin` is still accepted but no longer raises the cap. Both are
+worker configuration settings — `pagespeed.json` next to the cache volume, or
+`PATCH /v1/config` — not command-line flags.
+
+Fixed: a stylesheet with an invalid value in a complete longhand
+family no longer loses the whole family through minification. A browser drops
+one declaration for an invalid longhand but everything the shorthand would
+have set for an invalid shorthand, so collapsing the four padding longhands
+around a typo turned one ignored declaration into the loss of all of them.
+Each member value is now checked against what that longhand accepts, so the
+typo costs exactly what it costs a browser. This is not free on well-formed
+CSS: a family the check cannot positively recognise is left as longhands,
+which costs a few bytes — math and environment functions, `url()` values, the
+modern space-separated and slash-alpha colour forms, colour functions beyond
+`rgb()`, `rgba()`, `hsl()` and `hsla()`, and numbers in scientific notation no
+longer collapse.
+
+Fixed: with browser analysis enabled and a persistent profile
+directory, the headless browser could not start after the optimizer's
+container was recreated or a host's name changed — the profile kept a lock
+from the earlier browser, and every launch failed until it was removed by
+hand. A lock belonging to another host, or to a process that is no longer
+running, is now removed before each launch and its owner logged, a locked
+profile is named in the launch-failure log line, and the failure count and
+retry delay reported under `browser` in the health output clear once a launch
+has stayed up for a minute. A profile directory must not be shared between
+optimizer instances. Separately, the sandbox probe that decides how to run
+the headless browser is run once per process, and a probe that never replied
+was banked as a timeout verdict for the life of that process; the probe is
+now retried, so a slow first answer does not settle the question wrongly.
+Update recommended if browser analysis is enabled.
+
+Fixed (ASP.NET Core): the host now provisions its own cache
+directory, so the worker it starts comes up on a machine where the optimizer
+was never installed from a package. The worker refuses to start when its cache
+directory is absent — right for the packaged service, whose directory is
+created ahead of it, but the NuGet package has no such install step, and
+whichever of the host and the request-side cache ran first decided whether the
+worker survived startup. The directory is now created before the worker
+starts, owner-only, and an existing one is left exactly as it is; no
+configuration change is required. Read-back also honours the true
+origin-revalidation signal and the write path persists the origin's
+`Cache-Control` state, so entries carry the correct revalidation requirement
+and aggressive-mode `stale-if-error` is suppressed when the origin requires
+it; for a private cache only `no-cache` and `must-revalidate` trigger
+revalidation, per RFC 9111.
+
+Note for embedders: the C API gains a documented stability contract,
+with a published structure's layout pinned at compile time. Size-aware
+initializers are added for the cache, HTML and critical-CSS configuration
+structures, and the three original initializers now write only their earlier
+prefix, so a caller compiled against older headers must use the sized forms;
+four entry points that were documented and built but never exported are
+exported now. New this release and API-only, with nothing in the engine
+writing or serving them yet: a storage class for the bytes the origin sent, a
+storage class for a response's request-independent headers, and accessors that
+record and read back an origin's caching state and answer the freshness,
+`Cache-Control` and `Vary` questions directly. Every addition is additive, so
+existing callers and binaries are unaffected. Two things to check: a private,
+origin-scoped integration must set the cache scope explicitly, because the
+default is shared; and anyone who pinned `max_metadata_size` should raise it,
+since the default rises to 878 bytes and a ceiling below the largest blob the
+format can produce refuses the write whole, which in production looks like a
+cache that never warms.
+
+</details>

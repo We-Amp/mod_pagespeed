@@ -1,0 +1,28 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// Renders the `dotnet add package` command for the ASP.NET Core middleware.
+// The command carries no version, so it is version-neutral; the package name
+// and the `--prerelease` toggle come from the `artifacts.nuget` /
+// `display.nuget_install_flags` records, which live in
+// releases-2.0/release.yaml.
+//
+// Examples in MDX:
+//   <NugetCmd />            → dotnet add package WeAmp.PageSpeed.AspNetCore [--prerelease]
+//   <NugetCmd verb="restore" />  → dotnet restore --packages WeAmp.PageSpeed.AspNetCore
+
+import { getRelease } from '../../lib/release';
+
+interface Props {
+  /** Default "add" → `dotnet add package …`. */
+  verb?: 'add';
+}
+
+const rel = await getRelease('2.0');
+const pkg = (rel.artifacts.nuget?.package as string) ?? 'WeAmp.PageSpeed.AspNetCore';
+const flags = (rel.display.nuget_install_flags ?? '').trim();
+const cmd = `dotnet add package ${pkg}${flags ? ` ${flags}` : ''}`;
+---
+
+<Fragment>{cmd}</Fragment>

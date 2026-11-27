@@ -1,0 +1,59 @@
+# mod_pagespeed - Stress Test Environment
+#
+# Same 3-service architecture as E2E but with stress-tuned defaults:
+#   - Smaller cache (50MB) to trigger eviction
+#   - Lower connection limits for faster limit-testing
+#   - Shorter timeouts for faster failure detection
+#
+# Usage:
+#   docker compose -f tools/stress/docker-compose.yml up -d
+#   pytest tools/stress/ -v
+#   docker compose -f tools/stress/docker-compose.yml down -v
+
+services:
+  # Origin server: nginx serving static test data on port 8081.
+  origin:
+    image: nginx:1.26-alpine
+    volumes:
+      - ./testdata/generated:/usr/share/nginx/html:ro
+      - ./nginx-origin.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "${STRESS_ORIGIN_PORT:-8191}:8081"
+
+  # PageSpeed factory worker with low resource limits.
+  worker:
+    build:
+      context: ../../
+      dockerfile: tools/e2e/Dockerfile.e2e
+    entrypoint: ["/entrypoint-worker-stress.sh"]
+    environment:
+      - WORKER_MAX_CONNECTIONS=${WORKER_MAX_CONNECTIONS:-16}
+      - WORKER_CACHE_SIZE=${WORKER_CACHE_SIZE:-104857600}
+      - WORKER_CONNECTION_TIMEOUT=${WORKER_CONNECTION_TIMEOUT:-5000}
+      - WORKER_SHUTDOWN_TIMEOUT=${WORKER_SHUTDOWN_TIMEOUT:-3000}
+      - WORKER_MAX_BUFFER_SIZE=${WORKER_MAX_BUFFER_SIZE:-1048576}
+      - WORKER_LOG_LEVEL=${WORKER_LOG_LEVEL:-warning}
+      - PAGESPEED_PURGE_TOKEN=stress-test-token
+    volumes:
+      - shared:/shared
+      - ./entrypoint-worker-stress.sh:/entrypoint-worker-stress.sh:ro
+    depends_on:
+      - origin
+
+  # Nginx with stress-tuned config.
+  nginx:
+    build:
+      context: ../../
+      dockerfile: tools/e2e/Dockerfile.e2e
+    command: ["nginx", "-g", "daemon off;", "-c", "/etc/nginx/nginx-stress.conf"]
+    ports:
+      - "${STRESS_NGINX_PORT:-8190}:8080"
+    volumes:
+      - shared:/shared
+      - ./nginx-stress.conf:/etc/nginx/nginx-stress.conf:ro
+    depends_on:
+      - origin
+      - worker
+
+volumes:
+  shared:

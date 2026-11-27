@@ -1,0 +1,46 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// ReadoutPanel — a recessed plate that groups Readouts under an eyebrow title,
+// an optional live-link chip and a source caption. The caption is where the
+// numbers' provenance (source + date) always shows.
+
+type Props = {
+  id: string;
+  title: string;
+  source: string;
+} & ({ href: string; hrefLabel: string } | { href?: undefined; hrefLabel?: undefined });
+
+const { id, title, source, href, hrefLabel } = Astro.props;
+if (href && !hrefLabel) throw new Error('ReadoutPanel: hrefLabel is required when href is set');
+---
+
+<figure class="readout-plate p-5" data-ui="readout-panel" aria-labelledby={id}>
+  <div class="flex items-center justify-between gap-4">
+    <p id={id} class="eyebrow">
+      {title}
+    </p>
+    {href && (
+      /* py-2 grows the chip's own box to a >=24px target (the badge's base
+           py-1 is overridden by the utility layer); -my-2 keeps the header row
+           from gaining height. shrink-0 + nowrap: the chip never wraps or
+           shrinks at narrow widths. */
+      <a class="badge-interactive -my-2 shrink-0 whitespace-nowrap py-2" href={href}>
+        {hrefLabel}
+      </a>
+    )}
+  </div>
+  <slot />
+  <figcaption class="mt-3 font-mono text-xs text-text-annotation">{source}</figcaption>
+</figure>
+
+<style>
+  /* Slotted readouts are divided by a 1px border-top (not the first one). */
+  figure > :global(.readout) {
+    padding-block: 0.875rem;
+  }
+  figure > :global(.readout + .readout) {
+    border-top: 1px solid var(--color-border);
+  }
+</style>

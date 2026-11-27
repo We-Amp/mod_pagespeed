@@ -1,0 +1,207 @@
+---
+title: 'Release notes: the 1.1 module'
+description: 'Release notes for the 1.1 module line, 1.1.0-beta.1 to 1.1.0+r24: the first releases of the maintained module, before the renumber to 1.15.0 on 2026-06-01.'
+order: 84
+group: 'Release notes by line'
+lastUpdated: 2026-10-07
+---
+
+import ReleaseNotesDeepLink from '../../components/ReleaseNotesDeepLink.astro';
+
+<ReleaseNotesDeepLink />
+
+The 1.1 line is the first run of the maintained module: 1.1.0-beta.1, the 1.1.0 general-availability release and the package revisions r1 through r24, before the line was renumbered to [1.15.0](/docs/release-notes-1-15/) on 2026-06-01. Where the module shipped several package revisions within a few days they are grouped into one entry, listed under the lowest revision in the group. Where a release fixes a security problem its entry leads with that, and [Security updates](/docs/release-notes/#security-updates) lists every fix with the release that carried it. Entries are collapsed, newest first; open a release to read it in place.
+
+## Releases
+
+<span id="v110r23-r24--2026-05-31--2026-06-01" class="rn-alias" aria-hidden="true"></span>
+<details id="v1-1-0-r23-r24" class="rn-entry">
+<summary><span class="rn-ver">1.1.0+r23–r24</span> <span class="rn-date">2026-05-31 – 2026-06-01</span> <span class="rn-badge rn-badge-mod">module</span> <span class="rn-lede">Admin console copy and notices updated.</span></summary>
+
+- **Admin console.** Console copy and notices updated.
+
+</details>
+
+<span id="v110r22--2026-05-29" class="rn-alias" aria-hidden="true"></span>
+<details id="v1-1-0-r22" class="rn-entry">
+<summary><span class="rn-ver">1.1.0+r22</span> <span class="rn-date">2026-05-29</span> <span class="rn-badge rn-badge-mod">module</span> <span class="rn-lede">Security and reliability hardening release, the result of a dedicated audit pass.</span></summary>
+
+Security and reliability hardening release, the result of a dedicated audit
+pass. **Update recommended.**
+
+- Fixed a remotely triggerable crash condition (denial-of-service class) on
+  nginx — a defect inherited from the open-source ngx_pagespeed.
+- New opt-in `StrictAdminAccess` directive on Apache and nginx: admin,
+  statistics, and console access is decided on the validated client IP and
+  never on client-controlled headers. (IIS already gates admin access to
+  loopback.)
+- ASP.NET Core sidecar hardening: admin endpoints bind to loopback, tighter
+  configuration-file permissions, and tokens are kept out of logs.
+- IIS: two lock-handling fixes and correct IPv6 address reporting.
+- Redis: fixed a crash at startup when a database index is configured, and
+  reduced per-command overhead (both defects date to the open-source line,
+  2017).
+
+</details>
+
+<span id="v110r18--r21--2026-05-2527" class="rn-alias" aria-hidden="true"></span>
+<details id="v1-1-0-r18-r21" class="rn-entry">
+<summary><span class="rn-ver">1.1.0+r18–r21</span> <span class="rn-date">2026-05-25 – 2026-05-27</span> <span class="rn-badge rn-badge-mod">module</span> <span class="rn-lede">Security update: 13 admin-console dependency advisories cleared (4 high, 9 medium).</span></summary>
+
+- **Reliability.** Cache-library update: Apache graceful restarts no longer
+  leak scoreboard slots, and `nginx -s reload` no longer hangs — both were
+  process-lifecycle defects in cache teardown.
+- **Security.** Admin-console dependency updates clearing 13 published
+  advisories (4 high, 9 medium).
+- **Packaging.** The signed apt/yum repositories for the nginx module go GA,
+  with per-distro builds pinned to each distro's stock nginx and blocking
+  load, symbol, and optimization smoke gates. The EasyApache 4 configuration
+  now degrades gracefully if the module file is absent instead of breaking
+  Apache startup.
+
+</details>
+
+<span id="v110r9--r17--2026-05-2122" class="rn-alias" aria-hidden="true"></span>
+<details id="v1-1-0-r9-r17" class="rn-entry">
+<summary><span class="rn-ver">1.1.0+r9–r17</span> <span class="rn-date">2026-05-21 – 2026-05-22</span> <span class="rn-badge rn-badge-mod">module</span> <span class="rn-lede">IIS quality wave (r12–r17 contain no product changes).</span></summary>
+
+IIS quality wave (r12–r17 contain no product changes). **Update recommended
+for IIS deployments.**
+
+- Fixed crashes in the IIS URL fetcher and in lock handling.
+- Admin endpoints are default-deny in the shipped sample configurations, and
+  the module logs a warning when an admin handler receives a non-loopback
+  request.
+- Smoother installation: per-site cache and log directories are auto-created
+  with safe permissions (new `AutoCreateLogDir` directive), initialization
+  failures surface as specific `X-Pagespeed-Init-Status` values with
+  per-failure error pages, and the MSI grants the required ACLs.
+- Upgrading from IISpeed: an existing `iiswebspeed.config` is picked up
+  automatically when no `pagespeed.config` is present.
+
+</details>
+
+<span id="v110r1--r8--2026-05-1921" class="rn-alias" aria-hidden="true"></span>
+<details id="v1-1-0-r1-r8" class="rn-entry">
+<summary><span class="rn-ver">1.1.0+r1–r8</span> <span class="rn-date">2026-05-19 – 2026-05-21</span> <span class="rn-badge rn-badge-mod">module</span> <span class="rn-lede">Packaging and distribution (most of these revisions contain no product changes).</span></summary>
+
+Packaging and distribution (most of these revisions contain no product
+changes).
+
+- **First cPanel / EasyApache 4 channel:** `ea-apache24-mod_pagespeed` RPMs.
+- The `+rN` package-revision scheme is established (mapping to the RPM
+  `Release` field and the deb revision).
+
+</details>
+
+<span id="v110--ga--2026-05-15" class="rn-alias" aria-hidden="true"></span>
+<details id="v1-1-0" class="rn-entry">
+<summary><span class="rn-ver">1.1.0</span> <span class="rn-date">2026-05-15</span> <span class="rn-badge rn-badge-mod">module</span> <span class="rn-lede">Security update: general availability, clearing a six-year CVE backlog including CVE-2023-4863.</span></summary>
+
+The first We-Amp release of the maintained line, continuing directly from
+the final open-source release, **1.14.36.1** (August 2020). Everything below is
+relative to that baseline — in particular, the security and reliability fixes
+repair defects that were present in the final open-source release, not
+regressions in this line. See
+**[What's new in 1.15](/docs/release-notes/#115-history)** for the narrative version.
+
+**Security**
+
+- All bundled image codecs and network libraries updated across six years of
+  upstream security work: libwebp 1.5.0 (includes the fix for
+  **CVE-2023-4863**, the widely exploited WebP heap overflow), libjpeg-turbo
+  3.1.x, libpng 1.6.58, and a modern TLS stack. The HTTPS fetcher was
+  replaced with libcurl at a current release, clearing a 12-CVE backlog in
+  the process, and nginx module builds moved to a 1.30.x baseline covering
+  the May 2026 nginx CVE cluster.
+- Memory-safety fixes and hardening throughout image processing.
+- Admin-surface hardening throughout: constant-time token comparison, strict
+  validation of cache-purge request parameters, CSRF protection and security
+  headers on the admin endpoints, and mutating endpoints
+  restricted to the global admin.
+- Bounded resource consumption on untrusted input: response-size and
+  header-size caps in the fetcher, an HTML parser that stops at its size
+  limit instead of accumulating without bound, and graceful error handling
+  where malformed input could previously abort the process.
+- On IIS, internal HTTPS fetches validate certificates by default.
+- Release integrity: all packages are GPG-signed with a published key, and
+  the Windows binaries (DLL and MSI) carry timestamped Authenticode
+  signatures.
+- Development is backed by continuous sanitizer testing (AddressSanitizer,
+  ThreadSanitizer, and Application Verifier on Windows).
+
+**Reliability**
+
+- Fixes for long-standing crash and data-race conditions in the asynchronous
+  rewrite lifecycle, the proxy fetch path, and cache write-ordering (a
+  large-cache outage could previously produce persistent misses).
+- Graceful degradation replaces hard process aborts on recoverable
+  conditions.
+- Many platform-specific stability fixes; see the per-platform notes below.
+
+**Cyclone Cache — the new disk cache**
+
+- The original file-based cache is replaced by **Cyclone Cache**: a
+  fixed-size, memory-mapped, scan-resistant cache shared safely across
+  processes, with no periodic cleanup passes and a persistent index, so
+  restarts start warm.
+- Fully configuration-compatible: `FileCachePath` keeps working and now
+  locates the Cyclone cache; obsolete tuning options are accepted as
+  deprecated no-ops with a warning.
+- The rest of the cache stack is unchanged: LRU cache, shared-memory metadata
+  cache, Redis, and Memcached all remain.
+
+**Modernization**
+
+- The build moved from GYP to **Bazel**, with the core on modern C++
+  (C++20/23) and all dependencies pinned and vendored; the source tarball
+  builds fully offline.
+- **Prebuilt, signed packages** replace compile-it-yourself: deb and RPM for
+  Apache, a prebuilt dynamic module for stock nginx, and an MSI for IIS.
+- **arm64/aarch64 support** added on Linux; 32-bit x86 dropped; Apache 2.2
+  dropped (2.4+ only); the Google-era stable/beta/unstable channel split
+  collapsed into a single `mod-pagespeed` package.
+
+**Apache**
+
+- A single `mod_pagespeed.so` for Apache 2.4+, installed the same way as
+  before (`a2enmod pagespeed`, same configuration layout). Bundled TLS
+  symbols are hidden from the host process to prevent library clashes.
+
+**nginx**
+
+- ngx_pagespeed is now maintained in-tree and shipped as a **prebuilt dynamic
+  module** loadable into stock nginx 1.26/1.27 with `load_module` — no more
+  compiling nginx from source.
+
+**IIS — the IISpeed successor**
+
+- A new native IIS module (`pagespeed_iis.dll`) for IIS 10+ replaces IISpeed,
+  built on the IISpeed codebase and brought to parity with the Linux
+  platforms (streaming HTML rewriting, in-place
+  resource optimization, per-site configuration, the shared admin console).
+- Existing IISpeed installs migrate in place: the module reads
+  `pagespeed.config` and falls back to an existing `iiswebspeed.config`;
+  admin pages live at the standard `/pagespeed_admin` paths.
+- Ships as a signed MSI with clean upgrade and uninstall support.
+
+**What stayed the same**
+
+- All configuration directives, the full filter set (40+ filters),
+  `.pagespeed.` resource URLs, in-place resource optimization, the admin and
+  statistics endpoints, `.htaccess` support on Apache, and the
+  `X-Mod-Pagespeed` / `X-Page-Speed` response headers. Obsolete Google-era
+  options (update channels, distributed rewriting) are accepted as no-ops
+  with a warning rather than breaking startup.
+
+</details>
+
+<details id="v1-1-0-beta-1" class="rn-entry">
+<summary><span class="rn-ver">1.1.0-beta.1</span> <span class="rn-date">2026-02-25</span> <span class="rn-badge rn-badge-mod">module</span> <span class="rn-lede">First public beta of the maintained module line, on Apache, nginx and IIS.</span></summary>
+
+1.1.0-beta.1 is the first public beta of the maintained module line.
+
+It built the module for three front ends from one source tree: Apache and nginx,
+both stable, and IIS, experimental.
+
+</details>

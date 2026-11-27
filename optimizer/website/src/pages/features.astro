@@ -1,0 +1,1468 @@
+---
+import { OG_DEFAULT_IMAGE_URL } from '../data/og-image';
+import BaseLayout from '../layouts/BaseLayout.astro';
+import PageHero from '../components/PageHero.astro';
+import BitmaskVisualizer from '../components/BitmaskVisualizer.astro';
+import CTAButton from '../components/CTAButton.astro';
+import Icon from '../components/Icon.astro';
+import { getRelease } from '../lib/release';
+import { offerJsonLd } from '../data/offer-jsonld';
+import { productJsonLd } from '../data/software-jsonld';
+import { FREE_TO_RUN_LINE } from '../data/product-facts.mjs';
+
+// Single source of truth for the NuGet install command — the 2.0 release
+// manifest drives the `--prerelease` flag (display.nuget_install_flags).
+const rel20 = await getRelease('2.0');
+const nugetInstallCmd = `dotnet add package ${rel20.artifacts.nuget.package}${
+  rel20.display.nuget_install_flags ? ` ${rel20.display.nuget_install_flags}` : ''
+}`;
+
+// The canonical product page previously emitted only a FAQPage. Add a
+// SoftwareApplication + Offer so the feature content ties to the product
+// entity (and carries the price for merchant/rich results).
+const softwareApplication = await productJsonLd({
+  description:
+    'Self-hosted web performance optimization: WebP/AVIF image transcoding (plus SVG auto-vectorization in the optimizer worker), CSS/JS minification, heuristic critical CSS, variant-aware caching, and zero-copy mmap serving. One product in two parts: an in-process module and an optimizer worker; with the worker paired to the Apache or nginx module, and in the reverse-proxy deployment, both parts map the same Cyclone cache.',
+  image: OG_DEFAULT_IMAGE_URL,
+  featureList: [
+    'WebP/AVIF/SVG image transcoding with viewport-aware resizing',
+    'ML-predicted encoder quality with SSIMULACRA2 verification',
+    'Heuristic critical CSS extraction (no headless browser)',
+    'CSS and JavaScript minification',
+    'Variant-aware caching via a 32-bit capability bitmask',
+    'Zero-copy serving via mmap',
+  ],
+  offers: offerJsonLd({ url: 'https://modpagespeed.com/pricing/' }),
+});
+
+const faqPage = {
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: [
+    {
+      '@type': 'Question',
+      name: 'What image formats does mod_pagespeed support?',
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: "mod_pagespeed transcodes images to WebP and AVIF based on the client's Accept header, and also optimizes original JPEG and PNG. Animated GIFs are converted to animated WebP. The optimizer worker adds SVG auto-vectorization for eligible images, Jpegli encoding, and ML-predicted per-format quality — every variant is verified against the original with SSIMULACRA2 before it reaches the cache. Up to 37 variants are generated per image across formats, viewports, pixel densities, and Save-Data preferences.",
+      },
+    },
+    {
+      '@type': 'Question',
+      name: 'How does critical CSS extraction work?',
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: 'The optimizer worker uses heuristic critical CSS extraction that runs standalone — no headless browser required. The worker scans HTML and matches CSS selectors against the DOM structure, analyzing the first 300 elements inside the body, fixed-position elements, semantic patterns (header, nav, hero), and universal selectors. Critical CSS is injected as a style tag before </head>, eliminating render-blocking stylesheet requests. An optional browser analysis pipeline adds CSS coverage validation, waterfall capture, and visual comparison for advanced use cases.',
+      },
+    },
+    {
+      '@type': 'Question',
+      name: 'What is zero-copy serving?',
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: 'Zero-copy serving means the Cyclone cache maps optimized resources directly into server output buffers using mmap. The response body is served directly from a memory-mapped cache file with no data copying and no per-request memory allocation. This achieves sub-millisecond cache hit latency.',
+      },
+    },
+    {
+      '@type': 'Question',
+      name: 'How does the variant-aware caching work?',
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: 'Every request is classified into a 32-bit capability bitmask encoding image format (WebP/AVIF/SVG/Original), viewport class (Mobile/Tablet/Desktop), pixel density (1x/2x+), Save-Data preference, and transfer encoding. The cache stores multiple alternates per URL, each identified by its mask. On lookup, the best-fit variant is selected by mask similarity with automatic fallback.',
+      },
+    },
+    {
+      '@type': 'Question',
+      name: 'Does mod_pagespeed require changes to my application code?',
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: 'No. Optimization is transparent. The module serves in-process and the optimizer worker runs behind it; in reverse-proxy mode the module sits in front of any HTTP origin. Your application serves the same responses it always has. No URL rewrites, no markup changes, no build pipeline modifications.',
+      },
+    },
+    {
+      '@type': 'Question',
+      name: 'What CSS and JavaScript optimizations are performed?',
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: 'CSS optimization includes minification (whitespace, comments, redundant syntax removal, decimal optimization), critical CSS extraction, async CSS loading, and @import flattening. JavaScript minification safely removes comments and whitespace without AST transforms or variable renaming. Browser script analysis identifies scripts safe to defer, reducing parser-blocking JavaScript. Both only write optimized variants when the result is actually smaller than the original.',
+      },
+    },
+  ],
+};
+
+const jsonLd = [softwareApplication, faqPage];
+---
+
+<BaseLayout
+  title="mod_pagespeed features: WebP/AVIF, critical CSS, minify"
+  description="Self-hosted WebP/AVIF/SVG transcoding, heuristic critical CSS and variant-aware caching: the full mod_pagespeed feature set."
+  jsonLd={jsonLd}
+>
+  <!-- Hero -->
+  <PageHero>
+    <Fragment slot="title">
+      Server-side image optimization:
+      <br />
+      <span class="relative inline-block text-text-body border-b-[3px] border-interactive pb-1">
+        WebP, AVIF, and critical CSS.
+      </span>
+    </Fragment>
+    <Fragment slot="lede">
+      One decode pass yields up to 37 cache variants; the right one is served via mmap, in
+      microseconds, with no third party in the request path.
+    </Fragment>
+    <div class="mt-8 flex flex-wrap items-center gap-3">
+      <a href="/download/" class="btn-primary" data-umami-event="cta_features_hero_download">
+        Download &amp; run
+      </a>
+      <a
+        href="/pricing/"
+        class="btn-secondary"
+        data-umami-event="cta_commercial"
+        data-umami-event-offer="support"
+        data-umami-event-surface="features"
+        data-umami-event-position="hero"
+      >
+        See pricing
+      </a>
+    </div>
+    <div class="mt-4 flex">
+      <a
+        href="#aspnet-core"
+        class="inline-flex items-center gap-2 rounded-lg border border-interactive/45 bg-interactive-wash px-4 py-3 text-small text-interactive hover:border-interactive transition-colors"
+      >
+        Using .NET? Jump to the ASP.NET Core middleware section
+        <span aria-hidden="true">&rarr;</span>
+      </a>
+    </div>
+  </PageHero>
+  <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+    <div class="rule-ticked-scale" role="presentation" aria-hidden="true"></div>
+  </div>
+
+  <!-- Benefits summary -->
+  <section class="section">
+    <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div class="card card-stretch">
+          <Icon name="image" class="h-5 w-5 text-interactive mb-3" />
+          <p class="font-semibold text-text-body">
+            <a href="#image-optimization" class="card-stretch-link">
+              Image optimization
+            </a>
+          </p>
+          <p class="mt-1 text-body text-text-muted">
+            WebP/AVIF transcoding, viewport-aware resizing, ML quality, up to 37 variants per image
+          </p>
+        </div>
+        <div class="card card-stretch">
+          <Icon name="paintbrush" class="h-5 w-5 text-interactive mb-3" />
+          <p class="font-semibold text-text-body">
+            <a href="#css-optimization" class="card-stretch-link">
+              CSS optimization
+            </a>
+          </p>
+          <p class="mt-1 text-body text-text-muted">
+            Minification, critical CSS extraction, async loading, @import flattening
+          </p>
+        </div>
+        <div class="card card-stretch">
+          <Icon name="braces" class="h-5 w-5 text-interactive mb-3" />
+          <p class="font-semibold text-text-body">
+            <a href="#js-optimization" class="card-stretch-link">
+              JS optimization
+            </a>
+          </p>
+          <p class="mt-1 text-body text-text-muted">
+            Safe minification, automatic script deferral — no AST transforms
+          </p>
+        </div>
+        <div class="card card-stretch">
+          <Icon name="code-xml" class="h-5 w-5 text-interactive mb-3" />
+          <p class="font-semibold text-text-body">
+            <a href="#html-optimization" class="card-stretch-link">
+              HTML optimization
+            </a>
+          </p>
+          <p class="mt-1 text-body text-text-muted">
+            Critical CSS injection, async CSS, script deferral, Early Hints (103), lazy loading
+          </p>
+        </div>
+        <div class="card card-stretch">
+          <Icon name="database" class="h-5 w-5 text-interactive mb-3" />
+          <p class="font-semibold text-text-body">
+            <a href="#variant-caching" class="card-stretch-link">
+              Variant-aware caching
+            </a>
+          </p>
+          <p class="mt-1 text-body text-text-muted">
+            32-bit capability mask, best-fit fallback, per-client variants
+          </p>
+        </div>
+        <div class="card card-stretch">
+          <Icon name="gauge" class="h-5 w-5 text-interactive mb-3" />
+          <p class="font-semibold text-text-body">
+            <a href="#zero-copy" class="card-stretch-link">
+              Zero-copy serving
+            </a>
+          </p>
+          <p class="mt-1 text-body text-text-muted">
+            Sub-millisecond cache hits via mmap — no copies, no allocations
+          </p>
+        </div>
+        <div class="card card-stretch lg:col-start-2">
+          <Icon name="bot" class="h-5 w-5 text-interactive mb-3" />
+          <p class="flex items-center gap-2 font-semibold text-text-body">
+            <a href="#ai-readability" class="card-stretch-link">
+              AI-readability
+            </a>
+            <span class="badge-neutral">Experimental</span>
+          </p>
+          <p class="mt-1 text-body text-text-muted">
+            Serve fully-rendered content to AI crawlers that never run your JavaScript
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+  <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+    <div class="rule-ticked-scale" role="presentation" aria-hidden="true"></div>
+  </div>
+
+  <!-- Image Optimization -->
+  <section id="image-optimization" class="section">
+    <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+      <div class="lg:grid lg:grid-cols-2 lg:gap-12 lg:items-start">
+        <div>
+          <h2 class="h2-section text-text-body">Image optimization</h2>
+          <p class="mt-4 text-text-muted">
+            Automatically transcode images to the best format each client supports. No manual srcset
+            management, no build pipelines, no CDN configuration. If you're weighing the trade-offs,
+            see{' '}
+            <a
+              href="/blog/avif-vs-webp-2026/"
+              class="text-interactive hover:text-interactive-hover underline"
+            >
+              AVIF vs WebP: which to serve
+            </a>
+            , or learn how this works as{' '}
+            <a
+              href="/blog/nginx-image-optimization-module/"
+              class="text-interactive hover:text-interactive-hover underline"
+            >
+              the nginx image optimization module
+            </a>
+            . For how this compares to a hosted pipeline, see{' '}
+            <a
+              href="/self-hosted-image-optimization/"
+              class="text-interactive hover:text-interactive-hover underline"
+            >
+              self-hosted image optimization
+            </a>
+            .
+          </p>
+          <p class="mt-3 text-body text-text-muted">
+            Docs:{' '}
+            <a href="/docs/image-filters/" class="text-interactive underline">
+              Image filters
+            </a>
+          </p>
+        </div>
+        <div class="mt-8 lg:mt-0">
+          <ul class="space-y-4">
+            <li class="flex items-start gap-3">
+              <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-interactive/10 text-interactive text-xs font-bold">
+                &check;
+              </span>
+              <div>
+                <p class="font-medium text-text-body">WebP/AVIF transcoding</p>
+                <p class="text-body text-text-muted">
+                  Content-negotiated format selection based on the client's Accept header. Serve
+                  WebP to Chrome, AVIF to supporting browsers, original to the rest.
+                </p>
+              </div>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-interactive/10 text-interactive text-xs font-bold">
+                &check;
+              </span>
+              <div>
+                <p class="font-medium text-text-body">Responsive image generation</p>
+                <p class="text-body text-text-muted">
+                  Viewport-class and pixel-density aware resizing. Desktop, tablet, and mobile
+                  variants are generated and cached automatically.
+                </p>
+              </div>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-interactive/10 text-interactive text-xs font-bold">
+                &check;
+              </span>
+              <div>
+                <p class="font-medium text-text-body">Lossless PNG reduction</p>
+                <p class="text-body text-text-muted">
+                  OptiPNG-based lossless reduction strips unnecessary metadata and optimizes DEFLATE
+                  parameters without any quality loss.
+                </p>
+              </div>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-interactive/10 text-interactive text-xs font-bold">
+                &check;
+              </span>
+              <div>
+                <p class="font-medium text-text-body">GIF-to-WebP for animated GIFs</p>
+                <p class="text-body text-text-muted">
+                  Animated GIFs are transcoded to animated WebP, often substantially smaller while
+                  preserving all frames and timing.
+                </p>
+              </div>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-interactive/10 text-interactive text-xs font-bold">
+                &check;
+              </span>
+              <div>
+                <p class="font-medium text-text-body">Save-Data aware compression</p>
+                <p class="text-body text-text-muted">
+                  Compression levels adapt to Save-Data preferences. Clients requesting reduced data
+                  receive more aggressively compressed image variants. Text resources (HTML, CSS,
+                  JS) are served with Identity, Gzip, or Brotli transfer encoding as appropriate.
+                </p>
+              </div>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-interactive/10 text-interactive text-xs font-bold">
+                &check;
+              </span>
+              <div>
+                <p class="font-medium text-text-body">Proactive variant generation</p>
+                <p class="text-body text-text-muted">
+                  A single image decode produces up to 37 cache variants: 3 raster formats (WebP,
+                  AVIF, original) across 3 viewports, 2 pixel densities, and 2 Save-Data states,
+                  plus a resolution-independent SVG variant for eligible images. One request warms
+                  the cache for all client types.
+                </p>
+              </div>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-interactive/10 text-interactive text-xs font-bold">
+                &check;
+              </span>
+              <div>
+                <p class="font-medium text-text-body">SVG auto-vectorization</p>
+                <p class="text-body text-text-muted">
+                  Logos, icons, and simple graphics are automatically{' '}
+                  <a
+                    href="/blog/svg-auto-vectorization/"
+                    class="text-interactive hover:text-interactive-hover underline"
+                  >
+                    converted from raster to SVG
+                  </a>{' '}
+                  using VTracer (Rust FFI). The resulting vector is resolution-independent — one
+                  variant serves all viewports and pixel densities. A size gate stores the SVG only
+                  when it is smaller than the raster original. It runs in the optimizer worker, with
+                  the Apache module or the reverse-proxy deployment; the default{' '}
+                  <code class="text-small bg-bg-elevated px-1 rounded">--svg-mode detect</code>{' '}
+                  scores candidates without vectorizing, and{' '}
+                  <code class="text-small bg-bg-elevated px-1 rounded">--svg-mode auto</code> serves
+                  them.
+                </p>
+              </div>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-interactive/10 text-interactive text-xs font-bold">
+                &check;
+              </span>
+              <div>
+                <p class="font-medium text-text-body">Jpegli encoder with perceptual quality</p>
+                <p class="text-body text-text-muted">
+                  Jpegli replaces libjpeg-turbo for JPEG encoding. Every variant is verified against
+                  the original with SSIMULACRA2 before it reaches the cache. Content-aware quality
+                  presets adjust compression based on image characteristics.
+                </p>
+              </div>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-interactive/10 text-interactive text-xs font-bold">
+                &check;
+              </span>
+              <div>
+                <p class="font-medium text-text-body">ML-predicted encoder quality</p>
+                <p class="text-body text-text-muted">
+                  Per-format{' '}
+                  <a
+                    href="/blog/learned-quality-prediction/"
+                    class="text-interactive hover:text-interactive-hover underline"
+                  >
+                    ML models predict the optimal encoder quality
+                  </a>{' '}
+                  for a target SSIMULACRA2 score. Trained LightGBM decision trees compiled to C run
+                  in ~5 microseconds per format with zero runtime dependencies. SSIMULACRA2
+                  verification catches outliers.
+                </p>
+              </div>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-interactive/10 text-interactive text-xs font-bold">
+                &check;
+              </span>
+              <div>
+                <p class="font-medium text-text-body">Content-aware quality classification</p>
+                <p class="text-body text-text-muted">
+                  Each image is classified as photo, screenshot, illustration, or noisy before
+                  compression. Photos tolerate more aggressive compression than screenshots with
+                  sharp text. Noisy images keep their detail, and a variant is only served when it
+                  is smaller than the original.
+                </p>
+              </div>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-interactive/10 text-interactive text-xs font-bold">
+                &check;
+              </span>
+              <div>
+                <p class="font-medium text-text-body">Quality baselining</p>
+                <p class="text-body text-text-muted">
+                  JPEG source quality is detected from DQT tables. If the source was already saved
+                  at quality 60, re-encoding at quality 85 would bloat the file. The encoder caps
+                  output quality at the source level plus a small margin.
+                </p>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+  <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+    <div class="rule-ticked-scale" role="presentation" aria-hidden="true"></div>
+  </div>
+
+  <!-- CSS Optimization -->
+  <section id="css-optimization" class="section">
+    <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+      <div class="lg:grid lg:grid-cols-2 lg:gap-12 lg:items-start">
+        <div>
+          <h2 class="h2-section text-text-body">CSS optimization</h2>
+          <p class="mt-4 text-text-muted">
+            Reduce render-blocking CSS to the minimum required for first paint. Heuristic critical
+            CSS extraction runs standalone — no headless browser required. Optional browser analysis
+            adds CSS coverage validation, waterfall capture, and visual comparison. This targets the
+            render-blocking resources flagged by{' '}
+            <a
+              href="/pagespeed-insights/"
+              class="text-interactive hover:text-interactive-hover underline"
+            >
+              PageSpeed Insights
+            </a>
+            .
+          </p>
+          <p class="mt-3 text-body text-text-muted">
+            Docs:{' '}
+            <a href="/docs/css-filters/" class="text-interactive underline">
+              CSS filters
+            </a>
+          </p>
+        </div>
+        <div class="mt-8 lg:mt-0">
+          <ul class="space-y-4">
+            <li class="flex items-start gap-3">
+              <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-interactive/10 text-interactive text-xs font-bold">
+                &check;
+              </span>
+              <div>
+                <p class="font-medium text-text-body">Minification</p>
+                <p class="text-body text-text-muted">
+                  Whitespace, comments, and redundant syntax are stripped. Trailing semicolons are
+                  removed, decimal values optimized (0.5 to .5), and whitespace around CSS operators
+                  eliminated.
+                </p>
+              </div>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-interactive/10 text-interactive text-xs font-bold">
+                &check;
+              </span>
+              <div>
+                <p class="font-medium text-text-body">Critical CSS extraction</p>
+                <p class="text-body text-text-muted">
+                  Heuristic-based above-the-fold CSS extraction. Automatically includes selectors
+                  for <code class="text-small bg-bg-elevated px-1 rounded">html</code>,{' '}
+                  <code class="text-small bg-bg-elevated px-1 rounded">body</code>,{' '}
+                  <code class="text-small bg-bg-elevated px-1 rounded">:root</code>, first 300 body
+                  elements, fixed-position elements, and header/nav/hero patterns. Optional browser
+                  pipeline adds Lighthouse validation, waterfall capture, and visual comparison.
+                </p>
+              </div>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-interactive/10 text-interactive text-xs font-bold">
+                &check;
+              </span>
+              <div>
+                <p class="font-medium text-text-body">Injected into HTML</p>
+                <p class="text-body text-text-muted">
+                  Critical CSS is injected as a{' '}
+                  <code class="text-small bg-bg-elevated px-1 rounded">&lt;style&gt;</code> tag
+                  before <code class="text-small bg-bg-elevated px-1 rounded">&lt;/head&gt;</code>,
+                  creating a self-contained HTML variant that renders without blocking on external
+                  stylesheets.
+                </p>
+              </div>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-interactive/10 text-interactive text-xs font-bold">
+                &check;
+              </span>
+              <div>
+                <p class="font-medium text-text-body">Async CSS loading</p>
+                <p class="text-body text-text-muted">
+                  Render-blocking stylesheets are deprioritized using{' '}
+                  <code class="text-small bg-bg-elevated px-1 rounded">fetchpriority="low"</code>,
+                  keeping them as normal stylesheets with no JavaScript dependency. Activated
+                  automatically by the optimization policy when CSS coverage data indicates low
+                  stylesheet utilization. Requires{' '}
+                  <code class="text-small bg-bg-elevated px-1 rounded">
+                    --enable-browser-analysis
+                  </code>
+                  .
+                </p>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+  <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+    <div class="rule-ticked-scale" role="presentation" aria-hidden="true"></div>
+  </div>
+
+  <!-- JavaScript Optimization -->
+  <section id="js-optimization" class="section">
+    <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+      <div class="lg:grid lg:grid-cols-2 lg:gap-12 lg:items-start">
+        <div>
+          <h2 class="h2-section text-text-body">JavaScript optimization</h2>
+          <p class="mt-4 text-text-muted">
+            Reduce JavaScript payload with automatic minification. Conservative transforms that
+            remove dead weight without changing behavior.
+          </p>
+          <p class="mt-3 text-body text-text-muted">
+            Docs:{' '}
+            <a href="/docs/javascript-filters/" class="text-interactive underline">
+              JavaScript filters
+            </a>
+          </p>
+        </div>
+        <div class="mt-8 lg:mt-0">
+          <ul class="space-y-4">
+            <li class="flex items-start gap-3">
+              <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-interactive/10 text-interactive text-xs font-bold">
+                &check;
+              </span>
+              <div>
+                <p class="font-medium text-text-body">Minification</p>
+                <p class="text-body text-text-muted">
+                  Comments, whitespace, and unnecessary semicolons are removed.{' '}
+                  <a
+                    href="/blog/safe-javascript-minification-semicolon-insertion/"
+                    class="text-interactive hover:text-interactive-hover underline"
+                  >
+                    Deliberately conservative
+                  </a>
+                  : no variable renaming, no AST transforms.
+                </p>
+              </div>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-interactive/10 text-interactive text-xs font-bold">
+                &check;
+              </span>
+              <div>
+                <p class="font-medium text-text-body">Size-gated optimization</p>
+                <p class="text-body text-text-muted">
+                  Only writes a minified variant if the result is actually smaller. No wasted cache
+                  space for already-minified scripts.
+                </p>
+              </div>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-interactive/10 text-interactive text-xs font-bold">
+                &check;
+              </span>
+              <div>
+                <p class="font-medium text-text-body">Script deferral</p>
+                <p class="text-body text-text-muted">
+                  Browser script analysis identifies scripts safe to defer. The worker adds{' '}
+                  <code class="text-small bg-bg-elevated px-1 rounded">defer</code> to those{' '}
+                  <code class="text-small bg-bg-elevated px-1 rounded">
+                    &lt;script src="..."&gt;
+                  </code>{' '}
+                  tags, moving them off the critical path. Scripts already marked{' '}
+                  <code class="text-small bg-bg-elevated px-1 rounded">async</code>,{' '}
+                  <code class="text-small bg-bg-elevated px-1 rounded">defer</code>, or{' '}
+                  <code class="text-small bg-bg-elevated px-1 rounded">type="module"</code> are left
+                  unchanged. Requires{' '}
+                  <code class="text-small bg-bg-elevated px-1 rounded">
+                    --enable-browser-analysis
+                  </code>
+                  .
+                </p>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+  <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+    <div class="rule-ticked-scale" role="presentation" aria-hidden="true"></div>
+  </div>
+
+  <!-- HTML Optimization -->
+  <section id="html-optimization" class="section">
+    <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+      <div class="lg:grid lg:grid-cols-2 lg:gap-12 lg:items-start">
+        <div>
+          <h2 class="h2-section text-text-body">HTML optimization</h2>
+          <p class="mt-4 text-text-muted">
+            The worker rewrites HTML to inject critical CSS and generate preload hints. Combined
+            with the caching proxy's Early Hints support, pages render faster without any changes to
+            your application.
+          </p>
+          <p class="mt-3 text-body text-text-muted">
+            Docs:{' '}
+            <a href="/docs/html-filters/" class="text-interactive underline">
+              HTML filters
+            </a>
+          </p>
+        </div>
+        <div class="mt-8 lg:mt-0">
+          <ul class="space-y-4">
+            <li class="flex items-start gap-3">
+              <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-interactive/10 text-interactive text-xs font-bold">
+                &check;
+              </span>
+              <div>
+                <p class="font-medium text-text-body">Critical CSS injection</p>
+                <p class="text-body text-text-muted">
+                  Heuristic-based above-the-fold CSS extraction. The worker scans HTML and linked
+                  stylesheets, extracts rules matching header, nav, hero, and early DOM elements,
+                  and injects them as a{' '}
+                  <code class="text-small bg-bg-elevated px-1 rounded">&lt;style&gt;</code> tag
+                  before <code class="text-small bg-bg-elevated px-1 rounded">&lt;/head&gt;</code>.
+                  Optional browser analysis adds Lighthouse validation, waterfall capture, and
+                  visual comparison.
+                </p>
+              </div>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-interactive/10 text-interactive text-xs font-bold">
+                &check;
+              </span>
+              <div>
+                <p class="font-medium text-text-body">Early Hints (103)</p>
+                <p class="text-body text-text-muted">
+                  The worker stores stylesheet preload hints in the cache. On subsequent requests,
+                  the server sends{' '}
+                  <code class="text-small bg-bg-elevated px-1 rounded">103 Early Hints</code>
+                  responses with{' '}
+                  <code class="text-small bg-bg-elevated px-1 rounded">Link: rel=preload</code>{' '}
+                  headers before the origin responds, letting the browser fetch CSS while waiting.
+                </p>
+              </div>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-interactive/10 text-interactive text-xs font-bold">
+                &check;
+              </span>
+              <div>
+                <p class="font-medium text-text-body">Preconnect injection</p>
+                <p class="text-body text-text-muted">
+                  Third-party origins discovered during HTML processing automatically receive{' '}
+                  <code class="text-small bg-bg-elevated px-1 rounded">Link: rel=preconnect</code>{' '}
+                  headers, eliminating DNS/TLS setup time for external resources. Enabled by
+                  default.
+                </p>
+              </div>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-bg-elevated text-text-muted text-xs font-bold">
+                &check;
+              </span>
+              <div>
+                <p class="font-medium text-text-body">
+                  Speculation Rules
+                  <span class="ml-1 badge-neutral">Experimental</span>
+                </p>
+                <p class="text-body text-text-muted">
+                  Opt-in prefetching via the{' '}
+                  <a
+                    href="/blog/server-injected-resource-hints-speculation-rules/"
+                    class="text-interactive hover:text-interactive-hover underline"
+                  >
+                    Speculation Rules API
+                  </a>
+                  . When enabled with{' '}
+                  <code class="text-small bg-bg-elevated px-1 rounded">
+                    --enable-speculation-rules
+                  </code>
+                  , the worker injects prefetch hints for frequently-accessed URLs detected by the
+                  hot URL tracker. Off by default.
+                </p>
+              </div>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-interactive/10 text-interactive text-xs font-bold">
+                &check;
+              </span>
+              <div>
+                <p class="font-medium text-text-body">Hot URL warmup</p>
+                <p class="text-body text-text-muted">
+                  Frequently-accessed URLs are detected automatically. When a URL exceeds the hit
+                  threshold, the worker proactively generates all missing optimized variants so they
+                  are ready before the next request.
+                </p>
+              </div>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-interactive/10 text-interactive text-xs font-bold">
+                &check;
+              </span>
+              <div>
+                <p class="font-medium text-text-body">Native lazy loading</p>
+                <p class="text-body text-text-muted">
+                  The worker automatically adds{' '}
+                  <code class="text-small bg-bg-elevated px-1 rounded">loading="lazy"</code> to
+                  off-screen <code class="text-small bg-bg-elevated px-1 rounded">&lt;img&gt;</code>
+                  and <code class="text-small bg-bg-elevated px-1 rounded">
+                    &lt;iframe&gt;
+                  </code>{' '}
+                  elements. The LCP candidate (or first body image as fallback) receives{' '}
+                  <code class="text-small bg-bg-elevated px-1 rounded">fetchpriority="high"</code>{' '}
+                  instead, ensuring above-the-fold content loads at full priority. Enabled by
+                  default.
+                </p>
+              </div>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-interactive/10 text-interactive text-xs font-bold">
+                &check;
+              </span>
+              <div>
+                <p class="font-medium text-text-body">Explicit image dimensions</p>
+                <p class="text-body text-text-muted">
+                  Width and height attributes are injected on{' '}
+                  <code class="text-small bg-bg-elevated px-1 rounded">&lt;img&gt;</code> tags that
+                  lack them, using dimensions from cached image data. This prevents Cumulative
+                  Layout Shift (CLS) caused by images loading without reserved space. Enabled by
+                  default.
+                </p>
+              </div>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-interactive/10 text-interactive text-xs font-bold">
+                &check;
+              </span>
+              <div>
+                <p class="font-medium text-text-body">LCP image preload</p>
+                <p class="text-body text-text-muted">
+                  The detected LCP candidate image receives a{' '}
+                  <code class="text-small bg-bg-elevated px-1 rounded">
+                    &lt;link rel="preload" as="image"&gt;
+                  </code>{' '}
+                  hint, telling the browser to fetch it before encountering the{' '}
+                  <code class="text-small bg-bg-elevated px-1 rounded">&lt;img&gt;</code> tag.
+                  Reduces LCP by starting the download earlier.
+                </p>
+              </div>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-interactive/10 text-interactive text-xs font-bold">
+                &check;
+              </span>
+              <div>
+                <p class="font-medium text-text-body">Font preloading</p>
+                <p class="text-body text-text-muted">
+                  Font URLs discovered during CSS and HTML processing are injected as preload hints.
+                  Fonts are among the last resources browsers discover naturally — preloading them
+                  eliminates the flash of invisible text (FOIT).
+                </p>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+  <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+    <div class="rule-ticked-scale" role="presentation" aria-hidden="true"></div>
+  </div>
+
+  <!-- Variant-Aware Caching -->
+  <section id="variant-caching" class="section">
+    <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+      <div class="lg:grid lg:grid-cols-2 lg:gap-12 lg:items-start">
+        <div>
+          <h2 class="h2-section text-text-body">Variant-aware caching</h2>
+          <p class="mt-4 text-text-muted">
+            Every URL maps to a set of cache alternates, each identified by its 32-bit capability
+            bitmask. Different clients get different optimized variants without cache pollution.
+          </p>
+        </div>
+        <div class="mt-8 lg:mt-0">
+          <div class="rounded-lg border border-border bg-bg-elevated p-6">
+            <p class="text-small font-medium text-text-body mb-4">32-bit capability bitmask</p>
+            <div class="space-y-3 text-small">
+              <div class="flex justify-between">
+                <span class="text-text-muted">Bits 0-1</span>
+                <span class="font-medium text-text-body">
+                  Image Format{' '}
+                  <span class="text-text-annotation">(Original / WebP / AVIF / SVG)</span>
+                </span>
+              </div>
+              <div class="border-t border-border"></div>
+              <div class="flex justify-between">
+                <span class="text-text-muted">Bits 2-3</span>
+                <span class="font-medium text-text-body">
+                  Viewport Class{' '}
+                  <span class="text-text-annotation">(Mobile / Tablet / Desktop)</span>
+                </span>
+              </div>
+              <div class="border-t border-border"></div>
+              <div class="flex justify-between">
+                <span class="text-text-muted">Bit 4</span>
+                <span class="font-medium text-text-body">
+                  Pixel Density <span class="text-text-annotation">(1x / 2x+)</span>
+                </span>
+              </div>
+              <div class="border-t border-border"></div>
+              <div class="flex justify-between">
+                <span class="text-text-muted">Bit 5</span>
+                <span class="font-medium text-text-body">
+                  Save-Data <span class="text-text-annotation">(off / on)</span>
+                </span>
+              </div>
+              <div class="border-t border-border"></div>
+              <div class="flex justify-between">
+                <span class="text-text-muted">Bits 6-7</span>
+                <span class="font-medium text-text-body">
+                  Transfer Encoding{' '}
+                  <span class="text-text-annotation">(Identity / Gzip / Brotli / Reserved)</span>
+                </span>
+              </div>
+            </div>
+          </div>
+          <div class="mt-4">
+            <BitmaskVisualizer />
+          </div>
+          <p class="mt-4 text-body text-text-muted">
+            On cache miss, the best-fit fallback mechanism finds the closest cached variant rather
+            than going back to the origin. A Desktop WebP request can be served from a Tablet WebP
+            cache entry while the exact variant is being generated.
+          </p>
+          <p class="mt-3 text-body text-text-muted">
+            Pre-compressed gzip and brotli variants are generated for text resources (HTML, CSS,
+            JS). On cache hits, the server serves directly with the appropriate Content-Encoding —
+            no dynamic compression overhead.
+          </p>
+          <p class="mt-3 text-body text-text-muted">
+            Docs:{' '}
+            <a href="/docs/cache-modes/" class="text-interactive underline">
+              Cache modes
+            </a>{' '}
+            and{' '}
+            <a href="/docs/cache-control/" class="text-interactive underline">
+              Cache-Control
+            </a>
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+  <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+    <div class="rule-ticked-scale" role="presentation" aria-hidden="true"></div>
+  </div>
+
+  <!-- Zero-Copy Serving -->
+  <section id="zero-copy" class="section">
+    <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+      <div class="lg:grid lg:grid-cols-2 lg:gap-12 lg:items-start">
+        <div>
+          <h2 class="h2-section text-text-body">Zero-copy serving</h2>
+          <p class="mt-4 text-text-muted">
+            The Cyclone cache maps optimized resources directly into server output buffers using
+            mmap. The response body is served directly from a memory-mapped cache file with no data
+            copying and no per-request memory allocation for content.
+          </p>
+        </div>
+        <div class="mt-8 lg:mt-0">
+          <div class="rounded-lg border border-border bg-bg-elevated p-6">
+            <p class="text-small font-medium text-text-body mb-4">Cache hit path</p>
+            <ol class="space-y-3 text-small">
+              <li class="flex items-start gap-3">
+                <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-interactive text-on-accent text-xs font-bold">
+                  1
+                </span>
+                <p class="text-text-muted">
+                  Caching proxy classifies the request into a 32-bit capability mask
+                </p>
+              </li>
+              <li class="flex items-start gap-3">
+                <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-interactive text-on-accent text-xs font-bold">
+                  2
+                </span>
+                <p class="text-text-muted">
+                  URL is looked up in cache; best-fit variant selected by capability mask
+                </p>
+              </li>
+              <li class="flex items-start gap-3">
+                <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-interactive text-on-accent text-xs font-bold">
+                  3
+                </span>
+                <p class="text-text-muted">
+                  Cyclone lookup returns an mmap'd pointer with best-fit fallback
+                </p>
+              </li>
+              <li class="flex items-start gap-3">
+                <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-interactive text-on-accent text-xs font-bold">
+                  4
+                </span>
+                <p class="text-text-muted">
+                  Pointer is passed directly to the server's output chain — zero copy, zero
+                  allocation
+                </p>
+              </li>
+              <li class="flex items-start gap-3">
+                <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-interactive text-on-accent text-xs font-bold">
+                  5
+                </span>
+                <p class="text-text-muted">
+                  On miss: origin is served immediately, the worker is notified via Unix socket to
+                  generate the optimized variant
+                </p>
+              </li>
+            </ol>
+          </div>
+          <p class="mt-4 text-body text-text-muted">
+            Sub-millisecond cache hits. The hot path is a hash lookup and a pointer assignment — no
+            data copying, no content processing in the request path. This is one of several ways to{' '}
+            <a
+              href="/blog/reduce-ttfb-server-layer-2026/"
+              class="text-interactive hover:text-interactive-hover underline"
+            >
+              reduce TTFB at the server layer
+            </a>{' '}
+            before you reach for a CDN.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+  <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+    <div class="rule-ticked-scale" role="presentation" aria-hidden="true"></div>
+  </div>
+
+  <!-- AI-readability (agent_optimize) -->
+  <section id="ai-readability" class="section">
+    <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+      <div class="lg:grid lg:grid-cols-2 lg:gap-12 lg:items-start">
+        <div>
+          <p class="badge-neutral">Experimental &middot; off by default</p>
+          <h2 class="mt-3 h2-section text-text-body">
+            Serve clean, fully-rendered content to AI crawlers that never run your JavaScript
+          </h2>
+          <p class="mt-4 text-text-muted">
+            LLM and AI crawlers fetch your page and read the raw HTML. If your content arrives after
+            JavaScript runs, they see an empty shell. The experimental{' '}
+            <code class="text-small bg-bg-elevated px-1 rounded">agent_optimize</code>
+            capability renders each page server-side and serves the complete, post-render content at
+            the same URL, so an agent that never executes a line of your JavaScript still sees the
+            page a browser would.
+          </p>
+          <p class="mt-4 text-text-muted">
+            Rendering, cleaning, and serving all happen on your own server. Browsers and search
+            engines keep receiving your normal HTML — only a request that explicitly negotiates the
+            agent representation gets the rendered copy, and the response carries{' '}
+            <code class="text-small bg-bg-elevated px-1 rounded">Vary: Accept</code> so shared
+            caches never mix the two.
+          </p>
+          <div class="mt-6 flex flex-wrap gap-3">
+            <a
+              href="/ai-readability/"
+              class="inline-flex items-center gap-2 rounded-md bg-interactive text-on-accent px-4 py-2 text-sm font-medium hover:bg-interactive-hover transition-colors"
+            >
+              Scan your site with RenderPeek
+              <span aria-hidden="true">&rarr;</span>
+            </a>
+            <a
+              href="/docs/agent-optimize/"
+              class="inline-flex items-center gap-2 rounded-md border border-border-strong px-4 py-2 text-sm font-medium text-text-body hover:bg-bg-elevated transition-colors"
+            >
+              Read the docs
+              <span aria-hidden="true">&rarr;</span>
+            </a>
+          </div>
+        </div>
+        <div class="mt-8 lg:mt-0">
+          <ul class="space-y-4">
+            <li class="flex items-start gap-3">
+              <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-interactive/10 text-interactive text-xs font-bold">
+                &check;
+              </span>
+              <div>
+                <p class="font-medium text-text-body">
+                  Server-side rendered, no client JS required
+                </p>
+                <p class="text-body text-text-muted">
+                  The optimizer worker renders the page with headless Chrome and caches the
+                  post-render result. AI crawlers that don't run JavaScript receive the same content
+                  a real browser would — no empty shell, no missing copy.
+                </p>
+              </div>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-interactive/10 text-interactive text-xs font-bold">
+                &check;
+              </span>
+              <div>
+                <p class="font-medium text-text-body">Same URL, content-negotiated</p>
+                <p class="text-body text-text-muted">
+                  No alternate hostname, no separate sitemap. The rendered representation is served
+                  at the canonical URL and selected by the request's{' '}
+                  <code class="text-small bg-bg-elevated px-1 rounded">Accept</code> header, leaving
+                  the experience for browsers and search engines untouched.
+                </p>
+              </div>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-interactive/10 text-interactive text-xs font-bold">
+                &check;
+              </span>
+              <div>
+                <p class="font-medium text-text-body">Nothing leaves your server</p>
+                <p class="text-body text-text-muted">
+                  Rendering, cleaning and caching are all local. Serving a cached agent response
+                  performs zero outbound network I/O — your content is never sent to a third party.
+                </p>
+              </div>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-interactive/10 text-interactive text-xs font-bold">
+                &check;
+              </span>
+              <div>
+                <p class="font-medium text-text-body">
+                  Experimental, off by default, enabled by a flag
+                </p>
+                <p class="text-body text-text-muted">
+                  <code class="text-small bg-bg-elevated px-1 rounded">agent_optimize</code> ships
+                  in every build and stays off until you start the optimizer worker with{' '}
+                  <code class="text-small bg-bg-elevated px-1 rounded">--agent-optimize</code> (
+                  <code class="text-small bg-bg-elevated px-1 rounded">
+                    PAGESPEED_AGENT_OPTIMIZE=true
+                  </code>{' '}
+                  in the Docker images). It also needs browser analysis (
+                  <code class="text-small bg-bg-elevated px-1 rounded">
+                    --enable-browser-analysis
+                  </code>
+                  ). Its flags and behavior may change in a future release; every install runs the
+                  same binary.
+                </p>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+  <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+    <div class="rule-ticked-scale" role="presentation" aria-hidden="true"></div>
+  </div>
+
+  <!-- Architecture Overview -->
+  <section class="section">
+    <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+      <div class="text-center">
+        <h2 class="h2-section text-text-body">Architecture overview</h2>
+        <p class="mt-4 text-text-muted max-w-2xl mx-auto">
+          Three purpose-built components. Optimization outside the request path. Each component does
+          one thing well and communicates through minimal, well-defined interfaces.
+        </p>
+      </div>
+      <div class="mt-12 grid grid-cols-1 md:grid-cols-3 gap-8">
+        <div class="panel">
+          <div class="h-10 w-10 rounded-lg bg-interactive/10 flex items-center justify-center mb-4">
+            <Icon name="route" class="h-5 w-5 text-interactive" />
+          </div>
+          <h3 class="font-semibold text-text-body">Caching proxy</h3>
+          <p class="mt-1 text-small font-medium text-interactive">High-performance reverse proxy</p>
+          <p class="mt-3 text-body text-text-muted">
+            Deploys in front of any HTTP origin server. Classifies incoming requests by parsing
+            Accept headers, Client Hints, and Save-Data signals. Composes cache keys, serves cache
+            hits via zero-copy mmap, and passes cache misses through to the origin.
+          </p>
+        </div>
+        <div class="panel">
+          <div class="h-10 w-10 rounded-lg bg-interactive/10 flex items-center justify-center mb-4">
+            <Icon name="database" class="h-5 w-5 text-interactive" />
+          </div>
+          <h3 class="font-semibold text-text-body">Cyclone cache</h3>
+          <p class="mt-1 text-small font-medium text-interactive">Variant-aware disk cache</p>
+          <p class="mt-3 text-body text-text-muted">
+            High-performance disk cache with capability-based keys. Supports best-fit fallback so
+            near-miss variants can be served while the exact match is being generated. Data is
+            memory-mapped for zero-copy serving.
+          </p>
+        </div>
+        <div class="panel">
+          <div class="h-10 w-10 rounded-lg bg-interactive/10 flex items-center justify-center mb-4">
+            <Icon name="cpu" class="h-5 w-5 text-interactive" />
+          </div>
+          <h3 class="font-semibold text-text-body">The worker</h3>
+          <p class="mt-1 text-small font-medium text-interactive">
+            Lightweight optimization worker
+          </p>
+          <p class="mt-3 text-body text-text-muted">
+            Receives optimization requests via Unix socket. Runs HTML parsing, image transcoding,
+            CSS/JS minification, and critical CSS extraction. Results are written to the Cyclone
+            cache for subsequent zero-copy serving.
+          </p>
+        </div>
+      </div>
+      <p class="mt-8 text-body text-text-muted text-center max-w-2xl mx-auto">
+        The Apache packages install the configuration that points the module at the optimizer
+        worker. The native nginx module uses the worker once two directives point it there: install{' '}
+        <code class="text-small bg-bg-elevated px-1 rounded">pagespeed-optimizer</code> first, then
+        follow the{' '}
+        <a
+          href="/docs/installation-module/#native-nginx-module"
+          class="text-interactive hover:text-interactive-hover underline"
+        >
+          nginx install steps
+        </a>
+        .
+      </p>
+      <p class="mt-4 text-body text-text-muted text-center max-w-2xl mx-auto">
+        Beyond nginx, mod_pagespeed integrates as middleware for ASP.NET Core applications via the{' '}
+        <code class="text-small bg-bg-elevated px-1 rounded">libpagespeed.so</code> C API — same
+        optimization pipeline, different stack.
+      </p>
+      <p class="mt-4 text-body text-text-muted text-center max-w-2xl mx-auto">
+        Go deeper into how it works:{' '}
+        <a
+          href="/how-it-works/css-parsing/"
+          class="text-interactive hover:text-interactive-hover underline"
+        >
+          how the CSS parser builds a syntax tree
+        </a>
+        ,{' '}
+        <a
+          href="/how-it-works/metadata-cache/"
+          class="text-interactive hover:text-interactive-hover underline"
+        >
+          how the cache serves the right variant
+        </a>
+        , and{' '}
+        <a
+          href="/how-it-works/async-rewriting/"
+          class="text-interactive hover:text-interactive-hover underline"
+        >
+          how the worker optimizes off the request path
+        </a>
+        .
+      </p>
+    </div>
+  </section>
+  <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+    <div class="rule-ticked-scale" role="presentation" aria-hidden="true"></div>
+  </div>
+
+  <!-- Monitoring & Operations -->
+  <section class="section">
+    <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+      <div class="lg:grid lg:grid-cols-2 lg:gap-12 lg:items-start">
+        <div>
+          <h2 class="h2-section text-text-body">Monitoring &amp; operations</h2>
+          <p class="mt-4 text-text-muted">
+            Health checks, Prometheus metrics, cache invalidation, and Kubernetes-ready deployment.
+            Wire it into the observability stack you already run.
+          </p>
+          <p class="mt-4">
+            <a
+              href="https://we-amp.com/pagespeed_global_admin/"
+              rel="noopener"
+              data-umami-event="cta_live_console_features"
+              class="text-interactive underline underline-offset-2"
+            >
+              Open the live console
+            </a>
+            <span class="text-text-muted"> on our own sites.</span>
+          </p>
+          <p class="mt-3 text-body text-text-muted">
+            Docs:{' '}
+            <a href="/docs/admin-console/" class="text-interactive underline">
+              Admin console
+            </a>
+            and{' '}
+            <a href="/docs/monitoring/" class="text-interactive underline">
+              Monitoring
+            </a>
+          </p>
+        </div>
+        <div class="mt-8 lg:mt-0">
+          <ul class="space-y-4">
+            <li class="flex items-start gap-3">
+              <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-interactive/10 text-interactive text-xs font-bold">
+                &check;
+              </span>
+              <div>
+                <p class="font-medium text-text-body">Prometheus metrics</p>
+                <p class="text-body text-text-muted">
+                  The worker exposes metrics in Prometheus text exposition format via the management
+                  socket. Track variant generation rates, processing times by content type, cache
+                  size, and error counts.
+                </p>
+              </div>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-interactive/10 text-interactive text-xs font-bold">
+                &check;
+              </span>
+              <div>
+                <p class="font-medium text-text-body">Helm chart for Kubernetes</p>
+                <p class="text-body text-text-muted">
+                  Deploy as a Kubernetes pod with the included Helm chart. The caching proxy and
+                  worker run as sidecar containers sharing a cache volume.
+                </p>
+              </div>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-interactive/10 text-interactive text-xs font-bold">
+                &check;
+              </span>
+              <div>
+                <p class="font-medium text-text-body">Cache invalidation</p>
+                <p class="text-body text-text-muted">
+                  Purge all variants for a URL via the management socket. A single PURGE command
+                  removes all cached variants for the target URL.
+                </p>
+              </div>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-interactive/10 text-interactive text-xs font-bold">
+                &check;
+              </span>
+              <div>
+                <p class="font-medium text-text-body">Web console</p>
+                <p class="text-body text-text-muted">
+                  Built-in web console at{' '}
+                  <code class="text-small bg-bg-elevated px-1 rounded">/console/</code>
+                  for cache inspection, live dashboard, and URL analysis.{' '}
+                  <a
+                    href="https://we-amp.com/pagespeed_global_admin/"
+                    class="text-interactive underline underline-offset-2"
+                  >
+                    See the live admin console →
+                  </a>
+                </p>
+              </div>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-interactive/10 text-interactive text-xs font-bold">
+                &check;
+              </span>
+              <div>
+                <p class="font-medium text-text-body">HTTP management API</p>
+                <p class="text-body text-text-muted">
+                  REST API for health checks, statistics, Prometheus metrics, configuration, and
+                  cache inspection. WebSocket streaming for real-time optimization events.
+                </p>
+              </div>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-interactive/10 text-interactive text-xs font-bold">
+                &check;
+              </span>
+              <div>
+                <p class="font-medium text-text-body">Configuration hot-reload</p>
+                <p class="text-body text-text-muted">
+                  RCU-based configuration updates. Change settings without restarting the worker or
+                  dropping connections. Applied atomically with zero downtime.
+                </p>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+  <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+    <div class="rule-ticked-scale" role="presentation" aria-hidden="true"></div>
+  </div>
+
+  <!-- ASP.NET Core -->
+  <section id="aspnet" class="section">
+    <span id="aspnet-core" class="block -mt-8 pt-8" aria-hidden="true"></span>
+    <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+      <h2 class="h2-section text-text-body">ASP.NET Core middleware</h2>
+      <p class="mt-4 text-text-muted max-w-3xl">
+        The same optimization pipeline runs inside ASP.NET Core: the{' '}
+        <code class="rounded bg-bg-elevated px-1 py-0.5 text-sm">
+          {rel20.artifacts.nuget.package}
+        </code>{' '}
+        NuGet package calls the native library through P/Invoke. No nginx. No reverse proxy. Same
+        image transcoding, same CSS extraction, same variant-aware caching.
+      </p>
+
+      <div class="mt-10 max-w-3xl">
+        <img
+          src="/images/aspnet-architecture.svg"
+          alt="ASP.NET Core middleware architecture — request flows through other middleware to the PageSpeed middleware and back"
+          width="960"
+          height="540"
+          loading="lazy"
+          class="rounded-lg border border-border"
+        />
+      </div>
+
+      <div class="mt-10 max-w-2xl">
+        <p id="features-install-label" class="text-small font-medium text-text-body mb-3">
+          Install
+        </p>
+        <div
+          class="rounded-lg border border-border bg-bg-secondary p-4 overflow-x-auto"
+          tabindex="0"
+          role="region"
+          aria-labelledby="features-install-label"
+        >
+          <code class="text-sm text-text-body whitespace-nowrap">{nugetInstallCmd}</code>
+        </div>
+      </div>
+
+      <div class="mt-8">
+        <a
+          href="/docs/aspnet-getting-started/"
+          class="inline-flex items-center rounded-md bg-interactive text-on-accent px-5 py-2.5 text-sm font-medium hover:bg-interactive-hover transition-colors"
+        >
+          Install the NuGet package
+          <Icon name="arrow-right" class="ml-2 h-4 w-4" />
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+    <div class="rule-ticked-scale" role="presentation" aria-hidden="true"></div>
+  </div>
+
+  <!-- What it does not replace -->
+  <section class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 section">
+    <h2 class="h2-section text-text-body">What it does not replace</h2>
+    <div class="panel mt-6">
+      <p class="text-text-body">mod_pagespeed is an origin-side optimizer. It does not replace:</p>
+      <ul class="mt-4 space-y-2 text-body text-text-muted list-disc pl-6">
+        <li>
+          <span class="font-semibold text-text-body">Edge delivery</span>: use your CDN for caching,
+          geography, and TLS termination.
+        </li>
+        <li>
+          <span class="font-semibold text-text-body">
+            Web application firewall / bot protection
+          </span>
+          : use your WAF; we do not inspect request payloads or enforce policy.
+        </li>
+        <li>
+          <span class="font-semibold text-text-body">RUM / observability platforms</span>: we expose
+          metrics; we do not replace your APM.
+        </li>
+        <li>
+          <span class="font-semibold text-text-body">Build-time bundlers</span>: if your CSS/JS is
+          already optimized, we add less &mdash; we mainly add origin-side image transcoding and
+          critical CSS.
+        </li>
+      </ul>
+      <p class="mt-4 text-body text-text-muted">
+        For how the optimizations above map to the metrics Google measures, see the{' '}
+        <a href="/core-web-vitals/" class="text-interactive hover:text-interactive-hover underline">
+          Core Web Vitals
+        </a>{' '}
+        hub. For what stays in your own code, see the{' '}
+        <a
+          href="/pagespeed-optimization/"
+          class="text-interactive hover:text-interactive-hover underline"
+        >
+          PageSpeed optimization overview
+        </a>
+        .
+      </p>
+    </div>
+  </section>
+  <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+    <div class="rule-ticked-scale" role="presentation" aria-hidden="true"></div>
+  </div>
+
+  <!-- FAQ -->
+  <!-- Renders the SAME faqPage.mainEntity array emitted as FAQPage JSON-LD above,
+       so the structured data and the visible content are a single source of truth
+       and can never drift. Google's FAQ-rich-result policy requires the Q&A to be
+       visible on the page. -->
+  <section class="section">
+    <div class="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
+      <h2 class="h2-section text-text-body">Frequently asked questions</h2>
+      <div class="mt-8 space-y-3">
+        {faqPage.mainEntity.map((item) => (
+          <details class="group rounded-lg border border-border bg-bg-elevated">
+            <summary class="flex cursor-pointer items-center justify-between gap-4 px-5 py-4 font-medium text-text-body">
+              {item.name}
+              <Icon
+                name="chevron-down"
+                class="h-5 w-5 shrink-0 text-text-annotation group-open:rotate-180"
+              />
+            </summary>
+            <p class="px-5 pb-5 max-w-prose text-body text-text-muted">
+              {item.acceptedAnswer.text}
+            </p>
+          </details>
+        ))}
+      </div>
+    </div>
+  </section>
+  <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+    <div class="rule-ticked-scale" role="presentation" aria-hidden="true"></div>
+  </div>
+
+  <!-- CTA -->
+  <section class="bg-interactive py-24">
+    <div class="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 text-center">
+      <h2 class="h2-section text-on-accent">Try it on your own infrastructure</h2>
+      <p class="mt-4 text-on-accent/90">
+        Every optimization, on every install. The software is free. We sell support.
+      </p>
+      <div class="mt-8 flex justify-center gap-4">
+        <CTAButton variant="inverse" event="cta_features_bottom" />
+        <a
+          href="/demo/"
+          class="inline-flex items-center justify-center gap-2 rounded-lg border border-on-accent/40 bg-transparent px-6 py-3 text-sm font-semibold text-on-accent hover:bg-interactive-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-on-accent transition-colors"
+        >
+          See the demo
+        </a>
+      </div>
+      <p class="mt-4 text-sm text-on-accent/80">{FREE_TO_RUN_LINE}</p>
+    </div>
+  </section>
+</BaseLayout>
+
+<style>
+  /* The FAQ accordion uses native <details>/<summary>; hide the default
+     disclosure marker so the custom chevron (rotated via group-open) is the
+     only affordance. */
+  details > summary {
+    list-style: none;
+  }
+  details > summary::-webkit-details-marker {
+    display: none;
+  }
+</style>

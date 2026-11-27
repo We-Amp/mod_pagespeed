@@ -1,0 +1,75 @@
+# mod_pagespeed - Async-CSS probe environment
+#
+# Same three-service topology as tools/http-compliance (origin / worker / nginx
+# sharing a named volume), with two differences that are the whole point of the
+# harness:
+#
+#   * the origin serves the byte-frozen modpagespeed.com capture, not synthetic
+#     compliance fixtures, so the deferral decision runs on realistic input;
+#   * the worker keeps its critical-CSS pass (the compliance worker disables it).
+#
+# Two environment knobs shape the worker's argv, and nothing else differs
+# between the harness's three modes (see conftest.py):
+#   ASYNC_CSS_PROBE_FORCE=1          -> the diagnostic --unsafe-force-async-css
+#   PAGESPEED_ASYNC_CSS_MIN_COVERAGE -> the sufficiency floor the gate applies
+#
+# Usage:
+#   docker compose -f tools/async-css-probe/docker-compose.yml up -d
+#   pytest tools/async-css-probe/ -v
+#   docker compose -f tools/async-css-probe/docker-compose.yml down -v
+
+services:
+  # Static origin serving the PR-A fixture capture.
+  origin:
+    image: python:3.12-slim
+    working_dir: /var/www
+    command: python3 /app/probe_origin.py
+    volumes:
+      - ./fixtures/modpagespeed-com:/var/www/fixture:ro
+      - ./fixtures/bootstrap-5.3.3:/var/www/fixture-plain:ro
+      - ./probe_origin.py:/app/probe_origin.py:ro
+    environment:
+      - PORT=8081
+      - BIND=0.0.0.0
+      - PROBE_FIXTURE=/var/www/fixture
+      - PROBE_PLAIN_FIXTURE=/var/www/fixture-plain
+    ports:
+      - "${PROBE_ORIGIN_PORT:-8281}:8081"
+
+  # PageSpeed factory worker
+  worker:
+    build:
+      context: ../../
+      dockerfile: tools/e2e/Dockerfile.e2e
+    entrypoint: ["/entrypoint-probe-worker.sh"]
+    environment:
+      - ASYNC_CSS_PROBE_FORCE=${ASYNC_CSS_PROBE_FORCE:-0}
+      # Read by the canonical entrypoint; empty means "leave the default".
+      - PAGESPEED_ASYNC_CSS_MIN_COVERAGE=${PAGESPEED_ASYNC_CSS_MIN_COVERAGE:-}
+      # Host name visitors use (the published port) -> where the worker reaches
+      # nginx on the compose network; see entrypoint-probe-worker.sh.
+      - PROBE_VISITOR_HOST=localhost:${PROBE_NGINX_PORT:-8280}
+      - PROBE_WORKER_HOST=nginx:8080
+    volumes:
+      - shared:/shared
+      - ./entrypoint-probe-worker.sh:/entrypoint-probe-worker.sh:ro
+    depends_on:
+      - origin
+
+  # Nginx with pagespeed module
+  nginx:
+    build:
+      context: ../../
+      dockerfile: tools/e2e/Dockerfile.e2e
+    command: ["nginx", "-c", "/etc/nginx/nginx-probe.conf", "-g", "daemon off;"]
+    ports:
+      - "${PROBE_NGINX_PORT:-8280}:8080"
+    volumes:
+      - shared:/shared
+      - ./nginx-probe.conf:/etc/nginx/nginx-probe.conf:ro
+    depends_on:
+      - origin
+      - worker
+
+volumes:
+  shared:

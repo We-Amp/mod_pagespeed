@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<!-- SPDX-License-Identifier: Apache-2.0
+     Copyright (c) 2024-2026 We-Amp B.V. -->
+
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PageSpeed Browser E2E Test Page</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/responsive.css">
+  <style>
+    body { margin: 0; padding: 20px; font-family: sans-serif; }
+    h1 { color: #333; }
+    .hero { background: #0066cc; color: white; padding: 40px; }
+    #js-output { color: #666; padding: 10px; border: 1px solid #ddd; }
+    #test-button { padding: 10px 20px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <header>
+    <nav>
+      <a href="/">Home</a>
+      <a href="/about">About</a>
+    </nav>
+  </header>
+
+  <div class="hero">
+    <h1>mod_pagespeed Browser Test</h1>
+    <p>This page tests browser rendering after optimization.</p>
+  </div>
+
+  <main>
+    <section id="images" class="content-section">
+      <h2>Image Tests</h2>
+      <img id="img-jpeg" src="/photo.jpg" alt="Test JPEG image" width="640" height="480">
+      <img id="img-gif" src="/animation.gif" alt="Animated GIF test" width="100" height="100">
+    </section>
+
+    <section id="js-tests" class="content-section">
+      <h2>JavaScript Tests</h2>
+      <div id="js-output">Waiting for JavaScript...</div>
+      <button id="test-button">Click me</button>
+      <ul id="dynamic-list"></ul>
+    </section>
+
+    <section id="layout-test" class="content-section responsive-container">
+      <h2>Layout Test</h2>
+      <p>This section tests responsive layout behavior.</p>
+      <span class="desktop-only">Desktop content</span>
+      <span class="mobile-only">Mobile content</span>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+  <script src="/interactive.js"></script>
+</body>
+</html>

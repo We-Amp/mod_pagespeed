@@ -1,0 +1,179 @@
+{
+  "name": "@pagespeed/vscode-shell",
+  "displayName": "PageSpeed Workbench",
+  "description": "Web performance tuning for mod_pagespeed",
+  "version": "0.1.0",
+  "publisher": "we-amp",
+  "private": true,
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "pagespeed",
+          "title": "PageSpeed",
+          "icon": "$(dashboard)"
+        }
+      ]
+    },
+    "views": {
+      "pagespeed": [
+        {
+          "id": "pagespeed.connection",
+          "name": "Connection"
+        },
+        {
+          "id": "pagespeed.urls",
+          "name": "URLs"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "pagespeed.connect",
+        "title": "PageSpeed: Connect"
+      },
+      {
+        "command": "pagespeed.disconnect",
+        "title": "PageSpeed: Disconnect"
+      },
+      {
+        "command": "pagespeed.setToken",
+        "title": "PageSpeed: Set API Token"
+      },
+      {
+        "command": "pagespeed.showDashboard",
+        "title": "PageSpeed: Show Dashboard"
+      },
+      {
+        "command": "pagespeed.showWaterfall",
+        "title": "PageSpeed: Show Waterfall"
+      },
+      {
+        "command": "pagespeed.showDiff",
+        "title": "PageSpeed: Show Visual Diff"
+      },
+      {
+        "command": "pagespeed.showConfig",
+        "title": "PageSpeed: Show Configuration"
+      },
+      {
+        "command": "pagespeed.inspectUrl",
+        "title": "PageSpeed: Inspect URL"
+      },
+      {
+        "command": "pagespeed.refreshUrls",
+        "title": "PageSpeed: Refresh URLs",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "pagespeed.purgeUrlFromTree",
+        "title": "PageSpeed: Purge URL"
+      },
+      {
+        "command": "pagespeed.reprocessUrlFromTree",
+        "title": "PageSpeed: Reprocess URL"
+      }
+    ],
+    "configuration": {
+      "title": "PageSpeed",
+      "properties": {
+        "pagespeed.apiUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:9880",
+          "description": "PageSpeed HTTP Management API URL"
+        },
+        "pagespeed.autoConnect": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically connect on extension activation"
+        },
+        "pagespeed.dashboardRefreshMs": {
+          "type": "number",
+          "default": 1000,
+          "description": "Dashboard stats refresh interval (ms)"
+        }
+      }
+    },
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "pagespeed.disconnect",
+          "when": "pagespeed.connected"
+        },
+        {
+          "command": "pagespeed.showDashboard",
+          "when": "pagespeed.connected"
+        },
+        {
+          "command": "pagespeed.showWaterfall",
+          "when": "pagespeed.connected"
+        },
+        {
+          "command": "pagespeed.showDiff",
+          "when": "pagespeed.connected"
+        },
+        {
+          "command": "pagespeed.showConfig",
+          "when": "pagespeed.connected"
+        },
+        {
+          "command": "pagespeed.inspectUrl",
+          "when": "pagespeed.connected"
+        },
+        {
+          "command": "pagespeed.purgeUrlFromTree",
+          "when": "false"
+        },
+        {
+          "command": "pagespeed.reprocessUrlFromTree",
+          "when": "false"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "pagespeed.refreshUrls",
+          "when": "view == pagespeed.urls",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "pagespeed.purgeUrlFromTree",
+          "when": "view == pagespeed.urls && viewItem == url"
+        },
+        {
+          "command": "pagespeed.reprocessUrlFromTree",
+          "when": "view == pagespeed.urls && viewItem == url"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch",
+    "test": "vitest run --passWithNoTests",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@pagespeed/api-client": "workspace:*",
+    "@pagespeed/ui": "workspace:*"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.0.0",
+    "@types/vscode": "^1.96.0",
+    "svelte": "^5.57.1",
+    "typescript": "^6.0.0",
+    "vite": "^8.3.8",
+    "vitest": "^4.1.12"
+  }
+}

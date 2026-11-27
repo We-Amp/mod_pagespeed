@@ -1,0 +1,52 @@
+# One PID namespace for every process that shares the cache volume. This
+# release's cache library is safe across PID namespaces, but older builds
+# recover a cross-process write lock from a holder whose PID looks gone, and
+# a live holder in another container's PID namespace does; sharing one keeps
+# mixed-build upgrades safe. Both services join `pidns`, which
+# runs the digest-pinned Kubernetes pause image and owns the namespace, so
+# restarting either never stops the other. Stopping or recreating `pidns`
+# stops both (`up -d` restarts them); its image never follows the release
+# tag, so an upgrade does not recreate it.
+services:
+  pidns:
+    image: registry.k8s.io/pause:3.10.1@sha256:278fb9dbcca9518083ad1e11276933a2e96f23de604a3a08cc3c80002767d24c
+    user: "65535:65535"
+    network_mode: none
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ../../../../
+      dockerfile: samples/aspnetcore/samples/DemoSite/Dockerfile
+      target: worker-runtime
+    pid: "service:pidns"
+    depends_on:
+      - pidns
+    shm_size: '256m'
+    volumes:
+      - shared:/shared
+    ports:
+      - "9980:9880"
+
+  aspnet:
+    build:
+      context: ../../../../
+      dockerfile: samples/aspnetcore/samples/DemoSite/Dockerfile
+      target: aspnet-runtime
+    pid: "service:pidns"
+    environment:
+      PAGESPEED_CACHE_PATH: /shared/cache.vol
+      PAGESPEED_SOCKET_PATH: /shared/pagespeed.sock
+    volumes:
+      - shared:/shared
+    ports:
+      - "5200:8080"
+    depends_on:
+      - pidns
+      - worker
+
+volumes:
+  shared:

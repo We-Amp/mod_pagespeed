@@ -1,0 +1,18 @@
+bin/
+obj/
+
+# Native binaries staged for NuGet packaging (build artifacts, not source)
+src/WeAmp.PageSpeed.NativeAssets.Linux/runtimes/linux-x64/native/*
+src/WeAmp.PageSpeed.NativeAssets.macOS/runtimes/osx-arm64/native/*
+src/WeAmp.PageSpeed.NativeAssets.Windows/runtimes/win-x64/native/*
+!src/WeAmp.PageSpeed.NativeAssets.*/runtimes/**/native/.gitkeep
+
+# Old runtimes location (moved to NativeAssets projects)
+src/WeAmp.PageSpeed/runtimes/
+
+# Native assets staged next to the test project by E2E tooling (build
+# artifacts; the test-output copy under bin/ is already covered above)
+test/WeAmp.PageSpeed.AspNetCore.Tests/runtimes/
+
+# NuGet package output
+nupkg/

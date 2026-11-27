@@ -1,0 +1,74 @@
+{
+  "pack": {
+    "id": "edge-seo",
+    "version": "1.0.0",
+    "publisher": "we-amp",
+    "engine_min": "1.18.0",
+    "description": "Template: canonical, title, description, hreflang and JSON-LD rules; replace every example.com value with your own"
+  },
+  "sites": [
+    { "host": "www.example.com", "mode": "report" }
+  ],
+  "defaults": { "paths": ["/**"], "exclude_paths": ["/admin/**"] },
+  "tables": {
+    "titles": {
+      "/": "Example home page title",
+      "/about": "About Example"
+    },
+    "descriptions": {
+      "/": "Example description of the home page.",
+      "/about": "Example description of the about page."
+    },
+    "hreflang": [
+      {
+        "en": "https://www.example.com/en/",
+        "de": "https://www.example.com/de/",
+        "x-default": "https://www.example.com/en/"
+      }
+    ]
+  },
+  "rules": [
+    {
+      "id": "canonical-all",
+      "kind": "canonical",
+      "enabled": true,
+      "enforce": false,
+      "value": { "template": "https://www.example.com{path}" },
+      "on_present": "keep"
+    },
+    {
+      "id": "title-from-table",
+      "kind": "title",
+      "enabled": true,
+      "enforce": false,
+      "value": { "table": "titles" },
+      "on_present": "keep"
+    },
+    {
+      "id": "description-from-table",
+      "kind": "description",
+      "enabled": true,
+      "enforce": false,
+      "value": { "table": "descriptions" },
+      "on_present": "keep"
+    },
+    {
+      "id": "hreflang-cluster",
+      "kind": "hreflang",
+      "enabled": true,
+      "enforce": false,
+      "match": { "paths": ["/en/", "/de/"] },
+      "value": { "table": "hreflang" },
+      "on_present": "keep"
+    },
+    {
+      "id": "jsonld-organization",
+      "kind": "jsonld",
+      "enabled": true,
+      "enforce": false,
+      "match": { "paths": ["/"] },
+      "value": { "template": "{\"@context\":\"https://schema.org\",\"@type\":\"Organization\",\"name\":\"Example\",\"url\":\"{canonical}\"}" },
+      "on_present": "keep"
+    }
+  ]
+}

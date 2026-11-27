@@ -1,0 +1,611 @@
+{
+  "_comment": "Hand-maintained facts the module source does not carry: the content-type category each filter is documented under (Image, CSS, JavaScript, HTML, Caching), the risk rating from these docs (Generally safe, Test first, Experimental, Deprecated; null when the docs state none), a one-line summary for the filters table, and a short note. Membership, dangerous/deprecated status and names come from the source; see generate-references.mjs.",
+  "filters": {
+    "add_base_tag": {
+      "category": "HTML",
+      "summary": "Adds a <base href> for the page URL so relative URLs resolve against it",
+      "risk": null,
+      "note": null
+    },
+    "add_head": {
+      "category": "HTML",
+      "summary": "Adds <head> element if missing",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "add_ids": {
+      "category": "HTML",
+      "summary": "Adds id attributes to elements that have none, for beacon-driven filters",
+      "risk": null,
+      "note": null
+    },
+    "add_instrumentation": {
+      "category": "HTML",
+      "summary": "Injects JavaScript to measure page load time",
+      "risk": "Test first",
+      "note": null
+    },
+    "cache_partial_html": {
+      "category": "HTML",
+      "summary": "Deprecated no-op: accepted for compatibility, does nothing",
+      "risk": null,
+      "note": null
+    },
+    "canonicalize_javascript_libraries": {
+      "category": "JavaScript",
+      "summary": "Replaces recognized JavaScript libraries with a canonical CDN URL",
+      "risk": null,
+      "note": "Targets the Google Hosted Libraries CDN; listed as deprecated in these docs."
+    },
+    "collapse_whitespace": {
+      "category": "HTML",
+      "summary": "Removes excess whitespace from HTML",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "combine_css": {
+      "category": "CSS",
+      "summary": "Combines multiple CSS files into one",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "combine_heads": {
+      "category": "HTML",
+      "summary": "Merges multiple <head> elements",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "combine_javascript": {
+      "category": "JavaScript",
+      "summary": "Combines multiple JS files into one",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "compute_critical_css": {
+      "category": "CSS",
+      "summary": "Computes critical CSS in the background (experimental; prefer prioritize_critical_css)",
+      "risk": null,
+      "note": null
+    },
+    "compute_statistics": {
+      "category": "HTML",
+      "summary": "Computes HTML statistics for the admin console",
+      "risk": null,
+      "note": null
+    },
+    "convert_gif_to_png": {
+      "category": "Image",
+      "summary": "Converts GIF to PNG",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "convert_jpeg_to_avif": {
+      "category": "Image",
+      "summary": "Converts photographic JPEG to AVIF for capable browsers",
+      "risk": "Test first",
+      "note": null
+    },
+    "convert_jpeg_to_progressive": {
+      "category": "Image",
+      "summary": "Converts large JPEGs to progressive format",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "convert_jpeg_to_webp": {
+      "category": "Image",
+      "summary": "Converts JPEG to WebP for capable browsers",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "convert_meta_tags": {
+      "category": "HTML",
+      "summary": "Adds HTTP headers from <meta http-equiv> tags",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "convert_png_to_jpeg": {
+      "category": "Image",
+      "summary": "Converts opaque photographic PNGs to lossy WebP or JPEG",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "convert_to_avif_animated": {
+      "category": "Image",
+      "summary": "Converts animated images to AVIF",
+      "risk": "Test first",
+      "note": null
+    },
+    "convert_to_avif_lossless": {
+      "category": "Image",
+      "summary": "Converts PNG/GIF to lossless AVIF",
+      "risk": "Test first",
+      "note": null
+    },
+    "convert_to_webp_animated": {
+      "category": "Image",
+      "summary": "Converts animated GIF to WebP",
+      "risk": "Test first",
+      "note": null
+    },
+    "convert_to_webp_lossless": {
+      "category": "Image",
+      "summary": "Converts PNG/GIF graphics (not photos) to lossless WebP",
+      "risk": "Test first",
+      "note": null
+    },
+    "debug": {
+      "category": "HTML",
+      "summary": "Annotates the page with comments explaining rewriting decisions",
+      "risk": null,
+      "note": null
+    },
+    "decode_rewritten_urls": {
+      "category": "HTML",
+      "summary": "Turns .pagespeed. resource URLs back into their original URLs",
+      "risk": null,
+      "note": null
+    },
+    "dedup_inlined_images": {
+      "category": "Image",
+      "summary": "Replaces repeated inlined images with JS reference",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "defer_iframe": {
+      "category": "HTML",
+      "summary": "Deprecated no-op: iframe deferral is part of defer_javascript",
+      "risk": null,
+      "note": null
+    },
+    "defer_javascript": {
+      "category": "JavaScript",
+      "summary": "Defers JS execution until after page load",
+      "risk": "Test first",
+      "note": null
+    },
+    "deterministic_js": {
+      "category": "JavaScript",
+      "summary": "Makes Date and Math.random deterministic, for measurement runs",
+      "risk": null,
+      "note": null
+    },
+    "disable_javascript": {
+      "category": "JavaScript",
+      "summary": "Disables scripts by placing them inside noscript tags",
+      "risk": null,
+      "note": null
+    },
+    "div_structure": {
+      "category": "HTML",
+      "summary": "Deprecated no-op: accepted for compatibility, does nothing",
+      "risk": null,
+      "note": null
+    },
+    "elide_attributes": {
+      "category": "HTML",
+      "summary": "Removes default-value HTML attributes",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "experiment_collect_mob_image_info": {
+      "category": "Image",
+      "summary": "Experiment: collects image information for mobilization",
+      "risk": null,
+      "note": null
+    },
+    "experiment_http2": {
+      "category": "HTML",
+      "summary": "Experiment: HTTP/2-specific features in development",
+      "risk": null,
+      "note": null
+    },
+    "explicit_close_tags": {
+      "category": "HTML",
+      "summary": "Deprecated no-op: accepted for compatibility, does nothing",
+      "risk": null,
+      "note": null
+    },
+    "extend_cache": {
+      "category": "Caching",
+      "summary": "Content-hashed URLs with a 1-year browser cache for CSS, images and scripts",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "extend_cache_css": {
+      "category": "CSS",
+      "summary": "Content-hashed URLs with a 1-year browser cache for stylesheets",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "extend_cache_images": {
+      "category": "Image",
+      "summary": "Content-hashed URLs with a 1-year browser cache for images",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "extend_cache_pdfs": {
+      "category": "Caching",
+      "summary": "Cache extension for PDF links",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "extend_cache_scripts": {
+      "category": "JavaScript",
+      "summary": "Content-hashed URLs with a 1-year browser cache for scripts",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "fallback_rewrite_css_urls": {
+      "category": "CSS",
+      "summary": "Rewrites resource URLs in unparseable CSS",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "fix_reflows": {
+      "category": "HTML",
+      "summary": "Experimental reflow fix for deferred JavaScript",
+      "risk": null,
+      "note": null
+    },
+    "flatten_css_imports": {
+      "category": "CSS",
+      "summary": "Inlines CSS @import rules",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "flush_subresources": {
+      "category": "HTML",
+      "summary": "Deprecated no-op: accepted for compatibility, does nothing",
+      "risk": null,
+      "note": null
+    },
+    "hint_preload_subresources": {
+      "category": "HTML",
+      "summary": "Adds Link: rel=preload headers",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "in_place_optimize_for_browser": {
+      "category": "Image",
+      "summary": "Browser-specific in-place optimization",
+      "risk": null,
+      "note": "Retired: the name is still accepted (with a warning) but has no effect, because the module's own in-place path optimizes an image identically for every client. It does not control format negotiation: with the optimizer worker attached, in-place images are still served in the format the request's Accept header selects, with Vary: Accept."
+    },
+    "include_js_source_maps": {
+      "category": "JavaScript",
+      "summary": "Preserves JavaScript source maps",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "inline_css": {
+      "category": "CSS",
+      "summary": "Inlines small external CSS into HTML",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "inline_google_font_css": {
+      "category": "CSS",
+      "summary": "Inlines Google Fonts CSS",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "inline_images": {
+      "category": "Image",
+      "summary": "Inlines small images as data: URIs",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "inline_import_to_link": {
+      "category": "CSS",
+      "summary": "Converts <style>@import</style> to <link>",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "inline_javascript": {
+      "category": "JavaScript",
+      "summary": "Inlines small external JS into HTML",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "inline_preview_images": {
+      "category": "Image",
+      "summary": "Inserts low-quality image placeholders",
+      "risk": "Test first",
+      "note": null
+    },
+    "insert_amp_link": {
+      "category": "HTML",
+      "summary": "Adds a <link rel=amphtml> from AmpLinkPattern",
+      "risk": null,
+      "note": null
+    },
+    "insert_dns_prefetch": {
+      "category": "HTML",
+      "summary": "Adds <link rel=dns-prefetch> for third-party domains",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "insert_ga": {
+      "category": "HTML",
+      "summary": "Inserts the Google Analytics snippet for AnalyticsID (retired ga.js)",
+      "risk": "Deprecated",
+      "note": "Inserts the retired ga.js Google Analytics snippet."
+    },
+    "insert_image_dimensions": {
+      "category": "Image",
+      "summary": "Adds width and height attributes to <img> tags",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "insert_img_dimensions": {
+      "category": "Image",
+      "summary": "Alternate spelling of insert_image_dimensions",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "insert_speculation_rules": {
+      "category": "HTML",
+      "summary": "Injects a same-origin prefetch speculation-rules script",
+      "risk": "Test first",
+      "note": null
+    },
+    "jpeg_subsampling": {
+      "category": "Image",
+      "summary": "Reduces chroma sampling to 4:2:0",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "lazyload_images": {
+      "category": "Image",
+      "summary": "Defers offscreen image loading",
+      "risk": "Generally safe",
+      "note": "Native mode (the default) is generally safe; test `js` mode first."
+    },
+    "left_trim_urls": {
+      "category": "HTML",
+      "summary": "Alternate spelling of trim_urls",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "local_storage_cache": {
+      "category": "Caching",
+      "summary": "Retired from 2.7.0: accepted and ignored, with a warning",
+      "risk": "Deprecated",
+      "note": "Retired in 2.7.0: the name is still accepted but has no effect, and enabling it logs a warning."
+    },
+    "make_google_analytics_async": {
+      "category": "JavaScript",
+      "summary": "Deprecated no-op: targeted the retired ga.js",
+      "risk": null,
+      "note": "Targets the retired ga.js."
+    },
+    "make_show_ads_async": {
+      "category": "JavaScript",
+      "summary": "Converts showads.js use to async adsbygoogle.js",
+      "risk": "Deprecated",
+      "note": "Targets the deprecated AdSense show_ads.js."
+    },
+    "mobilize": {
+      "category": "HTML",
+      "summary": "Experimental page mobilization (dangerous set)",
+      "risk": null,
+      "note": null
+    },
+    "mobilize_precompute": {
+      "category": "HTML",
+      "summary": "Deprecated no-op: accepted for compatibility, does nothing",
+      "risk": null,
+      "note": null
+    },
+    "move_css_above_scripts": {
+      "category": "CSS",
+      "summary": "Moves CSS <link> above <script> tags",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "move_css_to_head": {
+      "category": "CSS",
+      "summary": "Moves CSS <link> into <head>",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "outline_css": {
+      "category": "CSS",
+      "summary": "Externalizes large inline CSS blocks",
+      "risk": "Experimental",
+      "note": null
+    },
+    "outline_javascript": {
+      "category": "JavaScript",
+      "summary": "Externalizes large inline JS blocks",
+      "risk": "Experimental",
+      "note": null
+    },
+    "pedantic": {
+      "category": "HTML",
+      "summary": "Adds type attributes for HTML4 validation",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "prioritize_critical_css": {
+      "category": "CSS",
+      "summary": "Inlines the CSS a page uses, loads the rest async",
+      "risk": "Test first",
+      "note": null
+    },
+    "prioritize_critical_images": {
+      "category": "Image",
+      "summary": "Sets fetchpriority=high on the LCP image",
+      "risk": "Test first",
+      "note": null
+    },
+    "recompress_avif": {
+      "category": "Image",
+      "summary": "AVIF-specific recompression",
+      "risk": "Test first",
+      "note": null
+    },
+    "recompress_images": {
+      "category": "Image",
+      "summary": "Recompresses and converts images in every format (enables the sub-filters)",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "recompress_jpeg": {
+      "category": "Image",
+      "summary": "JPEG-specific recompression",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "recompress_png": {
+      "category": "Image",
+      "summary": "PNG-specific recompression",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "recompress_webp": {
+      "category": "Image",
+      "summary": "WebP-specific recompression",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "remove_comments": {
+      "category": "HTML",
+      "summary": "Strips HTML comments",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "remove_quotes": {
+      "category": "HTML",
+      "summary": "Removes unnecessary attribute quotes",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "resize_images": {
+      "category": "Image",
+      "summary": "Resizes images to match <img> dimensions",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "resize_mobile_images": {
+      "category": "Image",
+      "summary": "Smaller placeholders for mobile",
+      "risk": "Test first",
+      "note": null
+    },
+    "resize_rendered_image_dimensions": {
+      "category": "Image",
+      "summary": "Resizes to rendered dimensions",
+      "risk": "Test first",
+      "note": null
+    },
+    "responsive_images": {
+      "category": "Image",
+      "summary": "Generates srcset for multiple resolutions",
+      "risk": "Test first",
+      "note": null
+    },
+    "responsive_images_zoom": {
+      "category": "Image",
+      "summary": "Adds the zoom-aware script for responsive_images srcsets",
+      "risk": null,
+      "note": null
+    },
+    "rewrite_css": {
+      "category": "CSS",
+      "summary": "Minifies CSS, rewrites embedded URLs",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "rewrite_domains": {
+      "category": "Caching",
+      "summary": "Applies domain mappings to original resources",
+      "risk": "Test first",
+      "note": null
+    },
+    "rewrite_images": {
+      "category": "Image",
+      "summary": "Master image optimization: recompress, convert, resize and inline (enables the sub-filters)",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "rewrite_javascript": {
+      "category": "JavaScript",
+      "summary": "Minifies external and inline JavaScript (enables both sub-filters)",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "rewrite_javascript_external": {
+      "category": "JavaScript",
+      "summary": "Minifies external JavaScript files",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "rewrite_javascript_inline": {
+      "category": "JavaScript",
+      "summary": "Minifies inline JavaScript",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "rewrite_style_attributes": {
+      "category": "CSS",
+      "summary": "Applies CSS rewriting to inline style attributes",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "rewrite_style_attributes_with_url": {
+      "category": "CSS",
+      "summary": "Same, only for styles containing url()",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "rule_packs": {
+      "category": "HTML",
+      "summary": "Applies a rule pack's rules for the canonical, title, description, hreflang and JSON-LD of a page",
+      "risk": null,
+      "note": "Off by default and in no rewrite level; a pack starts in report mode and changes nothing until enforced"
+    },
+    "split_html": {
+      "category": "HTML",
+      "summary": "Deprecated no-op: accepted for compatibility, does nothing",
+      "risk": null,
+      "note": null
+    },
+    "split_html_helper": {
+      "category": "HTML",
+      "summary": "Deprecated no-op: accepted for compatibility, does nothing",
+      "risk": null,
+      "note": null
+    },
+    "sprite_images": {
+      "category": "Image",
+      "summary": "Combines CSS background images into sprites",
+      "risk": "Test first",
+      "note": null
+    },
+    "strip_image_color_profile": {
+      "category": "Image",
+      "summary": "Removes ICC color profiles",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "strip_image_meta_data": {
+      "category": "Image",
+      "summary": "Removes EXIF and other metadata",
+      "risk": "Generally safe",
+      "note": null
+    },
+    "strip_scripts": {
+      "category": "JavaScript",
+      "summary": "Removes all scripts from the page, for measurement runs",
+      "risk": null,
+      "note": null
+    },
+    "trim_urls": {
+      "category": "HTML",
+      "summary": "Shortens URLs relative to base URL",
+      "risk": "Generally safe",
+      "note": null
+    }
+  }
+}

@@ -1,0 +1,39 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// Renders an X-Page-Speed / X-Mod-Pagespeed / X-PageSpeed response-header
+// example for docs pages with "verify it works" sections. None of them shows
+// a version: the modules send the generic value `on` by default (the version
+// only with the server-wide ExposeVersionInHeaders option), and the ASP.NET
+// Core middleware and the reverse proxy send the cache outcome, never a
+// version.
+//
+// Examples in MDX:
+//   <XPageSpeedExample line="2.1" surface="nginx" />
+//     → X-Page-Speed: on
+//   <XPageSpeedExample line="2.1" surface="apache" />
+//     → X-Mod-Pagespeed: on
+//   <XPageSpeedExample line="2.1" surface="middleware" />
+//     → X-PageSpeed: MISS   (HIT on the next request)
+//
+// `surface="middleware"` (and `line="2.0"`) render the cache-outcome form.
+
+interface Props {
+  line: '1.1' | '2.0' | '2.1';
+  surface?: 'nginx' | 'apache' | 'iis' | 'middleware';
+}
+
+const { line, surface = 'nginx' } = Astro.props;
+
+let header: string;
+if (surface === 'middleware' || line === '2.0') {
+  header = 'X-PageSpeed: MISS';
+} else if (surface === 'apache') {
+  header = 'X-Mod-Pagespeed: on';
+} else {
+  header = 'X-Page-Speed: on';
+}
+---
+
+<Fragment>{header}</Fragment>

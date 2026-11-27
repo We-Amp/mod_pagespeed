@@ -1,0 +1,507 @@
+---
+import { OG_DEFAULT_IMAGE_URL } from '../data/og-image';
+import BaseLayout from '../layouts/BaseLayout.astro';
+import Icon from '../components/Icon.astro';
+import TermPanel from '../components/instrument/TermPanel.astro';
+import InstallTabs from '../components/InstallTabs.astro';
+import { getRelease, artifactUrl, dockerTag } from '../lib/release';
+import { offerJsonLd } from '../data/offer-jsonld';
+import {
+  LICENSE_CLAUSE,
+  LICENSE_CLAUSE_CAP,
+  MODULE_APT_SHORT,
+  MODULE_PACKAGE_VERSION,
+  NGINX_APT_SHORT,
+  NGINX_RPM_SHORT,
+  LEGACY_1X_KEY,
+  RELEASE_KEY,
+  RELEASE_KEY_PAGE_URL,
+  RELEASE_VERIFY_URL,
+  REPOSITORY_KEY,
+  formatFingerprint,
+} from '../data/product-facts.mjs';
+import { productJsonLd } from '../data/software-jsonld';
+import VersionMap from '../components/release/VersionMap.astro';
+import PageHero from '../components/PageHero.astro';
+
+const rel21 = await getRelease('2.1');
+// The download page is where the version is the point: the title, the chip
+// above the integration grid and the versions section carry the exact release
+// from the manifest.
+const CURRENT_RELEASE = `mod_pagespeed ${rel21.release.semver}`;
+
+// The install commands shown under the heading. They repeat, character for
+// character, the commands the home page, the apt/yum page and the Docker
+// guide already show; test/sync/install-command-sync.test.ts fails when one
+// of them changes without the others.
+const REPOSITORY_INSTALL_COMMAND =
+  'curl -fsSL https://packages.modpagespeed.com/install.sh | sudo sh';
+const DOCKER_QUICK_TRY_COMMAND = String.raw`docker run --rm -p 80:80 \
+  --add-host=host.docker.internal:host-gateway \
+  -e BACKEND_HOST=host.docker.internal -e BACKEND_PORT=8081 \
+  ghcr.io/we-amp/pagespeed-combined:latest`;
+const installPlatforms = [
+  {
+    id: 'apache',
+    label: 'Apache',
+    command: REPOSITORY_INSTALL_COMMAND,
+    copyEvent: 'cta_download_cmd_apache',
+  },
+  {
+    id: 'nginx',
+    label: 'nginx',
+    command: REPOSITORY_INSTALL_COMMAND,
+    copyEvent: 'cta_download_cmd_nginx',
+  },
+  {
+    id: 'docker',
+    label: 'Docker',
+    command: DOCKER_QUICK_TRY_COMMAND,
+    copyEvent: 'cta_download_cmd_docker',
+  },
+];
+
+// The IIS installer is hosted on the module's GitHub release, not under
+// /releases/; its SHA256SUMS sits beside it on the same release.
+// The installer is a module artifact, so it carries the module package version,
+// which leads the release after a module-only update.
+const iisMsiUrl = artifactUrl(rel21, 'msi', 'win_x64', MODULE_PACKAGE_VERSION);
+const iisSumsUrl = iisMsiUrl.slice(0, iisMsiUrl.lastIndexOf('/') + 1) + 'SHA256SUMS';
+// Signing keys, each labelled by what it signs (product-facts.mjs).
+const RELEASE_FINGERPRINT = formatFingerprint(RELEASE_KEY.fingerprint);
+const REPOSITORY_FINGERPRINT = formatFingerprint(REPOSITORY_KEY.fingerprint);
+const LEGACY_1X_FINGERPRINT = formatFingerprint(LEGACY_1X_KEY.fingerprint);
+
+// Docker/Helm image tag via the shared resolver (see
+// src/components/release/ImageTag.astro for the MDX-side equivalent) — used
+// directly here since the 2.1 manifest declares no native artifact templates
+// and artifactUrl() would throw on this line.
+const rel21DockerTag = dockerTag(rel21);
+
+// Apache/nginx share the same deb/rpm distro support window;
+// nginx adds the version hint. EL8 is intentionally absent from the stock
+// channel — dropped 2026-05-21. The Apache card renders a concise
+// hand-written distro summary instead of the raw manifest join (that list is
+// now 11 entries long); apache_versions stays manifest-derived so the version
+// floor cannot drift.
+
+// One unified integration list. ASP.NET Core (in-process middleware + sidecar) is
+// merged in alongside the native-server modules so the page has a single "pick
+// your integration" grid, not a separate .NET section. requirements + the umami
+// event live on each entry so the grid renders straight from this array. `id`
+// is the card's anchor, so other pages can link straight to one integration.
+// Every card is the current release: the chip above the grid names it once.
+// Row order: current-line native integrations first (Apache, nginx), then
+// Docker, Helm, IIS, the ASP.NET Core middleware, and the sidecar.
+// Separate nginx.org lane package, named on the nginx card.
+const NGINXORG_PACKAGE = 'nginx-module-pagespeed-nginxorg';
+
+const integrations = [
+  {
+    id: 'apache',
+    name: 'Apache',
+    badge: 'Native module',
+    description:
+      'Prebuilt signed package from the apt/yum repository — apt-get on Debian and Ubuntu, dnf on Enterprise Linux. Drop-in replacement for the open-source build.',
+    requirements: `${MODULE_APT_SHORT} (amd64 + arm64); RHEL/AlmaLinux/Rocky 9 (x86_64 + aarch64) & 10 (x86_64); Apache ${rel21.compat.apache.apache_versions.join('/')}.`,
+    href: '/download/apt-yum/',
+    cta: 'Install on Apache',
+    umamiEvent: 'cta_download_apache',
+  },
+  {
+    id: 'nginx',
+    name: 'nginx',
+    badge: 'Native module',
+    description:
+      "Prebuilt signed dynamic module from the apt/yum repository, pinned to each distro's stock nginx. Loads alongside your existing nginx binary — no rebuild, no traffic detour.",
+    requirements: `${NGINX_APT_SHORT} (amd64 + arm64); RHEL/AlmaLinux/Rocky ${NGINX_RPM_SHORT} via dnf. Each module is pinned to its distro's exact stock nginx — running a different nginx version? Contact us for a matching build.`,
+    href: '/download/apt-yum/',
+    nginxorg: true,
+    cta: 'Install on nginx',
+    umamiEvent: 'cta_download_nginx',
+  },
+  {
+    id: 'docker',
+    name: 'nginx (Docker)',
+    badge: 'Reverse proxy',
+    description:
+      'Run the optimizer worker and an nginx with the thin nginx module as Docker containers in front of your origin. The image brings its own nginx and module, so your nginx binary and config stay as they are.',
+    requirements: `Any host with Docker 24+ (Linux, macOS, Windows). Images: ${rel21.artifacts.docker.image}:${rel21DockerTag} and ${rel21.artifacts.docker.worker_image}:${rel21DockerTag}.`,
+    href: '/docs/installation-docker/',
+    cta: 'Install guide',
+    umamiEvent: 'cta_download_nginx_docker',
+  },
+  {
+    id: 'helm',
+    name: 'Helm',
+    badge: 'Kubernetes',
+    description:
+      'Official Helm chart deploys nginx and the worker as a two-container pod, sharing a Cyclone cache volume. Pulls the public images directly — no registry credentials required.',
+    requirements: `Kubernetes ${rel21.compat.kubernetes.versions[0]}, Helm ${rel21.compat.kubernetes.helm_versions[0]}. Chart: ${rel21.artifacts.helm.chart} (${rel21.artifacts.helm.repository}).`,
+    href: '/docs/helm-deployment/',
+    cta: 'Helm guide',
+    umamiEvent: 'cta_download_helm',
+  },
+  {
+    id: 'iis',
+    name: 'IIS',
+    badge: 'Native module',
+    description:
+      'MSI installer for Windows Server. Enable in IIS Manager, iisreset, and the optimization pipeline is live.',
+    note: 'Running IISpeed? Uninstall it first — both modules cannot coexist on the same host. The installer takes every IIS site on the server down while it runs; see the maintenance-window note in the install guide.',
+    requirements: `${rel21.compat.iis.os.join(', ')}, IIS ${rel21.compat.iis.iis_versions.join('/')}, x64`,
+    href: '/docs/install-iis/',
+    cta: 'Install guide',
+    umamiEvent: 'cta_download_iis',
+  },
+  {
+    id: 'aspnet-core',
+    name: 'ASP.NET Core',
+    badge: 'NuGet middleware',
+    description:
+      'Two lines in Program.cs add the optimization pipeline to any ASP.NET Core app. Runs in-process — no sidecar, no Docker.',
+    requirements: '.NET 8 or .NET 10 on Windows, Linux, or macOS.',
+    href: '/docs/aspnet-getting-started/',
+    cta: 'Install guide',
+    umamiEvent: 'cta_download_aspnet',
+  },
+  {
+    id: 'sidecar',
+    name: 'ASP.NET Core Sidecar',
+    badge: 'NuGet · Linux',
+    description:
+      'WeAmp.PageSpeed.Sidecar adds the current mod_pagespeed module to your Kestrel app via middleware, with a bundled nginx optimizer on loopback behind it. One dotnet add package pulls the native binaries.',
+    note: 'Now GA. Want the classic nginx-module behavior under .NET? Start here.',
+    requirements: '.NET 8 or .NET 10 on Linux (linux-x64, linux-arm64).',
+    href: '/docs/aspnet-getting-started/#the-sidecar-weamppagespeedsidecar',
+    cta: 'Sidecar guide',
+    umamiEvent: 'cta_download_aspnet_sidecar',
+  },
+];
+
+const jsonLd = await productJsonLd({
+  image: OG_DEFAULT_IMAGE_URL,
+  offers: offerJsonLd({
+    url: 'https://modpagespeed.com/download/',
+  }),
+});
+---
+
+<BaseLayout
+  title={`Download ${CURRENT_RELEASE} — Apache, nginx, Docker & Helm`}
+  description={`Signed apt/yum packages for Apache and nginx, Docker and Helm, ASP.NET Core middleware and the IIS module. ${LICENSE_CLAUSE_CAP}.`}
+  jsonLd={jsonLd}
+>
+  <PageHero title="Pick your integration. Install in a few minutes.">
+    <div id="install" class="mt-8 max-w-2xl">
+      <InstallTabs
+        name="install"
+        groupLabel="Select platform"
+        copyLabel="Copy install command"
+        platforms={installPlatforms}
+      />
+    </div>
+    <p class="lede mt-8 max-w-2xl">
+      {LICENSE_CLAUSE_CAP} — free to install and run, in development and in production.
+    </p>
+    <p class="mt-4 max-w-2xl text-small text-text-muted">
+      Already running mod_pagespeed 1.x or ngx_pagespeed? Your pagespeed directives carry over.{' '}
+      <a
+        href="/docs/upgrade/"
+        data-umami-event="cta_download_upgrade"
+        class="text-interactive hover:text-interactive-hover underline"
+      >
+        Upgrade guide <span aria-hidden="true">&rarr;</span>
+      </a>
+    </p>
+  </PageHero>
+
+  <!-- One merged "pick your integration" section: native servers + Docker/Helm + ASP.NET Core -->
+  <section id="integrations" class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 pt-8 lg:pt-12">
+    <h2 class="h2-section text-text-body">Apache, nginx, Docker, Helm, IIS &amp; ASP.NET Core</h2>
+    <p class="mt-4 max-w-3xl text-text-muted">
+      Apache and nginx get a native module from the signed apt/yum repository. Docker runs a
+      container fronting nginx, with a Helm chart for Kubernetes. Windows/IIS gets a signed
+      installer. ASP.NET Core gets a NuGet middleware or a Linux sidecar. Each card shows which
+      package it comes from and how it integrates.
+    </p>
+    <p class="mt-3 text-small text-text-annotation inline-flex items-center gap-3">
+      <span class="inline-flex items-center rounded-md border border-border-strong bg-bg-secondary px-2 py-0.5 text-micro text-text-body">
+        {rel21.display.badge_version}
+      </span>
+      <a
+        href="/docs/release-notes/"
+        class="text-interactive hover:text-interactive-hover underline"
+      >
+        see release notes
+      </a>
+    </p>
+    <div class="mt-8 grid grid-cols-1 md:grid-cols-2 gap-6">
+      {/* The whole card is clickable, but only the title is the link (a
+          stretched link, see .card-stretch in global.css): a link wrapped
+          around the card would be named with every word on it. */}
+      {integrations.map((integration, index) => (
+        <div
+          id={integration.id}
+          class:list={[
+            'card card-stretch flex flex-col',
+            // Full-width final card: 7 cards in 2 columns orphans the last
+            // one on its own half-empty row — give it the whole row instead.
+            index === integrations.length - 1 && 'md:col-span-2',
+          ]}
+        >
+          <div class="flex items-baseline justify-between gap-3">
+            <h3 class="text-xl font-semibold text-text-body">
+              <a
+                href={integration.href}
+                data-umami-event={integration.umamiEvent}
+                class="card-stretch-link"
+              >
+                {integration.name}
+              </a>
+            </h3>
+          </div>
+          <p class="mt-2 text-micro font-semibold uppercase tracking-wide text-text-body">
+            {integration.badge}
+          </p>
+          <p class="mt-4 text-body text-text-body">{integration.description}</p>
+          {integration.note && (
+            <p class="mt-3 text-small italic text-text-annotation">{integration.note}</p>
+          )}
+          <p
+            class:list={['mt-3 text-small text-text-annotation', !integration.nginxorg && 'flex-1']}
+          >
+            {integration.requirements}
+          </p>
+          {integration.nginxorg && (
+            <p class="mt-3 text-small text-text-annotation flex-1">
+              Running nginx.org's stable nginx or the official nginx Docker image? Install{' '}
+              <code class="rounded bg-bg-elevated px-1 py-0.5 text-small">{NGINXORG_PACKAGE}</code>{' '}
+              instead; see{' '}
+              <a
+                href="/docs/installation-module/#nginxorgs-nginx-and-the-nginx-docker-image"
+                class="relative z-10 text-interactive hover:text-interactive-hover underline"
+              >
+                the nginx.org install steps
+              </a>
+              . It is built for stable only (no mainline build), amd64 only, with no Enterprise
+              Linux 10 build.
+            </p>
+          )}
+          <p class="mt-6 text-small">
+            <span class="link-arrow">{integration.cta}</span>
+          </p>
+        </div>
+      ))}
+    </div>
+    <p class="mt-6 text-body text-text-muted">
+      After install, open the admin console at{' '}
+      <code class="rounded bg-bg-elevated px-1 py-0.5 text-small">/pagespeed_global_admin</code> on
+      the server itself. The Apache package serves it to localhost out of the box; on nginx,{' '}
+      <a
+        href="/docs/installation-module/#native-nginx-module"
+        class="text-interactive hover:text-interactive-hover underline"
+      >
+        turn it on first
+      </a>
+      .
+    </p>
+    <p class="mt-6 text-body text-text-muted">
+      Also available: the{' '}
+      <a href="/docs/install-envoy/" class="text-interactive underline">
+        Envoy HTTP filter
+      </a>{' '}
+      (experimental, built from source) and the{' '}
+      <a href="/wordpress/" class="text-interactive underline">
+        WordPress plugin
+      </a>
+      .
+    </p>
+    <p class="mt-6 text-small text-text-annotation">
+      The Apache and nginx packages keep their existing 1.15-line names — your apt/dnf upgrades them
+      in place, no rename needed.
+    </p>
+
+    <!-- Direct downloads -->
+    <div id="direct-downloads" class="mt-10 rounded-card border border-border bg-bg-secondary p-6">
+      <h3 class="text-base font-semibold text-text-body">Direct downloads</h3>
+      <p class="mt-2 text-body text-text-muted">
+        The supported way to install is the{' '}
+        <a href="/download/apt-yum/" class="text-interactive underline">
+          signed package repositories
+        </a>
+        ; for IIS, download the{' '}
+        <a href={iisMsiUrl} class="text-interactive underline">
+          Windows installer
+        </a>{' '}
+        ({MODULE_PACKAGE_VERSION}, hosted on the module's GitHub release beside its{' '}
+        <a href={iisSumsUrl} class="text-interactive underline">
+          SHA256SUMS
+        </a>
+        ) and follow the{' '}
+        <a href="/docs/install-iis/" class="text-interactive underline">
+          install guide
+        </a>
+        ; the installer takes every IIS site on the server down while it runs, so read its{' '}
+        <a href="/docs/install-iis/#install-the-module" class="text-interactive underline">
+          maintenance-window note
+        </a>{' '}
+        first. The worker packages (deb, rpm and Windows zip, with a checksum list) of every release
+        are on the project's{' '}
+        <a
+          href="https://github.com/We-Amp/pagespeed-optimizer/releases/latest"
+          class="text-interactive underline"
+        >
+          release listing
+        </a>
+        .
+      </p>
+      <p id="verify-the-installer" class="mt-3 text-body text-text-muted">
+        <strong class="text-text-body">Verifying the Windows installer.</strong> The release's{' '}
+        <code class="text-small">SHA256SUMS.asc</code> is a GPG signature of its{' '}
+        <code class="text-small">SHA256SUMS</code>, made with the{' '}
+        <a href={RELEASE_KEY_PAGE_URL} class="text-interactive underline">
+          release signing key
+        </a>{' '}
+        (fingerprint <code class="text-small break-all">{RELEASE_FINGERPRINT}</code>): the signature
+        verifies the checksum file, and the checksum file then verifies the MSI. The steps are in{' '}
+        <a href={RELEASE_VERIFY_URL} class="text-interactive underline">
+          Verifying a Release
+        </a>
+        . On Windows, the MSI's own Authenticode signature, publisher "We-Amp B.V.", remains the
+        check for the installer itself.
+      </p>
+      <p class="mt-3 text-body text-text-muted">
+        The apt and dnf repositories are signed with a different key, the{' '}
+        <a href={REPOSITORY_KEY.public_url} class="text-interactive underline">
+          repository signing key
+        </a>{' '}
+        (fingerprint <code class="text-small break-all">{REPOSITORY_FINGERPRINT}</code>), which the{' '}
+        <a href="/download/apt-yum/" class="text-interactive underline">
+          apt/yum page
+        </a>{' '}
+        sets up; it does not sign the GitHub release files.
+      </p>
+      <p class="mt-3 text-small text-text-annotation">
+        An older key, fingerprint <code class="break-all">{LEGACY_1X_FINGERPRINT}</code>, signed the
+        1.x direct downloads (per-file <code>.asc</code>) and the source tags v2.1.0 to v2.4.0. It
+        signs nothing new from 20 October 2026 and is being revoked: use it only to check those
+        older signatures, and treat any signature it made after that date as not ours.
+      </p>
+    </div>
+  </section>
+
+  <!-- Other integration paths: nginx walkthrough + IISpeed transfer CTA -->
+  <section id="versions" class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 pt-16">
+    <h2 class="h2-section text-text-body">Versions</h2>
+    <p class="mt-4 max-w-3xl text-text-muted">
+      The version each artifact carries, per release. The current release is {CURRENT_RELEASE}.
+    </p>
+    <VersionMap />
+  </section>
+
+  <section class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 pt-16 pb-20">
+    <h2 class="text-base font-semibold text-text-body">Other integration paths</h2>
+    <p class="mt-3 text-body text-text-muted">
+      The{' '}
+      <a
+        href="/docs/installation-module/#native-nginx-module"
+        class="text-interactive hover:text-interactive-hover underline"
+      >
+        nginx install guide
+      </a>{' '}
+      has the full walkthrough for the native module.
+    </p>
+    <p class="mt-3 text-body text-text-muted">
+      IISpeed customer? Contact us about moving to mod_pagespeed — IIS deployments run on the native
+      Windows module, a signed installer on the mod_pagespeed GitHub release.{' '}
+      <a
+        href="/contact/?topic=iispeed-transfer"
+        data-umami-event="cta_commercial"
+        data-umami-event-offer="support"
+        data-umami-event-surface="download"
+        data-umami-event-position="iispeed_transfer"
+        class="text-interactive hover:text-interactive-hover underline"
+      >
+        Arrange your no-cost transfer
+      </a>
+      .
+    </p>
+  </section>
+
+  <section class="border-t border-border section">
+    <div class="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
+      <h2 class="text-2xl font-bold text-text-body text-center">How licensing and support work</h2>
+      <dl class="mt-10 mx-auto max-w-prose space-y-6 text-body text-text-muted">
+        <div>
+          <dt class="font-semibold text-text-body flex items-center gap-2">
+            <Icon name="tag" class="h-4 w-4 text-interactive shrink-0" />
+            Pricing
+          </dt>
+          <dd class="mt-1">
+            Free &mdash; {LICENSE_CLAUSE}, with no usage registration. What We-Amp sells is{' '}
+            <a
+              href="/pricing/"
+              data-umami-event="cta_commercial"
+              data-umami-event-offer="support"
+              data-umami-event-surface="download"
+              data-umami-event-position="licensing_pricing"
+              class="text-interactive hover:text-interactive-hover underline"
+            >
+              support
+            </a>
+            ; the software and its signed packages are the same for everyone. No per-request fees,
+            no bandwidth metering.
+          </dd>
+        </div>
+        <div>
+          <dt class="font-semibold text-text-body flex items-center gap-2">
+            <Icon name="circle-play" class="h-4 w-4 text-interactive shrink-0" />
+            Evaluation
+          </dt>
+          <dd class="mt-1">
+            There is nothing to evaluate against a clock — the software is free, in full, under
+            Apache-2.0. Install it, measure the results on your own pages, and add a{' '}
+            <a
+              href="/pricing/"
+              data-umami-event="cta_commercial"
+              data-umami-event-offer="support"
+              data-umami-event-surface="download"
+              data-umami-event-position="licensing_evaluation"
+              class="text-interactive hover:text-interactive-hover underline"
+            >
+              support plan
+            </a>{' '}
+            when you want support from the people who build it.
+          </dd>
+        </div>
+        <div>
+          <dt class="font-semibold text-text-body flex items-center gap-2">
+            <Icon name="server" class="h-4 w-4 text-interactive shrink-0" />
+            Hosting
+          </dt>
+          <dd class="mt-1">
+            Runs on your servers. No third-party proxy, no CDN dependency, no external service in
+            your request path. The software is{' '}
+            <a href="/license/" class="text-interactive hover:text-interactive-hover underline">
+              {LICENSE_CLAUSE}
+            </a>
+            .
+          </dd>
+        </div>
+      </dl>
+      <div class="mt-10 text-center">
+        <a
+          href="/support/"
+          data-umami-event="cta_commercial"
+          data-umami-event-offer="support"
+          data-umami-event-surface="download"
+          data-umami-event-position="footer_support_plans"
+          class="link-arrow text-small"
+        >
+          See support plans
+        </a>
+      </div>
+    </div>
+  </section>
+</BaseLayout>

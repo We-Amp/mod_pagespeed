@@ -1,0 +1,130 @@
+---
+// Static social-share buttons. No third-party tracking JS — every target is a
+// plain share-intent <a href>; only Copy-link uses a tiny inline script.
+// Canonical URL is derived from Astro.site + the current path unless overridden.
+// `surface` (e.g. "blog" / "docs") rides along on the umami `share` event so
+// shares can be segmented by page type in the dashboard.
+//
+// Visual intent: a raised NEUTRAL panel (bg-elevated) — deliberately quieter
+// than the accent-tinted product CTA that follows it, so the two read as a
+// hierarchy, not two competing call-outs. Visibility comes from the panel +
+// titled heading + larger body-coloured icon chips + one tonal-accent Copy
+// link, not from out-shouting the conversion CTA.
+interface Props {
+  title: string;
+  url?: string;
+  surface: string;
+}
+
+import { buildShareTargets } from '../data/share-targets';
+
+const { title, url, surface } = Astro.props;
+const shareUrl = url ?? new URL(Astro.url.pathname, Astro.site).href;
+
+const targets = buildShareTargets(shareUrl, title);
+---
+
+<aside class="not-prose mt-10 rounded-card border border-border bg-bg-elevated p-5 sm:flex sm:items-center sm:justify-between sm:gap-6 sm:p-6">
+  <div class="flex items-start gap-2.5">
+    <svg
+      class="mt-0.5 h-5 w-5 shrink-0 text-interactive"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+    >
+      <path d="M3.478 2.404a.75.75 0 0 0-.926.941l2.432 7.905H13.5a.75.75 0 0 1 0 1.5H4.984l-2.432 7.905a.75.75 0 0 0 .926.94 60.519 60.519 0 0 0 18.445-8.986.75.75 0 0 0 0-1.218A60.517 60.517 0 0 0 3.478 2.404Z"></path>
+    </svg>
+    <div>
+      <p class="text-sm font-semibold text-text-body">Share this page</p>
+      <p class="mt-0.5 text-xs text-text-muted">
+        Found this useful? Send it to someone who’d want it.
+      </p>
+    </div>
+  </div>
+
+  <div class="mt-4 flex flex-wrap items-center gap-2 sm:mt-0 sm:shrink-0">
+    <button
+      type="button"
+      data-share-copy
+      data-share-url={shareUrl}
+      aria-label="Copy link"
+      title="Copy link"
+      data-umami-event="share"
+      data-umami-event-network="copy"
+      data-umami-event-surface={surface}
+      class="order-first inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-interactive/30 bg-interactive/10 px-4 text-sm font-medium text-interactive transition-colors hover:border-interactive/50 hover:bg-interactive/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-offset-2 focus-visible:ring-offset-bg-elevated sm:order-none sm:w-auto"
+    >
+      <svg
+        class="h-4 w-4"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+      </svg>
+      <span data-share-copy-label>Copy link</span>
+    </button>
+    {targets.map((target) => (
+      <a
+        href={target.href}
+        target={target.name === 'Email' ? undefined : '_blank'}
+        rel={target.name === 'Email' ? undefined : 'noopener noreferrer'}
+        aria-label={
+          target.name === 'Email' ? 'Share by email' : `Share on ${target.name} (opens in new tab)`
+        }
+        title={target.name === 'Email' ? 'Share by email' : `Share on ${target.name}`}
+        data-umami-event="share"
+        data-umami-event-network={target.slug}
+        data-umami-event-surface={surface}
+        class="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-interactive/10 text-text-body transition-colors hover:border-interactive/40 hover:bg-interactive/20 hover:text-interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-offset-2 focus-visible:ring-offset-bg-elevated"
+      >
+        <svg class="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d={target.icon} />
+        </svg>
+      </a>
+    ))}
+  </div>
+</aside>
+
+<script>
+  // Spoken through the layout's one status writer (window.siteAnnounce),
+  // like the code-block buttons; the button's own name never changes.
+  const announceCopy = (ok: boolean) =>
+    (window as { siteAnnounce?: (_message: string) => void }).siteAnnounce?.(
+      ok ? 'Copied to clipboard' : 'Copy failed, select the text to copy',
+    );
+
+  document.querySelectorAll<HTMLButtonElement>('[data-share-copy]').forEach((btn) => {
+    const label = btn.querySelector<HTMLElement>('[data-share-copy-label]');
+    btn.addEventListener('click', async () => {
+      const url = btn.dataset.shareUrl ?? window.location.href;
+      let copied = true;
+      try {
+        await navigator.clipboard.writeText(url);
+      } catch {
+        const ta = document.createElement('textarea');
+        ta.value = url;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        copied = document.execCommand('copy');
+        ta.remove();
+      }
+      announceCopy(copied);
+      if (!copied) return;
+      if (label) {
+        const prev = label.textContent;
+        label.textContent = 'Copied';
+        window.setTimeout(() => {
+          label.textContent = prev;
+        }, 1500);
+      }
+    });
+  });
+</script>

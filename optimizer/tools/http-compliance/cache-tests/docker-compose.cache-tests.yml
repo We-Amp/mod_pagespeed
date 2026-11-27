@@ -1,0 +1,50 @@
+# IETF HTTP Cache Tests (mnot/proxy-cache-tests)
+#
+# Runs the standard HTTP cache compliance test suite against the
+# pagespeed nginx proxy. The test server generates its own requests
+# through the proxy under test.
+#
+# Usage:
+#   docker compose -f tools/http-compliance/cache-tests/docker-compose.cache-tests.yml up
+#
+# Results are printed to stdout and saved as JSON.
+
+services:
+  # PageSpeed worker (uses same image as E2E)
+  worker:
+    build:
+      context: ../../../
+      dockerfile: tools/e2e/Dockerfile.e2e
+    entrypoint: ["/entrypoint-worker.sh"]
+    volumes:
+      - shared:/shared
+      - ../entrypoint-compliance-worker.sh:/entrypoint-worker.sh:ro
+
+  # Nginx with pagespeed (proxy under test)
+  nginx:
+    build:
+      context: ../../../
+      dockerfile: tools/e2e/Dockerfile.e2e
+    command: ["nginx", "-c", "/etc/nginx/nginx-cache-tests.conf", "-g", "daemon off;"]
+    volumes:
+      - shared:/shared
+      - ./nginx-cache-tests.conf:/etc/nginx/nginx-cache-tests.conf:ro
+    depends_on:
+      - worker
+    ports:
+      - "${COMPLIANCE_NGINX_PORT:-8180}:8080"
+
+  # IETF cache-tests runner
+  cache-tests:
+    image: mnot/proxy-cache-tests
+    environment:
+      # The proxy under test
+      - PROXY=http://nginx:8080
+    depends_on:
+      - nginx
+    # Output results as JSON
+    volumes:
+      - ./results:/results
+
+volumes:
+  shared:

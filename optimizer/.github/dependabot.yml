@@ -1,0 +1,55 @@
+# One pull request per ecosystem per week for minor and patch updates; a major
+# update still arrives as its own pull request (or stays ignored, see below).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+  - package-ecosystem: docker
+    directories:
+      - /docker
+      - /samples/aspnetcore/samples/DemoSite
+      - /tools/e2e
+      - /tools/packaging/docker
+      - /tools/packaging/rig
+      - /tools/production-tests
+      - /tools/production-tests/origin
+      - /website
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      docker:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # Base images move to a new major release on purpose, never by a bump.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      # Ubuntu tags are year.month, so an interim release looks like a minor bump.
+      - dependency-name: ubuntu
+        update-types: ["version-update:semver-minor"]
+  - package-ecosystem: npm
+    directory: /website
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      npm:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch

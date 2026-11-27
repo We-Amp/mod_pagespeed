@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# Post-release smoke caller: triggers, tag filter and concurrency only; the
+# jobs live in pipeline-release-smoke.yml, pinned to main. See
+# docs/ci/release.md.
+#
+# release / published fires for every published release, including the
+# optimizer-v* host-package releases, which have no NuGet packages: the job
+# runs only for tags starting with `v`. A dispatch re-smokes a version (for
+# example after a transient failure or a missed release event).
+
+name: Post-release smoke (NuGet + Playwright)
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      package_version:
+        description: "WeAmp.PageSpeed.AspNetCore version on nuget.org (e.g., 2.4.0). Strip the leading 'v'."
+        required: true
+        type: string
+
+# One group per commit, so the release event and a dispatch for the same
+# release queue instead of overlapping; both are legitimate, so neither is
+# cancelled.
+concurrency:
+  group: release-smoke-${{ github.sha }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  smoke:
+    permissions:
+      contents: read
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.event.release.tag_name, 'v')
+    uses: We-Amp/pagespeed-optimizer/.github/workflows/pipeline-release-smoke.yml@main
+    with:
+      package_version: ${{ inputs.package_version || '' }}

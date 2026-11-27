@@ -1,0 +1,62 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// Home proof strip: four short facts under the hero, on the recessed band.
+// Four columns at >=1024px, two by two from 640px, one column below. The
+// figures and the license line come from src/data/product-facts.mjs, never
+// from literals.
+//
+// The markup keeps the indentation it has inside the page layout (see
+// Hero.astro).
+
+import { BUILTWITH_AS_OF, FREE_TO_RUN_LINE } from '../../data/product-facts.mjs';
+
+interface Props {
+  // The live-site count as a rounded-down lower bound (roundDownDisplay).
+  liveSites: string;
+}
+
+const { liveSites } = Astro.props;
+---
+
+    <div class="mt-8 home-band-y border-border bg-bg-secondary">
+      <dl class="proof-strip mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+        <div>
+          <dt>In production</dt>
+          <dd>
+            The optimization core behind{' '}
+            <span class="font-semibold text-text-body">{liveSites} live sites</span>{' '}
+            <a
+              href="https://trends.builtwith.com/Server/mod_pagespeed"
+              rel="noopener noreferrer"
+              class="underline decoration-control-border underline-offset-2 hover:text-text-body"
+            >
+              (BuiltWith, {BUILTWITH_AS_OF})</a
+            >{' '}
+            &mdash; maintained by We-Amp.
+          </dd>
+        </div>
+        <div>
+          <dt>Free to run</dt>
+          <dd>{FREE_TO_RUN_LINE}</dd>
+        </div>
+        <div>
+          <dt>What is for sale</dt>
+          <dd>
+            No per-image or per-request metering like a CDN. Support from the people who build it
+            is what&rsquo;s for sale.{' '}
+            <a href="/pricing/" data-umami-event="cta_home_hero_pricing" class="link-arrow">
+              See support pricing</a
+            >
+          </dd>
+        </div>
+        <div>
+          <dt>Who builds it</dt>
+          <dd>
+            Built by We-Amp &mdash; the team that helped build ngx_pagespeed and maintains
+            mod_pagespeed today.
+          </dd>
+        </div>
+      </dl>
+    </div>

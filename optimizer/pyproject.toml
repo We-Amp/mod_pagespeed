@@ -1,0 +1,50 @@
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+exclude = [
+    "node_modules",
+    "third_party",
+    ".venv",
+    "reference",
+    "lib/image/generated",
+]
+
+[tool.ruff.lint]
+select = [
+    "F",     # pyflakes (unused imports, undefined names, etc.)
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "I",     # isort (import sorting)
+    "UP",    # pyupgrade (modern Python idioms)
+    "B",     # flake8-bugbear (common bugs)
+    "SIM",   # flake8-simplify
+    "RUF",   # ruff-specific rules
+]
+ignore = [
+    "E501",   # line too long — handled by formatter
+    "SIM105", # contextlib.suppress — verbose for test try/except patterns
+    "SIM108", # ternary operator — often less readable in test assertions
+    "SIM115", # open-file-with-context-handler — not always practical
+    "RUF005", # collection concatenation — existing patterns are clear
+    "RUF012", # mutable class default — false positive on read-only test constants
+    "UP038",  # isinstance tuple → union — tuple form is clearer
+    "RUF059", # unused unpacked variable — common in test tuple unpacking
+]
+# Auto-fix unused imports and sort imports on save/commit
+fixable = ["F401", "I001", "UP", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+# Test files: allow unused variables (cache-warming side effects),
+# unused loop vars, imports not at top (conditional/fixture imports)
+"test_*.py" = ["F841", "B007", "E402"]
+"conftest.py" = ["F841", "B007", "E402"]
+# Origin servers and generators have intentional patterns
+"**/origin*.py" = ["F841", "E402"]
+"**/generate*.py" = ["E402"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["pagespeed"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"

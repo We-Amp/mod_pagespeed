@@ -1,0 +1,93 @@
+# pre-commit installs BOTH the commit-time and push-time git hooks
+# (default_install_hook_types). `pre-commit install` wires them up in one step.
+default_install_hook_types: [pre-commit, pre-push]
+# Keep the standard hooks commit-only; the push gate is declared explicitly below.
+default_stages: [pre-commit]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      # lib/js excludes: vendored 1.15 JS kernel + hash-load-bearing corpus
+      # — bytes are pinned by the sync tool and the shared
+      # goldens manifest; a fixer mutation would go RED in the drift check
+      # and/or the differential gate. See lib/js/CLAUDE.md.
+      # lib/html excludes: the vendored 1.15 HTML kernel (#1130), explicit
+      # name list (no uniform prefix; the optimizer-native lib/html files are
+      # 2.0-owned and stay checked). See lib/html/CLAUDE.md.
+      # async-css-probe fixtures are byte-frozen captures (sha256-recorded in
+      # CAPTURE.md) — a whitespace fixer mutating one silently breaks the
+      # capture contract.
+      - id: trailing-whitespace
+        exclude: '^tools/html-parse-corpus/(seeds|goldens)/|\.(rgba|gif|png|jpg|jpeg|webp)$|^tools/async-css-probe/fixtures/|^lib/js/(js_[a-z_0-9]+\.(h|cc)|source_map\.h|corpus/)|^lib/html/(content_type|doctype|empty_html_filter|html_element|html_event|html_filter|html_keywords|html_lexer|html_name|html_node|html_parse|html_parse_probe|html_parse_recorder|html_writer_filter)\.(h|cc|gperf)$'
+      - id: end-of-file-fixer
+        exclude: '^tools/html-parse-corpus/(seeds|goldens)/|\.(rgba|gif|png|jpg|jpeg|webp|original|minified)$|^tools/async-css-probe/fixtures/|^lib/js/(js_[a-z_0-9]+\.(h|cc)|source_map\.h|corpus/)|^lib/html/(content_type|doctype|empty_html_filter|html_element|html_event|html_filter|html_keywords|html_lexer|html_name|html_node|html_parse|html_parse_probe|html_parse_recorder|html_writer_filter)\.(h|cc|gperf)$'
+      - id: check-yaml
+        exclude: 'deploy/helm/.*/templates/'
+      - id: check-added-large-files
+        args: ['--maxkb=800']  # Allow JS test data files up to 800KB
+        exclude: '^lib/image/generated/.*_predictor\.c$'
+
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v20.1.8
+    hooks:
+      - id: clang-format
+        types_or: [c, c++]
+        # lib/js + lib/html: vendored 1.15 kernels keep canonical formatting
+        # (style-lint carve-out, #1130); compat/ stays formatted.
+        exclude: '^lib/image/generated/.*_predictor\.c$|^lib/js/(js_[a-z_0-9]+\.(h|cc)|source_map\.h|corpus/)|^lib/html/(content_type|doctype|empty_html_filter|html_element|html_event|html_filter|html_keywords|html_lexer|html_name|html_node|html_parse|html_parse_probe|html_parse_recorder|html_writer_filter)\.(h|cc|gperf)$'
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.11.4
+    hooks:
+      # Both differential corpora vendor their generators byte-identical from
+      # the 1.15 tree, and each corpus manifest records the generators'
+      # sha256 -- the same bytes gate both repos. The 1.15 tree runs no
+      # Python formatter, so anything ruff rewrites here drifts out of
+      # alignment and invalidates that pin on both sides.
+      #   lib/js/corpus/           gen_goldens.py, generate_synthetic.py
+      #   tools/html-parse-corpus/ gen_goldens.py, gen_extra_inputs.py
+      # The HTML corpus is matched by explicit filename, not by directory:
+      # check_manifest.py in that directory is optimizer-owned (see its
+      # LOCAL_NOTES.md) and must stay linted.
+      - id: ruff
+        args: [--fix]
+        exclude: &vendored_corpus '^(lib/js/corpus/|tools/html-parse-corpus/gen_(goldens|extra_inputs)\.py$)'
+      - id: ruff-format
+        exclude: *vendored_corpus
+
+  - repo: https://github.com/keith/pre-commit-buildifier
+    rev: 6.4.0
+    hooks:
+      - id: buildifier
+        args: ['--lint=warn']
+
+  - repo: local
+    hooks:
+      - id: license-headers
+        name: Check license headers
+        entry: tools/check-license-headers.sh
+        language: script
+        files: '\.(c|cc|cpp|h|hpp|py|ts|js|mjs|svelte|sh|ps1|bzl|cs|rs|astro|BUILD|t|hurl|gperf|css|html|csproj|props|targets|def|lds|exp|fc|te)$|(^|/)(BUILD(\.bazel)?|MODULE\.bazel|Dockerfile(\.[^/]+)?)$'
+        # third_party/ is skipped except for its repo-authored BUILD / *.BUILD
+        # files, which carry the header like every other Bazel file.
+        exclude: ^(third_party/(?!(.*\.)?BUILD$)|reference/mod_pagespeed/|node_modules/|\.venv/|lib/image/generated/)
+      - id: doc-version-literals
+        name: Doc version-literal drift (CLAUDE.md/AGENTS.md vs clang-format pin)
+        entry: tools/ci/check_doc_commands.sh
+        language: script
+        pass_filenames: false
+        files: '^(CLAUDE\.md|AGENTS\.md|\.pre-commit-config\.yaml)$'
+      # Push gate: re-checks clang-format on the files being pushed using the
+      # pinned clang-format 20.x (tools/format.sh resolves it — a local 20.x
+      # binary or the pinned pip wheel). Catches commits made with --no-verify
+      # or in a clone where `pre-commit install` was never run. Changed-files
+      # only, so it stays fast; needs no remote formatter box.
+      - id: clang-format-push-gate
+        name: clang-format 20.x push gate (tools/format.sh --check --changed)
+        entry: tools/format.sh
+        args: ['--check', '--changed']
+        language: script
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

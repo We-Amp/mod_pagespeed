@@ -1,0 +1,195 @@
+---
+import { OG_DEFAULT_IMAGE_URL } from '../data/og-image';
+import BaseLayout from '../layouts/BaseLayout.astro';
+import PageHero from '../components/PageHero.astro';
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'TechArticle',
+  headline: 'PageSpeed Optimization Libraries (PSOL)',
+  description:
+    "PSOL was Google's server-independent C++ optimization core inside mod_pagespeed. The original project's last open-source release shipped in 2020. The same engine is maintained today and runs in your web server, in front of any origin, or inside ASP.NET Core.",
+  about: 'PageSpeed Optimization Libraries',
+  image: OG_DEFAULT_IMAGE_URL,
+  author: { '@type': 'Organization', name: 'We-Amp B.V.' },
+  publisher: {
+    '@type': 'Organization',
+    name: 'We-Amp B.V.',
+    logo: {
+      '@type': 'ImageObject',
+      url: 'https://modpagespeed.com/logo.svg',
+    },
+  },
+  mainEntityOfPage: 'https://modpagespeed.com/psol/',
+};
+---
+
+<BaseLayout
+  title="PageSpeed Optimization Libraries (PSOL) — mod_pagespeed"
+  description="PSOL was Google's C++ optimization core inside mod_pagespeed. Its last open-source release shipped in 2020. The engine is maintained — run it today."
+  jsonLd={jsonLd}
+>
+  <PageHero title="PageSpeed Optimization Libraries (PSOL)" size="utility" width="prose">
+    <Fragment slot="lede">
+      PSOL was Google's server-independent C++ optimization engine &mdash; the core inside
+      mod_pagespeed that rewrote HTML, CSS, JavaScript, and images. The original project's last
+      open-source release shipped in 2020, under the Apache incubator. The engine kept working, and
+      it's still maintained. Here's how to run it today.
+    </Fragment>
+  </PageHero>
+
+  <section class="container-prose pb-16">
+    <div class="space-y-10">
+      <!-- What PSOL was -->
+      <div>
+        <h2 class="h2-section text-text-body">What PSOL was</h2>
+        <p class="mt-4 text-text-muted">
+          A set of C++ classes that optimized web pages and the resources they load, independent of
+          any one web server. The same core powered mod_pagespeed on Apache and ngx_pagespeed on
+          nginx. It ran on Linux, and building it meant building mod_pagespeed first.
+        </p>
+        <p class="mt-4 text-text-body">
+          PSOL is the engine behind{' '}
+          <a
+            href="/pagespeed-optimization/"
+            class="font-medium text-interactive hover:text-interactive-hover underline"
+          >
+            automatic PageSpeed optimization
+          </a>
+          : the work a web server can do on a page with no change to the application.
+        </p>
+      </div>
+
+      <div class="rule-ticked-scale" role="presentation" aria-hidden="true"></div>
+
+      <!-- What happened to it -->
+      <div>
+        <h2 class="h2-section text-text-body">What happened to it</h2>
+        <p class="mt-4 text-text-muted">
+          Google open-sourced mod_pagespeed in 2010. Its last Google release was 1.13.35.2 in 2018;
+          the final open-source release came in 2020 under the Apache incubator. Development
+          continued at
+          <a
+            href="https://we-amp.com/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            We-Amp B.V.
+          </a>
+          , the team that helped build ngx_pagespeed, maintained mod_pagespeed, and drove the
+          project's Apache incubation. The optimization algorithms PSOL proved across billions of
+          pages still ship today &mdash; patched for CVEs, built on modern toolchains, and
+          supported.
+        </p>
+      </div>
+
+      <div class="rule-ticked-scale" role="presentation" aria-hidden="true"></div>
+
+      <!-- Run the engine today -->
+      <div>
+        <h2 class="h2-section text-text-body">Run the optimization engine today</h2>
+        <p class="mt-4 text-text-muted">
+          PSOL is no longer a standalone build target, but the optimizations it pioneered are
+          unchanged &mdash;{' '}
+          <a href="/how-it-works/" class="text-interactive hover:text-interactive-hover underline">
+            how the engine rewrites a page
+          </a>{' '}
+          works the way it always has. The same core now ships three ways. Pick the one that matches
+          where your HTML lives.
+        </p>
+
+        <div class="mt-6 grid gap-4 sm:grid-cols-1">
+          <!-- module -->
+          <div class="panel">
+            <h3 class="text-xl font-bold text-text-body">In your web server &mdash; the module</h3>
+            <p class="mt-3 text-text-muted">
+              A drop-in module for Apache, nginx, and IIS. Your existing configuration and the{' '}
+              <a href="/features/" class="text-interactive hover:text-interactive-hover underline">
+                classic filter set
+              </a>{' '}
+              &mdash; combine, inline, minify, image rewriting &mdash; keep working.
+            </p>
+            <p class="mt-3 text-text-muted">
+              <a
+                href="/"
+                class="font-medium text-interactive hover:text-interactive-hover underline"
+              >
+                mod_pagespeed overview &rarr;
+              </a>
+              <span class="mx-2 text-text-annotation">&middot;</span>
+              <a
+                href="/docs/"
+                class="font-medium text-interactive hover:text-interactive-hover underline"
+              >
+                Docs &rarr;
+              </a>
+            </p>
+          </div>
+
+          <!-- worker -->
+          <div class="panel">
+            <h3 class="text-xl font-bold text-text-body">
+              In front of any origin &mdash; the optimizer worker
+            </h3>
+            <p class="mt-3 text-text-muted">
+              A separate worker process optimizes any HTTP origin and is driven by an HTTP API.
+              Nothing to compile into your server.
+            </p>
+            <p class="mt-3 text-text-muted">
+              <a
+                href="/docs/"
+                class="font-medium text-interactive hover:text-interactive-hover underline"
+              >
+                Read the docs &rarr;
+              </a>
+              <span class="mx-2 text-text-annotation">&middot;</span>
+              <a
+                href="/docs/http-api/"
+                class="font-medium text-interactive hover:text-interactive-hover underline"
+              >
+                Worker HTTP API &rarr;
+              </a>
+            </p>
+          </div>
+
+          <!-- NuGet -->
+          <div class="panel">
+            <h3 class="text-xl font-bold text-text-body [overflow-wrap:anywhere]">
+              Inside ASP.NET Core &mdash; WeAmp.PageSpeed.AspNetCore
+            </h3>
+            <p class="mt-3 text-text-muted">
+              A NuGet package runs the native C/C++ core inside your .NET request pipeline via
+              P/Invoke. No reverse proxy, no sidecar.
+            </p>
+            <a
+              href="/docs/aspnet-getting-started/"
+              class="mt-3 inline-block font-medium text-interactive hover:text-interactive-hover underline"
+            >
+              Install via NuGet &rarr;
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <div class="rule-ticked-scale" role="presentation" aria-hidden="true"></div>
+
+      <!-- Old API docs -->
+      <div>
+        <h2 class="h2-section text-text-body">Where the old PSOL API docs went</h2>
+        <p class="mt-4 text-text-muted">
+          The Doxygen class reference that lived at{' '}
+          <code class="rounded bg-bg-elevated px-1.5 py-0.5 text-sm">/psol/hierarchy.html</code> is
+          gone, and we don't publish PSOL as a standalone library to link against. If you came here
+          for programmatic access to the optimization engine, the optimizer worker HTTP API is the
+          maintained equivalent &mdash; every endpoint the web console uses is open to your own
+          scripts.
+        </p>
+        <a
+          href="/docs/http-api/"
+          class="mt-3 inline-block font-medium text-interactive hover:text-interactive-hover underline"
+        >
+          Worker HTTP API &rarr;
+        </a>
+      </div>
+    </div>
+  </section>
+</BaseLayout>

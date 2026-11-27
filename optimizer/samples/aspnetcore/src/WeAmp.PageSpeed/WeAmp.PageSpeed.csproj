@@ -1,0 +1,42 @@
+<!-- SPDX-License-Identifier: Apache-2.0
+     Copyright (c) 2024-2026 We-Amp B.V. -->
+
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <IsTrimmable>true</IsTrimmable>
+    <IsAotCompatible>true</IsAotCompatible>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <RootNamespace>WeAmp.PageSpeed</RootNamespace>
+    <Title>WeAmp.PageSpeed — PageSpeed Engine .NET Bindings</Title>
+    <Description>Most ASP.NET Core users want WeAmp.PageSpeed.AspNetCore (the drop-in middleware), which pulls this package as a transitive dependency. This package is the low-level managed binding to the C++23 PageSpeed engine via P/Invoke — install it directly only if you're embedding the optimization library outside of an ASP.NET Core pipeline. Provides HTML transformation, critical CSS extraction, image classification, and high-performance caching.</Description>
+    <PackageTags>pagespeed mod-pagespeed mod_pagespeed aspnetcore web-performance core-web-vitals web-vitals lcp inp cls webp avif image-optimization critical-css lazy-loading lighthouse css minification weamp</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="WeAmp.PageSpeed.AspNetCore" />
+    <InternalsVisibleTo Include="WeAmp.PageSpeed.Tests" />
+    <InternalsVisibleTo Include="WeAmp.PageSpeed.AspNetCore.Tests" />
+  </ItemGroup>
+
+  <!--
+    Native binaries ship in WeAmp.PageSpeed.NativeAssets.{Linux,macOS,Windows}.
+    Anyone pulling WeAmp.PageSpeed (directly or via WeAmp.PageSpeed.AspNetCore)
+    gets all three as transitive deps; MSBuild's runtimes/<rid>/native/ resolution
+    loads only the matching platform's binaries at publish time.
+
+    No ReferenceOutputAssembly="false" here — the NativeAssets projects have
+    IncludeBuildOutput=false (no managed DLL), so there's nothing to import
+    into the compile, but the default ProjectReference metadata is what makes
+    dotnet pack emit a <dependency id="WeAmp.PageSpeed.NativeAssets.X" .../>
+    entry in WeAmp.PageSpeed.nuspec.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="../WeAmp.PageSpeed.NativeAssets.Linux/WeAmp.PageSpeed.NativeAssets.Linux.csproj" />
+    <ProjectReference Include="../WeAmp.PageSpeed.NativeAssets.macOS/WeAmp.PageSpeed.NativeAssets.macOS.csproj" />
+    <ProjectReference Include="../WeAmp.PageSpeed.NativeAssets.Windows/WeAmp.PageSpeed.NativeAssets.Windows.csproj" />
+  </ItemGroup>
+
+</Project>

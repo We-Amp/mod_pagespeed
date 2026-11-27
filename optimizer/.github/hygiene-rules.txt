@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# Public-tree hygiene rules, enforced by tools/ci/check-public-hygiene.sh
+# (the "Public-tree hygiene gate" CI job). This repository is public, so the
+# tracked tree must stay free of private-infrastructure and private-process
+# vocabulary. One rule per line:
+#
+#   <grep-flags><TAB><extended-regex pattern>
+#
+# Blank lines and lines starting with # are ignored. Flags are a subset of
+# grep's: E (extended regex, required) and i (case-insensitive).
+#
+# Rule classes (one rule per line below, in this order):
+#   decision-ids    internal decision-record references
+#   runner-labels   private CI runner-pool label scheme
+#   dev-repo slugs  pre-publication development repository names
+#   internal IDs    internal work-item / requirement identifiers
+#   fleet topology  private build-fleet host, machine and topology words
+#   license-terms   a file still under the former (non-Apache) license: its
+#                   SPDX identifier header or its license-file title block
+#
+# Vocabulary that is itself non-public (further private host names, private
+# repository slugs, held-back private paths) is NOT spelled out here: it lives
+# as sha256 hashes in .github/hygiene-hashed-tokens.txt, checked by
+# tools/ci/check-public-hygiene.py, which also checks that relative markdown
+# links resolve.
+#
+# The slug and topology rules use explicit non-word character classes rather
+# than \b, so a longer path segment (github.com/oschaaf/cyclone-foo) is not a
+# hit while a hyphenated compound (non-threadripper) still is. The topology
+# rule scopes "self-hosted" to CI/runner contexts — the bare word is legitimate
+# product vocabulary ("self-hosted image optimization") and appears throughout
+# the website copy on purpose.
+E	ADR-[0-9]{3}([^0-9]|$)
+Ei	(linux|mac|macos|windows)-(x64|arm64)(-[a-z0-9]+)*-(pool|mps[0-9]+)([^a-z0-9-]|$)
+E	(^|[^A-Za-z0-9_/-])(oschaaf/modpagespeed-2|oschaaf/cyclone|mod_pagespeed_private)([^A-Za-z0-9_/-]|$)
+E	MPS2-[A-Z]+-[0-9]+
+Ei	(^|[^A-Za-z0-9_])(self-hosted[- ](runners?|agents?|ci|github|actions?|pool|fleet)|threadripper|duster|mpb-?16|weamp-web)([^A-Za-z0-9_]|$)
+Ei	SPDX-License-Identifier:[[:space:]]*[^[:space:]]*BUSL
+E	^(Business Source License|Licensed Work:|Change Date:|Change License:)

@@ -1,0 +1,110 @@
+# mod_pagespeed — release manifest (single source of truth)
+#
+# The converged line: the native web-server module (Apache, nginx)
+# and the pagespeed-optimizer worker ship as one product, mod_pagespeed,
+# licensed under the Apache License 2.0. The predecessor lines
+# (mod_pagespeed 1.15, ModPageSpeed 2.0) carry the same license.
+#
+# This file is named 2.1.yaml and `product.line` stays "2.1" because
+# tooling keys on both; the "2.1" product label itself is retired (plain
+# "mod_pagespeed"; the version appears only as a release fact).
+#
+# Edit this file when a new release of this line ships. Every website,
+# script, and docs page that needs a version string derives it from this
+# manifest (§1).
+#
+# The line uses plain SemVer (no `+rN` build metadata), like 2.0. The first
+# GA release of the converged line was v2.1.0 (2026-09-17), tagged v2.1.0 in
+# the public source repository.
+#
+# DO NOT hand-edit `release.{semver,revision,tag,released_on}` routinely —
+# bump tooling for the 2.1 line is pending; until it lands, this manifest is
+# operator-curated by hand. Other fields (compat, urls, artifacts) are
+# operator-curated.
+#
+# Schema: scripts/release/manifest-schema.mjs (2.1 branch pending)
+# Distribution scope: Docker + Helm + native deb/rpm packages, plus the
+# ASP.NET Core middleware on NuGet, which ships as 2.10.0 with this release,
+# and the signed IIS installer on the module's GitHub release.
+# The middleware's artifact block still lives in the 2.0 manifest; where it
+# re-homes is tracked separately.
+
+schema_version: 2
+
+product:
+  line: "2.1"
+  display_name: "mod_pagespeed" # PRODUCT_DISPLAY_NAME; no version in the product name
+
+status: active
+
+release:
+  semver: "2.10.0"
+  revision: null # plain SemVer; +rN not used on the converged line
+  tag: "v2.10.0"
+  released_on: "2026-11-23"
+
+artifacts:
+  # Docker images published to GHCR (ghcr.io/we-amp) — same channels as the
+  # 2.0 line; 2.1 tags ride these repositories. The combined single-container
+  # evaluation image is ghcr.io/we-amp/pagespeed-combined.
+  docker:
+    image: "ghcr.io/we-amp/pagespeed-nginx"
+    worker_image: "ghcr.io/we-amp/pagespeed-worker"
+    tag_template: "%V"
+  # Helm chart shipped from the product repo (deploy/helm/pagespeed).
+  helm:
+    chart: "pagespeed"
+    repository: "https://modpagespeed.com/charts"
+    app_version: "%V"
+  # Native packages: the serving module and the pagespeed-optimizer daemon
+  # install and upgrade as a matching pair from the signed repository at
+  # packages.modpagespeed.com (deb: Debian/Ubuntu; rpm: Enterprise Linux).
+  # Filename templates are intentionally not declared yet: the module
+  # packages keep the 1.15-line GA-alias naming until the 2.1 packaging
+  # channel is formalized.
+  # Windows/IIS: the Authenticode-signed installer for the IIS module. It is
+  # hosted on the public GitHub release of the module (tag module-v%V, with
+  # SHA256SUMS beside it), not under modpagespeed.com/releases/, so the
+  # template is an absolute URL that artifactUrl() renders as-is instead of
+  # joining it to urls.archive_base.
+  msi:
+    win_x64: "https://github.com/We-Amp/mod_pagespeed/releases/download/module-v%V/pagespeed-iis-%V-win-x64.msi"
+
+urls:
+  # No direct-archive download channel — packages ship via the signed apt/yum
+  # repository, Docker and Helm (the 2.0-style archive URLs would 404, so
+  # these point at the signed vendor repo root, as the 2.0 manifest does).
+  archive_base: "https://packages.modpagespeed.com/"
+  latest_base: "https://packages.modpagespeed.com/"
+  # Stable, NOT version-pinned (A1.1). Signed vendor-repo pubkey.
+  gpg_key: "https://packages.modpagespeed.com/pubkey.gpg"
+
+compat:
+  # The 2.1 module continues the 1.15-line module packaging: Apache 2.4+;
+  # nginx builds pinned per distro to each distribution's stock nginx (the
+  # signed apt matrix for this line runs Debian 12/13 + Ubuntu 22.04/24.04/26.04 on
+  # amd64+arm64; Debian 11 (bullseye) is end of life and no longer supported;
+  # see product-facts NGINX_APT_DISTROS).
+  apache:
+    apache_versions: ["2.4+"]
+  iis:
+    # The 2.6.0 release gate installs the MSI on one guest, Windows Server
+    # 2016 with IIS 10, as an upgrade over an older installed module; the MSI
+    # is built and signed on Windows Server 2022, and the IIS system tests run
+    # on Windows 10/11 with IIS 10. No lane installs on Server 2019 or 2025, so
+    # this states a floor, not a per-version tested list.
+    os: ["Windows Server 2016 or later"]
+    iis_versions: ["10"]
+  docker:
+    # Release images are ubuntu:24.04-based (digest-pinned); the bundled
+    # nginx is version-pinned in docker/nginx-version.txt (1.30.7).
+    base_images: ["ubuntu:24.04"]
+  kubernetes:
+    versions: ["1.28+", "1.29+", "1.30+"]
+    helm_versions: ["3.12+"]
+
+display:
+  # The 2.1 line derives every customer-facing version string from
+  # release.semver (same invariant the 2.0 collection enforces).
+  header_version: "2.10.0"
+  badge_version: "v2.10.0"

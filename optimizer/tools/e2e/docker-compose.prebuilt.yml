@@ -1,0 +1,15 @@
+# Compose override: use pre-built CI artifacts instead of building from source.
+#
+# Usage:
+#   docker compose -f tools/e2e/docker-compose.yml \
+#                  -f tools/e2e/docker-compose.prebuilt.yml up -d
+
+services:
+  worker:
+    build:
+      context: ../../
+      dockerfile: tools/e2e/Dockerfile.prebuilt
+  nginx:
+    build:
+      context: ../../
+      dockerfile: tools/e2e/Dockerfile.prebuilt

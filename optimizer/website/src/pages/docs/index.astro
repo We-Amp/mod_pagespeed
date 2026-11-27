@@ -1,0 +1,212 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import Icon from '../../components/Icon.astro';
+import { getCollection } from 'astro:content';
+import { getRelease } from '../../lib/release';
+
+// Badge version is sourced from the release manifest so it tracks
+// the shipped converged line instead of a hardcoded "preview" string.
+const rel21 = await getRelease('2.1');
+
+const allDocs = (await getCollection('docs')).sort((a, b) => a.data.order - b.data.order);
+
+// The first "Start here" page is the hero card; every other page, including
+// the rest of that group, is listed in its section below.
+const startHere = allDocs.find((d) => d.data.group === 'Start here');
+const rest = allDocs.filter((d) => d.id !== startHere?.id);
+
+const groups: { label: string; docs: typeof allDocs }[] = [];
+let currentGroup = '';
+for (const d of rest) {
+  const group = d.data.group ?? 'Other';
+  if (group !== currentGroup) {
+    currentGroup = group;
+    groups.push({ label: group, docs: [] });
+  }
+  groups[groups.length - 1].docs.push(d);
+}
+
+// The most-visited destinations, one tap from the top of the hub. Every docs
+// slug here must exist in the collection; /docs/filters/ is a page of its own
+// (src/pages/docs/filters.astro), not a collection entry.
+const popular = [
+  { href: '/docs/getting-started/', label: 'Getting started' },
+  { href: '/docs/installation-module/', label: 'Install the module' },
+  { href: '/docs/configuration/', label: 'Configuration' },
+  { href: '/docs/filters/', label: 'Filters' },
+  { href: '/docs/installation-docker/', label: 'Docker' },
+];
+for (const { href } of popular) {
+  const slug = href.replace(/^\/docs\//, '').replace(/\/$/, '');
+  if (slug !== 'filters' && !allDocs.some((d) => d.id === slug)) {
+    throw new Error(`docs hub: popular link ${href} has no docs collection entry`);
+  }
+}
+
+// Cards per section. /docs/filters/ (the filter table page) belongs with the
+// Reference group but is not a collection entry, so it is appended to that
+// group's cards — one Reference heading on the hub, not two. Should the
+// collection ever lose its Reference group, the card gets a section of its own.
+type Card = { href: string; title: string; description: string };
+const filtersCard: Card = {
+  href: '/docs/filters/',
+  title: 'PageSpeed filters reference',
+  description:
+    'The image, CSS, JavaScript, HTML, and caching filters, what each one does, and which run by default.',
+};
+const sections: { label: string; cards: Card[] }[] = groups.map((g) => ({
+  label: g.label,
+  cards: [
+    ...g.docs.map((d) => ({
+      href: `/docs/${d.id}/`,
+      title: d.data.title,
+      description: d.data.description,
+    })),
+    ...(g.label === 'Reference' ? [filtersCard] : []),
+  ],
+}));
+if (!groups.some((g) => g.label === 'Reference')) {
+  sections.push({ label: 'Reference', cards: [filtersCard] });
+}
+
+// SEO: CollectionPage JSON-LD built from the SAME doc data that renders the
+// visible list below, so the structured listing stays in step with the page —
+// except the filters (/docs/filters/) and Concepts (/how-it-works/) cards,
+// which are intentionally excluded from the structured ItemList.
+// Order mirrors the rendered order: Start here first, then each group.
+const siteOrigin = 'https://modpagespeed.com';
+const listedDocs = [...(startHere ? [startHere] : []), ...rest];
+const docItemList = listedDocs.map((doc, i) => ({
+  '@type': 'ListItem',
+  position: i + 1,
+  name: doc.data.title,
+  url: `${siteOrigin}/docs/${doc.id}/`,
+}));
+const docsJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'CollectionPage',
+  name: 'Documentation — mod_pagespeed',
+  url: `${siteOrigin}/docs/`,
+  mainEntity: {
+    '@type': 'ItemList',
+    itemListElement: docItemList,
+  },
+};
+---
+
+<BaseLayout
+  title="mod_pagespeed documentation: Apache, nginx and IIS"
+  description="Install, configure and run mod_pagespeed on Apache, nginx and IIS, or as a Docker reverse proxy: install guides, every directive and filter, operations."
+  jsonLd={docsJsonLd}
+  wideHeader
+>
+  <section class="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 py-16 lg:py-20">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:flex-wrap">
+      <div class="flex items-center gap-3 flex-wrap min-w-0">
+        <h1 class="h1-hero break-words text-text-body">Documentation</h1>
+        <span class="inline-flex items-center rounded-md bg-interactive px-2 py-1 text-xs font-mono font-normal text-on-accent">
+          <span class="sr-only">mod_pagespeed </span>
+          {rel21.display.badge_version}
+          <span class="sr-only"> documentation</span>
+        </span>
+      </div>
+    </div>
+    <p class="mt-4 text-lg text-text-muted">
+      Install, configure and run mod_pagespeed: the native module for Apache, nginx and IIS, the
+      optimizer worker beside it, or the Docker / nginx reverse proxy in front of any origin. Start
+      with{' '}
+      <a href="/docs/getting-started/" class="underline underline-offset-2 hover:text-interactive">
+        Getting started
+      </a>
+      ; the install guides cover apt/yum, cPanel, Docker and Helm; the reference pages cover every
+      directive and every filter. If a page contradicts what your install does, that is a bug:{' '}
+      <a href="/contact/" class="underline underline-offset-2 hover:text-interactive">
+        tell us
+      </a>
+      .
+    </p>
+
+    {/* Search box: opens the site search dialog (SearchDialog.astro) — a
+         button styled as a field, so it never pretends to be an input that
+         the dialog then takes over. */}
+    <button
+      type="button"
+      data-search-open
+      data-umami-event="search_open_docs_hub"
+      aria-haspopup="dialog"
+      aria-controls="site-search"
+      class="mt-6 flex w-full items-center gap-3 rounded-lg border border-control-border bg-bg-elevated px-4 py-3 text-left text-sm text-text-muted hover:border-interactive hover:text-text-body transition-colors"
+    >
+      <Icon name="search" class="h-5 w-5 shrink-0" />
+      <span class="flex-1">Search the docs…</span>
+      <kbd
+        class="rounded border border-border px-1.5 py-0.5 font-mono text-xs text-text-annotation"
+        aria-hidden="true"
+      >
+        /
+      </kbd>
+    </button>
+
+    {startHere && (
+      <a
+        href={`/docs/${startHere.id}/`}
+        class="mt-6 block rounded-card border border-interactive/40 bg-interactive/10 p-6 hover:border-interactive transition-colors"
+      >
+        <p class="text-xs font-semibold uppercase tracking-wider text-interactive">Start here</p>
+        <h2 class="mt-2 text-2xl font-semibold text-text-body">{startHere.data.title}</h2>
+        <p class="mt-2 text-body sm:text-sm text-text-muted">{startHere.data.description}</p>
+      </a>
+    )}
+
+    <nav class="mt-8" aria-label="Popular pages">
+      <p class="eyebrow tracking-widest text-text-body">Popular</p>
+      <ul class="mt-3 flex flex-wrap gap-2">
+        {popular.map((p) => (
+          <li>
+            <a
+              href={p.href}
+              class="inline-flex items-center rounded-md border border-border bg-bg-elevated px-3 py-1.5 text-sm font-medium text-text-body hover:border-interactive/40 hover:text-interactive transition-colors"
+            >
+              {p.label}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </nav>
+
+    <div class="mt-12 space-y-16">
+      {sections.map((section) => (
+        <div class="border-t border-border pt-8">
+          <h2 class="eyebrow tracking-widest text-text-body mb-6">{section.label}</h2>
+          <div class="space-y-3">
+            {section.cards.map((card) => (
+              <a
+                href={card.href}
+                class="block rounded-lg border border-border bg-bg-elevated p-6 hover:border-interactive/40 hover:bg-interactive/10 transition-colors"
+              >
+                <h3 class="text-lg font-semibold text-text-body">{card.title}</h3>
+                <p class="mt-1 text-body sm:text-sm text-text-muted">{card.description}</p>
+              </a>
+            ))}
+          </div>
+        </div>
+      ))}
+
+      <div class="border-t border-border pt-8">
+        <h2 class="eyebrow tracking-widest text-text-body mb-6">Concepts</h2>
+        <div class="space-y-3">
+          <a
+            href="/how-it-works/"
+            class="block rounded-lg border border-border bg-bg-elevated p-6 hover:border-interactive/40 hover:bg-interactive/10 transition-colors"
+          >
+            <h3 class="text-lg font-semibold text-text-body">How it works</h3>
+            <p class="mt-1 text-body sm:text-sm text-text-muted">
+              CSS parsing, the metadata cache, and optimizing off the request path &mdash; the
+              mechanics under the filters.
+            </p>
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+</BaseLayout>

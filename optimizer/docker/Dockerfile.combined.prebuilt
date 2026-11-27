@@ -1,0 +1,169 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# mod_pagespeed COMBINED image — PREBUILT.
+#
+# Runs the factory worker AND nginx in one container (single `docker run`),
+# pointing at the operator's backend via BACKEND_HOST/BACKEND_PORT. A packaging
+# convenience over the two-image pair — NOT a zero-config demo (no baked
+# origin). Assembled from CI-built artifacts; no in-image Bazel/Chromium build.
+# Build context = product repo checkout + ./artifacts/. Required:
+#   artifacts/factory_worker
+#   artifacts/ngx_pagespeed_module.so
+#   artifacts/nginx-version
+#
+# Requires the local base image pagespeed2-base-runtime.
+
+# --- Brotli builder (against the recorded nginx version) ---
+FROM ubuntu:24.04@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac AS brotli-builder
+ENV DEBIAN_FRONTEND=noninteractive
+COPY artifacts/nginx-version /tmp/nginx-version
+# The nginx.org signing key file holds several keys (the repository metadata
+# is signed by one of them). Only the keys in this pinned set are exported
+# into the apt keyring, and the build fails if none is present, so a swapped
+# file stops the build while a key nginx.org adds later does not. Fingerprints
+# from https://nginx.org/en/linux_packages.html and the published
+# https://nginx.org/keys/nginx_signing.key.
+ARG NGINX_KEY_FPR="573BFD6B3D8FBC641079A6ABABF5BD827BD9BF62 8540A6F18833A80E9C1653A42FD21310B49F6B46 9E9BE90EACBCDE69FE9B204CBCDCD8A38D88A2B3"
+RUN apt-get update && apt-get install -y wget gnupg ca-certificates \
+    && nkey="$(mktemp -d)" \
+    && for i in 1 2 3 4 5; do \
+         wget -qO "${nkey}/nginx.asc" --timeout=20 --tries=1 https://nginx.org/keys/nginx_signing.key \
+           && [ -s "${nkey}/nginx.asc" ] && break; \
+         echo "nginx.org key fetch attempt ${i} failed" >&2; if [ "$i" -lt 5 ]; then sleep $((i * 5)); fi; \
+       done \
+    && { [ -s "${nkey}/nginx.asc" ] \
+         || { echo "ERROR: could not fetch https://nginx.org/keys/nginx_signing.key" >&2; exit 1; }; } \
+    && { GNUPGHOME="${nkey}" gpg --batch --quiet --import "${nkey}/nginx.asc"; have=""; \
+         for f in ${NGINX_KEY_FPR}; do \
+           GNUPGHOME="${nkey}" gpg --batch --with-colons --list-keys "${f}" 2>/dev/null \
+             | awk -F: -v fpr="${f}" '$1=="fpr" && $10==fpr { ok=1 } END { exit !ok }' \
+             && have="${have} ${f}"; \
+         done; \
+         [ -n "${have}" ] || { echo "ERROR: no pinned key in the nginx.org key file" >&2; exit 1; }; } \
+    && GNUPGHOME="${nkey}" gpg --batch --export ${have} > /usr/share/keyrings/nginx-archive-keyring.gpg \
+    && [ -s /usr/share/keyrings/nginx-archive-keyring.gpg ] \
+    && rm -rf "${nkey}" \
+    && echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] http://nginx.org/packages/ubuntu noble nginx" \
+       > /etc/apt/sources.list.d/nginx.list \
+    && echo "deb-src [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] http://nginx.org/packages/ubuntu noble nginx" \
+       >> /etc/apt/sources.list.d/nginx.list \
+    && printf 'Package: *\nPin: origin nginx.org\nPin-Priority: 900\n' \
+       > /etc/apt/preferences.d/99nginx \
+    && apt-get update \
+    && NV="$(cat /tmp/nginx-version)" \
+    && apt-get install -y --allow-downgrades \
+       "nginx=${NV}-1~noble" dpkg-dev cmake git libpcre3-dev zlib1g-dev libssl-dev \
+    && mkdir -p /nginx-src && cd /nginx-src && apt-get source "nginx=${NV}-1~noble" \
+    && rm -rf /var/lib/apt/lists/*
+RUN git clone --recurse-submodules https://github.com/google/ngx_brotli.git /ngx_brotli \
+    && cd /ngx_brotli && git checkout a71f9312c2deb28875acc7bacfdd5695a111aa53
+RUN cd /ngx_brotli/deps/brotli && mkdir -p out && cd out \
+    && cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF .. \
+    && cmake --build . --config Release -j"$(nproc)"
+RUN cd /nginx-src/nginx-* \
+    && ./configure --with-compat --add-dynamic-module=/ngx_brotli \
+    && make -j"$(nproc)" modules \
+    && cp objs/ngx_http_brotli_filter_module.so /tmp/ngx_http_brotli_filter_module.so
+
+# --- Console build stage ---
+FROM node:22-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee AS build-console
+RUN corepack enable && corepack prepare pnpm@10.33.4 --activate
+WORKDIR /workbench
+COPY tools/workbench/pnpm-workspace.yaml tools/workbench/package.json \
+     tools/workbench/pnpm-lock.yaml tools/workbench/tsconfig.base.json ./
+COPY tools/workbench/packages/ packages/
+RUN pnpm install --frozen-lockfile
+RUN pnpm -C packages/api-client build && pnpm -C packages/web-shell build
+
+# --- Runtime ---
+FROM pagespeed2-base-runtime
+
+ARG VERSION=dev
+ARG BUILD_DATE
+ARG SOURCE_REVISION=unknown
+
+LABEL org.opencontainers.image.title="mod_pagespeed (combined)" \
+      org.opencontainers.image.vendor="We-Amp B.V." \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.documentation="https://modpagespeed.com/recipes/docker.md" \
+      org.opencontainers.image.source="https://github.com/We-Amp/modpagespeed-images" \
+      org.opencontainers.image.revision="${SOURCE_REVISION}" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.created="${BUILD_DATE}"
+
+# Pin runtime nginx to the module's exact version.
+# nginx is held BEFORE the dist-upgrade: the upgrade pass patches everything
+# else, but must not move nginx past the module's embedded
+# NGINX_VERSION_NUM or the module refuses to load (emerg at startup).
+# gnupg is not needed here (install-chromium.sh manages its own gnupg
+# lifecycle) and gosu is unused (the entrypoint exec's factory_worker
+# directly) — both dropped to shrink the CVE surface.
+COPY artifacts/nginx-version /tmp/nginx-version
+RUN apt-get update \
+    && NV="$(cat /tmp/nginx-version)" \
+    && apt-get install -y --allow-downgrades --no-install-recommends \
+       "nginx=${NV}-1~noble" gettext-base socat fonts-liberation \
+    && apt-mark hold nginx \
+    && apt-get -y dist-upgrade \
+    && rm -rf /var/lib/apt/lists/* /tmp/nginx-version
+
+# Chromium (browser analysis / agent_optimize).
+COPY docker/install-chromium.sh /tmp/install-chromium.sh
+RUN /tmp/install-chromium.sh && rm /tmp/install-chromium.sh
+
+# Prebuilt binaries + modules.
+COPY artifacts/factory_worker /usr/local/bin/factory_worker
+RUN chmod +x /usr/local/bin/factory_worker
+COPY artifacts/ngx_pagespeed_module.so /usr/lib/nginx/modules/ngx_pagespeed_module.so
+COPY --from=brotli-builder /tmp/ngx_http_brotli_filter_module.so \
+     /usr/lib/nginx/modules/ngx_http_brotli_filter_module.so
+COPY --from=build-console /workbench/packages/web-shell/dist/ /opt/console/
+
+# GeoIP DB intentionally NOT baked (determinism). geoip2 not loaded.
+
+COPY LICENSE NOTICE THIRD-PARTY-NOTICES /usr/share/doc/pagespeed/
+
+# --- The shared cache-volume identity contract (issue #1429).
+#
+# Group `pagespeed` is created at a FIXED GID in this image AND in the nginx
+# image, because the two are built independently: a system GID allocated on
+# demand lands on a different number in each (and moves between rebuilds as the
+# base image's package set changes), and two different numbers on one shared
+# /data is precisely the no-sharing case.  The UID is fixed for the mirror-image
+# reason -- the daemon refuses to start on cache content it does not own, so a
+# UID that drifts across a rebuild turns every existing volume into a refusal.
+# 918 is in the system range and outside the block Debian/Ubuntu allocate from
+# downwards (999, 998, ...), where `nginx` already sits at 999.
+#
+# There is deliberately NO `USER` directive: the entrypoint needs root for one
+# step -- taking ownership of /data, which a bind mount or a pre-existing named
+# volume never inherits from the image -- and then drops to `pagespeed` with
+# setpriv before exec'ing the daemon (docker/lib-cache-perms.sh).  Running the
+# container with an explicit `--user`/compose `user:` is supported too: the
+# entrypoint detects it, skips the root-only step and starts the daemon
+# directly, and /data below carries the right ownership for a fresh volume.
+#
+# /data is 2750 (setgid, group r-x): the peer only ever OPENS files the
+# optimizer authored -- it never creates anything here -- so group write buys
+# nothing and costs the class of problem this issue exists to fix.
+# nginx's master stays root here (it binds :80/:443) and drops its own workers
+# to `nginx`, which joins group `pagespeed` on the same line.
+RUN groupadd -r -g 918 pagespeed \
+    && useradd -r -u 918 -g 918 -d /data -s /usr/sbin/nologin pagespeed \
+    && usermod -aG pagespeed nginx \
+    && mkdir -p /data && chown 918:918 /data && chmod 2750 /data
+
+COPY docker/lib-cache-perms.sh /docker/lib-cache-perms.sh
+COPY deploy/nginx.conf.example /etc/nginx/nginx.conf.template
+COPY docker/entrypoint-combined.sh /entrypoint-combined.sh
+RUN chmod +x /entrypoint-combined.sh
+
+VOLUME /data
+# NOTE: Chromium needs --shm-size=256m at runtime.
+ENV BACKEND_HOST=host.docker.internal
+ENV BACKEND_PORT=8081
+ENV CACHE_SIZE=536870912
+ENV PAGESPEED_CONSOLE_DIR=/opt/console
+EXPOSE 80 443
+ENTRYPOINT ["/entrypoint-combined.sh"]

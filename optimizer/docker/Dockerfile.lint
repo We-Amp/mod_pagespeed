@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
+# Lint environment for mod_pagespeed
+# Extends the dev image with clang-tidy-20 and clang-format-20.
+# Build: docker build -t pagespeed2-lint:latest -f docker/Dockerfile.lint docker/
+# CI build: docker build --build-arg BASE=pagespeed2-dev:{arch}-{hash} ...
+# Note: requires the base dev image to already be present locally.
+# The LLVM apt repo (llvm-toolchain-noble-20) is already configured in the base image.
+ARG BASE=pagespeed2-dev:latest
+FROM ${BASE}
+
+RUN apt-get update && apt-get install -y \
+    clang-format-20 \
+    clang-tidy-20 \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/bin/clang-format-20 /usr/bin/clang-format \
+    && ln -sf /usr/bin/clang-tidy-20 /usr/bin/clang-tidy \
+    && ln -sf /usr/bin/run-clang-tidy-20 /usr/bin/run-clang-tidy

@@ -1,0 +1,173 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
+# mod_pagespeed - Nginx Module Production Image
+#
+# Multi-stage build:
+#   Stage 1 (builder): Builds the nginx dynamic module .so
+#   Stage 2 (runtime): pagespeed2-base-runtime (noble) + nginx.org nginx
+#                      pinned to the module-locked version
+#
+# Usage (requires the local base image to exist first):
+#   docker build -f docker/Dockerfile.base-runtime -t pagespeed2-base-runtime .
+#   docker build -f docker/Dockerfile.nginx -t modpagespeed/nginx:latest .
+
+# --- Builder stage ---
+FROM pagespeed2-dev AS builder
+
+WORKDIR /workspace
+COPY . /workspace/
+
+# Download nginx 1.30 source matching the runtime base image.
+# The dev base image has 1.24 from apt; remove it to avoid path collisions.
+RUN rm -rf /nginx-src && apt-get update && apt-get install -y \
+    cmake \
+    libpcre3-dev \
+    zlib1g-dev \
+    libssl-dev \
+    libmaxminddb-dev \
+    wget \
+    && mkdir -p /nginx-src \
+    && cd /nginx-src \
+    && wget -q https://nginx.org/download/nginx-1.30.7.tar.gz \
+    && echo "2565b5c837050e958f70fb0f73c48e2bca4542ad349fd356f46fb0c72610bc6e  nginx-1.30.7.tar.gz" | sha256sum -c - \
+    && tar xzf nginx-1.30.7.tar.gz \
+    && rm nginx-1.30.7.tar.gz \
+    && rm -rf /var/lib/apt/lists/*
+
+# Clone ngx_brotli with bundled brotli encoder/decoder source.
+# Pin to a71f9312 (2023-10-09, latest master) for reproducible builds.
+RUN git clone --recurse-submodules https://github.com/google/ngx_brotli.git /ngx_brotli \
+    && cd /ngx_brotli && git checkout a71f9312c2deb28875acc7bacfdd5695a111aa53
+
+# Build the bundled brotli library (required by the nginx module linker).
+RUN cd /ngx_brotli/deps/brotli \
+    && mkdir -p out && cd out \
+    && cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF .. \
+    && cmake --build . --config Release --target brotlienc brotlicommon
+
+# Clone ngx_http_geoip2_module (regional pricing geo-detection).
+# Pin to 3.4 (2023-06-29, commit hash) for reproducible builds.
+RUN git clone https://github.com/leev/ngx_http_geoip2_module.git /ngx_http_geoip2_module \
+    && cd /ngx_http_geoip2_module && git checkout cbaa35461c62a99d2577e6bae3273492502d8769
+
+# Configure nginx source and build dynamic modules (brotli + geoip2).
+# This also generates auto-config headers (objs/) needed by the pagespeed Bazel build.
+RUN cd /nginx-src/nginx-1.30.7 \
+    && ./configure --with-compat \
+       --add-dynamic-module=/ngx_brotli \
+       --add-dynamic-module=/ngx_http_geoip2_module \
+    && make modules
+
+# Build the pagespeed dynamic module
+# Pre-populate known_hosts so Bazel git_repository can fetch via SSH
+RUN mkdir -p /root/.ssh && ssh-keyscan github.com >> /root/.ssh/known_hosts
+
+RUN --mount=type=ssh NGINX_PATH=/nginx-src/nginx-1.30.7 \
+    bazel build --config=docker --config=opt //src/nginx:ngx_pagespeed_module.so
+
+# --- Runtime stage ---
+# Built on our own noble base-runtime, NOT the official (trixie-based)
+# nginx image: one platform across worker/nginx/base-runtime means one CVE
+# surface and one VEX set, and it drops the official image's bundled-but-
+# never-loaded dynamic modules (image-filter/xslt/njs/geoip) whose
+# libgd/libheif/libde265 codec stack carried most of this image's
+# Critical/High scan findings. base-runtime installs nginx.org's noble
+# nginx, the same channel the builder stage's source download tracks.
+FROM pagespeed2-base-runtime
+
+ARG VERSION=dev
+ARG BUILD_DATE
+
+LABEL org.opencontainers.image.title="mod_pagespeed Nginx Module" \
+      org.opencontainers.image.vendor="We-Amp B.V." \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.documentation="https://modpagespeed.com/recipes/docker.md" \
+      org.opencontainers.image.source="https://github.com/We-Amp/pagespeed-optimizer" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.created="${BUILD_DATE}"
+
+# Copy the built modules
+COPY --from=builder /workspace/bazel-bin/src/nginx/ngx_pagespeed_module.so \
+     /usr/lib/nginx/modules/ngx_pagespeed_module.so
+COPY --from=builder /nginx-src/nginx-1.30.7/objs/ngx_http_brotli_filter_module.so \
+     /usr/lib/nginx/modules/ngx_http_brotli_filter_module.so
+COPY --from=builder /nginx-src/nginx-1.30.7/objs/ngx_http_brotli_static_module.so \
+     /usr/lib/nginx/modules/ngx_http_brotli_static_module.so
+COPY --from=builder /nginx-src/nginx-1.30.7/objs/ngx_http_geoip2_module.so \
+     /usr/lib/nginx/modules/ngx_http_geoip2_module.so
+
+# Pin the runtime nginx to the exact version the modules were built against
+# (the builder stage downloads that source release above; keep the two in
+# lockstep when bumping). base-runtime installs nginx.org's CURRENT noble
+# build, so this is a no-op until the channel moves on — then it downgrades
+# back to the module-locked version, or fails loudly once nginx.org drops
+# the old deb, forcing the coordinated bump. Hold BEFORE dist-upgrade so the
+# upgrade pass can't move nginx past the modules' embedded NGINX_VERSION_NUM
+# (mismatch = emerg at load). curl + libc++1 come from base-runtime;
+# gettext-base provides the envsubst the entrypoint templating needs;
+# libmaxminddb0 backs the geoip2 module.
+# APT_REFRESH: bump (build-release.sh passes today's UTC date) to bust only this
+# apt layer so a scheduled rebuild always pulls current security updates even when
+# the layer cache is warm.
+ARG APT_REFRESH=2026-07-23
+RUN echo "apt refresh ${APT_REFRESH}" && apt-get update \
+    && apt-get install -y --allow-downgrades --no-install-recommends \
+       nginx=1.30.7-1~noble \
+       gettext-base \
+       libmaxminddb0 \
+    && apt-mark hold nginx \
+    && apt-get -y dist-upgrade \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /dev/stdout /var/log/nginx/access.log \
+    && ln -sf /dev/stderr /var/log/nginx/error.log
+# The log symlinks + STOPSIGNAL below restore two behaviors the official
+# nginx image provided before the base-runtime re-base: logs reach `docker
+# logs` instead of growing unbounded in the container, and stop drains
+# in-flight requests gracefully (SIGQUIT) instead of hard-killing (SIGTERM).
+STOPSIGNAL SIGQUIT
+
+# Bake a baseline DB-IP Lite Country database into the image.
+# The host-mounted volume overwrites this with a fresh monthly copy.
+# DB-IP Lite is CC BY 4.0 — attribution in the privacy policy.
+# Falls back to previous month if the current month's file is not yet published.
+RUN mkdir -p /etc/nginx/geoip \
+    && { curl -fsSL "https://download.db-ip.com/free/dbip-country-lite-$(date +%Y-%m).mmdb.gz" \
+         || curl -fsSL "https://download.db-ip.com/free/dbip-country-lite-$(date -d '-1 month' +%Y-%m 2>/dev/null || date -v-1m +%Y-%m).mmdb.gz"; } \
+       | gunzip > /etc/nginx/geoip/dbip-country-lite.mmdb \
+    && test $(stat -c%s /etc/nginx/geoip/dbip-country-lite.mmdb 2>/dev/null || echo 0) -gt 1048576
+
+# Copy license and SBOM files
+COPY LICENSE NOTICE THIRD-PARTY-NOTICES /usr/share/doc/pagespeed/
+COPY sbom/mod_pagespeed-2.1.spdx.json /usr/share/doc/pagespeed/sbom.spdx.json
+
+# --- The shared cache-volume identity contract (issue #1429).
+#
+# The optimizer creates the cyclone volume, its sockets and its shared config
+# 0660/0640 owned by `pagespeed`, so this image's worker processes reach them
+# by GROUP membership -- at the same fixed GID 918 the worker image uses.
+#
+# The join is `usermod -aG`, at image level, rather than `user nginx pagespeed;`
+# in the config: nginx calls initgroups(user, group) when it drops its workers,
+# so the supplementary group is picked up from /etc/group whatever config is in
+# force -- including an operator's own nginx.conf mounted over the packaged one,
+# which is the common deployment shape and would silently lose a config-level
+# directive.
+RUN groupadd -r -g 918 pagespeed && usermod -aG pagespeed nginx
+
+# Copy the nginx config template and entrypoint
+COPY deploy/nginx.conf.example /etc/nginx/nginx.conf.template
+COPY docker/entrypoint-nginx.sh /entrypoint-nginx.sh
+RUN chmod +x /entrypoint-nginx.sh
+
+# Shared volume for cache and socket
+VOLUME /data
+
+# Environment variables for config templating
+ENV BACKEND_HOST=host.docker.internal
+ENV BACKEND_PORT=8081
+
+EXPOSE 80 443
+
+ENTRYPOINT ["/entrypoint-nginx.sh"]
+CMD ["nginx", "-g", "daemon off;"]

@@ -1,0 +1,4 @@
+Linux Build	Build the modules	2026-10-26T04:01:02.0000000Z ERROR: /work/src/BUILD.bazel:12:11: Compiling src/lib.cc failed: (Exit 1): clang failed: error executing command
+Linux Build	Build the modules	2026-10-26T04:01:03.0000000Z [31m[1mERROR: [0mTarget //src:lib failed to build
+Linux Build	Build the modules	2026-10-26T04:01:04.0000000Z //src:lib_test                                                          NO STATUS
+Linux Build	Build the modules	2026-10-26T04:01:05.0000000Z //src:other_test                                                        FAILED TO BUILD

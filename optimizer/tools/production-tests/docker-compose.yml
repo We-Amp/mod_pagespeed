@@ -1,0 +1,63 @@
+# Production Readiness Test Stack
+#
+# Three services sharing a named volume:
+#   origin  - FastAPI dynamic origin on port 8201 (host, configurable via PRODTEST_ORIGIN_PORT)
+#   worker  - PageSpeed factory worker daemon
+#   nginx   - Nginx with pagespeed module on port 8200 (host, configurable via PRODTEST_NGINX_PORT)
+#
+# Usage:
+#   docker compose up -d --build
+#   pytest tests/ -v
+#   docker compose down -v
+
+services:
+  origin:
+    build:
+      context: ./origin
+    ports:
+      - "${PRODTEST_ORIGIN_PORT:-8201}:8081"
+    volumes:
+      - shared:/shared
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: tools/production-tests/Dockerfile.worker
+    volumes:
+      - shared:/shared
+      - ./entrypoint-worker.sh:/entrypoint-worker.sh:ro
+    environment:
+      - PAGESPEED_CACHE_SIZE=1073741824
+    depends_on:
+      origin:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "test", "-S", "/shared/pagespeed.sock"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  nginx:
+    build:
+      context: ../..
+      dockerfile: tools/production-tests/Dockerfile.nginx
+    ports:
+      - "${PRODTEST_NGINX_PORT:-8200}:8080"
+    volumes:
+      - shared:/shared
+    depends_on:
+      worker:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+volumes:
+  shared:

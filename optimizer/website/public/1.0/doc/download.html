@@ -1,0 +1,329 @@
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+<html>
+
+<head>
+    <link rel="canonical" href="https://modpagespeed.com/docs/getting-started/" />
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Installing From Packages</title>
+  <link rel="stylesheet" href="doc.css">
+</head>
+
+<body>
+<div id="archive-banner" style="background-color:#e1f5fe;padding:12px 24px;text-align:center;font-family:sans-serif;font-size:14px;line-height:1.6;position:relative;border-bottom:1px solid #b3e5fc;">
+  <span style="display:inline-block;padding:0 20px 0 0;">This is the archived documentation for the original mod_pagespeed releases, 1.14.36.1 and earlier. Those releases receive no security fixes: see the <a href="/docs/end-of-life-releases/" style="color:#0277bd;font-weight:bold;">end-of-life advisory</a>. The current mod_pagespeed is at <a href="https://modpagespeed.com" style="color:#0277bd;font-weight:bold;">modpagespeed.com</a>.</span>
+  <button onclick="this.parentElement.style.display='none'" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;font-size:18px;cursor:pointer;color:#0277bd;padding:0 4px;" aria-label="Dismiss">&times;</button>
+</div>
+
+  <!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+<div id=header>
+  <div id=logoline>
+    <div id=logo>
+      <a href="https://www.we-amp.com/"><img src="/1.0/we-amp.jpg"
+        srcset="/1.0/we-amp.jpg"
+        width=32 height=32 alt="We-Amp logo"></a>
+      <img src="https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png"
+           srcset="https://www.gstatic.com/images/branding/product/2x/pagespeed_32dp.png"
+           width=32 height=32 alt="pagespeed logo">
+    </div>
+    <div id=logotext>PageSpeed</div>
+  </div>
+  <div id=navline>
+    <a href="/1.0/doc/">&larr; documentation index</a>
+  </div>
+</div>
+<div id=toc></div>
+
+
+
+  <div id=content>
+    <h1>PageSpeed releases</h1>
+    <div id="pre-apache-downloads">
+      <dl>
+        <dd>
+          <div class=download>
+            <div class="paragraph">
+              <p><strong>A new signed release is in progress, as the project has exited the Apache Incubator</strong></p>
+              </div>
+          </div>
+        </dd>
+    </div>
+  </div>
+  <p class="note">
+    If you're using Nginx you need
+    to <a href="build_ngx_pagespeed_from_source">build from source</a>. These
+    packages are Apache-only.
+  </p>
+  <hr/>
+  <p class="warning">
+    Any releases offered below are pre-apache releases.
+  </p>
+  <div id="pre-apache-downloads">
+    <dl>
+      <dt>Latest pre-apache stable version</dt>
+      <dd>
+        <div class=download><a
+            href="https://dl-ssl.google.com/dl/linux/direct/mod-pagespeed-stable_current_i386.deb">mod_pagespeed
+            32-bit .deb (Debian/Ubuntu)</a></div>
+        <div class=download><a
+            href="https://dl-ssl.google.com/dl/linux/direct/mod-pagespeed-stable_current_amd64.deb">mod_pagespeed
+            64-bit .deb (Debian/Ubuntu)</a></div>
+        <div class=download><a
+            href="https://dl-ssl.google.com/dl/linux/direct/mod-pagespeed-stable_current_i386.rpm">mod_pagespeed
+            32-bit .rpm (CentOS/Fedora)</a></div>
+        <div class=download><a
+            href="https://dl-ssl.google.com/dl/linux/direct/mod-pagespeed-stable_current_x86_64.rpm">mod_pagespeed
+            64-bit .rpm (CentOS/Fedora)</a></div>
+      </dd>
+    </dl>
+  </div>
+
+  <h3>Supported platforms</h3>
+  <ul>
+    <li>CentOS/Fedora (32-bit and 64-bit)</li>
+    <li>Debian/Ubuntu (32-bit and 64-bit)</li>
+  </ul>
+
+  <p>To install the packages, on Debian/Ubuntu, please run the following
+    command:</p>
+  <pre class="prettyprint lang-bsh">
+sudo dpkg -i mod-pagespeed-*.deb
+sudo apt-get -f install
+</pre>
+
+  <p>For CentOS/Fedora, please execute:</p>
+  <pre class="prettyprint">
+sudo yum install at  # if you do not already have 'at' installed
+sudo rpm -U mod-pagespeed-*.rpm
+</pre>
+
+  <p>Installing mod_pagespeed will add the Google repository so your system
+    will automatically keep mod_pagespeed up to date. If you don't want Google's
+    repository, do <code>sudo touch /etc/default/mod-pagespeed</code> before
+    installing the package.</p>
+
+  <p>You can also download a number of <a
+      href="https://dl-ssl.google.com/page-speed/mod-pagespeed/mod_pagespeed_examples.tar.gz">system tests</a>. These
+    are the same tests available on <a href="http://www.modpagespeed.com">ModPageSpeed.com</a>.</p>
+
+  <h3>What is installed</h3>
+  <ul>
+    <li>The mod_pagespeed packages install two versions of the mod_pagespeed code
+      itself, <code>mod_pagespeed.so</code> for Apache 2.2
+      and <code>mod_pagespeed_ap24.so</code> for Apache 2.4.</li>
+    <li>Configuration files: <code>pagespeed.conf</code>, <code>pagespeed_libraries.conf</code>, and (on Debian)
+      <code>pagespeed.load</code>. If you modify one of these configuration files, that file will not be upgraded
+      automatically in the future.</li>
+    <li>A standalone JavaScript minifier <code>pagespeed_js_minify</code> based on
+      the one used in mod_pagespeed, that can
+      both <a href="build_from_source#js-minify">minify JavaScript</a>
+      and <a href="filter-canonicalize-js#sample">generate metadata for library
+        canonicalization</a>. </li>
+  </ul>
+
+  <h2>How to upgrade</h2>
+  <p>To upgrade from a previous version, use the standard <code>yum</code> or
+    <code>apt-get</code> update commands. For example:</p>
+  <dl>
+    <dt>.rpm
+    <dd>
+      <pre>
+sudo yum update mod-pagespeed-beta  # Or mod-pagespeed-stable
+sudo /etc/init.d/httpd restart</pre>
+    <dt>.deb
+    <dd>
+      <pre>
+sudo apt-get update
+sudo apt-get upgrade
+sudo /etc/init.d/apache2 restart</pre>
+  </dl>
+
+  <h2>How to Change Channels</h2>
+  <p>To convert from one channel to another, uninstall one and re-install
+    the other. For example, if you would like to move from stable to beta
+    channel:</p>
+  <dl>
+    <dt>.rpm
+    <dd>
+      <pre>
+sudo yum remove mod-pagespeed-stable
+sudo yum install mod-pagespeed-beta</pre>
+    <dt>.deb
+    <dd>
+      <pre>
+sudo apt-get remove mod-pagespeed-stable
+sudo apt-get install mod-pagespeed-beta</pre>
+  </dl>
+
+  </div>
+  <!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+<div id=footer>
+  <!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+<div id=navline>
+  <a href="/1.0/doc/">&larr; documentation index</a>
+</div>
+
+</div>
+
+<script>
+function buildTocHelper(node, headers) {
+  if (node.nodeType == 1) {
+    // Element node.
+    var nodeName = node.nodeName.toLowerCase();
+    if (nodeName == "h2" || nodeName == "h3" || nodeName == "h4" ||
+        nodeName == "h5" || nodeName == "h6") {
+      if (node.id) {
+        headers.push([nodeName, node.innerHTML, node.id]);
+	node.appendChild(document.createTextNode("\u00A0"));  // nbsp
+	var a = document.createElement("a");
+	a.class = "header-link";
+	a.href = "#" + node.id;
+	a.textContent = "\uD83D\uDD17";  // link symbol
+	node.appendChild(a);
+      }
+    } else {
+      for (var i = 0; i < node.childNodes.length; i++) {
+        buildTocHelper(node.childNodes[i], headers);
+      }
+    }
+  }
+}
+
+function buildToc() {
+  var headers = [];
+  buildTocHelper(document.body, headers);
+  if (headers.length == 0) {
+    return;
+  }
+
+  var toc = document.getElementById("toc");
+  var tocContents = document.createElement("div");
+  tocContents.id = "toc-contents";
+  tocContents.textContent = "Contents";
+  toc.appendChild(tocContents);
+
+  var level = 1;
+  var currentUl = null;
+  for (var i = 0; i < headers.length; i++) {
+    var header = headers[i];
+    var headerLevel = header[0];
+    var headerValue = header[1];
+    var headerId = header[2];
+
+    var newLevel = parseInt(headerLevel.substring(1));
+    while (newLevel > level) {
+      // We loop here to handle the case where we have h2 ... h4.  This
+      // isn't a good way to write html, but someone may still do it.
+
+      var newUl = document.createElement("ul");
+      if (currentUl == null) {
+        toc.appendChild(newUl);
+      } else {
+        currentUl.appendChild(newUl);
+      }
+      currentUl = newUl;
+      level++;
+    }
+    while (newLevel < level) {
+      currentUl = currentUl.parentNode;
+      level--;
+    }
+    var li = document.createElement("li");
+    var a = document.createElement("a");
+    a.href = "#" + headerId;
+    a.textContent = headerValue;
+    li.appendChild(a);
+    currentUl.appendChild(li);
+  }
+}
+
+function wrapTables() {
+  var tables = document.getElementsByTagName("table");
+  for (var i = 0; i < tables.length; i++) {
+    var table = tables[i];
+    var parent = table.parentNode;
+    var div = document.createElement('div');
+    div.className = "table-wrapper";
+    parent.insertBefore(div, table);
+    div.appendChild(table);
+  }
+}
+
+buildToc();
+wrapTables();
+</script>
+
+</body>
+
+</html>

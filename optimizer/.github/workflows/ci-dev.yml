@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# Exercise a pipeline change on the fleet before it reaches main: push the
+# change to the ci-dev branch, then dispatch this workflow. It calls the PR
+# tier at @ci-dev instead of @main. See docs/ci/pipelines.md.
+
+name: CI (ci-dev)
+
+on:
+  workflow_dispatch:
+    inputs:
+      full:
+        description: Also run the full tier (pipeline-full.yml@ci-dev)
+        type: boolean
+        default: false
+
+concurrency:
+  group: ci-dev
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  pr:
+    # The called pipeline requests pull-requests: read for the release-note
+    # gate and checks: read for its fleet scope (reads the commit's check
+    # suites); a called workflow cannot exceed what its caller grants.
+    permissions:
+      checks: read
+      contents: read
+      pull-requests: read
+    uses: We-Amp/pagespeed-optimizer/.github/workflows/pipeline-pr.yml@ci-dev
+
+  # Dispatch with full=true to exercise pipeline-full.yml from the ci-dev
+  # branch; the called workflow takes its permissions from the top level.
+  full:
+    permissions:
+      contents: read
+    if: ${{ inputs.full }}
+    uses: We-Amp/pagespeed-optimizer/.github/workflows/pipeline-full.yml@ci-dev

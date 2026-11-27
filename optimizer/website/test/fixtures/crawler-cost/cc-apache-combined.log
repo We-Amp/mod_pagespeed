@@ -1,0 +1,4 @@
+www.example.com:443 203.0.113.6 - - [10/Oct/2026:13:56:01 +0000] "GET /guide/ HTTP/1.1" 200 - "-" "Mozilla/5.0 (compatible; GPTBot/1.2; +https://openai.com/gptbot)"
+203.0.113.5 - - [10/Oct/2026:13:55:36 +0000] "GET /guide/ HTTP/1.1" 200 5120 "https://www.perplexity.ai/search/x" "Mozilla/5.0 Chrome/130"
+203.0.113.9 - frank [10/Oct/2026:14:02:00 +0000] "GET /docs/intro HTTP/1.1" 304 0 "https://claude.ai/" "Mozilla/5.0 Firefox/131"
+203.0.113.7 - - [10/Oct/2026:14:00:00 +0000] "GET /pricing/ HTTP/1.1" 200 3000 "-" "Mozilla/5.0 (compatible; ClaudeBot/1.0; +claudebot@anthropic.com)"

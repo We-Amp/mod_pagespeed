@@ -1,0 +1,213 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import PageHero from '../components/PageHero.astro';
+import { ORGANIZATION } from '../data/organization';
+
+// AboutPage JSON-LD carries the one Organization node (src/data/organization.ts),
+// the same @id the home page and iispeed.com use. Cross-property identity lets Google
+// reconcile the same legal entity wherever it appears.
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'AboutPage',
+  name: 'About — mod_pagespeed',
+  url: 'https://modpagespeed.com/about/',
+  description:
+    'The team behind mod_pagespeed and its 2.0 re-architecture, introduced as ModPageSpeed 2.0: We-Amp B.V., a Dutch software company founded in 2012 that helped build ngx_pagespeed and maintained mod_pagespeed, and today maintains the PageSpeed optimization lineage — led by Otto van der Schaaf, an Apache PageSpeed (incubating) committer who release-managed its only Apache release, 1.14.36.1, and an Apache Traffic Server PMC member since 2012.',
+  mainEntity: ORGANIZATION,
+};
+---
+
+<BaseLayout
+  title="About — mod_pagespeed"
+  description="Built by We-Amp B.V. — a Dutch web-optimization company that helped build ngx_pagespeed and maintains mod_pagespeed, home of IISpeed's IIS integration."
+  jsonLd={jsonLd}
+>
+  {/* Hero */}
+  <PageHero title="The team behind mod_pagespeed." width="prose">
+    <Fragment slot="lede">
+      mod_pagespeed is built by We-Amp B.V., a Dutch software company founded in 2012 in Castricum,
+      on the coast north of Amsterdam. It's led by Otto van der Schaaf, an Apache PageSpeed
+      (incubating) committer and Apache Traffic Server PMC member since 2012, who helped build
+      ngx_pagespeed, maintained mod_pagespeed, and release-managed 1.14.36.1, the project's only
+      Apache release. One product in two parts, one shared optimization core, and a line that traces
+      back to the original mod_pagespeed in 2010.
+    </Fragment>
+  </PageHero>
+  <div class="container-prose">
+    <div class="rule-ticked-scale" role="presentation" aria-hidden="true"></div>
+  </div>
+
+  {/* Lineage */}
+  <section class="container-prose section">
+    <h2 class="h2-section text-text-body">The lineage</h2>
+    <div class="mt-6 space-y-5 text-text-muted">
+      <p>
+        mod_pagespeed was an open-source server-side optimization framework originally built and
+        released by Google in 2010. The original team &mdash; Joshua Marantz, Jeff Kaufman, Maks
+        Orlovich, Bryan McQuade and others &mdash; shipped an Apache module that did things the rest
+        of the web hadn't figured out yet: server-side image transcoding, critical-CSS inlining,
+        cache-extension, JS minification, dozens of transforms across a content pipeline that
+        thousands of operators put in front of production traffic.
+      </p>
+      <p>
+        It set the standard. It's no longer actively developed upstream &mdash; Google moved the
+        project to the Apache Incubator in 2017, and the podling retired in 2023. The{' '}
+        <a href="/psol/" class="text-interactive hover:text-interactive-hover underline">
+          optimization libraries from the original mod_pagespeed
+        </a>{' '}
+        are the shared core of both parts. The{' '}
+        <a href="/" class="text-interactive hover:text-interactive-hover underline">
+          mod_pagespeed module
+        </a>{' '}
+        carries the proven line forward in-process on Apache, nginx and IIS; the 2.0 re-architecture
+        wrapped the same rewriters in a worker and cache architecture, and that worker is the other
+        part. The rewriters that decide how to compress an image or rewrite a stylesheet are the
+        ones the original team built and proved.
+      </p>
+    </div>
+  </section>
+  <div class="container-prose">
+    <div class="rule-ticked-scale" role="presentation" aria-hidden="true"></div>
+  </div>
+
+  {/* The company */}
+  <section class="container-prose section">
+    <h2 class="h2-section text-text-body">The company</h2>
+    <div class="mt-6 space-y-5 text-text-muted">
+      <p>
+        We-Amp B.V. is a Dutch private limited company, registered at the KvK under 57898138,
+        founded in Castricum in 2012. The specialty has always been web performance:{' '}
+        <a
+          href="/self-hosted-image-optimization/"
+          class="text-interactive hover:text-interactive-hover underline"
+        >
+          image optimization
+        </a>
+        , content rewriting, cache architecture, the boring infrastructure that decides whether a
+        page is fast or slow.
+      </p>
+      <p>
+        Today We-Amp is led by Otto van der Schaaf, an Apache PageSpeed (incubating) committer and
+        Apache Traffic Server PMC member who helped build ngx_pagespeed and drove the project's
+        Apache incubation. After the podling retired and upstream went quiet, We-Amp carried the
+        lineage forward. We-Amp is{' '}
+        <a
+          href="https://developers.googleblog.com/en/speed-up-your-sites-with-pagespeed-for-nginx/"
+          rel="nofollow noopener"
+          class="text-interactive hover:text-interactive-hover underline"
+        >
+          credited by Google as an ngx_pagespeed contributor
+        </a>
+        . The codebase has shipped optimization code since Google's first release in 2010, and
+        We-Amp has worked on it since 2012, across Apache, nginx, Envoy and IIS ports of the 1.x
+        line. The 2.0 re-architecture was We-Amp's independent rebuild, and the current
+        mod_pagespeed brings it together with the module as one product: one shared optimization
+        core, one Cyclone Cache library underneath both parts.
+      </p>
+      <p>
+        Self-hosted software fits the way we work: you run the binary on your infrastructure, you
+        control the upgrade timing, we don't sit in your request path.
+      </p>
+      <p>
+        Alongside the product, We-Amp takes on consulting for teams whose question is their site
+        rather than the software: a fixed-price performance and configuration audit, and longer
+        engagements on caching and reverse-proxy infrastructure. See{' '}
+        <a
+          href="https://we-amp.com/consulting/"
+          class="text-interactive hover:text-interactive-hover underline"
+          data-umami-event="cta_commercial"
+          data-umami-event-offer="consulting"
+          data-umami-event-surface="about"
+          data-umami-event-position="company_section"
+        >
+          consulting at we-amp.com
+        </a>
+        .
+      </p>
+    </div>
+  </section>
+  <div class="container-prose">
+    <div class="rule-ticked-scale" role="presentation" aria-hidden="true"></div>
+  </div>
+
+  {/* Where AI fits */}
+  <section class="container-prose section">
+    <h2 class="h2-section text-text-body">Where AI fits, and where it doesn't</h2>
+    <div class="mt-6 space-y-5 text-text-muted">
+      <p>
+        Inside the binary: small LightGBM models &mdash; one per format, JPEG, WebP, AVIF &mdash;
+        predict the encoder quality that hits a target SSIMULACRA2 perceptual score. Compiled to C
+        through TL2cgen, around five microseconds per call. No model downloads, no runtime
+        dependency, no outbound call in the request path. Every variant is verified against the
+        original with SSIMULACRA2 before it reaches your cache. Don't want it?
+        <code>--no-learned-quality-jpeg</code>, <code>--no-learned-quality-webp</code>,
+        <code>--no-learned-quality-avif</code>. Per format.
+      </p>
+      <p>
+        Outside the binary: agents watch security advisories, performance research and upstream
+        changes, and brief the team. A human approves before anything user-visible ships. No release
+        goes out without that sign-off.
+      </p>
+    </div>
+  </section>
+  <div class="container-prose">
+    <div class="rule-ticked-scale" role="presentation" aria-hidden="true"></div>
+  </div>
+
+  {/* Why this matters */}
+  <section class="container-prose section">
+    <h2 class="h2-section text-text-body">Why self-hosted, in 2026</h2>
+    <div class="mt-6 space-y-5 text-text-muted">
+      <p>
+        The 2026 web is HTTP/2 and HTTP/3, container orchestration, nginx in front of nearly
+        everything, AVIF in every browser worth optimizing for. The performance story is no longer
+        "the network is slow" &mdash; it's "your origin is doing too much work and shipping too many
+        bytes." Server-side optimization should live next to your origin, not in someone else's data
+        center two hops away.
+      </p>
+      <p>
+        mod_pagespeed reflects that reality. The module serves and the optimizer worker optimizes;
+        with the worker paired to the Apache or nginx module, and in the reverse-proxy deployment,
+        they talk over a local socket, and neither phones home with request data. There is no
+        third-party proxy in the path. There is no CDN dependency. It makes no outbound request of
+        its own accord — the only egress is what the operator configures.
+      </p>
+      <p>
+        Operators in 2026 have absorbed the trade-offs of edge platforms and managed services, and a
+        growing number want some things back on their own boxes.
+      </p>
+    </div>
+  </section>
+  <div class="container-prose">
+    <div class="rule-ticked-scale" role="presentation" aria-hidden="true"></div>
+  </div>
+
+  {/* Get in touch */}
+  <section class="container-prose section">
+    <h2 class="h2-section text-text-body">Get in touch</h2>
+    <p class="mt-6 text-text-muted">
+      Questions about the product, the company, or the lineage &mdash; email or use the form. The
+      software is free; support is sold in three tiers, with prices on the pricing page.
+    </p>
+    <div class="mt-8 flex flex-wrap gap-4">
+      <a href="/contact/" class="btn-primary">
+        {' '}
+        Contact{' '}
+      </a>
+      <a
+        href="/pricing/"
+        data-umami-event="cta_commercial"
+        data-umami-event-offer="support"
+        data-umami-event-surface="about"
+        data-umami-event-position="get_in_touch"
+        class="inline-flex items-center justify-center gap-2 rounded-lg border border-border-strong px-6 py-3 text-sm font-semibold text-text-body hover:bg-bg-secondary transition-colors"
+      >
+        See pricing
+      </a>
+    </div>
+    <p class="mt-10 text-xs text-text-annotation max-w-2xl">
+      mod_pagespeed is an open-source project originally developed at Google. The current
+      mod_pagespeed is developed by We-Amp B.V. and is not affiliated with or endorsed by Google.
+    </p>
+  </section>
+</BaseLayout>

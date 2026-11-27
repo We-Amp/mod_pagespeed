@@ -1,0 +1,72 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// Orientation for visitors who arrive from the archived PageSpeed Module
+// documentation on developers.google.com (its old /doc/* pages redirect to the
+// install and configuration docs here). Progressive enhancement: the aside
+// ships with the `hidden` attribute, so it takes no space and no visitor
+// without that referrer ever sees it; the script below reveals it only when
+// document.referrer starts with https://developers.google.com/ and records
+// one `referral_orientation_shown` event per page view.
+import { LICENSE_CLAUSE } from '../data/product-facts.mjs';
+---
+
+<aside
+  id="referral-orientation"
+  class="mb-6 rounded-lg border border-interactive/40 bg-interactive/10 px-4 py-3 text-sm text-text-body"
+  aria-label="About this site"
+  data-pagefind-ignore
+  hidden
+>
+  <p>
+    <strong>Arriving from Google&rsquo;s PageSpeed Module docs?</strong> Those pages describe the
+    archived project. This is its maintained continuation, the current mod_pagespeed,{' '}
+    {LICENSE_CLAUSE}. Already running the archived module?{' '}
+    <a
+      href="/docs/migrate-from-google-mod-pagespeed/"
+      class="text-interactive hover:text-interactive-hover underline underline-offset-2"
+      data-umami-event="referral_orientation_migrate"
+    >
+      Migrate your existing install
+    </a>
+    ,{' '}
+    <a
+      href="/docs/getting-started/"
+      class="text-interactive hover:text-interactive-hover underline underline-offset-2"
+      data-umami-event="referral_orientation_install"
+    >
+      install it fresh
+    </a>
+    , or read{' '}
+    <a
+      href="/alternatives/google-pagespeed-module/"
+      class="text-interactive hover:text-interactive-hover underline underline-offset-2"
+      data-umami-event="referral_orientation_explainer"
+    >
+      what the PageSpeed module was and what replaced it
+    </a>
+    .
+  </p>
+</aside>
+
+<script is:inline>
+  // Inline and right after the aside, so it runs while the page is parsed and
+  // the aside is in place before first paint: no layout shift on reveal.
+  (function () {
+    var aside = document.getElementById('referral-orientation');
+    if (!aside || document.referrer.indexOf('https://developers.google.com/') !== 0) return;
+    aside.hidden = false;
+    var sent = false;
+    function track() {
+      var umami = window.umami;
+      if (sent || !umami || typeof umami.track !== 'function') return;
+      sent = true;
+      umami.track('referral_orientation_shown');
+    }
+    // The analytics script loads deferred from another host and is not there
+    // yet while the page is parsed; record the event once the page has loaded.
+    track();
+    if (!sent) window.addEventListener('load', track, { once: true });
+  })();
+</script>

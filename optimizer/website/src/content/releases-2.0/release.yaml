@@ -1,0 +1,116 @@
+# ModPageSpeed 2.0 — release manifest (single source of truth)
+#
+# Edit this file when a new 2.0 release ships. Every website, script,
+# and docs page that needs a 2.0 version string derives it from this
+# manifest (§1).
+#
+# 2.0 uses plain SemVer patches for reships (e.g. 2.0.0 → 2.0.1), NOT
+# the `+rN` build-metadata form used by 1.1 (§3). NuGet enforces
+# version uniqueness natively, and the aptly NVR constraint that drove
+# `+rN` for 1.1 does not apply to NuGet/Docker/Helm channels.
+#
+# DO NOT hand-edit `release.{semver,revision,tag,released_on}` — use the
+# `bump-website.mjs` tool. Other fields (compat, urls, artifacts) are
+# operator-curated.
+#
+# Schema: scripts/release/manifest-schema.mjs
+# Distribution scope: §2 — NuGet + Docker + Helm only.
+#
+# FROZEN D1 (ratified 2026-08-07, operator lane 4): the 2.0
+# serving products froze after v2.0.41 (the last feature release, shipped
+# 2026-08-08). `bump-website.mjs` refuses feature bumps against this
+# manifest; security-critical reships (plain SemVer patch bumps, # §3) still increment. The identity keys are untouched.
+# EOL basis: lane-4 ruling = 6 months per channel from the 2026-08-07
+# ruling date; dates publish at the freeze (publication rule) and
+# land in the EOL/support-lifecycle extraction ADR.
+# CARVE-OUT (operator ruling on the manifest review): the NuGet/middleware
+# line CONTINUES as a live product (ratified D1/D9) and is NOT covered by
+# this freeze — no eol entry for nuget. It re-homes to its own
+# manifest/line when it next ships (tracked in the meta-repo).
+
+schema_version: 2
+
+product:
+  line: "2.0"
+  display_name: "ModPageSpeed 2.0"
+
+status: frozen
+
+# Per-channel end-of-life dates (D1 lane 4: 6 months per frozen
+# 2.0 channel from the 2026-08-07 ruling; security-only reships meanwhile).
+# nuget is deliberately absent — see the carve-out note above.
+# Security reships do NOT move these dates: the EOL basis is the
+# 2026-08-07 ruling date, not the reship date (v2.0.42, 2026-08-10, leaves
+# both channels at 2027-02-07).
+eol:
+  docker: "2027-02-07"
+  helm: "2027-02-07"
+
+release:
+  semver: "2.0.42" # current shipping 2.0 line (v2.0.0 GA shipped 2026-05-17); 2.0.42 = security reship on the frozen line (nanoid GHSA-2v37-7h3g-55p8 ×2 license-service+website, @sveltejs/kit GHSA-29g2-3rmr-qm68 workbench; mps2 #1271 → #1272)
+  revision: null # 2.0 uses plain SemVer; +rN not used
+  tag: "v2.0.42"
+  released_on: "2026-08-10"
+
+artifacts:
+  # NuGet flagship (four RIDs).
+  nuget:
+    package: "WeAmp.PageSpeed.AspNetCore"
+    rids:
+      - "linux-x64"
+      - "linux-arm64"
+      - "osx-arm64"
+      - "win-x64"
+  # Docker images published to GHCR (ghcr.io/we-amp) — . The combined
+  # single-container image is ghcr.io/we-amp/pagespeed-combined.
+  docker:
+    image: "ghcr.io/we-amp/pagespeed-nginx"
+    worker_image: "ghcr.io/we-amp/pagespeed-worker"
+    tag_template: "%V"
+  # Helm chart shipped from the 2.x product repo (deploy/helm/pagespeed).
+  helm:
+    chart: "pagespeed"
+    repository: "https://modpagespeed.com/charts"
+    app_version: "%V"
+
+urls:
+  # 2.0 has NO direct-archive download channel — it ships via NuGet + Docker +
+  # Helm only (§2). These URLs are never rendered for 2.0 (the website
+  # download UI keys off the per-line distribution scope), so they point at the
+  # signed vendor repo root rather than a /releases/vX.Y.Z/ archive path that
+  # would 404. The previous v2.0.7/ archive_base 404'd and was never reached.
+  archive_base: "https://packages.modpagespeed.com/"
+  latest_base: "https://packages.modpagespeed.com/"
+  # Stable, NOT version-pinned (A1.1). Signed vendor-repo pubkey.
+  gpg_key: "https://packages.modpagespeed.com/pubkey.gpg"
+
+compat:
+  # 2.0 v1 ships NuGet middleware + Docker + Helm only (§2).
+  # Native server modules (Apache/nginx/IIS) stay on 1.1.
+  dotnet:
+    # TFMs are net8.0;net10.0 (csproj + shipped nupkg lib/ folders) — .NET 9
+    # was never a target.
+    runtimes: [".NET 8", ".NET 10"]
+    asp_net_core: ["8.0+", "10.0+"]
+  docker:
+    # The shipped images are ubuntu:24.04-based with nginx compiled from
+    # source — the embedded nginx version is pinned in the 2.x product repo
+    # docker/nginx-version.txt (1.30.4 since the July 2026 nginx CVE batch).
+    # The old "nginx:1.27-alpine" value never matched the shipped images.
+    base_images: ["ubuntu:24.04"]
+  kubernetes:
+    versions: ["1.28+", "1.29+", "1.30+"]
+    helm_versions: ["3.12+"]
+
+display:
+  # The 2.0 content schema (mps2 content.config.ts) enforces
+  # display.header_version === release.semver, so these track the manifest's
+  # semver (2.0.26, the latest GA).
+  # Keep release.semver on the latest STABLE so the public "current release"
+  # never shows a prerelease (e.g. 2.0.21-preview.1, which stays a nuget-only
+  # opt-in via --prerelease).
+  header_version: "2.0.42"
+  badge_version: "v2.0.42"
+  # `dotnet add package WeAmp.PageSpeed.AspNetCore` (no flag) resolves to the
+  # latest stable (2.0.26); `--prerelease` is only needed to opt into previews.
+  nuget_install_flags: ""

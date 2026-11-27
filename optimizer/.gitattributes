@@ -1,0 +1,10 @@
+# Text files check out with LF everywhere, so byte-compared fixtures match on
+# Windows checkouts whose git defaults to CRLF.
+* text=auto eol=lf
+# Mark generated demo images as binary (prevent git diff on JPEGs)
+website/public/demos/*/images/*.jpg binary
+GIT_COMMIT text eol=lf
+# Inputs of build-time generators and shell scripts must check out with LF
+# everywhere: gperf rejects CR in its declarations and bash chokes on CRLF.
+*.gperf text eol=lf
+*.sh text eol=lf

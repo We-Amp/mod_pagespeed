@@ -1,0 +1,144 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// Home hero: the message on the left, the measured readout panel on the right
+// at >=1024px; stacked with the panel right after the CTA block on narrow
+// screens. Below them, full width, the proof strip and the affiliation
+// notice.
+//
+// The markup keeps the indentation it has inside the page layout: the build
+// does not compress HTML, so this indentation is the whitespace of the page.
+// The class names are styled by the page's global style block in
+// src/pages/index.astro. Keep the component imports below in this order: it
+// decides the order of the inline style blocks in <head> (see the note in
+// src/pages/index.astro).
+
+import Readout from '../instrument/Readout.astro';
+import ReadoutPanel from '../instrument/ReadoutPanel.astro';
+import ProofStrip from './ProofStrip.astro';
+import { formatPct, monthYear, pctDelta } from '../../lib/instrument';
+import demoMetrics from '../../data/demo-metrics.json';
+
+interface Props {
+  // The live-site count as a rounded-down lower bound (roundDownDisplay).
+  liveSites: string;
+}
+
+const { liveSites: builtwithLiveRounded } = Astro.props;
+
+// Hero readout panel: the e-commerce case from src/data/demo-metrics.json
+// (measured on the demo store; the label date comes from generated_at).
+const demoStore = demoMetrics.sites.find((site) => site.id === 'ecommerce');
+if (!demoStore) throw new Error('demo-metrics.json: the ecommerce site entry is missing');
+const demoLighthouse = demoStore.lighthouse;
+const demoLoad = demoStore.loadTime;
+const demoImageJpeg = demoStore.resources.images.totalJpeg;
+const demoImageAvif = demoStore.resources.images.totalAvif;
+const demoImageDelta = formatPct(pctDelta(demoImageJpeg, demoImageAvif));
+const demoMeasured = `Measured on our demo store, ${monthYear(demoMetrics.generated_at)}.`;
+---
+
+  <section class="pt-12 home-hero-top">
+    <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+      <div class="hero-grid">
+        <div>
+          <p class="eyebrow">open source &middot; Apache-2.0</p>
+          <h1 class="h1-hero mt-4 text-text-body">
+            <span class="block">mod_pagespeed, the PageSpeed module for nginx and Apache</span>
+            {/* A hidden full stop: the two lines are read as two sentences, not one run-on. */}
+            <span class="sr-only">.</span>
+            <span class="hero-sub mt-4 block text-interactive">
+              Lighthouse <span class="text-text-body">56</span> to{' '}
+              <span class="text-text-body">90</span>. On your own servers.
+            </span>
+          </h1>
+          <p class="lede hero-lede mt-5">
+            mod_pagespeed transcodes images to AVIF, minifies CSS and JS, and injects critical CSS
+            &mdash; optimized off the request path, served from cache by your own nginx or Apache.
+          </p>
+
+          <div class="hero-actions mt-6">
+            <a href="/download/" class="btn-primary" data-umami-event="cta_primary_home_hero">
+              Download &amp; run
+            </a>
+            <a href="/demo/" class="btn-secondary" data-umami-event="cta_home_hero_demo">
+              See the demo
+            </a>
+            <a href="/docs/" class="link-arrow hero-docs" data-umami-event="cta_home_hero_docs">
+              Read the docs
+            </a>
+          </div>
+          <p class="mt-4 max-w-xl text-small text-text-annotation">
+            No proxy, no CDN, nothing third-party in your request path. Running IIS or ASP.NET
+            Core?{' '}
+            <a
+              href="/download/#iis"
+              data-umami-event="cta_home_hero_iis_aspnet"
+              class="link-arrow"
+            >
+              see the IIS and ASP.NET Core packages</a
+            >
+          </p>
+          <p class="mt-2 max-w-xl text-small text-text-annotation">
+            Already running mod_pagespeed 1.x or ngx_pagespeed? Your pagespeed directives carry over.{' '}
+            <a
+              href="/docs/upgrade/"
+              data-umami-event="cta_home_hero_upgrade"
+              class="link-arrow"
+            >
+              Upgrade guide</a
+            >
+          </p>
+        </div>
+
+        {/* Measured readout panel: the e-commerce demo store numbers from
+            src/data/demo-metrics.json (source + date in the caption). */}
+        <div>
+          <ReadoutPanel
+            id="home-readout"
+            title="Readout · demo store"
+            source={demoMeasured}
+            href="/demo/"
+            hrefLabel="see it live"
+          >
+            <Readout
+              label="Lighthouse performance score"
+              before={String(demoLighthouse.before)}
+              after={String(demoLighthouse.after)}
+              gauge={{ min: 0, max: 100, before: demoLighthouse.before, after: demoLighthouse.after }}
+            />
+            <Readout
+              label="page load, cut in half (simulated 3G)"
+              before={`${demoLoad.before}s`}
+              after={`${demoLoad.after}s`}
+              gauge={{ min: 0, max: 2, before: demoLoad.before, after: demoLoad.after }}
+            />
+            <Readout
+              label="product image, JPEG → AVIF"
+              after={demoImageDelta}
+              gauge={{ min: 0, max: demoImageJpeg, before: demoImageJpeg, after: demoImageAvif }}
+            />
+            <Readout label="third parties in the request path" after="0" tone="neutral" />
+          </ReadoutPanel>
+        </div>
+      </div>
+    </div>
+
+    <ProofStrip liveSites={builtwithLiveRounded} />
+
+    <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+      <p class="pt-4 pb-8 text-xs text-text-annotation">
+        mod_pagespeed is developed by{' '}
+        <a
+          href="https://we-amp.com/"
+          rel="noopener noreferrer"
+          class="hover:text-text-muted transition-colors"
+        >
+          We-Amp B.V.
+        </a>{' '}
+        and is not affiliated with or endorsed by Google. mod_pagespeed is an open-source project
+        originally developed at Google.
+      </p>
+    </div>
+  </section>

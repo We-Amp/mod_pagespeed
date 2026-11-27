@@ -1,0 +1,23 @@
+# Compose override: use pre-built CI artifacts instead of building from source.
+#
+# The nginx.conf volume mount is needed because the production-tests Dockerfile.nginx
+# embeds its own nginx.conf via COPY; switching to Dockerfile.prebuilt requires
+# providing it via bind mount instead.
+#
+# Usage:
+#   docker compose -f tools/production-tests/docker-compose.yml \
+#                  -f tools/production-tests/docker-compose.prebuilt.yml up -d
+
+services:
+  worker:
+    build:
+      context: ../../
+      dockerfile: tools/e2e/Dockerfile.prebuilt
+    entrypoint: ["/entrypoint-worker.sh"]
+  nginx:
+    build:
+      context: ../../
+      dockerfile: tools/e2e/Dockerfile.prebuilt
+    command: ["nginx", "-g", "daemon off;"]
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro

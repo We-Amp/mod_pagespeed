@@ -1,0 +1,178 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# Nightly caller: schedule and manual dispatch. The nightly jobs live in
+# pipeline-nightly.yml and the full tier in pipeline-full.yml (job `full`),
+# both pinned to main. Every scheduled night runs both; a dispatch runs the
+# full tier only with full_tier set. The hosted `nightly-red` job reports a
+# red full tier in one issue. See docs/ci/pipelines.md.
+
+name: Nightly
+
+# A full-tier dispatch is titled `Nightly (full)`: the schedule guard and the
+# external dispatcher count it as a real night. Any other dispatch is `Nightly`.
+run-name: ${{ github.event_name == 'workflow_dispatch' && inputs.full_tier && 'Nightly (full)' || 'Nightly' }}
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+    inputs:
+      fuzz_seconds:
+        description: libFuzzer time budget in seconds
+        required: false
+        default: "600"
+      css_fuzz_shadow:
+        description: Also run the manual CSS oracle shadow lane
+        type: boolean
+        default: false
+      full_tier:
+        description: Also run the full tier (default branch only)
+        type: boolean
+        default: false
+
+# One nightly at a time; a running nightly is never cancelled.
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  # The schedule guard. GitHub's cron is best effort, and an external
+  # scheduler also dispatches this workflow every night. A first-attempt
+  # scheduled run skips all its work when a real night started in the
+  # previous 20 hours, and cancels itself so that a skipped night reads
+  # `cancelled`. A real night is a run on the default branch that is not
+  # cancelled and is either a scheduled run or a full-tier dispatch (titled
+  # `Nightly (full)`); other dispatches and skipped runs never count. A
+  # dispatch and a re-run never skip. The guard runs inside the `nightly`
+  # concurrency group, so a late cron run that waited for a running dispatch
+  # sees that run. A queued dispatch can be replaced by a newer queued run in
+  # the group; it then reads `cancelled`, is not counted, and the cron run
+  # proceeds. Any error in the check leaves skip=false: a night that runs
+  # twice is better than a night that is lost.
+  guard:
+    name: Schedule guard
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
+    outputs:
+      skip: ${{ steps.check.outputs.skip }}
+    steps:
+      - name: Skip a scheduled run when a real night started in the last 20 hours
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          ATTEMPT: ${{ github.run_attempt }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -uo pipefail
+          skip=false
+          if [ "${EVENT}" = schedule ] && [ "${ATTEMPT}" = 1 ]; then
+            recent="$(gh api "repos/${REPO}/actions/workflows/nightly.yml/runs?per_page=50" 2>/dev/null \
+              | jq -r --arg run "${RUN_ID}" --arg br "${DEFAULT_BRANCH}" --argjson now "$(date -u +%s)" \
+                  '[.workflow_runs[]
+                    | select((.id | tostring) != $run and .head_branch == $br and .conclusion != "cancelled"
+                             and (.event == "schedule" or ((.display_title // "") | endswith("(full)")))
+                             and ((.created_at | fromdateiso8601) > ($now - 72000)))] | length' 2>/dev/null || true)"
+            case "${recent}" in
+              ''|*[!0-9]*) echo "::notice::the guard could not read the run list; running" ;;
+              0) echo "no real night in the last 20 hours; running" ;;
+              *) skip=true; echo "::notice::${recent} real night(s) started in the last 20 hours; skipping this scheduled run" ;;
+            esac
+          fi
+          echo "skip=${skip}" >> "${GITHUB_OUTPUT}"
+      # A separate step, so the output is recorded before the run is
+      # cancelled. If the cancel cannot be made to work the step fails, so a
+      # skipped run never ends `success` and counts as a real night.
+      - name: Cancel this skipped run
+        if: steps.check.outputs.skip == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -uo pipefail
+          for _ in 1 2 3; do
+            if gh run cancel "${RUN_ID}"; then sleep 30; exit 0; fi
+            sleep 5
+          done
+          if gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/force-cancel"; then sleep 30; exit 0; fi
+          echo "::error::could not cancel this skipped run"
+          exit 1
+
+  nightly:
+    needs: [guard]
+    if: ${{ !cancelled() && needs.guard.outputs.skip != 'true' }}
+    # The ceiling for the called workflow: it can narrow these, never widen
+    # them. Only its hosted report jobs use issues: write, and only the
+    # manual shadow lane reads actions.
+    permissions:
+      contents: read
+      issues: write
+      actions: read
+    uses: We-Amp/pagespeed-optimizer/.github/workflows/pipeline-nightly.yml@main
+    with:
+      fuzz_seconds: ${{ inputs.fuzz_seconds || '600' }}
+      css_fuzz_shadow: ${{ inputs.css_fuzz_shadow || false }}
+
+  # The full tier, named `full` like the push tier's call in ci.yml, so its
+  # checks read `full / <job name>` in both. It runs on every scheduled night
+  # and on a dispatch with full_tier set: the make-up path for a missed or
+  # late night. The dispatch path also needs the default branch, so a
+  # dispatch on ci-dev or any other ref never reaches it. It shares the
+  # `nightly` concurrency group above, so it never starts while another
+  # nightly is pending or running. A release-candidate nightly dispatch keeps
+  # full_tier false: the candidate's CI dispatch with full=true covers the
+  # full tier. pipeline-full.yml asks for no job-level permission beyond its
+  # top-level contents: read; actions: read matches the grant of the push
+  # tier's call in ci.yml. A called workflow cannot exceed what its caller
+  # grants, and a missing grant fails the whole run at startup.
+  full:
+    needs: [guard]
+    if: >-
+      !cancelled() && needs.guard.outputs.skip != 'true' && (
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' && inputs.full_tier && github.ref == 'refs/heads/main'))
+    permissions:
+      actions: read
+      contents: read
+    uses: We-Amp/pagespeed-optimizer/.github/workflows/pipeline-full.yml@main
+
+  # The nightly-red issue (docs/ci/pipelines.md, "The nightly-red issue").
+  # Hosted, no secret: it reads this run's own job list, because the caller
+  # sees one result for `full` and a continue-on-error job never turns it
+  # red, and opens, updates or closes one issue labelled nightly-red. The
+  # issue body carries job names, SHAs, failing targets and run links only.
+  # The script comes from main; on any other ref it is a dry run that prints
+  # what it would write.
+  nightly-red:
+    name: Nightly full-tier report
+    needs: [guard, full]
+    if: always() && needs.guard.outputs.skip != 'true' && needs.full.result != 'skipped'
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Open, update or close the nightly-red issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: main
+          DRY_RUN: ${{ github.ref != 'refs/heads/main' }}
+          RUNTIME_STEP_CHECKS: ""
+        run: bash tools/ci/nightly_red_report.sh

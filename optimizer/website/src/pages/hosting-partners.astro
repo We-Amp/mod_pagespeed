@@ -1,0 +1,186 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import PageHero from '../components/PageHero.astro';
+import Icon from '../components/Icon.astro';
+import { LICENSING_TERMS_URL } from '../data/product-facts.mjs';
+
+// Partner-program page (converged model): the software is free everywhere, so
+// the hosting offer is the support subscription shaped for providers —
+// fleet-scale backing, packaging coordination, and a direct channel — not a
+// volume license. Keep the two structural markers the production smoke
+// asserts: the hosting-topic contact CTA and the packages.modpagespeed.com
+// reference. The qualifier form is a plain GET to /contact/ with topic=hosting
+// plus hosts, panel and distros; the contact page's script selects the topic
+// and folds those values into the message. Without JS the visitor still lands
+// on the contact form, but picks the topic and retypes the details.
+const hostBands = ['Up to 25 hosts', 'Up to 100 hosts', 'More than 100 hosts'];
+const panels = ['cPanel/EA4', 'Plesk', 'DirectAdmin', 'CloudPanel', 'Custom or none'];
+const fieldClass =
+  'mt-1 block w-full rounded-md border border-control-border bg-bg-elevated text-text-body px-3 py-2 focus:border-interactive focus:ring-2 focus:ring-interactive';
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'WebPage',
+  name: 'Hosting partners — mod_pagespeed',
+  description:
+    'The hosting partner program backs hosting providers running mod_pagespeed at fleet scale.',
+};
+---
+
+<BaseLayout
+  title="Hosting partners — mod_pagespeed"
+  description="mod_pagespeed is free on every host. The hosting partner program adds fleet support and a direct channel for providers."
+  jsonLd={jsonLd}
+>
+  <PageHero
+    id="hosting-title"
+    width="prose"
+    eyebrow="Partner program · for hosting providers"
+    title="Run it across your fleet. We'll back you."
+  >
+    <Fragment slot="lede">
+      mod_pagespeed is free on every host and every hosted domain — nothing about fleet scale
+      changes that. The hosting partner program is the support subscription shaped for providers: a
+      direct channel to the people who build the product, for those who make it part of their
+      platform.
+    </Fragment>
+  </PageHero>
+
+  <section class="container-prose pb-16">
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div class="card">
+        <div class="h-10 w-10 rounded-lg bg-interactive/10 flex items-center justify-center">
+          <Icon name="server" class="h-5 w-5 text-interactive" />
+        </div>
+        <h2 class="mt-4 font-semibold text-text-body">The packages you already trust</h2>
+        <p class="mt-2 text-sm text-text-muted">
+          No partner-specific builds: the same signed packages every nginx and Apache deployment
+          uses, from{' '}
+          <a
+            href="https://packages.modpagespeed.com/"
+            rel="noopener noreferrer external"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            packages.modpagespeed.com
+          </a>{' '}
+          — including cPanel/EA4 RPMs.
+        </p>
+      </div>
+      <div class="card">
+        <div class="h-10 w-10 rounded-lg bg-interactive/10 flex items-center justify-center">
+          <Icon name="route" class="h-5 w-5 text-interactive" />
+        </div>
+        <h2 class="mt-4 font-semibold text-text-body">Fleet-scale support</h2>
+        <p class="mt-2 text-sm text-text-muted">
+          Support for providers who make mod_pagespeed part of their platform — talk to us about
+          what the program covers for your fleet.
+        </p>
+      </div>
+      <div class="card">
+        <div class="h-10 w-10 rounded-lg bg-interactive/10 flex items-center justify-center">
+          <Icon name="check" class="h-5 w-5 text-interactive" />
+        </div>
+        <h2 class="mt-4 font-semibold text-text-body">Annual partner agreement</h2>
+        <p class="mt-2 text-sm text-text-muted">
+          One agreement per provider, under the{' '}
+          <a
+            href={LICENSING_TERMS_URL}
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            We-Amp terms
+          </a>
+          . Partner terms are agreed per fleet.
+        </p>
+      </div>
+    </div>
+
+    <p class="mt-6 text-text-muted">
+      Evaluate first:{' '}
+      <a href="/docs/cpanel/" class="text-interactive underline">
+        cPanel and EasyApache 4
+      </a>
+      ,{' '}
+      <a href="/docs/installation-module/" class="text-interactive underline">
+        the Apache and nginx packages
+      </a>
+      ,{' '}
+      <a href="/docs/deployment/" class="text-interactive underline">
+        running in production
+      </a>{' '}
+      and{' '}
+      <a href="/support/" class="text-interactive underline">
+        support plans
+      </a>
+      .
+    </p>
+
+    <div class="mt-14 rounded-card border border-border bg-bg-secondary p-6 md:p-8 text-center">
+      <h2 class="h2-section text-text-body">Talk to us about your fleet</h2>
+      <p class="mt-3 text-text-muted max-w-2xl mx-auto">
+        Three answers and we come back with what the partnership looks like for your fleet. The
+        contact form opens with them filled in.
+      </p>
+      <form
+        action="/contact/"
+        method="get"
+        class="mt-8 grid grid-cols-1 gap-4 text-left sm:grid-cols-3"
+      >
+        <input type="hidden" name="topic" value="hosting" />
+        <div>
+          <label for="hp-hosts" class="eyebrow">
+            Hosts
+          </label>
+          <select id="hp-hosts" name="hosts" class={fieldClass}>
+            {hostBands.map((b) => (
+              <option value={b}>{b}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label for="hp-panel" class="eyebrow">
+            Control panel
+          </label>
+          <select id="hp-panel" name="panel" class={fieldClass}>
+            {panels.map((p) => (
+              <option value={p}>{p}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label for="hp-distros" class="eyebrow">
+            Distributions
+          </label>
+          <input
+            id="hp-distros"
+            name="distros"
+            type="text"
+            placeholder="e.g. AlmaLinux 9, Ubuntu 24.04"
+            class={fieldClass}
+          />
+        </div>
+        <div class="sm:col-span-3 flex flex-wrap items-center justify-center gap-4 pt-2">
+          <button
+            type="submit"
+            class="btn-primary"
+            data-umami-event="cta_commercial"
+            data-umami-event-offer="hosting"
+            data-umami-event-surface="hosting-partners"
+            data-umami-event-position="qualifier_form"
+          >
+            Continue to the contact form
+          </button>
+          <a
+            href="/contact/?topic=hosting"
+            class="text-sm text-interactive hover:text-interactive-hover underline"
+            data-umami-event="cta_commercial"
+            data-umami-event-offer="hosting"
+            data-umami-event-surface="hosting-partners"
+            data-umami-event-position="contact_link"
+          >
+            Or just write to us
+          </a>
+        </div>
+      </form>
+    </div>
+  </section>
+</BaseLayout>

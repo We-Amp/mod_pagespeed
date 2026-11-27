@@ -1,0 +1,296 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: Apache-2.0
+     Copyright (c) 2024-2026 We-Amp B.V. -->
+
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>The Dispatch - News Portal | PageSpeed 2.0 Demo</title>
+    <meta name="robots" content="noindex,follow" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <!-- Breaking news ticker bar -->
+    <div class="ticker" id="ticker">
+      <div class="label">Breaking</div>
+      <div class="track" id="ticker-track">
+        <span class="item">Global tech leaders meet for annual AI safety summit in Geneva</span>
+        <span class="sep">&bull;</span>
+        <span class="item"
+          >Stock markets reach record highs as inflation data shows cooling trend</span
+        >
+        <span class="sep">&bull;</span>
+        <span class="item">Space agency confirms successful Mars sample collection mission</span>
+        <span class="sep">&bull;</span>
+        <span class="item"
+          >Major cybersecurity vulnerability patched after coordinated disclosure</span
+        >
+        <span class="sep">&bull;</span>
+        <span class="item"
+          >New renewable energy milestone: 50% of global electricity from clean sources</span
+        >
+        <span class="sep">&bull;</span>
+        <!-- Duplicate items for seamless infinite scroll -->
+        <span class="item">Global tech leaders meet for annual AI safety summit in Geneva</span>
+        <span class="sep">&bull;</span>
+        <span class="item"
+          >Stock markets reach record highs as inflation data shows cooling trend</span
+        >
+        <span class="sep">&bull;</span>
+        <span class="item">Space agency confirms successful Mars sample collection mission</span>
+        <span class="sep">&bull;</span>
+        <span class="item"
+          >Major cybersecurity vulnerability patched after coordinated disclosure</span
+        >
+        <span class="sep">&bull;</span>
+        <span class="item"
+          >New renewable energy milestone: 50% of global electricity from clean sources</span
+        >
+        <span class="sep">&bull;</span>
+      </div>
+    </div>
+
+    <header class="site-header">
+      <h1>The Dispatch</h1>
+      <nav>
+        <ul>
+          <li><a href="#">World</a></li>
+          <li><a href="#">Politics</a></li>
+          <li><a href="#">Tech</a></li>
+          <li><a href="#">Business</a></li>
+          <li><a href="#">Science</a></li>
+          <li><a href="#">Sports</a></li>
+        </ul>
+      </nav>
+      <span class="date" id="header-date">Loading date...</span>
+    </header>
+
+    <section class="featured">
+      <div class="wrap">
+        <img
+          src="images/quantum-hero.jpg"
+          alt="Quantum Computing Breakthrough"
+          width="800"
+          height="400"
+        />
+        <div class="overlay">
+          <span class="tag">Exclusive</span>
+          <h2>Quantum Computing Achieves New Milestone in Error Correction</h2>
+          <p class="summary">
+            Researchers demonstrate fault-tolerant quantum computation at scale for the first time,
+            marking a turning point in the race toward practical quantum advantage.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <div class="content">
+      <main>
+        <div class="news-grid" id="news-grid">
+          <article class="news-card">
+            <img
+              src="images/autonomous-vehicles.jpg"
+              alt="Autonomous Vehicles"
+              width="300"
+              height="200"
+            />
+            <div class="body">
+              <span class="cat">Technology</span>
+              <h3>Self-Driving Trucks Begin Cross-Country Freight Routes</h3>
+              <span class="time">2 hours ago</span>
+            </div>
+          </article>
+
+          <article class="news-card">
+            <img
+              src="images/ocean-conservation.jpg"
+              alt="Ocean Conservation"
+              width="300"
+              height="200"
+            />
+            <div class="body">
+              <span class="cat">World</span>
+              <h3>Pacific Nations Propose Historic Ocean Conservation Treaty</h3>
+              <span class="time">3 hours ago</span>
+            </div>
+          </article>
+
+          <article class="news-card">
+            <img src="images/central-banks.jpg" alt="Central Banks" width="300" height="200" />
+            <div class="body">
+              <span class="cat">Business</span>
+              <h3>Central Banks Signal Rate Cuts as Global Growth Stabilizes</h3>
+              <span class="time">4 hours ago</span>
+            </div>
+          </article>
+
+          <article class="news-card">
+            <img src="images/cancer-research.jpg" alt="Cancer Research" width="300" height="200" />
+            <div class="body">
+              <span class="cat">Science</span>
+              <h3>mRNA Vaccine Platform Shows Promise Against Multiple Cancer Types</h3>
+              <span class="time">5 hours ago</span>
+            </div>
+          </article>
+
+          <article class="news-card">
+            <img src="images/championship.jpg" alt="Championship Game" width="300" height="200" />
+            <div class="body">
+              <span class="cat">Sports</span>
+              <h3>Underdog Team Clinches Championship in Historic Overtime Victory</h3>
+              <span class="time">6 hours ago</span>
+            </div>
+          </article>
+
+          <article class="news-card">
+            <img src="images/space-telescope.png" alt="Space Telescope" width="300" height="200" />
+            <div class="body">
+              <span class="cat">Science</span>
+              <h3>Next-Gen Space Telescope Captures New Details of Distant Exoplanets</h3>
+              <span class="time">7 hours ago</span>
+            </div>
+          </article>
+        </div>
+
+        <div class="load-more-wrap">
+          <button class="load-more" id="load-more-btn">Load More Stories</button>
+        </div>
+      </main>
+
+      <aside>
+        <div class="widget">
+          <h3>Trending Now</h3>
+          <ol class="trending">
+            <li>
+              <span class="rank">1</span>
+              <div>
+                <p class="headline">
+                  Global chip shortage eases as new fabrication plants come online
+                </p>
+                <span class="ago">1h ago</span>
+              </div>
+            </li>
+            <li>
+              <span class="rank">2</span>
+              <div>
+                <p class="headline">
+                  Major airline announces fully electric short-haul fleet by 2030
+                </p>
+                <span class="ago">2h ago</span>
+              </div>
+            </li>
+            <li>
+              <span class="rank">3</span>
+              <div>
+                <p class="headline">
+                  City council approves world's largest urban forest restoration
+                </p>
+                <span class="ago">3h ago</span>
+              </div>
+            </li>
+            <li>
+              <span class="rank">4</span>
+              <div>
+                <p class="headline">
+                  Popular platform rolls out end-to-end encryption for all messages
+                </p>
+                <span class="ago">4h ago</span>
+              </div>
+            </li>
+            <li>
+              <span class="rank">5</span>
+              <div>
+                <p class="headline">Record-breaking heatwave prompts emergency cooling centers</p>
+                <span class="ago">5h ago</span>
+              </div>
+            </li>
+          </ol>
+        </div>
+
+        <div class="widget">
+          <h3>Weather</h3>
+          <div class="weather-now">
+            <div><div class="temp">72&deg;</div></div>
+            <div>
+              <div class="cond">Partly Cloudy</div>
+              <div class="loc">San Francisco, CA</div>
+            </div>
+          </div>
+          <div class="forecast">
+            <div class="day">
+              <div class="day-name">Mon</div>
+              <div class="day-temp">68&deg;</div>
+            </div>
+            <div class="day">
+              <div class="day-name">Tue</div>
+              <div class="day-temp">71&deg;</div>
+            </div>
+            <div class="day">
+              <div class="day-name">Wed</div>
+              <div class="day-temp">65&deg;</div>
+            </div>
+            <div class="day">
+              <div class="day-name">Thu</div>
+              <div class="day-temp">70&deg;</div>
+            </div>
+            <div class="day">
+              <div class="day-name">Fri</div>
+              <div class="day-temp">74&deg;</div>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <footer class="footer">
+      <div class="grid">
+        <div>
+          <h4>Sections</h4>
+          <ul>
+            <li><a href="#">World News</a></li>
+            <li><a href="#">U.S. Politics</a></li>
+            <li><a href="#">Technology</a></li>
+            <li><a href="#">Business</a></li>
+            <li><a href="#">Science</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4>Features</h4>
+          <ul>
+            <li><a href="#">Investigations</a></li>
+            <li><a href="#">Opinion</a></li>
+            <li><a href="#">Podcasts</a></li>
+            <li><a href="#">Video</a></li>
+            <li><a href="#">Photography</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4>Company</h4>
+          <ul>
+            <li><a href="#">About Us</a></li>
+            <li><a href="#">Careers</a></li>
+            <li><a href="#">Contact</a></li>
+            <li><a href="#">Advertise</a></li>
+            <li><a href="#">Press</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4>Legal</h4>
+          <ul>
+            <li><a href="#">Terms of Use</a></li>
+            <li><a href="#">Privacy Policy</a></li>
+            <li><a href="#">Cookie Settings</a></li>
+            <li><a href="#">Accessibility</a></li>
+            <li><a href="#">RSS Feeds</a></li>
+          </ul>
+        </div>
+      </div>
+      <p class="bottom">
+        &copy; 2025 The Dispatch. All rights reserved. Demo page for PageSpeed 2.0 optimization.
+      </p>
+    </footer>
+
+    <script src="app.js" defer></script>
+  </body>
+</html>

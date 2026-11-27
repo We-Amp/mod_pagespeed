@@ -1,0 +1,125 @@
+# mod_pagespeed - Production Docker Compose
+#
+# Usage:
+#   docker compose -f deploy/docker-compose.yml up -d
+#
+# Pulls the published images from ghcr.io/we-amp. To run images you built
+# yourself: docker/build-release.sh VERSION tags them modpagespeed/worker:VERSION
+# and modpagespeed/nginx:VERSION, not the names on the image: lines below, so
+# retag them first and set PAGESPEED_VERSION=VERSION:
+#   docker tag modpagespeed/worker:VERSION ghcr.io/we-amp/pagespeed-worker:VERSION
+#   docker tag modpagespeed/nginx:VERSION  ghcr.io/we-amp/pagespeed-nginx:VERSION
+#
+# Environment variables:
+#   PAGESPEED_VERSION - Image tag (default: the current release, kept equal to
+#                       the Helm chart's appVersion by tools/ci/check_helm.sh;
+#                       the worker and nginx images publish no `latest` tag)
+#   CACHE_SIZE - Cache size in bytes (default: 1GB)
+#   NGINX_PORT - HTTP port (default: 80)
+#   NGINX_SSL_PORT - HTTPS port (default: 443)
+#   BACKEND_HOST - Origin server host (default: host.docker.internal)
+#   BACKEND_PORT - Origin server port (default: 8081)
+#
+# Cache sharing (since 2.1.0): the worker and nginx images share the volume through
+# group `pagespeed` at the fixed GID 918, not through world-writable modes.
+# The worker's entrypoint starts as root, prepares/adopts the volume and then
+# drops the optimizer to uid 918, so no `user:` key is needed here. If you add
+# one, it must be `918:918`; if you mount this volume into a container of your
+# own that reads the cache, give it `group_add: ["918"]`. A worker that exits
+# 78 is refusing the volume, not crashing -- its log names the path and the fix.
+
+# One PID namespace for every process that shares the cache volume. This
+# release's cache library tells a live write-lock holder from a dead one by a
+# lock the kernel holds per process, which works across PID namespaces. Older
+# builds judge a holder by its PID, and a live holder in ANOTHER PID namespace
+# looks gone to them (or its PID names an unrelated process), so while an old
+# and a new build share the volume during an upgrade two writes could
+# overlap undetected. Separate containers get separate PID
+# namespaces by default, so the worker and nginx both join the namespace of
+# `pidns`, which runs the Kubernetes pause image (the same thing a pod's
+# sandbox container runs; it also reaps orphaned zombies). The anchor, not
+# the worker, owns the namespace so that restarting or killing the worker or
+# nginx never takes the other down. Stopping or recreating `pidns` itself
+# DOES stop both -- the kernel kills every process in a PID namespace when
+# its first process exits -- and `docker compose up -d` then starts all
+# three again. That is why its image is pinned by digest and never follows
+# the release tag: an anchor that changed with every image bump would be
+# recreated on each upgrade, killing the namespace mid-`up`.
+services:
+  pidns:
+    image: registry.k8s.io/pause:3.10.1@sha256:278fb9dbcca9518083ad1e11276933a2e96f23de604a3a08cc3c80002767d24c
+    user: "65535:65535"
+    network_mode: none
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+
+  worker:
+    image: ghcr.io/we-amp/pagespeed-worker:${PAGESPEED_VERSION:-2.10.0}
+    pid: "service:pidns"
+    depends_on:
+      pidns:
+        condition: service_started
+    volumes:
+      - pagespeed-data:/data
+    environment:
+      - CACHE_SIZE=${CACHE_SIZE:-1073741824}
+    restart: unless-stopped
+    # The probe only reads: the optimizer writes one status line on connect
+    # and closes. `-T 4` is how long socat waits for that line, kept one
+    # second inside `timeout` so a slow reply fails the attempt on its own
+    # exit status. Do not feed socat an empty stdin instead: it then gives up
+    # 0.5 s after connecting, whatever `timeout` says.
+    # tools/ci/check_health_probe.sh checks this command.
+    healthcheck:
+      test: ["CMD-SHELL", "socat -u -T 4 UNIX-CONNECT:/data/pagespeed.sock.health - | grep -q '^OK'"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  nginx:
+    image: ghcr.io/we-amp/pagespeed-nginx:${PAGESPEED_VERSION:-2.10.0}
+    pid: "service:pidns"
+    ports:
+      - "${NGINX_PORT:-80}:80"
+      - "${NGINX_SSL_PORT:-443}:443"
+    volumes:
+      - pagespeed-data:/data
+      # Uncomment to use a custom nginx config:
+      # - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      # Uncomment for SSL:
+      # - ./ssl/cert.pem:/etc/nginx/ssl/cert.pem:ro
+      # - ./ssl/key.pem:/etc/nginx/ssl/key.pem:ro
+    environment:
+      - BACKEND_HOST=${BACKEND_HOST:-host.docker.internal}
+      - BACKEND_PORT=${BACKEND_PORT:-8081}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      pidns:
+        condition: service_started
+      worker:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 3s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  pagespeed-data:
+    driver: local

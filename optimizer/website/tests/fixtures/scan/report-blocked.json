@@ -1,0 +1,439 @@
+{
+  "cached": false,
+  "id": "9a8b7c6d5e4f",
+  "permalink": "https://modpagespeed.com/ai-readability/api/r/9a8b7c6d5e4f",
+  "badge": "https://modpagespeed.com/ai-readability/api/badge/9a8b7c6d5e4f.svg",
+  "report": {
+    "url": "https://protected.example.net/",
+    "scannedAt": "2026-10-10T12:00:00.000Z",
+    "grade": "F",
+    "score": 23,
+    "categories": {
+      "Content fidelity": {
+        "score": 0,
+        "max": 30,
+        "verdict": "No substantial readable content found even after rendering (possible bot-block, login wall, or thin page).",
+        "flag": "thin"
+      },
+      "Token efficiency": {
+        "score": 13,
+        "max": 20,
+        "verdict": "Bloated: the page is ~44× more HTML than actual content (2,400 tokens raw vs ~55 clean). Agents pay for — and choke on — the difference.",
+        "detail": {
+          "bloatX": 44,
+          "rawHtmlTokens": 2400,
+          "cleanTokens": 55
+        }
+      },
+      "Structured data": {
+        "score": 6,
+        "max": 20,
+        "verdict": "Partial: Open Graph, canonical. Missing schema.org/JSON-LD makes agents infer facts instead of reading them.",
+        "detail": {
+          "jsonLdTypes": []
+        }
+      },
+      "Crawler access": {
+        "score": 2,
+        "max": 20,
+        "verdict": "You are blocking AI crawlers (GPTBot, ClaudeBot, Claude-Web, PerplexityBot, Google-Extended, CCBot, Applebot-Extended, Bytespider, Amazonbot) in robots.txt: they cannot read you at all.",
+        "detail": {
+          "aiBotsBlocked": [
+            "GPTBot",
+            "ClaudeBot",
+            "Claude-Web",
+            "PerplexityBot",
+            "Google-Extended",
+            "CCBot",
+            "Applebot-Extended",
+            "Bytespider",
+            "Amazonbot"
+          ],
+          "llmsTxt": false
+        }
+      },
+      "Citation readiness": {
+        "score": 2,
+        "max": 10,
+        "verdict": "Thin attribution metadata (title) — an LLM citing you may get the source/author/date wrong."
+      }
+    },
+    "agentActionability": {
+      "detected": false,
+      "label": "none detected",
+      "verdict": "No WebMCP tools detected. Agents can read this page but can't act on it via WebMCP, the emerging agent-tool interface now surfacing in Chrome and Lighthouse's \"agentic browsing\" audit. Early days, so optional today — but it's where agent traffic is heading.",
+      "detail": {
+        "imperative": 0,
+        "declarative": 0,
+        "manifest": false
+      }
+    },
+    "agentVerifiability": {
+      "verifiable": false,
+      "verdict": "Your origin cannot cryptographically verify signed AI agents, but robots.txt restricts all 9 AI crawlers.",
+      "detail": {
+        "verifiable": false,
+        "aiCrawlersAllowed": [],
+        "aiCrawlersBlocked": [
+          "GPTBot",
+          "ClaudeBot",
+          "Claude-Web",
+          "PerplexityBot",
+          "Google-Extended",
+          "CCBot",
+          "Applebot-Extended",
+          "Bytespider",
+          "Amazonbot"
+        ],
+        "exposurePct": 100,
+        "botAuthHeaders": [],
+        "renderOk": true
+      }
+    },
+    "accessibility": {
+      "available": true,
+      "verdict": "No WCAG violations detected by automated checks.",
+      "detail": {
+        "total": 0,
+        "nodeTotal": 0,
+        "byImpact": {
+          "critical": 0,
+          "serious": 0,
+          "moderate": 0,
+          "minor": 0
+        },
+        "fixableInline": 0,
+        "topRules": []
+      }
+    },
+    "agentVerificationPosture": {
+      "status": "ok",
+      "posture": "none",
+      "emitsSignatureHeaders": false,
+      "signatureHeaders": {
+        "signatureInput": null,
+        "signature": null,
+        "signatureAgent": null
+      },
+      "parsedSignatureInput": null,
+      "botUaProbe": {
+        "performed": true,
+        "status": 200,
+        "wwwAuthenticate": null,
+        "returns402": false
+      },
+      "note": "Posture observed from the scanner’s own HTTP exchange only; not a measure of how many inbound agents the origin verifies (invisible from outside). No signature is cryptographically verified."
+    },
+    "signedAgentVerification": {
+      "status": "ok",
+      "classification": "no-signal",
+      "probes": {
+        "signed": {
+          "status": 200,
+          "headers": {},
+          "bodyLength": 195790
+        },
+        "broken": {
+          "status": 200,
+          "headers": {},
+          "bodyLength": 195790
+        },
+        "unsigned": {
+          "status": 200,
+          "headers": {},
+          "bodyLength": 195790
+        }
+      },
+      "evidence": [],
+      "keyid": "GBxqWscB-GOkwNXEhmWQA4SY2gWRH2Hz4dAvzRcK1gw",
+      "signatureAgent": "https://protected.example.net/.well-known/http-message-signatures-directory",
+      "note": "Classification derived solely from the scanner’s own three probe exchanges (valid signature, corrupted signature, unsigned). “no-signal” does NOT mean the origin runs no verifier: observe-only verifiers are externally invisible, and an origin can only fully verify our probe if it trusts our key directory. The corrupted-signature probe is the strongest discriminator. We only report what our own three exchanges showed."
+    },
+    "provenanceSurvival": {
+      "status": "ok",
+      "imagesScanned": 2,
+      "withManifestServed": 0,
+      "strippedOnServe": 0,
+      "images": [
+        {
+          "url": "https://protected.example.net/logo.svg",
+          "format": "other",
+          "servedHasManifest": false,
+          "servedMarkers": [],
+          "sourceFetched": false,
+          "sourceHasManifest": null,
+          "survival": "served-only"
+        },
+        {
+          "url": "https://protected.example.net/logo-dark.svg",
+          "format": "other",
+          "servedHasManifest": false,
+          "servedMarkers": [],
+          "sourceFetched": false,
+          "sourceHasManifest": null,
+          "survival": "served-only"
+        }
+      ],
+      "note": "Detection only (JUMBF/XMP byte-scan); no manifest is validated, re-signed, or authored."
+    },
+    "sovereigntyExposure": {
+      "status": "ok",
+      "exposedFeatureCount": 0,
+      "findings": [],
+      "classifierVersion": "ws4-1",
+      "note": "Heuristic, passive observation of features that phone home to US-jurisdiction endpoints. Not legal advice or a compliance certificate."
+    },
+    "preConsentLeak": {
+      "status": "blocked",
+      "verdict": "unknown",
+      "blockedBy": ["http-status", "anti-bot-hosts"],
+      "thirdPartyHosts": [
+        {
+          "host": "challenges.cloudflare.com",
+          "requests": 2,
+          "category": "anti-bot",
+          "tracker": false
+        }
+      ],
+      "thirdPartyCount": 1,
+      "trackerCount": 0,
+      "cmpDetected": {
+        "detected": false,
+        "vendor": null
+      },
+      "firstParty": ["example.net"],
+      "requestsObserved": 3,
+      "httpStatus": 403,
+      "trackerListVersion": "pcl-2",
+      "note": "Render blocked (HTTP 403; only challenge hosts contacted (challenges.cloudflare.com)): what rendered was a bot wall or challenge page, not the real page, so its pre-consent requests could not be observed."
+    },
+    "scriptInventory": {
+      "status": "blocked",
+      "verdict": "unknown",
+      "reasons": [],
+      "blockedBy": ["http-status", "anti-bot-hosts"],
+      "totals": {
+        "scripts": 0,
+        "inline": 0,
+        "inlineBytes": 0,
+        "external": 0,
+        "firstPartyExternal": 0,
+        "thirdPartyExternal": 0,
+        "thirdPartyHosts": 0,
+        "thirdPartyWithIntegrity": 0,
+        "nonExecutable": 0
+      },
+      "scriptHosts": [],
+      "sriMissing": [],
+      "floating": [],
+      "duplicates": [],
+      "integrityWithoutCors": 0,
+      "csp": {
+        "enforced": false,
+        "reportOnly": false,
+        "scriptSrc": false,
+        "reporting": false
+      },
+      "firstParty": ["example.net"],
+      "requestsObserved": 3,
+      "httpStatus": 403,
+      "scriptListVersion": "si-1",
+      "note": "Render blocked (HTTP 403; only challenge hosts contacted (challenges.cloudflare.com)): what rendered was a bot wall or challenge page, not the real page, so its scripts could not be inventoried."
+    },
+    "seoDefects": {
+      "status": "blocked",
+      "verdict": "unknown",
+      "defects": [],
+      "counts": {
+        "total": 0,
+        "canonical": 0,
+        "hreflang": 0,
+        "title": 0,
+        "description": 0,
+        "jsonld": 0
+      },
+      "blockedBy": ["http-status", "anti-bot-hosts"],
+      "staticCompared": false,
+      "notMeasured": [],
+      "canonical": {
+        "static": {
+          "count": 0,
+          "href": null
+        },
+        "rendered": {
+          "count": 0,
+          "href": null
+        },
+        "header": null
+      },
+      "hreflang": {
+        "static": 0,
+        "rendered": 0,
+        "header": 0,
+        "selfReference": null,
+        "invalid": 0,
+        "xDefault": false
+      },
+      "title": {
+        "static": {
+          "count": 0,
+          "text": null
+        },
+        "rendered": {
+          "count": 0,
+          "text": null
+        }
+      },
+      "description": {
+        "static": {
+          "count": 0,
+          "text": null
+        },
+        "rendered": {
+          "count": 0,
+          "text": null
+        }
+      },
+      "jsonLd": {
+        "static": {
+          "blocks": 0,
+          "invalid": 0,
+          "types": []
+        },
+        "rendered": {
+          "blocks": 0,
+          "invalid": 0,
+          "types": []
+        },
+        "renderOnlyTypes": []
+      },
+      "robots": {
+        "static": {
+          "noindex": false,
+          "nofollow": false
+        },
+        "rendered": {
+          "noindex": false,
+          "nofollow": false
+        },
+        "header": {
+          "noindex": false,
+          "nofollow": false
+        },
+        "mismatch": false
+      },
+      "delivery": {
+        "cdn": null,
+        "server": null
+      },
+      "firstParty": ["example.net"],
+      "requestsObserved": 3,
+      "httpStatus": 403,
+      "seoRulesVersion": "seo-1",
+      "note": "Render blocked (HTTP 403; only challenge hosts contacted (challenges.cloudflare.com)): what rendered was a bot wall or challenge page, not the real page, so its head could not be checked."
+    },
+    "responseExposure": {
+      "status": "error",
+      "reason": "timeout while reading the response headers"
+    },
+    "ghostLayer": {
+      "detected": true,
+      "count": 2,
+      "byTechnique": {
+        "clipped": 1,
+        "off-viewport": 1
+      },
+      "verdict": "Found 5 elements that a person effectively cannot see but an AI agent still reads (clipped to nothing, pushed off-screen). On your own site this is usually leftover, mis-styled, or third-party-injected content worth reviewing — agents weight it the same as visible copy.",
+      "viewport": {
+        "width": 1280,
+        "height": 720,
+        "dpr": 1
+      },
+      "truncated": false,
+      "nodes": [
+        {
+          "technique": "clipped",
+          "label": "Clipped to nothing",
+          "gloss": "A clip / clip-path / zero-size overflow crops the text out of view while it stays in the DOM for agents.",
+          "selector": "html#html-root > body.min-h-screen.flex > a.sr-only.focus:not-sr-only",
+          "rect": {
+            "x": -1,
+            "y": -1,
+            "width": 1,
+            "height": 1
+          },
+          "textSample": "Skip to main content",
+          "computed": {
+            "reason": "clip-path collapses painted area to ~0"
+          }
+        },
+        {
+          "technique": "clipped",
+          "label": "Clipped to nothing",
+          "gloss": "A clip / clip-path / zero-size overflow crops the text out of view while it stays in the DOM for agents.",
+          "selector": "div.readout > div.readout-row > p.readout-value.display-num > span.sr-only",
+          "rect": {
+            "x": 808.8,
+            "y": 213,
+            "width": 1,
+            "height": 1
+          },
+          "textSample": "to",
+          "computed": {
+            "reason": "clip-path collapses painted area to ~0"
+          }
+        }
+      ]
+    },
+    "metrics": {
+      "staticTextLen": 310,
+      "renderedTextLen": 220,
+      "rawHtmlTokens": 2400,
+      "cleanTokens": 55,
+      "httpOk": false
+    },
+    "signals": {
+      "jsonLdTypes": [],
+      "hasJsonLd": false,
+      "hasOG": true,
+      "canonical": true,
+      "title": "Just a moment...",
+      "metaDescription": false,
+      "author": false,
+      "published": false,
+      "modified": false
+    },
+    "access": {
+      "robotsFound": true,
+      "llmsTxt": true,
+      "aiBotsBlocked": [
+        "GPTBot",
+        "ClaudeBot",
+        "Claude-Web",
+        "PerplexityBot",
+        "Google-Extended",
+        "CCBot",
+        "Applebot-Extended",
+        "Bytespider",
+        "Amazonbot"
+      ],
+      "webmcpManifest": false,
+      "webmcpManifestTools": 0
+    },
+    "webmcp": {
+      "imperative": [],
+      "declarative": 0,
+      "declarativeNames": [],
+      "manifest": false,
+      "manifestTools": 0
+    },
+    "diff": {
+      "staticMarkdown": "# Just a moment...\n\nChecking your browser before accessing the site.",
+      "renderedMarkdown": "# Just a moment...\n\nChecking your browser before accessing the site.",
+      "staticCleanTokens": 20,
+      "renderedCleanTokens": 20
+    },
+    "renderError": null,
+    "staticError": null
+  }
+}

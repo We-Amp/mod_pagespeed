@@ -1,0 +1,22 @@
+<!-- SPDX-License-Identifier: Apache-2.0
+     Copyright (c) 2024-2026 We-Amp B.V. -->
+
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <Title>WeAmp.PageSpeed Native Binaries — Windows (x64)</Title>
+    <Description>Native Windows binaries for WeAmp.PageSpeed (pagespeed.dll, factory_worker.exe). Pulled transitively when you install WeAmp.PageSpeed.AspNetCore.</Description>
+    <PackageTags>pagespeed mod-pagespeed mod_pagespeed weamp native windows x64</PackageTags>
+  </PropertyGroup>
+
+  <!-- Exclude console/** — see WeAmp.PageSpeed.NativeAssets.Linux.csproj for context. -->
+  <ItemGroup>
+    <None Include="runtimes/win-x64/native/**" Exclude="runtimes/win-x64/native/console/**" Pack="true" PackagePath="runtimes/win-x64/native/" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="buildTransitive/**" Pack="true" PackagePath="buildTransitive/" />
+  </ItemGroup>
+</Project>

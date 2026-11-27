@@ -1,0 +1,67 @@
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-unchecked-optional-access,
+  clang-analyzer-core.*,
+  clang-analyzer-cplusplus.*,
+  clang-analyzer-deadcode.*,
+  modernize-avoid-bind,
+  modernize-concat-nested-namespaces,
+  modernize-deprecated-headers,
+  modernize-loop-convert,
+  modernize-make-shared,
+  modernize-make-unique,
+  modernize-pass-by-value,
+  modernize-redundant-void-arg,
+  modernize-return-braced-init-list,
+  modernize-use-auto,
+  modernize-use-bool-literals,
+  modernize-use-default-member-init,
+  modernize-use-emplace,
+  modernize-use-equals-default,
+  modernize-use-equals-delete,
+  modernize-use-nodiscard,
+  modernize-use-nullptr,
+  modernize-use-override,
+  modernize-use-starts-ends-with,
+  modernize-use-using,
+  performance-*,
+  -performance-unnecessary-value-param,
+  readability-container-size-empty,
+  readability-implicit-bool-conversion,
+  readability-make-member-function-const,
+  readability-misleading-indentation,
+  readability-redundant-member-init,
+  readability-redundant-string-cstr,
+  readability-redundant-string-init,
+  readability-static-accessed-through-instance,
+  readability-string-compare
+WarningsAsErrors: >
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-unchecked-optional-access,
+  -bugprone-unused-return-value,
+  -bugprone-narrowing-conversions,
+  -bugprone-branch-clone,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -bugprone-exception-escape,
+  modernize-use-nullptr,
+  modernize-use-override,
+  performance-*
+# bugprone-exception-escape rationale:
+#   The worker is a libuv-based event loop, not an exception-aware runtime.
+#   Destructors like ~HttpServer / ~WsManager call Stop(), which touches
+#   std::string / std::vector / handler_->Warning() — any of these could
+#   theoretically throw std::bad_alloc. The codebase does not handle bad_alloc
+#   (process death is the only sensible recovery for OOM under libuv) and
+#   uses try/catch only at well-defined deserialization boundaries
+#   (json::exception in api/cache/capture/config handlers). Flagging
+#   every destructor that touches an allocating type is not actionable here.
+#   See test/.clang-tidy (already excludes this check); the same exclusion was
+#   applied to the mod_pagespeed 1.1 repo for the same reason ("too noisy on
+#   legacy destructors"). The check still runs as a
+#   warning so new violations remain visible in the log; only the as-errors
+#   promotion is dropped. Follows the incremental WAE-exclusion pattern PR #374
+#   established for bugprone-branch-clone + implicit-widening-of-multiplication-result.
+HeaderFilterRegex: '^(?!.*/_deps/).*\.(h|hpp)$'

@@ -1,0 +1,100 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// Home further reading: four docs, guide and blog cards, just above the closing
+// panel. Each card is clickable as a whole, but only its title is the link
+// (a stretched link, .card-stretch in global.css), so the link is named by
+// the title and not by every word on the card.
+//
+// The markup keeps the indentation it has inside the page layout: the build
+// does not compress HTML, so this indentation is the whitespace of the page.
+// The class names are styled by the page's global style block in
+// src/pages/index.astro.
+---
+
+  <section class="home-reading">
+    <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+      <div>
+        <h2 id="s-reading" class="eyebrow">Further reading</h2>
+        <div class="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div class="card-resource card-stretch">
+            <p class="eyebrow text-text-body">Docs</p>
+            <h3 class="mt-2 text-lg font-semibold text-text-body">
+              <a
+                href="/docs/configuration/"
+                class="card-stretch-link"
+                data-umami-event="cta_home_featured_docs_configuration"
+              >
+                Configuration
+              </a>
+            </h3>
+            <p class="mt-2 text-body text-text-muted">
+              Configuration options for Apache and nginx: directives, cache modes, worker settings,
+              and per-location overrides.
+            </p>
+            <p class="mt-4 text-sm font-medium text-interactive inline-flex items-center gap-1">
+              Read the docs <span aria-hidden="true">&rarr;</span>
+            </p>
+          </div>
+          <div class="card-resource card-stretch">
+            <p class="eyebrow text-text-body">Docs</p>
+            <h3 class="mt-2 text-lg font-semibold text-text-body">
+              <a
+                href="/docs/filters/"
+                class="card-stretch-link"
+                data-umami-event="cta_home_featured_docs_filters"
+              >
+                PageSpeed filters reference
+              </a>
+            </h3>
+            <p class="mt-2 text-body text-text-muted">
+              Every rewrite filter and what it does: image transcoding, CSS and JS minification,
+              combining, spriting, IPRO, and domain mapping.
+            </p>
+            <p class="mt-4 text-sm font-medium text-interactive inline-flex items-center gap-1">
+              Read the docs <span aria-hidden="true">&rarr;</span>
+            </p>
+          </div>
+          <div class="card-resource card-stretch">
+            <p class="eyebrow text-text-body">Guide</p>
+            <h3 class="mt-2 text-lg font-semibold text-text-body">
+              <a
+                href="/pagespeed-optimization/"
+                class="card-stretch-link"
+                data-umami-event="cta_home_guide_pagespeed_optimization"
+              >
+                PageSpeed optimization
+              </a>
+            </h3>
+            <p class="mt-2 text-body text-text-muted">
+              What PageSpeed optimization covers: images, CSS, JavaScript, HTML and caching. What a
+              server module handles on its own, and what stays in your code.
+            </p>
+            <p class="mt-4 text-sm font-medium text-interactive inline-flex items-center gap-1">
+              Read the guide <span aria-hidden="true">&rarr;</span>
+            </p>
+          </div>
+          <div class="card-resource card-stretch">
+            <p class="eyebrow text-text-body">Blog</p>
+            <h3 class="mt-2 text-lg font-semibold text-text-body">
+              <a
+                href="/blog/economics-of-image-optimization/"
+                class="card-stretch-link"
+                data-umami-event="cta_home_blog_economics_images"
+              >
+                Image optimization cost: self-hosted vs CDN (2026)
+              </a>
+            </h3>
+            <p class="mt-2 text-body text-text-muted">
+              Cost comparison at 100K, 1M, and 10M monthly image requests &mdash; with break-even
+              analysis against self-hosted optimization.
+            </p>
+            <p class="mt-4 text-sm font-medium text-interactive inline-flex items-center gap-1">
+              Read post <span aria-hidden="true">&rarr;</span>
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>

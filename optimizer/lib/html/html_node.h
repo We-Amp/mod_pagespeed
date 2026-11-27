@@ -1,0 +1,256 @@
+// SPDX-License-Identifier: Apache-2.0
+// GENERATED — DO NOT EDIT BY HAND. Synced by tools/sync-html-kernel.sh.
+// Canonical source: mod_pagespeed 1.15, pagespeed/kernel/html/html_node.h (#1130).
+// Synced from the commit pinned in lib/html/HTML_KERNEL_PIN.
+// Drift guard: CI re-runs tools/sync-html-kernel.sh and byte-compares.
+// The canonical file's original license header is retained in full below;
+// Apache-2.0 headed files: see lib/html/LICENSE.apache-2.0 for the license text.
+
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ * 
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ * 
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+#ifndef PAGESPEED_KERNEL_HTML_HTML_NODE_H_
+#define PAGESPEED_KERNEL_HTML_HTML_NODE_H_
+
+#include <cstddef>
+#include <list>
+#include <memory>
+
+#include "lib/html/compat/logging.h"
+#include "lib/base/arena.h"
+#include "lib/base/basictypes.h"
+#include "lib/html/compat/string.h"
+#include "lib/html/compat/string_util.h"
+
+namespace net_instaweb {
+
+class HtmlElement;
+class HtmlEvent;
+
+using HtmlEventList = std::list<HtmlEvent*>;
+using HtmlEventListIterator = HtmlEventList::iterator;
+
+// Base class for HtmlElement and HtmlLeafNode.  Generally represents all
+// lexical tokens in HTML, except that for subclass HtmlElement, which
+// represents both the opening & closing token.
+class HtmlNode {
+ public:
+  virtual ~HtmlNode();
+  friend class HtmlParse;
+
+  HtmlElement* parent() const { return parent_; }
+  virtual bool live() const = 0;
+  virtual GoogleString ToString() const = 0;
+
+  // Marks a node as dead.  The queue's end iterator should be passed in,
+  // to remove references to stale iterators, and to force IsRewritable to
+  // return false.
+  virtual void MarkAsDead(const HtmlEventListIterator& end) = 0;
+
+  void* operator new(size_t size, Arena<HtmlNode>* arena) {
+    return arena->Allocate(size);
+  }
+
+  void operator delete(void* ptr, Arena<HtmlNode>* arena) {
+    LOG(FATAL) << "HtmlNode must not be deleted directly.";
+  }
+
+ protected:
+  // TODO(jmarantz): jmaessen suggests instantiating the html nodes
+  // without parents and computing them from context at the time they
+  // are instantiated from the lexer.  This is a little more difficult
+  // when synthesizing new nodes, however.  We assert sanity, however,
+  // when calling HtmlParse::ApplyFilter.
+  explicit HtmlNode(HtmlElement* parent) : parent_(parent) {}
+
+  // Create new event object(s) representing this node, and insert them into
+  // the queue just before the given iterator; also, update this node object as
+  // necessary so that begin() and end() will return iterators pointing to
+  // the new event(s).  The line number for each event should probably be -1.
+  virtual void SynthesizeEvents(const HtmlEventListIterator& iter,
+                                HtmlEventList* queue) = 0;
+
+  // Return an iterator pointing to the first event associated with this node.
+  virtual HtmlEventListIterator begin() const = 0;
+  // Return an iterator pointing to the last event associated with this node.
+  virtual HtmlEventListIterator end() const = 0;
+
+  // Version that affects visibility of the destructor.
+  void operator delete(void* ptr) {
+    LOG(FATAL) << "HtmlNode must not be deleted directly.";
+  }
+
+ private:
+  friend class HtmlLexer;
+  friend class HtmlTestingPeer;
+
+  // Note: setting the parent doesn't change the DOM -- it just updates
+  // the pointer.  This is intended to be called only from the DOM manipulation
+  // methods in HtmlParse.
+  void set_parent(HtmlElement* parent) { parent_ = parent; }
+
+  HtmlElement* parent_;
+  HtmlNode(const HtmlNode&) = delete;
+  HtmlNode& operator=(const HtmlNode&) = delete;
+};
+
+class HtmlLeafNode : public HtmlNode {
+ public:
+  ~HtmlLeafNode() override;
+  bool live() const override {
+    return (data_.get() != nullptr) && data_->is_live_;
+  }
+  void MarkAsDead(const HtmlEventListIterator& end) override;
+  GoogleString ToString() const override;
+
+  const GoogleString& contents() const { return data_->contents_; }
+  HtmlEventListIterator begin() const override { return data_->iter_; }
+  HtmlEventListIterator end() const override { return data_->iter_; }
+  void set_iter(const HtmlEventListIterator& iter) { data_->iter_ = iter; }
+
+  void FreeData() { data_.reset(nullptr); }
+
+ protected:
+  HtmlLeafNode(HtmlElement* parent, const HtmlEventListIterator& iter,
+               const StringPiece& contents);
+
+  // Write-access to the contents is protected by default, and made
+  // accessible by subclasses that need to expose this method.
+  GoogleString* mutable_contents() { return &data_->contents_; }
+
+ private:
+  struct Data {
+    Data(const HtmlEventListIterator& iter, const StringPiece& contents)
+        : contents_(contents.data(), contents.size()),
+          is_live_(true),
+          iter_(iter) {}
+    GoogleString contents_;
+    bool is_live_;
+    HtmlEventListIterator iter_;
+  };
+
+  friend class HtmlTestingPeer;
+
+  std::unique_ptr<Data> data_;
+};
+
+// Leaf node representing a CDATA section
+class HtmlCdataNode : public HtmlLeafNode {
+ public:
+  ~HtmlCdataNode() override;
+  friend class HtmlParse;
+
+ protected:
+  void SynthesizeEvents(const HtmlEventListIterator& iter,
+                        HtmlEventList* queue) override;
+
+ private:
+  HtmlCdataNode(HtmlElement* parent, const StringPiece& contents,
+                const HtmlEventListIterator& iter)
+      : HtmlLeafNode(parent, iter, contents) {}
+
+  HtmlCdataNode(const HtmlCdataNode&) = delete;
+  HtmlCdataNode& operator=(const HtmlCdataNode&) = delete;
+};
+
+// Leaf node representing raw characters in HTML
+class HtmlCharactersNode : public HtmlLeafNode {
+ public:
+  ~HtmlCharactersNode() override;
+  void Append(const StringPiece& str) {
+    mutable_contents()->append(str.data(), str.size());
+  }
+  friend class HtmlParse;
+
+  // Expose writable contents for Characters nodes.
+  using HtmlLeafNode::mutable_contents;
+
+ protected:
+  void SynthesizeEvents(const HtmlEventListIterator& iter,
+                        HtmlEventList* queue) override;
+
+ private:
+  HtmlCharactersNode(HtmlElement* parent, const StringPiece& contents,
+                     const HtmlEventListIterator& iter)
+      : HtmlLeafNode(parent, iter, contents) {}
+
+  HtmlCharactersNode(const HtmlCharactersNode&) = delete;
+  HtmlCharactersNode& operator=(const HtmlCharactersNode&) = delete;
+};
+
+// Leaf node representing an HTML comment
+class HtmlCommentNode : public HtmlLeafNode {
+ public:
+  ~HtmlCommentNode() override;
+  friend class HtmlParse;
+
+ protected:
+  void SynthesizeEvents(const HtmlEventListIterator& iter,
+                        HtmlEventList* queue) override;
+
+ private:
+  HtmlCommentNode(HtmlElement* parent, const StringPiece& contents,
+                  const HtmlEventListIterator& iter)
+      : HtmlLeafNode(parent, iter, contents) {}
+
+  HtmlCommentNode(const HtmlCommentNode&) = delete;
+  HtmlCommentNode& operator=(const HtmlCommentNode&) = delete;
+};
+
+// Leaf node representing an HTML IE directive
+class HtmlIEDirectiveNode : public HtmlLeafNode {
+ public:
+  ~HtmlIEDirectiveNode() override;
+  friend class HtmlParse;
+
+ protected:
+  void SynthesizeEvents(const HtmlEventListIterator& iter,
+                        HtmlEventList* queue) override;
+
+ private:
+  HtmlIEDirectiveNode(HtmlElement* parent, const StringPiece& contents,
+                      const HtmlEventListIterator& iter)
+      : HtmlLeafNode(parent, iter, contents) {}
+
+  HtmlIEDirectiveNode(const HtmlIEDirectiveNode&) = delete;
+  HtmlIEDirectiveNode& operator=(const HtmlIEDirectiveNode&) = delete;
+};
+
+// Leaf node representing an HTML directive
+class HtmlDirectiveNode : public HtmlLeafNode {
+ public:
+  ~HtmlDirectiveNode() override;
+  friend class HtmlParse;
+
+ protected:
+  void SynthesizeEvents(const HtmlEventListIterator& iter,
+                        HtmlEventList* queue) override;
+
+ private:
+  HtmlDirectiveNode(HtmlElement* parent, const StringPiece& contents,
+                    const HtmlEventListIterator& iter)
+      : HtmlLeafNode(parent, iter, contents) {}
+
+  HtmlDirectiveNode(const HtmlDirectiveNode&) = delete;
+  HtmlDirectiveNode& operator=(const HtmlDirectiveNode&) = delete;
+};
+
+}  // namespace net_instaweb
+
+#endif  // PAGESPEED_KERNEL_HTML_HTML_NODE_H_

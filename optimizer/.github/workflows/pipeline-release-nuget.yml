@@ -1,0 +1,2063 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# pipeline-release-nuget.yml -- the NuGet release lane (WeAmp.PageSpeed,
+# WeAmp.PageSpeed.AspNetCore, the three WeAmp.PageSpeed.NativeAssets.*
+# packages, and the sidecar packages WeAmp.PageSpeed.Sidecar and
+# WeAmp.PageSpeed.Sidecar.NativeAssets.Linux), as a reusable workflow. The
+# caller (release.yml) holds the triggers and the concurrency group; this
+# file holds the jobs. See docs/ci/release.md and docs/ci/pipelines.md.
+#
+#   ref-guard (hosted)
+#     -> vendor (fleet, or its hosted twin): source + vendor/ + GIT_COMMIT
+#        as one tarball, passed to every consumer as a workflow artifact
+#     -> security-gates (hosted): license headers, SBOM drift, grype + VEX
+#     -> linux x64 build + tests (fleet, or hosted twins)
+#     -> windows x64 build (fleet, or hosted twin): UNSIGNED binaries
+#        -> sign-windows (hosted, `release` environment): Authenticode via
+#           Trusted Signing, then the signed binaries are verified
+#        -> windows tests (fleet, or hosted twin)
+#     -> macOS arm64 build + tests (hosted)
+#     -> linux arm64 build + tests (hosted)
+#     -> sidecar-pack (hosted): the native pair and the source tarball of
+#        the mod_pagespeed module release module-v<version> of the tag,
+#        verified against the release signing key;
+#        the sidecar tests (.NET 8 and 10) and the two sidecar .nupkg
+#     -> package (hosted, `release` environment): the four native sets
+#        from workflow artifacts, five .nupkg plus the two sidecar .nupkg,
+#        draft GitHub release, the two
+#        repository_dispatch notifications
+#     -> sign-checksums (hosted, `release` environment): SHA256SUMS signed
+#        with the release signing key, verified against the published key
+#     -> provenance (the SLSA generator, GitHub-hosted): the keyless SLSA
+#        provenance of the released files and SHA256SUMS, as a run artifact
+#     -> attach-signature (hosted): SHA256SUMS.asc and the provenance
+#        (multiple.intoto.jsonl) added to the draft
+#     -> publish-nuget (hosted, `release` environment): nuget.org Trusted
+#        Publishing (OIDC)
+#     -> promote-release (hosted, `release` environment): draft ->
+#        published, only when dispatched with auto_promote
+#
+# Real run: a push of a v* tag, or a dispatch with dry_run false. Dry run
+# (a dispatch with dry_run true, the default): every build and test, the
+# seven packages (with UNSIGNED Windows binaries) uploaded as a workflow
+# artifact, and nothing else; no job enters the `release` environment, so
+# a dry run needs no approval, creates no draft release, pushes nothing to
+# nuget.org and dispatches nothing.
+#
+# Fleet jobs run on the fleet when FLEET_ENABLED is 'true' and on hosted
+# twin jobs with identical steps otherwise, so the kill switch never blocks
+# a release. Fleet jobs carry no secret and write nothing to GitHub.
+# Optional runner-side facilities (remote Bazel cache) come from the runner
+# environment (docs/ci/runner-environment.md); without them a job runs
+# slower, never fails for that reason.
+
+name: pipeline-release-nuget
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Tag to release (v<version>); empty on a tag push.
+        type: string
+        default: ''
+      dry_run:
+        description: Dispatch only. Build, test and pack; publish nothing. Ignored on a tag push.
+        type: boolean
+        default: true
+      grype_severity:
+        description: grype fail-on severity (negligible, low, medium, high, critical).
+        type: string
+        default: medium
+      auto_promote:
+        description: Promote the draft GitHub release after the nuget.org push.
+        type: boolean
+        default: false
+      allow_sbom_drift:
+        description: Let a cosmetic SBOM --verify mismatch warn instead of fail (dispatch only).
+        type: boolean
+        default: false
+    # Declared per secret and passed explicitly by the caller. They are
+    # environment secrets of `release`: a job that runs in that environment
+    # reads the environment's value, which takes precedence over the value
+    # the caller passed. None is required, so a dry run needs none of them.
+    secrets:
+      AZURE_TENANT_ID:
+        required: false
+      AZURE_CLIENT_ID:
+        required: false
+      AZURE_CLIENT_SECRET:
+        required: false
+      AZURE_TRUSTED_SIGNING_ENDPOINT:
+        required: false
+      AZURE_TRUSTED_SIGNING_ACCOUNT:
+        required: false
+      AZURE_TRUSTED_SIGNING_PROFILE:
+        required: false
+      CORP_DISPATCH_TOKEN:
+        required: false
+      RELEASE_GPG_KEY:
+        required: false
+      RELEASE_GPG_PASSPHRASE:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  event-guard:
+    name: Event guard (refuses merge_group, unexpected events, refs and actors)
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Refuse events, refs and actors this pipeline must never run on
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          ACTOR: ${{ github.actor }}
+          PR_FORK: ${{ github.event.pull_request.head.repo.fork }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+          ALLOWED: "push workflow_dispatch"
+          ALLOWED_REFS: "refs/tags/* refs/heads/main"
+        run: |
+          set -euo pipefail
+          set -f
+          case " ${ALLOWED} " in *" ${EVENT} "*) ;; *) echo "::error::event ${EVENT} is not allowed in this pipeline"; exit 1;; esac
+          case "${REF}" in refs/heads/gh-readonly-queue/*) echo "::error::merge queue refs never run this pipeline"; exit 1;; esac
+          ok=no
+          # shellcheck disable=SC2254  # the allowed refs are globs on purpose
+          for r in ${ALLOWED_REFS}; do case "${REF}" in ${r}) ok=yes;; esac; done
+          [ "${ok}" = yes ] || { echo "::error::ref ${REF} is not allowed in this pipeline"; exit 1; }
+          if [ "${EVENT}" = workflow_dispatch ] && [ "${ACTOR}" = "github-actions[bot]" ]; then echo "::error::dispatches made with a workflow token are not allowed"; exit 1; fi
+          if [ "${EVENT}" = pull_request ] && { [ "${PR_FORK}" = true ] || [ "${PR_HEAD_REPO}" != "${REPOSITORY}" ]; }; then echo "::error::pull requests from forks are not allowed in this pipeline"; exit 1; fi
+          echo "event ${EVENT} on ${REF} accepted"
+
+  # Hosted, no secrets, read-only token; every later job chains to it. The
+  # guard code is checked out from main, never from the tree being released.
+  # A dispatch builds the dispatched tag, never the HEAD of the ref it ran
+  # on; `ref`/`sha` are what every job checks out and stamps.
+  ref-guard:
+    name: Ref guard
+    needs: event-guard
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      ref: ${{ steps.guard.outputs.ref }}
+      sha: ${{ steps.guard.outputs.sha }}
+      tag: ${{ steps.mode.outputs.tag }}
+      short_sha: ${{ steps.mode.outputs.short_sha }}
+      real: ${{ steps.mode.outputs.real }}
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - name: Checkout main (guard code)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          fetch-tags: true
+          filter: blob:none
+
+      - id: guard
+        uses: ./.github/actions/ref-guard
+        with:
+          tag-glob: 'v*'
+          dispatch-tag: ${{ inputs.tag }}
+          events: 'push workflow_dispatch'
+
+      - name: Real run or dry run
+        id: mode
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DRY_RUN_INPUT: ${{ inputs.dry_run }}
+          REF: ${{ steps.guard.outputs.ref }}
+          SHA: ${{ steps.guard.outputs.sha }}
+        run: |
+          set -euo pipefail
+          REAL=false
+          if [ "$EVENT_NAME" = push ] || [ "$DRY_RUN_INPUT" = false ]; then
+            REAL=true
+          fi
+          case "$REF" in
+            refs/tags/v*) ;;
+            *) echo "::error::the NuGet lane releases a v* tag, not '$REF'"; exit 1 ;;
+          esac
+          # Only a v<X>.<Y>.<Z> tag can take a real run. Any other tag (a
+          # prerelease such as v<X>-pre.<N>, a suffix, build metadata) can be
+          # dry-run by dispatch and nothing else: a tag push and a dispatch
+          # with dry_run false are refused here, before any output is written
+          # and before any later job runs.
+          if [ "$REAL" = true ] && ! [[ "${REF#refs/tags/}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::${REF#refs/tags/} is not a v<X>.<Y>.<Z> tag: it can only be dry-run (workflow_dispatch with dry_run true)"
+            exit 1
+          fi
+          {
+            echo "real=$REAL"
+            echo "tag=${REF#refs/tags/}"
+            echo "short_sha=${SHA:0:7}"
+          } >> "$GITHUB_OUTPUT"
+          echo "tag=${REF#refs/tags/} sha=$SHA real=$REAL"
+
+  ci-release-gate:
+    name: CI run of the release commit
+    needs: ref-guard
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    # Reads the workflow runs of this public repository with the default
+    # read-only token; no extra permission is requested. The script comes
+    # from main, never from the tree being released.
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_SHA: ${{ needs.ref-guard.outputs.sha }}
+      DRY_RUN: ${{ needs.ref-guard.outputs.real != 'true' }}
+    steps:
+      - name: Checkout main (gate script)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          sparse-checkout: tools/ci
+          persist-credentials: false
+
+      - name: Require a green CI run of this commit
+        run: bash tools/ci/ci_release_gate.sh
+
+  # ---------------------------------------------------------------------
+  # Vendor: one hermetic tree (source, vendor/, GIT_COMMIT) for every
+  # platform, as the `release-source` workflow artifact.
+  # ---------------------------------------------------------------------
+  vendor:
+    name: Vendor Dependencies
+    needs: ref-guard
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-24.04' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 30
+    env:
+      RELEASE_SHA: ${{ needs.ref-guard.outputs.sha }}
+      RELEASE_TAG: ${{ needs.ref-guard.outputs.tag }}
+      REAL_RUN: ${{ needs.ref-guard.outputs.real }}
+      SHORT_SHA: ${{ needs.ref-guard.outputs.short_sha }}
+    steps: &vendor-steps
+      - name: Unlock stale vendored files
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.ref-guard.outputs.ref }}
+
+      - name: Verify the checkout is the release commit
+        run: |
+          [ "$(git rev-parse HEAD)" = "$RELEASE_SHA" ] || { echo "::error::checked-out HEAD $(git rev-parse HEAD) != release commit $RELEASE_SHA"; exit 1; }
+
+      # The NuGet package version derives from the tag, the worker's
+      # /v1/health version from VERSION.txt. Fail fast before any heavy build
+      # when they disagree.
+      - name: Verify VERSION.txt matches the release tag
+        run: |
+          set -euo pipefail
+          # The tag must be v<X>.<Y>.<Z>, or v<X>.<Y>.<Z>-pre.<N> (N without a
+          # leading zero): anything else, build metadata included, is refused.
+          if ! [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-pre\.(0|[1-9][0-9]*))?$ ]]; then
+            echo "::error::release tag $RELEASE_TAG is not v<X>.<Y>.<Z> or v<X>.<Y>.<Z>-pre.<N>"
+            exit 1
+          fi
+          EXPECTED="${RELEASE_TAG#v}"
+          # A dry run may name v<X>-pre.<N>: its base <X> is what VERSION.txt
+          # carries. Only a dry run: the ref guard refuses a real run of any
+          # prerelease tag before this job.
+          if [ "$REAL_RUN" != true ]; then
+            EXPECTED="${EXPECTED%%-pre.*}"
+          fi
+          ACTUAL="$(tr -d '[:space:]' < VERSION.txt)"
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "::error::VERSION.txt ($ACTUAL) != release tag ($RELEASE_TAG -> $EXPECTED). Bump VERSION.txt on main and tag the bump commit."
+            exit 1
+          fi
+          echo "VERSION.txt=$ACTUAL matches release tag $RELEASE_TAG"
+
+      - name: Ensure bazel
+        run: |
+          if command -v bazel >/dev/null 2>&1; then bazel --version; exit 0; fi
+          npm install -g @bazel/bazelisk@1.28.1 2>/dev/null || sudo npm install -g @bazel/bazelisk@1.28.1
+          bazel --version
+
+      - name: Cache the Bazel repository cache (hosted)
+        if: ${{ runner.environment == 'github-hosted' }}
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/optimizer-bazel-repo
+          key: optimizer-repo-cache-${{ hashFiles('MODULE.bazel', '.bazelversion', 'bazel/**', 'third_party/**') }}
+          restore-keys: |
+            optimizer-repo-cache-
+
+      - name: Vendor all dependencies
+        run: |
+          bazel vendor --vendor_dir=vendor "--repository_cache=${HOME}/.cache/optimizer-bazel-repo" //...
+          if [ -d vendor/cyclone ]; then
+            echo "Cyclone commit: $(git -C vendor/cyclone rev-parse HEAD 2>/dev/null || echo 'not a git repo')"
+          fi
+
+      - name: Stamp GIT_COMMIT
+        run: echo -n "$RELEASE_SHA" > GIT_COMMIT
+
+      - name: Create the source tarball
+        run: |
+          set -euo pipefail
+          OUT="${RUNNER_TEMP}/release-source"
+          rm -rf "$OUT"
+          mkdir -p "$OUT"
+          TARBALL="${OUT}/pagespeed-optimizer-${SHORT_SHA}.tar.zst"
+          tar --zstd --dereference --mode='u+w' -cf "$TARBALL" \
+            --exclude='.git' \
+            --exclude='bazel-*' \
+            .
+          zstd -t "$TARBALL"
+          echo "Tarball: $(basename "$TARBALL") ($(du -h "$TARBALL" | cut -f1))"
+
+      # Already zstd-compressed: no second compression pass.
+      - name: Upload the source tarball
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: release-source
+          path: ${{ runner.temp }}/release-source/*.tar.zst
+          compression-level: 0
+          retention-days: 3
+          if-no-files-found: error
+
+  vendor-hosted:
+    name: Vendor Dependencies (hosted)
+    needs: ref-guard
+    if: ${{ vars.FLEET_ENABLED != 'true' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      RELEASE_SHA: ${{ needs.ref-guard.outputs.sha }}
+      RELEASE_TAG: ${{ needs.ref-guard.outputs.tag }}
+      REAL_RUN: ${{ needs.ref-guard.outputs.real }}
+      SHORT_SHA: ${{ needs.ref-guard.outputs.short_sha }}
+    steps: *vendor-steps
+
+  # ---------------------------------------------------------------------
+  # Release security gates: license headers (a tag can carry direct pushes
+  # that bypassed review), SBOM freshness and SPDX 2.3 validity, grype on
+  # the SBOM with the VEX statements applied. `package` depends on it.
+  # ---------------------------------------------------------------------
+  security-gates:
+    name: Security Gates (SBOM + Grype + VEX)
+    needs: ref-guard
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      GRYPE_FAIL_ON: ${{ inputs.grype_severity || 'medium' }}
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.ref-guard.outputs.sha }}
+
+      # generate-sbom.py needs Python 3.11+ (datetime.UTC).
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: License headers (defense-in-depth)
+        run: tools/check-license-headers.sh --all
+
+      # Operator escape hatch (dispatch only, default off): tolerate a
+      # cosmetic SBOM-reproducibility mismatch. The grype/VEX/license gates
+      # below still apply.
+      - name: Regenerate SBOM (must match committed copy)
+        continue-on-error: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_sbom_drift == true }}
+        run: python3 tools/generate-sbom.py --verify
+
+      - name: SPDX 2.3 structural sanity
+        run: python3 tools/sbom/check-spdx-structure.py sbom/mod_pagespeed-2.1.spdx.json
+
+      - name: VEX statements present + well-formed (OpenVEX)
+        id: vex
+        run: |
+          set -euo pipefail
+          python3 tools/ci/validate-vex.py sbom/
+          shopt -s nullglob
+          vex_files=(sbom/*.vex.json)
+          if [ ${#vex_files[@]} -eq 0 ]; then
+            echo "vex_path=" >> "$GITHUB_OUTPUT"
+          else
+            echo "vex_path=${vex_files[0]}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # grype 0.108.0 or newer is required for VEX on an SBOM source; this
+      # pin bundles 0.118.0.
+      - name: Vulnerability scan (grype on SPDX SBOM)
+        id: grype
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        with:
+          sbom: "sbom/mod_pagespeed-2.1.spdx.json"
+          vex: ${{ steps.vex.outputs.vex_path }}
+          severity-cutoff: ${{ env.GRYPE_FAIL_ON }}
+          fail-build: true
+          output-format: sarif
+
+      - name: Upload SBOM + grype report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: release-sbom-and-cve-report-${{ needs.ref-guard.outputs.short_sha }}
+          path: |
+            sbom/mod_pagespeed-2.1.spdx.json
+            sbom/*.vex.json
+            ${{ steps.grype.outputs.sarif }}
+          if-no-files-found: warn
+          retention-days: 90
+
+  # ---------------------------------------------------------------------
+  # Linux builds. One step list for three jobs: x64 on the fleet, its hosted
+  # twin, and arm64 hosted. Each uploads `native-<rid>` (the NuGet payload)
+  # and `docker-artifacts-<rid>` (the container-image build inputs).
+  # ---------------------------------------------------------------------
+  linux-release-build:
+    name: Linux Release Build
+    needs: [ref-guard, vendor]
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-24.04' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 90
+    env: &linux-x64-env
+      RELEASE_SHA: ${{ needs.ref-guard.outputs.sha }}
+      SHORT_SHA: ${{ needs.ref-guard.outputs.short_sha }}
+      RID: linux-x64
+      IMAGE_ARCH: x64
+      BAZEL_RELEASE_CONFIG: release
+    steps: &linux-build-steps
+      - name: Unlock and clear the workspace
+        run: |
+          [ -d "${GITHUB_WORKSPACE}" ] && chmod -R u+w "${GITHUB_WORKSPACE}" 2>/dev/null || true
+          find "${GITHUB_WORKSPACE}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+
+      - name: Download the release source
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-source
+          path: ${{ runner.temp }}/release-source
+
+      - name: Extract the release source
+        run: |
+          set -euo pipefail
+          TARBALL="${RUNNER_TEMP}/release-source/pagespeed-optimizer-${SHORT_SHA}.tar.zst"
+          zstd -t "$TARBALL"
+          tar --zstd -xf "$TARBALL" -C "${GITHUB_WORKSPACE}"
+          rm -f "$TARBALL"
+          bash tools/ci/verify-artifacts.sh "$RELEASE_SHA" "stamp:${GITHUB_WORKSPACE}/GIT_COMMIT"
+
+      - name: Docker preflight
+        run: tools/ci/docker-preflight.sh
+
+      - name: Ensure the dev image
+        run: |
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh "$IMAGE_ARCH" docker)
+          echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
+
+      # The remote cache is used only when the runner environment names it;
+      # otherwise the trailing empty --remote_cache= disables the cache the
+      # release config chains.
+      - name: Remote cache settings
+        run: |
+          if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
+            # The cache alias plus the optional credentials mount; every flag is one
+            # word, so the joined string is expanded unquoted by the docker run steps.
+            # A tag cut before the helper existed has no such file: the cache alias alone.
+            CACHE_ARGS=()
+            if [ -f "${GITHUB_WORKSPACE}/tools/ci/remote-cache-docker-args.sh" ]; then
+              source "${GITHUB_WORKSPACE}/tools/ci/remote-cache-docker-args.sh"
+              remote_cache_docker_args CACHE_ARGS
+            else
+              CACHE_ARGS+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")  # predates remote-cache-docker-args.sh
+            fi
+            echo "DOCKER_CACHE_HOST_ARG=${CACHE_ARGS[*]}" >> "$GITHUB_ENV"
+            echo "BAZEL_CACHE_FLAG=" >> "$GITHUB_ENV"
+            echo "using the remote Bazel cache from the runner environment"
+          else
+            echo "DOCKER_CACHE_HOST_ARG=" >> "$GITHUB_ENV"
+            echo "BAZEL_CACHE_FLAG=--remote_cache=" >> "$GITHUB_ENV"
+            echo "::notice::BAZEL_CACHE_HOST not set: building without the remote cache (docs/ci/runner-environment.md)"
+          fi
+
+      # The NuGet flavour: telemetry attribution copts, the same as
+      # build-native.sh. libc++/libc++abi/libunwind are statically linked
+      # into both binaries; there are no separate shared libraries to ship.
+      - name: Build all targets + the NuGet binaries (release)
+        run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB). A tag cut before the helper
+          # existed has no such file: use the previous fixed values for it.
+          if [ -f "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh" ]; then
+            source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+            slot_budget 55g || exit 1
+          else
+            SLOT_JOBS='HOST_CPUS*.75' SLOT_CPUS='' SLOT_MEM=55g
+          fi
+          set -euo pipefail
+          mkdir -p "${GITHUB_WORKSPACE}/release-artifacts"
+          docker run --rm --init ${DOCKER_CACHE_HOST_ARG} \
+            --memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}" \
+            --user "$(id -u):$(id -g)" \
+            -e HOME=/workspace \
+            -e BAZEL_RELEASE_CONFIG -e BAZEL_CACHE_FLAG \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" \
+            bash -c '
+              set -e
+              OUT=/workspace/release-artifacts
+              WORKER_COPTS=(
+                "--copt=-DPAGESPEED_SERVER=\"aspnetcore\""
+                "--copt=-DPAGESPEED_DISTRIBUTION=\"nuget\""
+              )
+              BAZEL="bazel --output_user_root=/tmp/bazel-out"
+              $BAZEL build --vendor_dir=vendor "--config=${BAZEL_RELEASE_CONFIG}" ${BAZEL_CACHE_FLAG:+"$BAZEL_CACHE_FLAG"} \
+                "${WORKER_COPTS[@]}" //...
+              $BAZEL build --vendor_dir=vendor "--config=${BAZEL_RELEASE_CONFIG}" ${BAZEL_CACHE_FLAG:+"$BAZEL_CACHE_FLAG"} \
+                "${WORKER_COPTS[@]}" \
+                //lib/pagespeed:libpagespeed.so //src/worker:factory_worker
+              bash tools/assert-binary-hardening.sh bazel-bin/lib/pagespeed/libpagespeed.so
+              cp -L bazel-bin/lib/pagespeed/libpagespeed.so "$OUT/"
+              cp -L bazel-bin/src/worker/factory_worker "$OUT/"
+            '
+          ls -lh "${GITHUB_WORKSPACE}/release-artifacts/"
+
+      # Docker flavour for the public container images: the same vendored
+      # release recipe WITHOUT the NuGet copts (the worker reports
+      # server=nginx), plus the nginx module (a manual target) and the nginx
+      # version it links against (the prebuilt image pins runtime nginx to
+      # it).
+      - name: Build the container-image artifacts
+        run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB). A tag cut before the helper
+          # existed has no such file: use the previous fixed values for it.
+          if [ -f "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh" ]; then
+            source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+            slot_budget 55g || exit 1
+          else
+            SLOT_JOBS='HOST_CPUS*.75' SLOT_CPUS='' SLOT_MEM=55g
+          fi
+          set -euo pipefail
+          mkdir -p "${GITHUB_WORKSPACE}/docker-artifacts"
+          docker run --rm --init ${DOCKER_CACHE_HOST_ARG} \
+            --memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}" \
+            --user "$(id -u):$(id -g)" \
+            -e HOME=/workspace \
+            -e BAZEL_RELEASE_CONFIG -e BAZEL_CACHE_FLAG \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" \
+            bash -c '
+              set -e
+              OUT=/workspace/docker-artifacts
+              bazel --output_user_root=/tmp/bazel-out \
+                build --vendor_dir=vendor "--config=${BAZEL_RELEASE_CONFIG}" ${BAZEL_CACHE_FLAG:+"$BAZEL_CACHE_FLAG"} \
+                //src/worker:factory_worker //src/nginx:ngx_pagespeed_module.so
+              bash tools/assert-binary-hardening.sh bazel-bin/src/nginx/ngx_pagespeed_module.so
+              cp -L bazel-bin/src/worker/factory_worker "$OUT/"
+              cp -L bazel-bin/src/nginx/ngx_pagespeed_module.so "$OUT/"
+              ls -d /nginx-src/nginx-*/ | head -1 | sed "s#.*/nginx-##; s#/##" > "$OUT/nginx-version"
+              echo "Recorded module nginx-version: $(cat "$OUT/nginx-version")"
+            '
+          ls -lh "${GITHUB_WORKSPACE}/docker-artifacts/"
+
+      - name: Upload the NuGet native binaries
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: native-${{ env.RID }}
+          path: release-artifacts/*
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload the container-image artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: docker-artifacts-${{ env.RID }}
+          path: docker-artifacts/*
+          retention-days: 30
+          if-no-files-found: error
+
+  linux-release-build-hosted:
+    name: Linux Release Build (hosted)
+    needs: [ref-guard, vendor-hosted]
+    if: ${{ vars.FLEET_ENABLED != 'true' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 330
+    env: *linux-x64-env
+    steps: *linux-build-steps
+
+  linux-arm64-release-build:
+    name: Linux arm64 Release Build
+    needs: [ref-guard, vendor, vendor-hosted]
+    if: >-
+      ${{ !cancelled() && needs.ref-guard.result == 'success'
+      && (needs.vendor.result == 'success' || needs.vendor-hosted.result == 'success') }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 330
+    env: &linux-arm64-env
+      RELEASE_SHA: ${{ needs.ref-guard.outputs.sha }}
+      SHORT_SHA: ${{ needs.ref-guard.outputs.short_sha }}
+      RID: linux-arm64
+      IMAGE_ARCH: arm64
+      BAZEL_RELEASE_CONFIG: release-linux-arm64
+    steps: *linux-build-steps
+
+  # Linux unit tests, same three-way split.
+  linux-release-tests:
+    name: Linux Release Tests
+    needs: [ref-guard, linux-release-build]
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-24.04' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 60
+    env: *linux-x64-env
+    steps: &linux-test-steps
+      - name: Unlock and clear the workspace
+        run: |
+          [ -d "${GITHUB_WORKSPACE}" ] && chmod -R u+w "${GITHUB_WORKSPACE}" 2>/dev/null || true
+          find "${GITHUB_WORKSPACE}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+
+      - name: Download the release source
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-source
+          path: ${{ runner.temp }}/release-source
+
+      - name: Extract the release source
+        run: |
+          set -euo pipefail
+          TARBALL="${RUNNER_TEMP}/release-source/pagespeed-optimizer-${SHORT_SHA}.tar.zst"
+          zstd -t "$TARBALL"
+          tar --zstd -xf "$TARBALL" -C "${GITHUB_WORKSPACE}"
+          rm -f "$TARBALL"
+          bash tools/ci/verify-artifacts.sh "$RELEASE_SHA" "stamp:${GITHUB_WORKSPACE}/GIT_COMMIT"
+
+      - name: Docker preflight
+        run: tools/ci/docker-preflight.sh
+
+      - name: Ensure the dev image
+        run: |
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh "$IMAGE_ARCH" docker)
+          echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
+
+      - name: Run unit tests
+        run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB). A tag cut before the helper
+          # existed has no such file: use the previous fixed values for it.
+          if [ -f "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh" ]; then
+            source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+            slot_budget 55g || exit 1
+          else
+            SLOT_JOBS='HOST_CPUS*.75' SLOT_CPUS='' SLOT_MEM=55g
+          fi
+          set -euo pipefail
+          EXTRA_DOCKER=()
+          CACHE_FLAG="--remote_cache="
+          if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
+            # A tag cut before the helper existed has no such file: the cache alias alone.
+            if [ -f "${GITHUB_WORKSPACE}/tools/ci/remote-cache-docker-args.sh" ]; then
+              source "${GITHUB_WORKSPACE}/tools/ci/remote-cache-docker-args.sh"
+              remote_cache_docker_args EXTRA_DOCKER
+            else
+              EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")  # predates remote-cache-docker-args.sh
+            fi
+            CACHE_FLAG=""
+          fi
+          docker run --rm --init ${EXTRA_DOCKER[@]+"${EXTRA_DOCKER[@]}"} \
+            --memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}" \
+            --user "$(id -u):$(id -g)" \
+            -e HOME=/workspace \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" \
+            bazel --output_user_root=/tmp/bazel-out \
+              test --vendor_dir=vendor "--config=${BAZEL_RELEASE_CONFIG}" ${CACHE_FLAG:+"$CACHE_FLAG"} --nocache_test_results \
+              //test/... //lib/pagespeed:pagespeed_test \
+              //lib/image/vtracer_ffi:vtracer_ffi_test 2>&1 | tee "${RUNNER_TEMP}/bazel-test.log"
+      - name: Report flaky tests
+        if: ${{ !cancelled() }}
+        run: |
+          [ -f "${RUNNER_TEMP}/bazel-test.log" ] || exit 0
+          flaky=$(grep -E '^//.* FLAKY' "${RUNNER_TEMP}/bazel-test.log" | sed -E 's/ +/ /g' || true)
+          if [ -n "$flaky" ]; then
+            echo "::warning::Tests passed only on retry (FLAKY): $(echo "$flaky" | cut -d' ' -f1 | paste -sd' ' -)"
+            { echo "### Flaky tests (passed on retry)"; echo '```'; echo "$flaky"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  linux-release-tests-hosted:
+    name: Linux Release Tests (hosted)
+    needs: [ref-guard, linux-release-build-hosted]
+    if: ${{ vars.FLEET_ENABLED != 'true' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    env: *linux-x64-env
+    steps: *linux-test-steps
+
+  linux-arm64-release-tests:
+    name: Linux arm64 Release Tests
+    # Starts with the build, not after it: the tests only consume
+    # release-source and compile on their own runner.
+    needs: [ref-guard, vendor, vendor-hosted]
+    if: >-
+      ${{ !cancelled() && needs.ref-guard.result == 'success'
+      && (needs.vendor.result == 'success' || needs.vendor-hosted.result == 'success') }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 300
+    env: *linux-arm64-env
+    steps: *linux-test-steps
+
+  # ---------------------------------------------------------------------
+  # Windows. The build produces UNSIGNED binaries (no secret on the fleet);
+  # sign-windows signs them on a hosted runner inside the environment.
+  # ---------------------------------------------------------------------
+  windows-release-build:
+    name: Windows Release Build
+    needs: [ref-guard, vendor]
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'windows-2022' || 'fleet-windows' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 120
+    env: &windows-env
+      RELEASE_SHA: ${{ needs.ref-guard.outputs.sha }}
+      SHORT_SHA: ${{ needs.ref-guard.outputs.short_sha }}
+    steps: &windows-build-steps
+      # A previous build leaves vendor\bazel-external as a junction into a Bazel
+      # output base full of nested junctions; the checkout clean walks that loop.
+      # Remove only the links (never their targets) before the checkout.
+      - name: Unlink vendor reparse points before checkout (build runner)
+        if: runner.environment != 'github-hosted'
+        shell: powershell
+        run: |
+          $s = Join-Path $env:GITHUB_WORKSPACE 'tools\ci\unlink-vendor-reparse.ps1'
+          if (Test-Path -LiteralPath $s) { & $s -Workspace $env:GITHUB_WORKSPACE } else { Write-Host 'no previous checkout' }
+
+      - name: Clear the workspace
+        shell: powershell
+        run: |
+          Get-ChildItem -Force "$env:GITHUB_WORKSPACE" | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+
+      - name: Download the release source
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-source
+          path: ${{ runner.temp }}/release-source
+
+      - name: Extract the release source
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tarball = "$env:RUNNER_TEMP\release-source\pagespeed-optimizer-$env:SHORT_SHA.tar.zst"
+          # Decompress with all cores, then extract with the Windows tar
+          # (MSYS2's GNU tar reads a drive letter as a remote host).
+          & zstd -d -f -T0 $tarball -o "$tarball.tar"
+          if ($LASTEXITCODE -ne 0) { Write-Error "zstd decompression failed (exit $LASTEXITCODE)"; exit 1 }
+          & "$env:SystemRoot\System32\tar.exe" xf "$tarball.tar" -C "$env:GITHUB_WORKSPACE"
+          if ($LASTEXITCODE -ne 0) { Write-Error "tar extraction failed (exit $LASTEXITCODE)"; exit 1 }
+          Remove-Item "$tarball", "$tarball.tar" -ErrorAction SilentlyContinue
+          & "$env:GITHUB_WORKSPACE\tools\ci\verify-artifacts.ps1" `
+            -Expected $env:RELEASE_SHA `
+            -Specs "stamp:$env:GITHUB_WORKSPACE\GIT_COMMIT"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # BAZEL_SH from the runner environment when it names an existing
+      # shell, else MSYS2, else Git for Windows. gperf and nasm are
+      # installed only when missing.
+      - name: Locate and install the build tools
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sh = $env:BAZEL_SH
+          if (-not $sh -or -not (Test-Path $sh)) {
+            $sh = @('C:\msys64\usr\bin\bash.exe', 'C:\Program Files\Git\bin\bash.exe') | Where-Object { Test-Path $_ } | Select-Object -First 1
+          }
+          if (-not $sh) { Write-Error 'no bash for Bazel: set BAZEL_SH in the runner environment'; exit 1 }
+          "BAZEL_SH=$sh" >> $env:GITHUB_ENV
+          if (-not (Get-Command bazelisk -ErrorAction SilentlyContinue)) {
+            npm install -g @bazel/bazelisk@1.28.1
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          if (-not (Test-Path C:\msys64\usr\bin\gperf.exe) -and -not (Get-Command gperf -ErrorAction SilentlyContinue)) {
+            & C:\msys64\usr\bin\pacman.exe -S --noconfirm --needed gperf
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          if (-not (Test-Path "C:\Program Files\NASM\nasm.exe") -and -not (Get-Command nasm -ErrorAction SilentlyContinue)) {
+            choco install nasm -y --no-progress
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - name: Cache the Bazel disk cache (hosted)
+        if: ${{ runner.environment == 'github-hosted' }}
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: C:\bazel-disk
+          key: ${{ runner.os }}-x64-nuget-release-bazel-v1-${{ hashFiles('MODULE.bazel', '.bazelrc', '.bazelversion') }}
+          restore-keys: |
+            ${{ runner.os }}-x64-nuget-release-bazel-v1-
+
+      # The build reads PATH, INCLUDE and LIB (.bazelrc action_env), so it
+      # runs inside the MSVC x64 developer environment. The compiler is
+      # cl.exe: its response-file parser strips unescaped double quotes, so
+      # the string copts escape them as \" to arrive as string literals.
+      - name: Build all targets + the NuGet binaries (release)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Build Tools installs are products too: without -products * vswhere
+          # reports nothing on a host that has only them, hence the fallback.
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vs = $null
+          if (Test-Path -LiteralPath $vswhere) {
+            $vs = & $vswhere -latest -products * -property installationPath 2>$null
+          }
+          if (-not $vs -or -not (Test-Path -LiteralPath "$vs\VC\Auxiliary\Build\vcvars64.bat")) {
+            $vs = @(
+              (Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\2022\BuildTools'),
+              (Join-Path $env:ProgramFiles 'Microsoft Visual Studio\2022\Community'),
+              (Join-Path $env:ProgramFiles 'Microsoft Visual Studio\2022\Enterprise')
+            ) | Where-Object { Test-Path -LiteralPath "$_\VC\Auxiliary\Build\vcvars64.bat" } | Select-Object -First 1
+          }
+          if (-not $vs) { Write-Host "::error::no Visual Studio installation found"; exit 1 }
+          $vcvars = Join-Path $vs 'VC\Auxiliary\Build\vcvars64.bat'
+          # Call the command interpreter by its full path: a bare `cmd` can
+          # resolve to another program when a POSIX tools directory precedes
+          # the system directory on PATH.
+          & "$env:ComSpec" /c "`"$vcvars`" >nul && set" | ForEach-Object {
+            if ($_ -match '^(PATH|INCLUDE|LIB|LIBPATH|VCToolsInstallDir|WindowsSdkDir|WindowsSDKVersion)=(.*)$') {
+              Set-Item -Path "env:$($Matches[1])" -Value $Matches[2]
+            }
+          }
+          $env:PATH = "C:\msys64\usr\bin;C:\Program Files\NASM;$env:PATH"
+          # A short output root keeps Windows paths under the length limit;
+          # CI_WIN_BAZEL_OUTPUT_ROOT in the runner environment overrides it.
+          $outRoot = $(if ($env:CI_WIN_BAZEL_OUTPUT_ROOT) { $env:CI_WIN_BAZEL_OUTPUT_ROOT } else { Join-Path $env:SystemDrive 'b' }) -replace '\\', '/'
+          $startup = @("--output_user_root=$outRoot")
+          $cacheArgs = @()
+          if ($env:RUNNER_ENVIRONMENT -eq 'github-hosted') { $cacheArgs += '--disk_cache=C:/bazel-disk' }
+          if ($env:BAZEL_REMOTE_CACHE_URL) {
+            Write-Host 'using the remote Bazel cache from the runner environment'
+            $cacheArgs += "--remote_cache=$env:BAZEL_REMOTE_CACHE_URL"
+          }
+          $common = @('--vendor_dir=vendor', '--config=windows', '--config=opt', '--stamp') + $cacheArgs + @(
+            '--copt=-DPAGESPEED_SERVER=\"aspnetcore\"',
+            '--copt=-DPAGESPEED_DISTRIBUTION=\"nuget\"')
+          bazelisk @startup build @common -- //lib/... //src/... //test/...
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          bazelisk @startup build @common //lib/pagespeed:libpagespeed.so //src/worker:factory_worker
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $bin = (bazelisk @startup info @common bazel-bin).Trim()
+          $dll = "$bin\lib\pagespeed\libpagespeed.so"
+          if (-not (Test-Path $dll)) { $dll = "$bin\lib\pagespeed\libpagespeed.dll" }
+          New-Item -ItemType Directory -Force -Path unsigned-output | Out-Null
+          Copy-Item $dll unsigned-output\pagespeed.dll -Force
+          Copy-Item "$bin\src\worker\factory_worker.exe" unsigned-output\factory_worker.exe -Force
+          Get-ChildItem unsigned-output | ForEach-Object { Set-ItemProperty $_.FullName -Name IsReadOnly -Value $false }
+
+      # What ships must start on a stock Windows Server (no Visual C++
+      # runtime).
+      - name: The binaries need no Visual C++ runtime
+        shell: powershell
+        run: |
+          & tools\ci\check-no-vc-runtime.ps1 -Binaries unsigned-output\factory_worker.exe,unsigned-output\pagespeed.dll
+          exit $LASTEXITCODE
+
+      - name: Upload the unsigned Windows binaries
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: native-win-x64-unsigned
+          path: unsigned-output/*
+          retention-days: 7
+          if-no-files-found: error
+
+  windows-release-build-hosted:
+    name: Windows Release Build (hosted)
+    needs: [ref-guard, vendor-hosted]
+    if: ${{ vars.FLEET_ENABLED != 'true' }}
+    runs-on: windows-2022
+    timeout-minutes: 330
+    env: *windows-env
+    steps: *windows-build-steps
+
+  # Authenticode signing with Microsoft Trusted Signing (signtool + the
+  # Trusted Signing dlib). Hosted, real runs only, inside the `release`
+  # environment, which holds the six AZURE_* secrets. The outer .nupkg files
+  # are not signed: nuget.org does not accept Trusted Signing certificates
+  # for package signing; the embedded binaries are what SmartScreen,
+  # antivirus and the Windows loader check.
+  sign-windows:
+    name: Sign Windows binaries
+    needs: [ref-guard, windows-release-build, windows-release-build-hosted]
+    if: >-
+      ${{ !cancelled() && needs.ref-guard.outputs.real == 'true'
+      && (needs.windows-release-build.result == 'success' || needs.windows-release-build-hosted.result == 'success') }}
+    runs-on: windows-2022
+    timeout-minutes: 20
+    environment: release
+    env:
+      RELEASE_SHA: ${{ needs.ref-guard.outputs.sha }}
+    steps:
+      - name: Checkout the verification helpers
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.ref-guard.outputs.sha }}
+          persist-credentials: false
+          sparse-checkout: tools/ci
+          sparse-checkout-cone-mode: false
+
+      - name: Download the unsigned Windows binaries
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: native-win-x64-unsigned
+          path: signed-output
+
+      - name: Authenticode-sign (Microsoft Trusted Signing)
+        shell: powershell
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          TRUSTED_SIGNING_ACCOUNT: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT }}
+          TRUSTED_SIGNING_PROFILE: ${{ secrets.AZURE_TRUSTED_SIGNING_PROFILE }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($n in @('AZURE_TENANT_ID', 'AZURE_CLIENT_ID', 'AZURE_CLIENT_SECRET', 'TRUSTED_SIGNING_ENDPOINT', 'TRUSTED_SIGNING_ACCOUNT', 'TRUSTED_SIGNING_PROFILE')) {
+            if (-not [Environment]::GetEnvironmentVariable($n)) { Write-Error "secret for $n is not set in the release environment (docs/ci/release.md)"; exit 1 }
+          }
+          $dlibDir = "$env:RUNNER_TEMP\TrustedSigning"
+          New-Item -ItemType Directory -Path $dlibDir -Force | Out-Null
+          $nupkg = "$dlibDir\Microsoft.Trusted.Signing.Client.zip"
+          Invoke-WebRequest -Uri "https://www.nuget.org/api/v2/package/Microsoft.Trusted.Signing.Client/1.0.53" -OutFile $nupkg
+          Expand-Archive -Path $nupkg -DestinationPath $dlibDir -Force
+          $dlib = "$dlibDir\bin\x64\Azure.CodeSigning.Dlib.dll"
+          $metadata = @{
+            Endpoint = $env:TRUSTED_SIGNING_ENDPOINT
+            CodeSigningAccountName = $env:TRUSTED_SIGNING_ACCOUNT
+            CertificateProfileName = $env:TRUSTED_SIGNING_PROFILE
+            CorrelationId = [guid]::NewGuid().ToString()
+          } | ConvertTo-Json
+          $metadataFile = "$env:RUNNER_TEMP\tsmetadata.json"
+          Set-Content -Path $metadataFile -Value $metadata
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { Write-Error "signtool.exe not found"; exit 1 }
+          Write-Host "Using signtool: $($signtool.FullName)"
+          foreach ($file in @("signed-output\pagespeed.dll", "signed-output\factory_worker.exe")) {
+            Set-ItemProperty $file -Name IsReadOnly -Value $false
+            Write-Host "Signing $file"
+            & $signtool.FullName sign /v /fd SHA256 `
+              /tr "http://timestamp.acs.microsoft.com" /td SHA256 `
+              /dlib $dlib /dmdf $metadataFile `
+              $file
+            if ($LASTEXITCODE -ne 0) { Write-Error "signtool failed on $file with exit $LASTEXITCODE"; exit 1 }
+          }
+
+      # Consume what was signed: a valid signature by exactly the We-Amp B.V.
+      # identity of the Trusted Signing profile on both files (a signature
+      # Windows calls Valid but that names anyone else, for example a
+      # misconfigured profile or another tenant's, fails), and both still
+      # load and report the release commit on a stock hosted Windows image.
+      - name: Verify the signed binaries
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ExpectedSubject = 'CN=We-Amp B.V., O=We-Amp B.V., L=Castricum, C=NL'
+          foreach ($file in @("signed-output\pagespeed.dll", "signed-output\factory_worker.exe")) {
+            $sig = Get-AuthenticodeSignature -LiteralPath $file
+            if ($sig.Status -ne 'Valid') { Write-Error "$file signature status: $($sig.Status)"; exit 1 }
+            $subject = if ($sig.SignerCertificate) { $sig.SignerCertificate.Subject } else { '<no signer certificate>' }
+            if ($subject -cne $ExpectedSubject) { Write-Error "$file is signed by '$subject', expected '$ExpectedSubject'"; exit 1 }
+            Write-Host "$file signed by: $subject"
+          }
+          & tools\ci\check-no-vc-runtime.ps1 -Binaries signed-output\factory_worker.exe,signed-output\pagespeed.dll
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & tools\ci\verify-artifacts.ps1 -Expected $env:RELEASE_SHA `
+            -Specs "binary:signed-output\factory_worker.exe","sharedlib:signed-output\pagespeed.dll"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload the signed Windows binaries
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: native-win-x64
+          path: signed-output/*
+          retention-days: 7
+          if-no-files-found: error
+
+  # The Windows unit tests run on the source tree (the same tarball the
+  # build used), so they do not wait for signing.
+  windows-release-tests:
+    name: Windows Release Tests
+    needs: [ref-guard, windows-release-build]
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'windows-2022' || 'fleet-windows' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 60
+    env: *windows-env
+    steps: &windows-test-steps
+      # A previous build leaves vendor\bazel-external as a junction into a Bazel
+      # output base full of nested junctions; the checkout clean walks that loop.
+      # Remove only the links (never their targets) before the checkout.
+      - name: Unlink vendor reparse points before checkout (build runner)
+        if: runner.environment != 'github-hosted'
+        shell: powershell
+        run: |
+          $s = Join-Path $env:GITHUB_WORKSPACE 'tools\ci\unlink-vendor-reparse.ps1'
+          if (Test-Path -LiteralPath $s) { & $s -Workspace $env:GITHUB_WORKSPACE } else { Write-Host 'no previous checkout' }
+
+      - name: Clear the workspace
+        shell: powershell
+        run: |
+          Get-ChildItem -Force "$env:GITHUB_WORKSPACE" | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+
+      - name: Download the release source
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-source
+          path: ${{ runner.temp }}/release-source
+
+      - name: Extract the release source
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tarball = "$env:RUNNER_TEMP\release-source\pagespeed-optimizer-$env:SHORT_SHA.tar.zst"
+          & zstd -d -f -T0 $tarball -o "$tarball.tar"
+          if ($LASTEXITCODE -ne 0) { Write-Error "zstd decompression failed (exit $LASTEXITCODE)"; exit 1 }
+          & "$env:SystemRoot\System32\tar.exe" xf "$tarball.tar" -C "$env:GITHUB_WORKSPACE"
+          if ($LASTEXITCODE -ne 0) { Write-Error "tar extraction failed (exit $LASTEXITCODE)"; exit 1 }
+          Remove-Item "$tarball", "$tarball.tar" -ErrorAction SilentlyContinue
+          & "$env:GITHUB_WORKSPACE\tools\ci\verify-artifacts.ps1" `
+            -Expected $env:RELEASE_SHA `
+            -Specs "stamp:$env:GITHUB_WORKSPACE\GIT_COMMIT"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Locate and install the build tools
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sh = $env:BAZEL_SH
+          if (-not $sh -or -not (Test-Path $sh)) {
+            $sh = @('C:\msys64\usr\bin\bash.exe', 'C:\Program Files\Git\bin\bash.exe') | Where-Object { Test-Path $_ } | Select-Object -First 1
+          }
+          if (-not $sh) { Write-Error 'no bash for Bazel: set BAZEL_SH in the runner environment'; exit 1 }
+          "BAZEL_SH=$sh" >> $env:GITHUB_ENV
+          if (-not (Get-Command bazelisk -ErrorAction SilentlyContinue)) {
+            npm install -g @bazel/bazelisk@1.28.1
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          if (-not (Test-Path C:\msys64\usr\bin\gperf.exe) -and -not (Get-Command gperf -ErrorAction SilentlyContinue)) {
+            & C:\msys64\usr\bin\pacman.exe -S --noconfirm --needed gperf
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          if (-not (Test-Path "C:\Program Files\NASM\nasm.exe") -and -not (Get-Command nasm -ErrorAction SilentlyContinue)) {
+            choco install nasm -y --no-progress
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - name: Restore the Bazel disk cache (hosted)
+        if: ${{ runner.environment == 'github-hosted' }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: C:\bazel-disk
+          key: ${{ runner.os }}-x64-nuget-release-bazel-v1-${{ hashFiles('MODULE.bazel', '.bazelrc', '.bazelversion') }}
+          restore-keys: |
+            ${{ runner.os }}-x64-nuget-release-bazel-v1-
+
+      - name: Run unit tests
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Build Tools installs are products too: without -products * vswhere
+          # reports nothing on a host that has only them, hence the fallback.
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vs = $null
+          if (Test-Path -LiteralPath $vswhere) {
+            $vs = & $vswhere -latest -products * -property installationPath 2>$null
+          }
+          if (-not $vs -or -not (Test-Path -LiteralPath "$vs\VC\Auxiliary\Build\vcvars64.bat")) {
+            $vs = @(
+              (Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\2022\BuildTools'),
+              (Join-Path $env:ProgramFiles 'Microsoft Visual Studio\2022\Community'),
+              (Join-Path $env:ProgramFiles 'Microsoft Visual Studio\2022\Enterprise')
+            ) | Where-Object { Test-Path -LiteralPath "$_\VC\Auxiliary\Build\vcvars64.bat" } | Select-Object -First 1
+          }
+          if (-not $vs) { Write-Host "::error::no Visual Studio installation found"; exit 1 }
+          $vcvars = Join-Path $vs 'VC\Auxiliary\Build\vcvars64.bat'
+          # Call the command interpreter by its full path: a bare `cmd` can
+          # resolve to another program when a POSIX tools directory precedes
+          # the system directory on PATH.
+          & "$env:ComSpec" /c "`"$vcvars`" >nul && set" | ForEach-Object {
+            if ($_ -match '^(PATH|INCLUDE|LIB|LIBPATH|VCToolsInstallDir|WindowsSdkDir|WindowsSDKVersion)=(.*)$') {
+              Set-Item -Path "env:$($Matches[1])" -Value $Matches[2]
+            }
+          }
+          $env:PATH = "C:\msys64\usr\bin;C:\Program Files\NASM;$env:PATH"
+          # A short output root keeps Windows paths under the length limit;
+          # CI_WIN_BAZEL_OUTPUT_ROOT in the runner environment overrides it.
+          $outRoot = $(if ($env:CI_WIN_BAZEL_OUTPUT_ROOT) { $env:CI_WIN_BAZEL_OUTPUT_ROOT } else { Join-Path $env:SystemDrive 'b' }) -replace '\\', '/'
+          $startup = @("--output_user_root=$outRoot")
+          $cacheArgs = @()
+          if ($env:RUNNER_ENVIRONMENT -eq 'github-hosted') { $cacheArgs += '--disk_cache=C:/bazel-disk' }
+          if ($env:BAZEL_REMOTE_CACHE_URL) { $cacheArgs += "--remote_cache=$env:BAZEL_REMOTE_CACHE_URL" }
+          bazelisk @startup test --vendor_dir=vendor --config=windows --config=opt --stamp --nocache_test_results @cacheArgs //test/...
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  windows-release-tests-hosted:
+    name: Windows Release Tests (hosted)
+    needs: [ref-guard, windows-release-build-hosted]
+    if: ${{ vars.FLEET_ENABLED != 'true' }}
+    runs-on: windows-2022
+    timeout-minutes: 300
+    env: *windows-env
+    steps: *windows-test-steps
+
+  # ---------------------------------------------------------------------
+  # macOS arm64 (hosted).
+  # ---------------------------------------------------------------------
+  macos-release-build:
+    name: macOS Release Build
+    needs: [ref-guard, vendor, vendor-hosted]
+    if: >-
+      ${{ !cancelled() && needs.ref-guard.result == 'success'
+      && (needs.vendor.result == 'success' || needs.vendor-hosted.result == 'success') }}
+    runs-on: macos-15
+    timeout-minutes: 300
+    env: &macos-env
+      RELEASE_SHA: ${{ needs.ref-guard.outputs.sha }}
+      SHORT_SHA: ${{ needs.ref-guard.outputs.short_sha }}
+    steps:
+      - &macos-tools
+        name: Ensure the build tools
+        run: |
+          set -euo pipefail
+          for t in zstd gperf nasm; do
+            command -v "$t" >/dev/null 2>&1 || brew install "$t"
+          done
+          command -v bazel >/dev/null 2>&1 || brew install bazelisk
+          bazel --version
+
+      - &macos-download
+        name: Download the release source
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-source
+          path: ${{ runner.temp }}/release-source
+
+      - &macos-extract
+        name: Extract the release source
+        run: |
+          set -euo pipefail
+          find "${GITHUB_WORKSPACE}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          TARBALL="${RUNNER_TEMP}/release-source/pagespeed-optimizer-${SHORT_SHA}.tar.zst"
+          zstd -d -T0 < "$TARBALL" | tar xf - -C "${GITHUB_WORKSPACE}"
+          rm -f "$TARBALL"
+          bash tools/ci/verify-artifacts.sh "$RELEASE_SHA" "stamp:${GITHUB_WORKSPACE}/GIT_COMMIT"
+
+      - name: Build all targets + the NuGet binaries (release)
+        run: |
+          set -euo pipefail
+          CACHE_FLAG="--remote_cache=${BAZEL_REMOTE_CACHE_URL:-}"
+          COMMON=(--vendor_dir=vendor --config=ci-macos --config=opt --stamp "$CACHE_FLAG"
+            '--copt=-DPAGESPEED_SERVER="aspnetcore"'
+            '--copt=-DPAGESPEED_DISTRIBUTION="nuget"')
+          bazel build "${COMMON[@]}" //...
+          bazel build "${COMMON[@]}" //lib/pagespeed:libpagespeed.so //src/worker:factory_worker
+          # The target is named .so; on macOS the output is a dylib.
+          mkdir -p release-artifacts
+          cp -L bazel-bin/lib/pagespeed/libpagespeed.so release-artifacts/libpagespeed.dylib
+          cp -L bazel-bin/src/worker/factory_worker release-artifacts/factory_worker
+          ls -lh release-artifacts/
+
+      - name: Upload the NuGet native binaries
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: native-osx-arm64
+          path: release-artifacts/*
+          retention-days: 7
+          if-no-files-found: error
+
+  macos-release-tests:
+    name: macOS Release Tests
+    # Starts with the build, not after it: the tests only consume
+    # release-source and compile on their own runner.
+    needs: [ref-guard, vendor, vendor-hosted]
+    if: >-
+      ${{ !cancelled() && needs.ref-guard.result == 'success'
+      && (needs.vendor.result == 'success' || needs.vendor-hosted.result == 'success') }}
+    runs-on: macos-15
+    timeout-minutes: 300
+    env: *macos-env
+    steps:
+      - *macos-tools
+      - *macos-download
+      - *macos-extract
+      - name: Run unit tests
+        run: |
+          set -o pipefail
+          bazel test --vendor_dir=vendor --config=ci-macos --config=opt --stamp --nocache_test_results \
+            "--remote_cache=${BAZEL_REMOTE_CACHE_URL:-}" //test/... 2>&1 | tee "${RUNNER_TEMP}/bazel-test.log"
+      - name: Report flaky tests
+        if: ${{ !cancelled() }}
+        run: |
+          [ -f "${RUNNER_TEMP}/bazel-test.log" ] || exit 0
+          flaky=$(grep -E '^//.* FLAKY' "${RUNNER_TEMP}/bazel-test.log" | sed -E 's/ +/ /g' || true)
+          if [ -n "$flaky" ]; then
+            echo "::warning::Tests passed only on retry (FLAKY): $(echo "$flaky" | cut -d' ' -f1 | paste -sd' ' -)"
+            { echo "### Flaky tests (passed on retry)"; echo '```'; echo "$flaky"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # ---------------------------------------------------------------------
+  # Sidecar: WeAmp.PageSpeed.Sidecar and WeAmp.PageSpeed.Sidecar.NativeAssets.Linux.
+  # Their native pair (nginx, the module built against it and the launch
+  # shim, per RID) is built, tested and signed in the mod_pagespeed module
+  # release; their managed code is aspnetcore/ of that release's source
+  # tarball. This job takes both from the module release module-<tag> of the
+  # tag being released (v<X> takes module-v<X>) and verifies them
+  # (tools/ci/sidecar_fetch.sh): SHA256SUMS.asc against RELEASE-SIGNING-KEY.asc,
+  # sidecar-pair.json, every pair tarball and file against it and SHA256SUMS,
+  # and the source tarball against SHA256SUMS; the release must be published
+  # with none of those assets modified after publication, and its tag must
+  # still point at the commit the signed manifest was built from. Never
+  # "latest" in a real run, never a branch checkout of the module: a mismatch
+  # fails the job and therefore the release. The sha256 of SHA256SUMS and of
+  # sidecar-pair.json go to the step summary as release evidence. Then, in the
+  # same job so no verified input crosses a job boundary: the xunit suite
+  # under .NET 8 and .NET 10, and the two packages at the version of the v<X>
+  # tag. The script and the key come from main, never from the tree being
+  # released, because the module release is cut after the v<X> commit.
+  # Anonymous downloads; the job's read-only token goes to the API only.
+  # ---------------------------------------------------------------------
+  sidecar-pack:
+    name: Sidecar packages (fetch, verify, test, pack)
+    needs: ref-guard
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      artifact: ${{ steps.pin.outputs.artifact }}
+    env:
+      RELEASE_TAG: ${{ needs.ref-guard.outputs.tag }}
+      REAL_RUN: ${{ needs.ref-guard.outputs.real }}
+      SHORT_SHA: ${{ needs.ref-guard.outputs.short_sha }}
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+    steps:
+      - name: Checkout the apt helper
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: ci-helpers
+          sparse-checkout: tools/ci/apt-robust.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Checkout main (fetch script, published key)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          path: trust
+          sparse-checkout: |
+            tools/ci/sidecar_fetch.sh
+            tools/ci/release_checksums_sig.sh
+            VERSION.txt
+            RELEASE-SIGNING-KEY.asc
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      # v<X> takes the sidecar of module-v<X>, derived here and nowhere else.
+      # A dry run happens before the module release of the version is cut: it
+      # uses module-v<X> when that exists and otherwise the newest published
+      # module release. Packages built from another module release say so in
+      # the step summary, in their artifact name and in a
+      # README-SIDECAR-PIN.txt next to them, so a rehearsal is never mistaken
+      # for a release build. A real run never falls back.
+      - name: The module release of this tag
+        id: pin
+        env:
+          GH_READ_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          MODE=dry
+          if [ "$REAL_RUN" = true ]; then MODE=real; fi
+          WANT="module-${RELEASE_TAG}"
+          # A prerelease dry run (v<X>-pre.<N>) wants the module release of
+          # its base version, module-v<X>.
+          if [ "$REAL_RUN" != true ]; then WANT="module-${RELEASE_TAG%%-pre.*}"; fi
+          PIN_TAG="$(bash trust/tools/ci/sidecar_fetch.sh resolve "$RELEASE_TAG" "$MODE" trust/VERSION.txt)"
+          echo "MODULE_TAG=$PIN_TAG" >> "$GITHUB_ENV"
+          ARTIFACT="sidecar-nupkg-${SHORT_SHA}"
+          if [ "$PIN_TAG" != "$WANT" ]; then
+            if [ "$REAL_RUN" = true ]; then
+              echo "::error::resolved '$PIN_TAG' but $RELEASE_TAG needs '$WANT'"
+              exit 1
+            fi
+            NOTE="DRY RUN ONLY: there is no module release for ${RELEASE_TAG} (${WANT}), so the sidecar packages of this run are labelled ${RELEASE_TAG#v} but contain the native pair and the managed code of ${PIN_TAG}, not of ${WANT}. They are a rehearsal of the pack path, not a release build."
+            echo "::warning::$NOTE"
+            printf '### Sidecar module release mismatch\n\n%s\n\n' "$NOTE" >> "$GITHUB_STEP_SUMMARY"
+            mkdir -p "${RUNNER_TEMP}/sidecar-nupkg"
+            printf '%s\n' "$NOTE" > "${RUNNER_TEMP}/sidecar-nupkg/README-SIDECAR-PIN.txt"
+            ARTIFACT="${ARTIFACT}-contains-${PIN_TAG}"
+          fi
+          echo "artifact=$ARTIFACT" >> "$GITHUB_OUTPUT"
+          printf '### Sidecar inputs\n\nModule release: %s\n\n' "$PIN_TAG" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Download and verify, then stage
+        env:
+          GH_READ_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          KEY=trust/RELEASE-SIGNING-KEY.asc
+          bash trust/tools/ci/sidecar_fetch.sh fetch "$MODULE_TAG" "${RUNNER_TEMP}/sidecar" "$KEY" | tee -a "$GITHUB_STEP_SUMMARY"
+          bash trust/tools/ci/sidecar_fetch.sh stage "$MODULE_TAG" "${RUNNER_TEMP}/sidecar" "$KEY" "${RUNNER_TEMP}/sidecar-work"
+
+      # The keyring holds only the public key; removed anyway in case the
+      # script's EXIT trap did not run.
+      - name: Remove the temporary keyrings
+        if: always()
+        run: |
+          for h in "${RUNNER_TEMP}"/gnupg.*; do
+            [ -d "$h" ] || continue
+            GNUPGHOME="$h" gpgconf --kill gpg-agent >/dev/null 2>&1 || true
+            rm -rf "$h"
+          done
+
+      # .NET 8 for the net8.0 test run, .NET 10 for net10.0 and the pack.
+      - name: Ensure .NET 8 and .NET 10 SDKs
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      # Locked restore (the test project's lock files). Every test must run
+      # and pass; 201 is the floor the module lane holds the suite to. The
+      # live nginx tier (InverseModeIntegrationTests) runs against the pair
+      # this job verified, never a host nginx: the pair of the runner's RID
+      # is copied to runtimes/<rid>/native next to the test assembly, where
+      # the sidecar resolves it before any system path, and
+      # PAGESPEED_SIDECAR_REQUIRE_LIVE_NGINX=1 makes the tests require that
+      # pair (a missing pair fails them instead of falling back). Each live
+      # test writes "live-nginx: <path>"; every one must have passed against
+      # runtimes/<rid>/native/nginx, at least 8 per framework.
+      - name: Test the sidecar (.NET 8 and .NET 10)
+        working-directory: ${{ runner.temp }}/sidecar-work/aspnetcore
+        env:
+          UBUNTU_MIRROR: ${{ vars.UBUNTU_MIRROR }}
+        run: |
+          set -euo pipefail
+          PROJ=WeAmp.PageSpeed.AspNetCore.Tests/WeAmp.PageSpeed.AspNetCore.Tests.csproj
+          case "$(uname -m)" in
+            x86_64) RID=linux-x64 ;;
+            aarch64) RID=linux-arm64 ;;
+            *) echo "::error::no sidecar pair for $(uname -m)"; exit 1 ;;
+          esac
+          PAIR="${PWD}/WeAmp.PageSpeed.Sidecar.NativeAssets.Linux/runtimes/${RID}/native"
+          for f in nginx pagespeed-nginx-launch; do
+            [ -x "$PAIR/$f" ] || { echo "::error::$PAIR/$f is missing or not executable"; exit 1; }
+          done
+          [ -s "$PAIR/ngx_pagespeed_module.so" ] || { echo "::error::no $PAIR/ngx_pagespeed_module.so"; exit 1; }
+          # The bundled nginx links PCRE (libpcre.so.3), which a consumer
+          # host provides; install it only when the runner lacks it.
+          if ldd "$PAIR/nginx" | grep -q 'not found'; then
+            bash "${GITHUB_WORKSPACE}/ci-helpers/tools/ci/apt-robust.sh" update
+            sudo apt-get install -y -qq --no-install-recommends libpcre3 >/dev/null
+          fi
+          if ldd "$PAIR/nginx" | grep 'not found'; then
+            echo "::error::the bundled nginx has unresolved libraries on this runner"; exit 1
+          fi
+          for fw in net8.0 net10.0; do
+            props=()
+            [ "$fw" = net8.0 ] || props=(-p:IncludeNet10=true)
+            dotnet build "$PROJ" -c Release -f "$fw" -p:RestoreLockedMode=true ${props[@]+"${props[@]}"}
+            dest="WeAmp.PageSpeed.AspNetCore.Tests/bin/Release/${fw}/runtimes/${RID}/native"
+            mkdir -p "$dest"
+            cp -a "$PAIR/." "$dest/"
+            ls -l "$dest"
+            PAGESPEED_SIDECAR_REQUIRE_LIVE_NGINX=1 dotnet test "$PROJ" -c Release -f "$fw" --no-build ${props[@]+"${props[@]}"} \
+              --results-directory "${RUNNER_TEMP}/sidecar-results" --logger "trx;LogFileName=sidecar-${fw}.trx"
+            python3 -I - "${RUNNER_TEMP}/sidecar-results/sidecar-${fw}.trx" "$fw" "$RID" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+          path, fw, rid = sys.argv[1:4]
+          root = ET.parse(path).getroot()
+          c = next(e for e in root.iter() if e.tag.endswith("}Counters"))
+          total, executed, passed = (int(c.get(k, 0)) for k in ("total", "executed", "passed"))
+          print("%s: %d of %d tests passed (%d executed)" % (fw, passed, total, executed))
+          if not (total >= 201 and passed == executed == total):
+              sys.exit("::error::not every sidecar test ran and passed under %s" % fw)
+          want = "runtimes/%s/native/nginx" % rid
+          live, other = [], []
+          for r in root.iter():
+              if not r.tag.endswith("}UnitTestResult"):
+                  continue
+              name = r.get("testName", "")
+              if ".InverseModeIntegrationTests." not in name:
+                  continue
+              out = "".join(e.text or "" for e in r.iter() if e.tag.endswith("}StdOut"))
+              marked = any(l.strip().startswith("live-nginx: ") and l.strip().endswith(want) for l in out.splitlines())
+              (live if r.get("outcome") == "Passed" and marked else other).append(name.rsplit(".", 1)[-1])
+          print("%s: %d live nginx tests ran against the bundled pair" % (fw, len(live)))
+          if other:
+              sys.exit("::error::live tests that did not run against the bundled pair: " + ", ".join(sorted(other)))
+          if len(live) < 8:
+              sys.exit("::error::only %d live nginx tests ran under %s, expected at least 8" % (len(live), fw))
+          PY
+          done
+
+      # The version is the v<X> tag's, as for the other five packages.
+      - name: Pack the sidecar packages
+        working-directory: ${{ runner.temp }}/sidecar-work/aspnetcore
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#v}"
+          OUT="${RUNNER_TEMP}/sidecar-nupkg"
+          rm -f "$OUT"/*.nupkg
+          for proj in WeAmp.PageSpeed.Sidecar.NativeAssets.Linux/WeAmp.PageSpeed.Sidecar.NativeAssets.Linux.csproj \
+                      WeAmp.PageSpeed.AspNetCore/WeAmp.PageSpeed.AspNetCore.csproj; do
+            # The module source of the module release may predate the
+            # sidecar lock files, and locked mode without a lock file fails
+            # the restore; enable it only for a project that ships one.
+            lock=()
+            if [ -f "$(dirname "$proj")/packages.lock.json" ]; then
+              lock=(-p:RestoreLockedMode=true)
+              echo "Packing $proj: locked restore (packages.lock.json present)"
+            else
+              echo "Packing $proj: unlocked restore (no packages.lock.json in the module source)"
+            fi
+            dotnet pack "$proj" -c Release -o "$OUT" -p:IncludeNet10=true \
+              -p:Version="$VERSION" -p:PackageVersion="$VERSION" ${lock[@]+"${lock[@]}"}
+          done
+          ls -lh "$OUT"
+          bash "${GITHUB_WORKSPACE}/trust/tools/ci/sidecar_fetch.sh" check-packages \
+            "${RUNNER_TEMP}/sidecar" "$OUT" "$VERSION" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the sidecar packages (input to package)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: ${{ steps.pin.outputs.artifact }}
+          path: ${{ runner.temp }}/sidecar-nupkg/*
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload the test results
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: sidecar-test-results-${{ needs.ref-guard.outputs.short_sha }}
+          path: ${{ runner.temp }}/sidecar-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # ---------------------------------------------------------------------
+  # Package: the four native sets from workflow artifacts, five .nupkg,
+  # plus the two sidecar .nupkg from sidecar-pack: seven in all. Waits for
+  # sidecar-pack, so a sidecar that does not verify, test or pack stops the
+  # release before anything is created.
+  # One step list for the real run (inside the `release` environment: draft
+  # release + notifications) and the dry run (no environment, no approval,
+  # unsigned Windows binaries, nothing leaves the workflow).
+  # ---------------------------------------------------------------------
+  package:
+    name: Package & Release
+    needs: [ref-guard, ci-release-gate, security-gates, sidecar-pack, linux-release-tests, linux-release-tests-hosted, windows-release-tests, windows-release-tests-hosted, sign-windows, macos-release-build, macos-release-tests, linux-arm64-release-build, linux-arm64-release-tests]
+    if: >-
+      ${{ !cancelled() && needs.ref-guard.outputs.real == 'true'
+      && needs.ci-release-gate.result == 'success'
+      && needs.security-gates.result == 'success'
+      && needs.sidecar-pack.result == 'success'
+      && (needs.linux-release-tests.result == 'success' || needs.linux-release-tests-hosted.result == 'success')
+      && (needs.windows-release-tests.result == 'success' || needs.windows-release-tests-hosted.result == 'success')
+      && needs.sign-windows.result == 'success'
+      && needs.macos-release-build.result == 'success'
+      && needs.macos-release-tests.result == 'success'
+      && needs.linux-arm64-release-build.result == 'success'
+      && needs.linux-arm64-release-tests.result == 'success' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: release
+    permissions:
+      contents: write
+      pull-requests: read
+    # The subjects of the SLSA provenance (the `provenance` job): the files
+    # SHA256SUMS lists and SHA256SUMS, as `sha256sum` lines, base64 encoded.
+    outputs:
+      provenance_subjects: ${{ steps.draft.outputs.provenance_subjects }}
+    env: &package-env
+      RELEASE_SHA: ${{ needs.ref-guard.outputs.sha }}
+      SHORT_SHA: ${{ needs.ref-guard.outputs.short_sha }}
+      RELEASE_TAG: ${{ needs.ref-guard.outputs.tag }}
+      REAL_RUN: ${{ needs.ref-guard.outputs.real }}
+    steps: &package-steps
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.ref-guard.outputs.sha }}
+          persist-credentials: false
+
+      - name: Ensure .NET 10 SDK
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Download linux-x64 native binaries
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: native-linux-x64
+          path: ${{ runner.temp }}/native/linux-x64
+      - name: Download linux-arm64 native binaries
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: native-linux-arm64
+          path: ${{ runner.temp }}/native/linux-arm64
+      - name: Download osx-arm64 native binaries
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: native-osx-arm64
+          path: ${{ runner.temp }}/native/osx-arm64
+      # A real run packs the signed Windows binaries; a dry run the unsigned
+      # ones (signing happens only inside the environment).
+      - name: Download win-x64 native binaries
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.ref-guard.outputs.real == 'true' && 'native-win-x64' || 'native-win-x64-unsigned' }}
+          path: ${{ runner.temp }}/native/win-x64
+
+      # Workflow artifacts drop POSIX mode bits, so the executables get +x
+      # back here. BUILD_INFO.json matches build-native.sh:write_build_info.
+      - name: Place the native binaries into the NativeAssets projects
+        run: |
+          set -euo pipefail
+          SRC="${RUNNER_TEMP}/native"
+          ASPNET="${GITHUB_WORKSPACE}/samples/aspnetcore/src"
+          place() { # place <rid> <project> <file>...
+            local rid="$1" proj="$2"; shift 2
+            local dir="${ASPNET}/${proj}/runtimes/${rid}/native" f
+            mkdir -p "$dir"
+            for f in "$@"; do
+              [ -s "${SRC}/${rid}/${f}" ] || { echo "::error::missing native binary ${rid}/${f}"; exit 1; }
+              cp "${SRC}/${rid}/${f}" "${dir}/${f}"
+            done
+            cat > "${dir}/BUILD_INFO.json" <<JSON
+          {
+            "git_sha": "${RELEASE_SHA}",
+            "git_sha_short": "${SHORT_SHA}",
+            "build_timestamp_utc": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "rid": "${rid}"
+          }
+          JSON
+            echo "${rid}:"
+            ls -lh "$dir"
+          }
+          place linux-x64 WeAmp.PageSpeed.NativeAssets.Linux libpagespeed.so factory_worker
+          place linux-arm64 WeAmp.PageSpeed.NativeAssets.Linux libpagespeed.so factory_worker
+          place win-x64 WeAmp.PageSpeed.NativeAssets.Windows pagespeed.dll factory_worker.exe
+          place osx-arm64 WeAmp.PageSpeed.NativeAssets.macOS libpagespeed.dylib factory_worker
+          chmod +x "${ASPNET}"/WeAmp.PageSpeed.NativeAssets.Linux/runtimes/linux-*/native/factory_worker \
+                   "${ASPNET}"/WeAmp.PageSpeed.NativeAssets.macOS/runtimes/osx-arm64/native/factory_worker
+
+      # This job runs on linux-x64, so only those binaries are executed and
+      # loaded here; the other RIDs are stamped at build time and covered by
+      # the matching-RID package smokes.
+      - name: Verify linux-x64 native binaries match the release commit
+        run: |
+          D="${GITHUB_WORKSPACE}/samples/aspnetcore/src/WeAmp.PageSpeed.NativeAssets.Linux/runtimes/linux-x64/native"
+          bash tools/ci/verify-artifacts.sh "$RELEASE_SHA" \
+            "binary:${D}/factory_worker" \
+            "sharedlib:${D}/libpagespeed.so"
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+
+      # WeAmp.PageSpeed.AspNetCore embeds the /console/ SPA as manifest
+      # resources. Build it out-of-band, then pack with WebShellSkipBuild.
+      # api-client is built first: web-shell consumes it via workspace:*.
+      # pnpm is pinned (pnpm 11 made ignored builds fatal).
+      - name: Build workbench SPA (embedded /console/)
+        run: |
+          set -euo pipefail
+          export NPM_CONFIG_PREFIX="$HOME/.npm-global"
+          mkdir -p "$NPM_CONFIG_PREFIX/bin"
+          echo "$NPM_CONFIG_PREFIX/bin" >> "$GITHUB_PATH"
+          export PATH="$NPM_CONFIG_PREFIX/bin:$PATH"
+          npm install -g pnpm@10.33.4
+          test "$(pnpm --version)" = "10.33.4"
+          cd tools/workbench
+          pnpm install --frozen-lockfile
+          pnpm -C packages/api-client build
+          pnpm -C packages/web-shell build
+          ls -la packages/web-shell/dist/index.html
+
+      # -p:Version overrides Directory.Build.props at pack time so the
+      # packages always carry the tag's version.
+      - name: Pack NuGet packages
+        run: |
+          set -euo pipefail
+          cd samples/aspnetcore
+          rm -rf nupkg
+          VERSION="${RELEASE_TAG#v}"
+          echo "Packing version: $VERSION"
+          dotnet restore --source https://api.nuget.org/v3/index.json
+          for p in Linux Windows macOS; do
+            dotnet pack "src/WeAmp.PageSpeed.NativeAssets.${p}/WeAmp.PageSpeed.NativeAssets.${p}.csproj" \
+              -o nupkg --no-build --no-restore -c Release -p:Version="$VERSION" -p:PackageVersion="$VERSION"
+          done
+          dotnet pack src/WeAmp.PageSpeed/WeAmp.PageSpeed.csproj \
+            -o nupkg --no-restore -c Release -p:Version="$VERSION" -p:PackageVersion="$VERSION"
+          dotnet pack src/WeAmp.PageSpeed.AspNetCore/WeAmp.PageSpeed.AspNetCore.csproj \
+            -o nupkg --no-restore -c Release -p:Version="$VERSION" -p:PackageVersion="$VERSION" \
+            -p:WebShellSkipBuild=true
+          ls -lh nupkg/
+          [ "$(find nupkg -maxdepth 1 -name '*.nupkg' | wc -l)" -eq 5 ] || { echo "::error::expected 5 packages"; exit 1; }
+
+      # Packed and checked by sidecar-pack; from here on the seven packages
+      # take one path: the metadata guard, SHA256SUMS (and its signature),
+      # the draft release and publish-nuget.
+      - name: Download the sidecar packages
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.sidecar-pack.outputs.artifact }}
+          path: samples/aspnetcore/nupkg
+
+      # The package checks come from main, never from the tree being released:
+      # an older tag does not carry the script. It is checked out just before
+      # its first use, after the steps that run the released tree's own code.
+      - name: Checkout main (package checks)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          path: trust
+          sparse-checkout: |
+            tools/ci/nupkg_checks.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Expect seven packages
+        run: |
+          set -euo pipefail
+          cd samples/aspnetcore/nupkg
+          VERSION="${RELEASE_TAG#v}"
+          # The same script the publish rehearsal runs (docs/ci/release.md), taken
+          # from the trusted checkout of main.
+          "${GITHUB_WORKSPACE}/trust/tools/ci/nupkg_checks.sh" expect-seven . "$VERSION"
+          # Only a dry run with a module release of another version carries the note
+          # (a real run never resolves to one); it travels with the packages.
+          if [ -s README-SIDECAR-PIN.txt ]; then
+            [ "$REAL_RUN" != true ] || { echo "::error::README-SIDECAR-PIN.txt in a real run"; exit 1; }
+            { echo "### Sidecar module release mismatch"; echo; cat README-SIDECAR-PIN.txt; echo; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # The ASP.NET Core packages carry the public repository URL and commit
+      # (Source Link); the sidecar packages carry none. Any repository url
+      # that is not the public repository, and any SourceLink element in a
+      # nuspec, fails the release.
+      - name: Guard against wrong source-control metadata in the .nupkg files
+        run: |
+          set -euo pipefail
+          "${GITHUB_WORKSPACE}/trust/tools/ci/nupkg_checks.sh" metadata samples/aspnetcore/nupkg
+
+      # A failed SPA build or a drifted EmbedWebShell glob would ship an
+      # empty console and every install would answer 503 for /console/.
+      - name: Guard against shipping an empty /console/ SPA
+        run: |
+          set -euo pipefail
+          "${GITHUB_WORKSPACE}/trust/tools/ci/nupkg_checks.sh" console-spa samples/aspnetcore/nupkg
+
+      # Real runs only. A draft that already exists for the tag is reused
+      # (an operator may have created it by hand); otherwise it is created.
+      # The SBOM and VEX ship next to the packages; SHA256SUMS lists all.
+      - name: Create the draft GitHub release
+        id: draft
+        if: ${{ needs.ref-guard.outputs.real == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="$RELEASE_TAG"
+          LINE="$(printf '%s' "${TAG#v}" | cut -d. -f1,2)"
+          case "$TAG" in
+            v2.0.*) TITLE="ModPageSpeed 2.0 $TAG" ;;
+            *)      TITLE="mod_pagespeed ${LINE} $TAG" ;;
+          esac
+          VERSION="${TAG#v}"
+          ASSETS="${RUNNER_TEMP}/release-assets"
+          rm -rf "$ASSETS"
+          mkdir -p "$ASSETS"
+          cp samples/aspnetcore/nupkg/*.nupkg "$ASSETS/"
+          cp sbom/mod_pagespeed-2.1.spdx.json "$ASSETS/mod_pagespeed-${VERSION}.spdx.json"
+          cp sbom/mod_pagespeed-2.1.vex.json "$ASSETS/mod_pagespeed-${VERSION}.vex.json"
+          ( cd "$ASSETS" && sha256sum -- *.nupkg mod_pagespeed-"${VERSION}".spdx.json mod_pagespeed-"${VERSION}".vex.json > SHA256SUMS && sha256sum -c SHA256SUMS )
+          echo "provenance_subjects=$( cd "$ASSETS" && { cat SHA256SUMS; sha256sum SHA256SUMS; } | base64 -w0 )" >> "$GITHUB_OUTPUT"
+          if gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null | grep -qx true; then
+            echo "A draft release for $TAG exists; attaching the packages, SBOM, VEX and SHA256SUMS"
+            # A signature or provenance from an earlier run would not match
+            # the new files.
+            gh release delete-asset "$TAG" SHA256SUMS.asc --yes 2>/dev/null || true
+            gh release delete-asset "$TAG" multiple.intoto.jsonl --yes 2>/dev/null || true
+            gh release upload "$TAG" --clobber "$ASSETS"/*
+          else
+            gh release create "$TAG" --draft \
+              --target "$RELEASE_SHA" \
+              --title "$TITLE" \
+              --generate-notes \
+              "$ASSETS"/*
+            echo "Draft release created: $TAG"
+          fi
+
+      # Real runs only: the input to sign-checksums.
+      - name: Upload SHA256SUMS (input to sign-checksums)
+        if: ${{ needs.ref-guard.outputs.real == 'true' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: release-sums-${{ needs.ref-guard.outputs.short_sha }}
+          path: ${{ runner.temp }}/release-assets/SHA256SUMS
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload the .nupkg artifact (input to publish-nuget)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: nupkg-${{ needs.ref-guard.outputs.short_sha }}
+          path: |
+            samples/aspnetcore/nupkg/*.nupkg
+            samples/aspnetcore/nupkg/README-SIDECAR-PIN.txt
+          retention-days: 7
+          if-no-files-found: error
+
+      # Real tag runs only. The target repositories come from repository
+      # variables (RELEASE_BUMP_REPO, RELEASE_IMAGES_REPO); unset means
+      # skip. Best effort: the release artifacts are the truth, a lagging
+      # downstream is recoverable.
+      - name: Dispatch the release-bump event
+        if: ${{ needs.ref-guard.outputs.real == 'true' && startsWith(github.ref, 'refs/tags/v') }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.CORP_DISPATCH_TOKEN }}
+          TARGET_REPO: ${{ vars.RELEASE_BUMP_REPO }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TARGET_REPO" ]; then
+            echo "::notice::RELEASE_BUMP_REPO not set: no release-bump dispatch"
+            exit 0
+          fi
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::RELEASE_BUMP_REPO is set but CORP_DISPATCH_TOKEN is empty: the release-bump dispatch cannot be sent"
+            exit 1
+          fi
+          PAYLOAD=$(jq -n \
+            --arg line "2.0" \
+            --arg tag "$RELEASE_TAG" \
+            --arg released_on "$(date -u +%Y-%m-%d)" \
+            --arg run_id "$RUN_ID" \
+            --arg sha "$RELEASE_SHA" \
+            '{event_type: "release-bump", client_payload: {line: $line, tag: $tag, released_on: $released_on, run_id: $run_id, sha: $sha}}')
+          echo "$PAYLOAD" | jq .
+          gh api "repos/${TARGET_REPO}/dispatches" --method POST --input - <<<"$PAYLOAD"
+          echo "Dispatched release-bump for $RELEASE_TAG"
+
+      # The container-image flow fetches docker-artifacts-<rid> from this
+      # run (artifacts_repository + run_id) and builds, smokes and, behind
+      # its own protected environment, publishes the images.
+      - name: Dispatch the release-images event
+        if: ${{ needs.ref-guard.outputs.real == 'true' && startsWith(github.ref, 'refs/tags/v') }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.CORP_DISPATCH_TOKEN }}
+          TARGET_REPO: ${{ vars.RELEASE_IMAGES_REPO }}
+          RUN_ID: ${{ github.run_id }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TARGET_REPO" ]; then
+            echo "::notice::RELEASE_IMAGES_REPO not set: no release-images dispatch"
+            exit 0
+          fi
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::RELEASE_IMAGES_REPO is set but CORP_DISPATCH_TOKEN is empty: the release-images dispatch cannot be sent"
+            exit 1
+          fi
+          PAYLOAD=$(jq -n \
+            --arg version "$RELEASE_TAG" \
+            --arg sha "$RELEASE_SHA" \
+            --arg source_tag "$RELEASE_TAG" \
+            --arg source_sha "$RELEASE_SHA" \
+            --arg artifacts_repository "$REPOSITORY" \
+            --arg run_id "$RUN_ID" \
+            '{event_type: "release-images", client_payload: {version: $version, sha: $sha, source_tag: $source_tag, source_sha: $source_sha, artifacts_repository: $artifacts_repository, run_id: $run_id, artifacts: ["docker-artifacts-linux-x64", "docker-artifacts-linux-arm64"]}}')
+          echo "$PAYLOAD" | jq .
+          gh api "repos/${TARGET_REPO}/dispatches" --method POST --input - <<<"$PAYLOAD"
+          echo "Dispatched release-images for $RELEASE_TAG"
+
+  package-dry-run:
+    name: Package (dry run)
+    needs: [ref-guard, ci-release-gate, security-gates, sidecar-pack, linux-release-tests, linux-release-tests-hosted, windows-release-tests, windows-release-tests-hosted, macos-release-build, macos-release-tests, linux-arm64-release-build, linux-arm64-release-tests]
+    if: >-
+      ${{ !cancelled() && needs.ref-guard.outputs.real != 'true'
+      && needs.ci-release-gate.result == 'success'
+      && needs.security-gates.result == 'success'
+      && needs.sidecar-pack.result == 'success'
+      && (needs.linux-release-tests.result == 'success' || needs.linux-release-tests-hosted.result == 'success')
+      && (needs.windows-release-tests.result == 'success' || needs.windows-release-tests-hosted.result == 'success')
+      && needs.macos-release-build.result == 'success'
+      && needs.macos-release-tests.result == 'success'
+      && needs.linux-arm64-release-build.result == 'success'
+      && needs.linux-arm64-release-tests.result == 'success' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env: *package-env
+    steps: *package-steps
+
+  # The release signing key lives in this one job, which holds no write
+  # token. The signing script and the published public key come from main,
+  # never from the tree being released.
+  sign-checksums:
+    name: Sign SHA256SUMS
+    needs: [ref-guard, package]
+    if: ${{ !cancelled() && needs.package.result == 'success' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: release
+    steps:
+      - name: Checkout main (signing script, published key)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          path: trust
+          sparse-checkout: |
+            tools/ci/release_checksums_sig.sh
+            RELEASE-SIGNING-KEY.asc
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Download SHA256SUMS
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-sums-${{ needs.ref-guard.outputs.short_sha }}
+          path: sums
+
+      - name: Sign SHA256SUMS (detached, armored)
+        env:
+          RELEASE_GPG_KEY: ${{ secrets.RELEASE_GPG_KEY }}
+          RELEASE_GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
+        run: bash trust/tools/ci/release_checksums_sig.sh sign sums/SHA256SUMS signature/SHA256SUMS.asc
+
+      # A fresh keyring holding only RELEASE-SIGNING-KEY.asc from main.
+      - name: Verify SHA256SUMS.asc against the published release key
+        run: |
+          set -euo pipefail
+          bash trust/tools/ci/release_checksums_sig.sh verify sums/SHA256SUMS signature/SHA256SUMS.asc trust/RELEASE-SIGNING-KEY.asc \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # Belt and braces for the script's EXIT trap: a cancelled or killed
+      # step skips it, and a leftover keyring on a persistent runner would
+      # keep the private key on disk.
+      - name: Remove the temporary keyrings
+        if: always()
+        run: |
+          for h in "${RUNNER_TEMP}"/gnupg.*; do
+            [ -d "$h" ] || continue
+            GNUPGHOME="$h" gpgconf --kill gpg-agent >/dev/null 2>&1 || true
+            rm -rf "$h"
+          done
+
+      - name: Upload the signature
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: release-signature-${{ needs.ref-guard.outputs.short_sha }}
+          path: signature/SHA256SUMS.asc
+          retention-days: 7
+          if-no-files-found: error
+
+  # SLSA build provenance (multiple.intoto.jsonl) of the files of the
+  # draft, by the generic generator of the SLSA project. Real runs only, like
+  # `package`, which chooses the subjects. The generator only uploads the
+  # statement as a run artifact (`upload-assets: false`, pinned by the shape
+  # gate's slsa rule); attach-signature checks it against the draft
+  # (tools/ci/check_slsa_provenance.py --exact, from main) and adds it. It
+  # runs after `package`, which is behind the `release` environment's
+  # approval. The generator keeps the artifact 5 days (v2.1.0): an
+  # attach-signature re-run after that needs `provenance` re-run too. The generator is referenced by its version tag, not a commit: it
+  # verifies its own ref and refuses a commit SHA. Its jobs run on
+  # GitHub-hosted runners and declare these permissions (the upload job's
+  # `contents: write` included, although `upload-assets: false` skips it); a
+  # called workflow cannot get more than its caller grants, so release.yml
+  # grants them.
+  provenance:
+    name: SLSA build provenance
+    needs: [package]
+    if: ${{ !cancelled() && needs.package.result == 'success' }}
+    permissions:
+      actions: read
+      id-token: write
+      contents: write
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    with:
+      base64-subjects: ${{ needs.package.outputs.provenance_subjects }}
+      provenance-name: multiple.intoto.jsonl
+      upload-assets: false
+
+  # Adds the signature and the provenance to the draft, after checking that
+  # the draft's SHA256SUMS is the file that was signed and that every subject
+  # of the provenance is a file of the draft. Holds the write token, no key.
+  attach-signature:
+    name: Attach SHA256SUMS.asc and the provenance to the draft release
+    needs: [ref-guard, sign-checksums, provenance]
+    if: ${{ !cancelled() && needs.sign-checksums.result == 'success' && needs.provenance.result == 'success' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Download SHA256SUMS
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-sums-${{ needs.ref-guard.outputs.short_sha }}
+          path: signed
+
+      - name: Download the signature
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-signature-${{ needs.ref-guard.outputs.short_sha }}
+          path: signed
+
+      - name: Download the SLSA provenance
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: multiple.intoto.jsonl
+          path: provenance
+
+      - name: Checkout main (provenance check)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          path: provenance-tool
+          sparse-checkout: tools/ci/check_slsa_provenance.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Attach to the draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.ref-guard.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft | grep -qx true \
+            || { echo "::error::$TAG is not a draft release; the signature is attached to the draft only"; exit 1; }
+          # Every asset on the draft, checked against the signed SHA256SUMS:
+          # the draft must carry exactly the signed file and the files it
+          # lists, intact (a stale SHA256SUMS.asc or provenance aside, which
+          # is replaced).
+          rm -rf draft && mkdir draft
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir draft
+          rm -f draft/SHA256SUMS.asc draft/multiple.intoto.jsonl
+          cmp -s draft/SHA256SUMS signed/SHA256SUMS \
+            || { echo "::error::the draft's SHA256SUMS is not the file that was signed"; exit 1; }
+          diff <(awk '{ sub(/^\*/, "", $2); print $2 }' signed/SHA256SUMS | LC_ALL=C sort) \
+               <(find draft -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' | LC_ALL=C sort) \
+            || { echo "::error::the draft's assets differ from the files SHA256SUMS lists"; exit 1; }
+          ( cd draft && sha256sum -c SHA256SUMS )
+          # The provenance covers exactly the draft's files and SHA256SUMS.
+          python3 -I provenance-tool/tools/ci/check_slsa_provenance.py verify provenance/multiple.intoto.jsonl draft --exact
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber signed/SHA256SUMS.asc provenance/multiple.intoto.jsonl
+          echo "Attached SHA256SUMS.asc and multiple.intoto.jsonl to the draft release $TAG" | tee -a "$GITHUB_STEP_SUMMARY"
+
+  # nuget.org Trusted Publishing: NuGet/login exchanges this job's OIDC
+  # token for a short-lived API key. The nuget.org policy names this
+  # repository, the workflow file pipeline-release-nuget.yml (the token's
+  # job_workflow_ref) and the environment `release` (docs/ci/release.md).
+  publish-nuget:
+    name: Publish to nuget.org (Trusted Publishing)
+    needs: [ref-guard, package, attach-signature]
+    if: ${{ !cancelled() && needs.package.result == 'success' && needs.attach-signature.result == 'success' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: release
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Ensure .NET 10 SDK
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Download the .nupkg artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: nupkg-${{ needs.ref-guard.outputs.short_sha }}
+          path: nupkg
+
+      - name: List packages
+        run: ls -lh nupkg/
+
+      # `user` is the nuget.org account that owns the reserved WeAmp.*
+      # prefix and the Trusted Publishing policy.
+      - name: Exchange the OIDC token for a nuget.org API key
+        id: nuget-login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+        with:
+          user: modpagespeed
+
+      # --skip-duplicate: re-running a release for a version already on
+      # nuget.org is idempotent.
+      - name: Push packages to nuget.org
+        env:
+          NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
+        run: |
+          set -euo pipefail
+          for pkg in nupkg/*.nupkg; do
+            echo "Pushing $pkg"
+            dotnet nuget push "$pkg" \
+              --api-key "$NUGET_API_KEY" \
+              --source https://api.nuget.org/v3/index.json \
+              --skip-duplicate
+          done
+          echo "All packages pushed to nuget.org."
+
+  # Opt-in: by default the release stays a draft for human review.
+  promote-release:
+    name: Promote draft to published GitHub release
+    needs: [ref-guard, publish-nuget]
+    if: ${{ !cancelled() && needs.publish-nuget.result == 'success' && inputs.auto_promote == true }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - name: Flip draft to published
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.ref-guard.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
+          echo "Promoted release $TAG to published."

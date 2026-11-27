@@ -1,0 +1,374 @@
+---
+import { ORGANIZATION_PUBLISHER } from '../data/organization';
+import { OG_DEFAULT_IMAGE_URL } from '../data/og-image';
+import BaseLayout from '../layouts/BaseLayout.astro';
+import PageHero from '../components/PageHero.astro';
+import { LICENSE_CLAUSE, LICENSE_CLAUSE_CAP } from '../data/product-facts.mjs';
+
+// Reference page for the runtime "markers" people see when debugging a live
+// mod_pagespeed install: HTML attributes, query parameters,
+// rewritten-resource URL patterns, the beacon endpoint, and the response
+// header. Captures the high-CTR, zero-competition debug-marker query cluster
+// (data-pagespeed-no-defer, data-pagespeed-url-hash, ?pagespeed=noscript,
+// mod_pagespeed_beacon). This page owns the "what is this marker" reference
+// intent only — it links to /core-web-vitals/ and /analyze/ rather than
+// restating them.
+//
+// Every marker below is verified against the mod_pagespeed filter docs (the
+// legacy modpagespeed.com/doc/* pages that 301 into /1.1/docs/, and the live
+// configuration reference). Voice = Product / DevOps dialect: concise,
+// technical, no hype, no dates. We document our own module's behavior; we do
+// not attack anyone.
+
+interface Marker {
+  id: string;
+  name: string;
+  kind: 'HTML attribute' | 'Query parameter' | 'URL pattern' | 'Endpoint' | 'Response header';
+  // One-line meaning.
+  summary: string;
+  // "When you'd see / use it" note.
+  seen: string;
+  // Optional copy-paste example.
+  example?: string;
+  exampleLang?: 'html' | 'http' | 'text';
+}
+
+// Ordered by what people are most likely to be searching while staring at a
+// live page's source or a network tab.
+const markers: Marker[] = [
+  {
+    id: 'data-pagespeed-no-defer',
+    name: 'data-pagespeed-no-defer',
+    kind: 'HTML attribute',
+    summary:
+      'Excludes a <script> from the defer_javascript filter, so that script runs during page load instead of being deferred to onload.',
+    seen: 'You add it by hand to a script that must execute inline — for example a script that other inline code depends on, or one that writes to the page before load. The deprecated spelling is pagespeed_no_defer; the combine_javascript filter also leaves scripts carrying it alone. The lazyload_images filter honors the same attribute on an <img> to leave that image eagerly loaded.',
+    example:
+      '<script data-pagespeed-no-defer>\n  // runs in place, not deferred to onload\n</script>',
+    exampleLang: 'html',
+  },
+  {
+    id: 'text-psajs',
+    name: 'type="text/psajs"',
+    kind: 'HTML attribute',
+    summary:
+      'defer_javascript retypes scripts to this non-executing type so the browser skips them during parse; the src attribute is left intact.',
+    seen: 'You see it on <script> tags when defer_javascript is active — the type change is what keeps the browser from executing the script during initial parse. data-pagespeed-orig-index (below) preserves its original position for restoration.',
+  },
+  {
+    id: 'data-pagespeed-orig-index',
+    name: 'data-pagespeed-orig-index',
+    kind: 'HTML attribute',
+    summary:
+      "Records a deferred script's original position in the page so execution order is preserved.",
+    seen: 'You see it on <script> tags alongside type="text/psajs" when defer_javascript is active; the module uses it to restore deferred scripts to their real position and type before execution.',
+  },
+  {
+    id: 'data-pagespeed-no-transform',
+    name: 'data-pagespeed-no-transform',
+    kind: 'HTML attribute',
+    summary:
+      'Tells the image filters to leave a specific element alone — no recompression, no resizing, no srcset injection.',
+    seen: 'You add it to an <img> (or other element) you want delivered exactly as authored — a pixel-perfect asset, a tracking pixel, or an image another script measures. The legacy spelling is pagespeed_no_transform. The element may still be cache-extended.',
+    example: '<img src="logo.png" width="160" height="40" data-pagespeed-no-transform>',
+    exampleLang: 'html',
+  },
+  {
+    id: 'pagespeed-off',
+    name: '?PageSpeed=off',
+    kind: 'Query parameter',
+    summary:
+      'Disables optimization for a single request, so the origin response is served unrewritten. ?PageSpeed=on forces it back on.',
+    seen: 'You append it while debugging to compare optimized vs. unoptimized output for one URL. On Apache the equivalent legacy spelling is ?ModPagespeed=off. These three values — on, off, and noscript — are honored without a token; any other query-parameter override requires the RequestOptionOverride token configured on the server.',
+    example: 'https://example.com/page.html?PageSpeed=off',
+    exampleLang: 'text',
+  },
+  {
+    id: 'pagespeed-noscript',
+    name: '?PageSpeed=noscript',
+    kind: 'Query parameter',
+    summary:
+      'The no-JavaScript fallback URL. Filters that inject client-side JavaScript also inject a <noscript> meta-refresh that redirects no-JS browsers to this variant, which serves the page without the JS-dependent rewrites.',
+    seen: 'You see ?PageSpeed=noscript (or ?ModPagespeed=noscript) in your address bar after landing on a page with JavaScript disabled, or in the injected <noscript> block in page source. The filters that add it include lazyload_images, inline_preview_images, inline_images, and prioritize_critical_css. The SupportNoScript option controls whether the <noscript> block is inserted.',
+    example:
+      '<noscript>\n  <meta http-equiv="refresh" content="0;url=\'/page.html?PageSpeed=noscript\'">\n</noscript>',
+    exampleLang: 'html',
+  },
+  {
+    id: 'pagespeed-url',
+    name: '.pagespeed. resource URLs',
+    kind: 'URL pattern',
+    summary:
+      'The naming scheme for rewritten static assets. The two-letter code identifies which filter produced the resource; the hash is a content hash that lets the module cache-extend the URL with a long max-age and still invalidate it when the bytes change.',
+    seen: 'You see these in page source and the network tab in place of the original CSS, JS, and image URLs. The shape is original-name.pagespeed.<code>.<hash>.<ext>. Common codes: ic = image recompress/resize, ce = cache extend, jm = JavaScript minify, cf = CSS rewrite/minify, jc = combine JavaScript, cc = combine CSS.',
+    example:
+      'logo.png.pagespeed.ic.GpQ1A7n5Kz.png\nsite.css.pagespeed.cf.j7l9m2Xp4Q.css\napp.js.pagespeed.jm.kZ3w8tRq1Lp.js',
+    exampleLang: 'text',
+  },
+  {
+    id: 'pagespeed-beacon',
+    name: 'mod_pagespeed_beacon / ngx_pagespeed_beacon',
+    kind: 'Endpoint',
+    summary:
+      'The instrumentation beacon endpoint. JavaScript injected by certain filters reports measurements to it: page-load timing from add_instrumentation as a GET, and which images and CSS are above the fold from the critical-image and critical-CSS beacons as a POST.',
+    seen: 'You see requests to /mod_pagespeed_beacon (Apache) or /ngx_pagespeed_beacon (nginx) in your access log or network tab. The default path is set by the ModPagespeedBeaconUrl directive. The data feeds the optimizer: it learns the critical viewport and prioritizes those images and CSS on later requests.',
+    example: 'GET /ngx_pagespeed_beacon?ets=load:312  →  204',
+    exampleLang: 'http',
+  },
+  {
+    id: 'data-pagespeed-lazy-src',
+    name: 'data-pagespeed-lazy-src',
+    kind: 'HTML attribute',
+    summary:
+      'Holds the real image URL while the lazyload_images filter is active. The filter rewrites <img src> to data-pagespeed-lazy-src and swaps it back in JavaScript once the image scrolls near the viewport.',
+    seen: 'You see it on <img> tags in rendered source when lazyload_images is enabled. If images are not loading and you have JavaScript disabled, this is why — the no-JS fallback above (?PageSpeed=noscript) exists to serve those images normally.',
+    example:
+      '<img data-pagespeed-lazy-src="/photo.jpg" src="/data:image/gif;base64,...placeholder...">',
+    exampleLang: 'html',
+  },
+  {
+    id: 'data-pagespeed-url-hash',
+    name: 'data-pagespeed-url-hash',
+    kind: 'HTML attribute',
+    summary:
+      'A hash of an image’s original URL, written onto <img> tags by the critical-image beacon. It lets the beacon report which images were in the initial viewport without the client knowing anything about the module’s URL rewriting.',
+    seen: 'You see it alongside the beacon machinery when critical-image beaconing is on. It is bookkeeping for the optimizer, not something you set — the server matches the reported hash back to the original image to learn what was above the fold.',
+  },
+  {
+    id: 'x-page-speed',
+    name: 'X-Page-Speed / X-Mod-Pagespeed',
+    kind: 'Response header',
+    summary:
+      'Shows the module handled the response; the value is the generic `on` unless the server-wide ExposeVersionInHeaders option sends the version. nginx and IIS emit X-Page-Speed; Apache emits X-Mod-Pagespeed.',
+    seen: 'You see it in response headers when the module is active. Use it to confirm an optimizer is in the request path; it does not disclose which version is running unless ExposeVersionInHeaders is set. The header text is configurable via the XHeaderValue directive.',
+    // The default value, as on the homepage quick-start.
+    example: 'X-Page-Speed: on',
+    exampleLang: 'http',
+  },
+];
+
+const kindStyles: Record<Marker['kind'], string> = {
+  'HTML attribute': 'bg-interactive/10 text-interactive',
+  'Query parameter': 'bg-success-wash text-success',
+  'URL pattern': 'bg-bg-elevated text-text-muted',
+  Endpoint: 'bg-accent-wash text-accent',
+  'Response header': 'bg-bg-elevated text-text-muted',
+};
+
+const title = '.pagespeed. URLs and data-pagespeed-no-defer, explained';
+const description =
+  'What .pagespeed. URLs, data-pagespeed-no-defer, ?PageSpeed=off and the X-Page-Speed header mean, and how to turn optimization off for one request.';
+
+// Primary reference schema FIRST so seo.spec.ts's first-block @context check
+// passes, then FAQPage. TechArticle suits a developer reference page.
+const articleJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'TechArticle',
+  headline: 'PageSpeed markers: the runtime attributes, query parameters, and headers explained',
+  description,
+  url: 'https://modpagespeed.com/pagespeed-markers/',
+  about: markers.map((m) => ({ '@type': 'Thing', name: m.name })),
+  image: OG_DEFAULT_IMAGE_URL,
+  author: { '@type': 'Organization', name: 'We-Amp B.V.' },
+  publisher: ORGANIZATION_PUBLISHER,
+};
+
+// FAQ — visible <dl> and FAQPage JSON-LD share this single source of truth.
+// Targets the real questions people search while debugging a live install.
+const faqEntries = [
+  {
+    q: 'What is data-pagespeed-no-defer?',
+    a: 'It is an HTML attribute that excludes a single &lt;script&gt; from the defer_javascript filter, so that script runs during page load instead of being deferred to the onload event. Add it to a script that must execute inline — for example one that other inline code depends on. The older spelling pagespeed_no_defer does the same thing.',
+  },
+  {
+    q: 'I see .pagespeed. URLs in my page source — what are they?',
+    a: 'They are static assets the optimizer rewrote. The format is original-name.pagespeed.&lt;code&gt;.&lt;hash&gt;.&lt;ext&gt;: the two-letter code says which filter produced the file (ic for image recompression, ce for cache extension, jm for JavaScript minification, cf for CSS rewriting), and the hash is a content hash that lets the module serve the URL with a long cache lifetime and still invalidate it when the bytes change.',
+  },
+  {
+    q: 'I see POSTs to mod_pagespeed_beacon — what is the beacon?',
+    a: 'It is the instrumentation endpoint. JavaScript injected by filters such as add_instrumentation and the critical-image and critical-CSS beacons POSTs measurements back to /mod_pagespeed_beacon (Apache) or /ngx_pagespeed_beacon (nginx): page-load timing and which images and CSS were above the fold. The optimizer uses that to prioritize the right resources on later requests. The path is configurable with the ModPagespeedBeaconUrl directive.',
+  },
+  {
+    q: 'How do I turn optimization off for one request to debug?',
+    a: 'Append ?PageSpeed=off to the URL (?ModPagespeed=off on older Apache builds). The origin response is then served unrewritten, which lets you compare optimized and unoptimized output for the same page. ?PageSpeed=on forces it back on. These two values, plus ?PageSpeed=noscript, are honored without the RequestOptionOverride token; any other override needs that token.',
+  },
+  {
+    q: 'Is mod_pagespeed still maintained?',
+    a: "Yes. The current mod_pagespeed is the maintained continuation of the open-source module, kept up by We-Amp — the team that helped build ngx_pagespeed, maintained mod_pagespeed, and drove the project's Apache incubation — with CVE patches. It keeps the same directives and filter names, so existing configuration carries over. It is one product in two parts: the module, in-process in Apache, nginx or IIS, and the optimizer worker introduced by the 2.0 re-architecture, which optimizes off the request path; with the worker paired to the Apache or nginx module, and in the reverse-proxy deployment, both parts map the same Cyclone cache. The IIS package ships as a signed installer on the mod_pagespeed GitHub release. In reverse-proxy mode the module fronts any HTTP origin, and the same product also ships as ASP.NET Core middleware.",
+  },
+];
+
+const faqJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: faqEntries.map((entry) => ({
+    '@type': 'Question',
+    name: entry.q,
+    acceptedAnswer: { '@type': 'Answer', text: entry.a },
+  })),
+};
+---
+
+<BaseLayout title={title} description={description} jsonLd={[articleJsonLd, faqJsonLd]}>
+  <PageHero
+    id="markers"
+    size="utility"
+    width="prose"
+    title=".pagespeed. URLs and data-pagespeed-no-defer, explained"
+  >
+    <nav slot="before" class="mb-6 text-small text-text-annotation" aria-label="Breadcrumb">
+      <a href="/" class="hover:text-text-body">
+        Home
+      </a>
+      <span class="mx-1">/</span>
+      <span>PageSpeed markers</span>
+    </nav>
+    <Fragment slot="lede">
+      If you are looking at a page served through mod_pagespeed, you will run into markers it leaves
+      behind: HTML attributes like{' '}
+      <code class="text-[0.9em] bg-bg-elevated px-1 rounded">data-pagespeed-no-defer</code>, query
+      parameters like <code class="text-[0.9em] bg-bg-elevated px-1 rounded">?PageSpeed=off</code>,
+      rewritten <code class="text-[0.9em] bg-bg-elevated px-1 rounded">.pagespeed.</code> resource
+      URLs, a beacon endpoint, and a response header. This page documents what each marker means,
+      where it shows up, and how to set the ones you control.
+    </Fragment>
+  </PageHero>
+
+  <article class="container-prose pb-16">
+    <!-- Quick index -->
+    <nav aria-label="Markers on this page">
+      <p class="text-xs font-semibold uppercase tracking-wide text-text-annotation">On this page</p>
+      <ul class="mt-3 flex flex-wrap gap-2">
+        {markers.map((m) => (
+          <li>
+            <a
+              href={`#${m.id}`}
+              class="inline-flex items-center rounded-md border border-border bg-bg-elevated px-2.5 py-1 font-mono text-xs text-text-body hover:border-interactive/40 hover:text-interactive transition-colors"
+            >
+              {m.name}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </nav>
+
+    <!-- Marker reference: one anchored section per marker -->
+    <div class="mt-12 space-y-10">
+      {markers.map((m) => (
+        <section id={m.id}>
+          <div class="flex flex-wrap items-center gap-3">
+            <h2 class="h2-section text-text-body break-all">
+              <code class="font-mono">{m.name}</code>
+            </h2>
+            <span
+              class={`shrink-0 inline-flex items-center rounded-md px-2 py-0.5 text-micro font-semibold uppercase tracking-wide ${kindStyles[m.kind]}`}
+            >
+              {m.kind}
+            </span>
+          </div>
+          <p class="mt-3 text-text-body">{m.summary}</p>
+          <p class="mt-3 text-sm text-text-muted">
+            <span class="font-medium text-text-body">When you see it:</span> {m.seen}
+          </p>
+          {m.example && <pre class="mt-4 overflow-x-auto rounded-md bg-bg-recessed p-4 text-xs sm:text-sm">
+                <code class="text-text-body">{m.example}</code>
+              </pre>}
+        </section>
+      ))}
+    </div>
+
+    <!-- Notes / cross-links to hub + tool (NOT restating them) -->
+    <section class="mt-14 rounded-card border border-border bg-bg-secondary p-6 md:p-8">
+      <h2 class="h2-section text-text-body">Why these markers exist</h2>
+      <p class="mt-3 text-text-body">
+        Every marker above is a side effect of an automatic optimization. The module recompresses
+        and resizes images, minifies and rewrites CSS and JavaScript, extends cache lifetimes on
+        static assets, and inlines critical CSS. Those rewrites cut byte weight and render-blocking
+        and change image delivery, which is what drives Largest Contentful Paint and image-driven
+        layout shift. The filters do <span class="italic">not</span> rewrite your application code,
+        so interaction responsiveness (INP) and most layout-reservation work stay in your hands.
+      </p>
+      <ul class="mt-5 space-y-2 text-sm">
+        <li>
+          <a
+            href="/core-web-vitals/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            Core Web Vitals: what the metrics mean and which ones the server layer moves
+          </a>{' '}
+          &mdash; the breakdown of LCP, CLS, and INP.
+        </li>
+        <li>
+          <a href="/analyze/" class="text-interactive hover:text-interactive-hover underline">
+            Analyze a URL
+          </a>{' '}
+          &mdash; score any page with PageSpeed Insights and see which findings the module fixes.
+        </li>
+        <li>
+          <a
+            href="/self-hosted-image-optimization/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            Self-hosted image optimization
+          </a>{' '}
+          &mdash; what the image filters behind the{' '}
+          <code class="text-[0.9em] bg-bg-elevated px-1 rounded">ic</code> marker actually do to
+          recompress and resize.
+        </li>
+        <li>
+          <a
+            href="/docs/is-it-working/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            Is it working?
+          </a>{' '}
+          &mdash; the response header per server and the first checks to run after an install.
+        </li>
+        <li>
+          <a href="/docs/" class="text-interactive hover:text-interactive-hover underline">
+            mod_pagespeed documentation
+          </a>{' '}
+          &mdash; the full directive and filter reference behind these markers.
+        </li>
+      </ul>
+    </section>
+
+    <!-- CTA — single, honest, non-disparaging -->
+    <section class="mt-12">
+      <div class="rounded-card border border-interactive/40 bg-interactive/10 p-6 md:p-8">
+        <h2 class="h2-section text-text-body">Stay on a maintained build</h2>
+        <p class="mt-3 text-text-body">
+          If you are seeing these markers, you have a PageSpeed module in the request path. The
+          current mod_pagespeed is the maintained continuation of the open-source module, kept up
+          with CVE patches by We-Amp — the team that helped build ngx_pagespeed and maintained
+          mod_pagespeed. It uses the same directives and filter names, so existing configuration
+          carries over. The whole line is {LICENSE_CLAUSE}: free to install and run in production.
+        </p>
+        <div class="mt-6 flex flex-wrap gap-3">
+          <a href="/download/" class="btn-primary" data-umami-event="cta_markers_upgrade">
+            Download &amp; run &rarr;
+          </a>
+          <a href="/docs/" class="btn-secondary" data-umami-event="cta_markers_docs">
+            Read the 1.15 docs &rarr;
+          </a>
+        </div>
+        <p class="mt-3 text-xs text-text-annotation">
+          {LICENSE_CLAUSE_CAP}. Support plans available.
+        </p>
+      </div>
+    </section>
+
+    <!-- FAQ — visible Q&A mirrors the FAQPage JSON-LD -->
+    <section class="mt-14">
+      <h2 class="h2-section text-text-body">PageSpeed markers: common questions</h2>
+      <dl class="mt-8 space-y-6">
+        {faqEntries.map((entry) => (
+          <div class="border-b border-border pb-6">
+            <dt class="font-semibold text-text-body">{entry.q}</dt>
+            <dd class="mt-2 text-sm text-text-muted" set:html={entry.a} />
+          </div>
+        ))}
+      </dl>
+    </section>
+  </article>
+</BaseLayout>

@@ -1,0 +1,47 @@
+---
+// Canonical primary CTA: "Download & run".
+// The install-first verb matches the actual funnel (the CTA lands on an
+// install/buy page, not a signup): the engine optimizes out of the box and is
+// free to install and run, so install-and-run is the honest entry point and the single standardized label sitewide (F21). Use this
+// anywhere the surface is an install/buy conversion CTA (links to /download/ or
+// /buy/). For genuine "download this artifact" links (release tarball,
+// .deb/.rpm package, GPG key), use a plain <a> — those are not conversion CTAs.
+//
+// The default label is value-led and consistent sitewide. Callers can override
+// via `label` for surfaces that need different framing (e.g. "Support pricing").
+//
+// `event` defaults to a sensible cta_install slug, but callers should
+// pass the existing data-umami-event value for surfaces that already report
+// into analytics (cta_nav_download, cta_features_bottom, etc.) so dashboards
+// stay continuous.
+
+import { FREE_TO_RUN_LINE } from '../data/product-facts.mjs';
+
+interface Props {
+  href?: string;
+  event?: string;
+  label?: string;
+  variant?: 'primary' | 'secondary' | 'inverse';
+  class?: string;
+  showSubtext?: boolean;
+}
+
+const {
+  href = '/download/',
+  event = 'cta_install',
+  label = 'Download & run',
+  variant = 'primary',
+  class: extraClass = '',
+  showSubtext = false,
+} = Astro.props;
+
+// `inverse` = dark button on a cyan band (used in bottom CTA sections).
+// Keeps the same canonical text + analytics contract as primary.
+const variantClass =
+  variant === 'primary' ? 'btn-primary' : variant === 'secondary' ? 'btn-secondary' : 'btn-inverse';
+---
+
+<a href={href} data-umami-event={event} class:list={[variantClass, extraClass]}>
+  {label}
+</a>
+{showSubtext && <p class="mt-2 text-xs text-text-annotation text-center">{FREE_TO_RUN_LINE}</p>}

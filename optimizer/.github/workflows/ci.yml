@@ -1,0 +1,144 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# The thin CI caller. It holds the triggers, the concurrency group, the
+# permissions, the hosted `Full tier scope` job and the aggregate `CI gate`
+# job; every other job lives in the reusable workflows, pinned to main. See
+# docs/ci/pipelines.md.
+#
+# Required checks are named `pr / <job name>` (for example `pr / Linux Build`)
+# plus `CI gate`.
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  # The merge queue's temporary branch: the same pipeline runs on the
+  # queued merge result, and `CI gate` reports on it.
+  merge_group:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      full:
+        description: Also run the full tier
+        type: boolean
+        default: false
+
+# Cancel superseded pull request runs only; a push to main always finishes.
+concurrency:
+  group: ci-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && 'dispatch' || 'run' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions: {}
+
+jobs:
+  pr:
+    # The called pipeline requests pull-requests: read for the release-note
+    # gate and checks: read for its fleet scope (reads the commit's check
+    # suites); a called workflow cannot exceed what its caller grants.
+    permissions:
+      checks: read
+      contents: read
+      pull-requests: read
+    uses: We-Amp/pagespeed-optimizer/.github/workflows/pipeline-pr.yml@main
+
+  # Does this push change the full tier's own definition? A hosted job reads
+  # tools/ci/full_tier_scope.sh (and the push_range_base.sh it calls) from
+  # the default branch, never from the tree under test, and prints
+  # full_tier_change. Anything other than one clean line counts as true.
+  full-scope:
+    name: Full tier scope
+    if: github.event_name == 'push'
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    # actions: read for the runs and jobs API (the base of the push range).
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      full_tier_change: ${{ steps.scope.outputs.full_tier_change }}
+    steps:
+      # fetch-depth: 0 so the diff can reach the base commit.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Decide whether the push changes the full tier
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          # Every failure (mkdir, fetch, read, run, output shape) takes the
+          # warning path and prints true; the step itself never goes red.
+          set +e
+          set -uo pipefail
+          dir="${RUNNER_TEMP}/full-tier-scope"
+          out="${dir}/out.txt"
+          if mkdir -p "${dir}" &&
+            { git rev-parse -q --verify "origin/${DEFAULT_BRANCH}^{commit}" >/dev/null ||
+              git fetch --no-tags --depth=1 origin "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"; } &&
+            git show "origin/${DEFAULT_BRANCH}:tools/ci/full_tier_scope.sh" > "${dir}/full_tier_scope.sh" 2>/dev/null &&
+            git show "origin/${DEFAULT_BRANCH}:tools/ci/push_range_base.sh" > "${dir}/push_range_base.sh" 2>/dev/null &&
+            bash "${dir}/full_tier_scope.sh" > "${out}" &&
+            [ "$(wc -l < "${out}")" -eq 1 ] && grep -qxE 'full_tier_change=(true|false)' "${out}"; then
+            cat "${out}" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::full tier scope undecided; running the full tier"
+            echo "full_tier_change=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  # The full tier runs on a dispatch with full=true, on a pull request
+  # labelled ci:full, and on a push to main. The ci:full label is read when
+  # the pull request run starts (open, push, reopen); after adding it, push or
+  # re-run to get the full tier. A push skips the full tier only when the
+  # repository variable FULL_TIER_TRIGGER is `nightly`, full-scope succeeded
+  # and it printed false; then the scheduled nightly (nightly.yml) carries it.
+  # Unset or any other value runs it on every push. !cancelled() keeps the
+  # implicit success() off, which would skip this job on every dispatch and
+  # ci:full pull request, where full-scope is skipped.
+  full:
+    needs: [full-scope]
+    if: >-
+      !cancelled() && (
+        (github.event_name == 'workflow_dispatch' && inputs.full) ||
+        (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:full')) ||
+        (github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+          (vars.FULL_TIER_TRIGGER != 'nightly' ||
+           needs.full-scope.result != 'success' ||
+           needs.full-scope.outputs.full_tier_change != 'false')))
+    # The same grant as the nightly's call of the full tier; a called
+    # workflow cannot exceed what its caller grants.
+    permissions:
+      actions: read
+      contents: read
+    uses: We-Amp/pagespeed-optimizer/.github/workflows/pipeline-full.yml@main
+
+  # Aggregate gate: the one check branch protection needs besides the
+  # per-job ones. A called workflow cannot read needs.*.result of its
+  # siblings, so this job runs inline, on a hosted label only. full-scope
+  # (it runs on a push only) and full (off unless its trigger matches) are
+  # accepted as skipped; failure and cancelled still fail the gate.
+  gate:
+    permissions: {}
+    name: CI gate
+    needs: [pr, full-scope, full]
+    if: always()
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Every needed pipeline succeeded or was skipped
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "pipeline results: ${RESULTS}"
+          for r in ${RESULTS}; do
+            case "${r}" in
+              success|skipped) ;;
+              *) echo "::error::a pipeline finished with '${r}'"; exit 1 ;;
+            esac
+          done

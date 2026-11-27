@@ -1,0 +1,125 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
+# mod_pagespeed - Factory Worker Production Image
+#
+# Multi-stage build:
+#   Stage 1 (builder): Builds the factory_worker binary
+#   Stage 2 (build-console): Builds the web console SPA
+#   Stage 3 (runtime): Minimal Ubuntu with binary + Chromium + console
+#
+# Usage:
+#   docker build -f docker/Dockerfile.worker -t modpagespeed/worker:latest .
+
+# --- Builder stage ---
+FROM pagespeed2-dev AS builder
+
+WORKDIR /workspace
+COPY . /workspace/
+
+# Pre-populate known_hosts so Bazel git_repository can fetch via SSH
+RUN mkdir -p /root/.ssh && ssh-keyscan github.com >> /root/.ssh/known_hosts
+
+# Build the optimized factory_worker binary (SSH mount for private Cyclone dep)
+RUN --mount=type=ssh bazel build --config=docker --config=opt //src/worker:factory_worker
+
+# --- Console build stage ---
+FROM node:22-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee AS build-console
+
+RUN corepack enable && corepack prepare pnpm@10.33.4 --activate
+
+WORKDIR /workbench
+COPY tools/workbench/pnpm-workspace.yaml tools/workbench/package.json \
+     tools/workbench/pnpm-lock.yaml tools/workbench/tsconfig.base.json ./
+COPY tools/workbench/packages/ packages/
+RUN pnpm install --frozen-lockfile
+RUN pnpm -C packages/api-client build && pnpm -C packages/web-shell build
+
+# --- Runtime stage ---
+FROM pagespeed2-base-runtime
+
+ARG VERSION=dev
+ARG BUILD_DATE
+
+LABEL org.opencontainers.image.title="mod_pagespeed Worker" \
+      org.opencontainers.image.vendor="We-Amp B.V." \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.documentation="https://modpagespeed.com/recipes/docker.md" \
+      org.opencontainers.image.source="https://github.com/We-Amp/pagespeed-optimizer" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.created="${BUILD_DATE}"
+
+# Worker-specific runtime packages (base-runtime already has libc++, curl, ca-certs).
+# dist-upgrade guards against a cached/stale base-runtime layer re-freezing CVEs.
+# gnupg is NOT needed here — install-chromium.sh installs and purges its own.
+# gosu: removed — the entrypoint has exec'd factory_worker directly since #133.
+# nginx comes from base-runtime but the worker never runs a proxy (that's the
+# nginx/combined images) — purge it from this image's CVE surface.
+# APT_REFRESH: bump (build-release.sh passes today's UTC date) to bust only this
+# apt layer so a scheduled rebuild always pulls current security updates even when
+# the layer cache is warm.
+ARG APT_REFRESH=2026-07-23
+RUN echo "apt refresh ${APT_REFRESH}" && apt-get update && apt-get -y dist-upgrade \
+    && apt-get install -y --no-install-recommends \
+    socat fonts-liberation \
+    && apt-get purge -y nginx \
+    && apt-get autoremove -y --purge \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Chromium from Debian bookworm (needed for browser analysis).
+COPY docker/install-chromium.sh /tmp/install-chromium.sh
+RUN /tmp/install-chromium.sh && rm /tmp/install-chromium.sh
+
+# Copy the built binary
+COPY --from=builder /workspace/bazel-bin/src/worker/factory_worker \
+     /usr/local/bin/factory_worker
+
+# Copy the web console SPA
+COPY --from=build-console /workbench/packages/web-shell/dist/ /opt/console/
+
+# Copy license and SBOM files
+COPY LICENSE NOTICE THIRD-PARTY-NOTICES /usr/share/doc/pagespeed/
+COPY sbom/mod_pagespeed-2.1.spdx.json /usr/share/doc/pagespeed/sbom.spdx.json
+
+# --- The shared cache-volume identity contract (issue #1429).
+#
+# Group `pagespeed` is created at a FIXED GID in this image AND in the nginx
+# image, because the two are built independently: a system GID allocated on
+# demand lands on a different number in each (and moves between rebuilds as the
+# base image's package set changes), and two different numbers on one shared
+# /data is precisely the no-sharing case.  The UID is fixed for the mirror-image
+# reason -- the daemon refuses to start on cache content it does not own, so a
+# UID that drifts across a rebuild turns every existing volume into a refusal.
+# 918 is in the system range and outside the block Debian/Ubuntu allocate from
+# downwards (999, 998, ...), where `nginx` already sits at 999.
+#
+# There is deliberately NO `USER` directive: the entrypoint needs root for one
+# step -- taking ownership of /data, which a bind mount or a pre-existing named
+# volume never inherits from the image -- and then drops to `pagespeed` with
+# setpriv before exec'ing the daemon (docker/lib-cache-perms.sh).  Running the
+# container with an explicit `--user`/compose `user:` is supported too: the
+# entrypoint detects it, skips the root-only step and starts the daemon
+# directly, and /data below carries the right ownership for a fresh volume.
+#
+# /data is 2750 (setgid, group r-x): the peer only ever OPENS files the
+# optimizer authored -- it never creates anything here -- so group write buys
+# nothing and costs the class of problem this issue exists to fix.
+RUN groupadd -r -g 918 pagespeed \
+    && useradd -r -u 918 -g 918 -d /data -s /usr/sbin/nologin pagespeed \
+    && mkdir -p /data && chown 918:918 /data && chmod 2750 /data
+
+COPY docker/lib-cache-perms.sh /docker/lib-cache-perms.sh
+
+# Copy the canonical entrypoint script (also used by variant wrappers).
+COPY docker/entrypoint-worker.sh /docker/entrypoint-worker.sh
+RUN chmod +x /docker/entrypoint-worker.sh && ln -s /docker/entrypoint-worker.sh /entrypoint-worker.sh
+
+# Shared volume for cache and socket
+VOLUME /data
+
+# Environment variables (can be overridden)
+# NOTE: Chromium requires shm_size >= 256m at runtime (docker run --shm-size=256m)
+ENV CACHE_SIZE=536870912
+ENV PAGESPEED_CONSOLE_DIR=/opt/console
+
+ENTRYPOINT ["/entrypoint-worker.sh"]

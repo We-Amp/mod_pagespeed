@@ -1,0 +1,154 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PageHero from '../../components/PageHero.astro';
+import { EXAMPLES, CATEGORY_ORDER, CATEGORY_BLURB, DEMO_ORIGIN } from '../../data/examples';
+import examplesData from '../../data/examples-data.json';
+import { headlineMetric } from '../../lib/example-impact';
+
+const data = examplesData as {
+  generated_at: string | null;
+  examples: Record<string, any>;
+};
+
+// "New" marker for cards that first shipped in a recent release. Derives the
+// user-facing minor version from `addedIn` (e.g. '1.15.0-r20' → 'New in 1.15').
+function newLabel(addedIn?: string): string | null {
+  if (!addedIn) return null;
+  const m = addedIn.match(/^(\d+\.\d+)/);
+  return m ? `New in ${m[1]}` : 'New';
+}
+
+const byCategory = CATEGORY_ORDER.map((cat) => ({
+  cat,
+  blurb: CATEGORY_BLURB[cat],
+  items: EXAMPLES.filter((e) => e.category === cat),
+})).filter((g) => g.items.length > 0);
+
+const total = EXAMPLES.length;
+
+// ItemList structured data so search engines understand the hub → spoke
+// relationship between this index and the per-filter detail pages.
+const itemListJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'ItemList',
+  name: 'mod_pagespeed optimization examples',
+  itemListElement: EXAMPLES.map((ex, i) => ({
+    '@type': 'ListItem',
+    position: i + 1,
+    name: ex.title,
+    url: `https://modpagespeed.com/examples/${ex.slug}/`,
+  })),
+};
+---
+
+<BaseLayout
+  title="mod_pagespeed examples — every filter, shown live"
+  description="Every optimization the mod_pagespeed module performs, shown live: combine and minify CSS/JS, recompress images, inline critical CSS, extend cache."
+  jsonLd={itemListJsonLd}
+>
+  <PageHero id="examples" size="utility" eyebrow="Live gallery" title="Optimization examples">
+    <Fragment slot="lede">
+      Every optimization the mod_pagespeed module performs, shown live. Each of these {total}{' '}
+      examples is a small page served by the module — in-process in Apache, nginx and IIS. Open one
+      to see the original and the optimized output side by side, read exactly what changed in the
+      source, and see the bytes and requests it saved.
+    </Fragment>
+
+    {/* Which part these belong to — the module's per-filter control model. */}
+    <div class="mt-6 max-w-3xl rounded-lg border border-border bg-bg-secondary/60 p-5">
+      <p class="font-semibold text-text-body">These are the module's named filters.</p>
+      <p class="mt-2 text-small text-text-muted">
+        The module runs in-process in Apache, nginx and IIS, where you switch each optimization on
+        and off individually — so this gallery shows them one filter at a time. The optimizer worker
+        takes a different path: one always-on pipeline with no per-filter switches, nothing to tune
+        and nothing to break. Same optimization libraries underneath, a different control model — on
+        the worker, read these as what the pipeline does, not a list of toggles.
+      </p>
+      <p class="mt-3 text-small">
+        <a class="font-medium text-interactive hover:underline" href="/docs/">
+          Read the module docs
+        </a>
+        <span class="mx-1 text-text-annotation">·</span>
+        <a class="font-medium text-interactive hover:underline" href="/demo/">
+          See mod_pagespeed optimize a whole site
+        </a>
+      </p>
+    </div>
+
+    <p class="mt-4 max-w-3xl text-xs text-text-annotation">
+      Served live from <code class="font-mono">{DEMO_ORIGIN.replace('https://', '')}</code>. These
+      revive the classic open-source mod_pagespeed example showcase; mod_pagespeed was originally
+      developed at Google, and examples that name Google services (Analytics, AdSense, Fonts)
+      interoperate with them but imply no affiliation.
+      {data.generated_at && (
+        <>
+          {' '}
+          Measured{' '}
+          {new Date(data.generated_at).toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+          })}
+          .
+        </>
+      )}
+    </p>
+  </PageHero>
+
+  <section class="pb-16 sm:pb-20">
+    <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+      {/* Category jump links */}
+      <nav class="flex flex-wrap gap-2" aria-label="Example categories">
+        {byCategory.map((g) => (
+          <a
+            href={`#${g.cat.toLowerCase()}`}
+            aria-label={`${g.cat}, ${g.items.length} examples`}
+            class="rounded-full border border-border px-4 py-1.5 text-sm font-medium text-text-body hover:border-interactive/40 hover:text-interactive transition-colors"
+          >
+            {g.cat}
+            <span aria-hidden="true" class="ml-1.5 text-xs text-text-annotation">
+              {g.items.length}
+            </span>
+          </a>
+        ))}
+      </nav>
+
+      {/* Category sections */}
+      {byCategory.map((g) => (
+        <section class="mt-14" id={g.cat.toLowerCase()}>
+          <div class="border-b border-border pb-3">
+            <h2 class="h2-section text-text-body">{g.cat}</h2>
+            <p class="mt-1 text-sm text-text-annotation">{g.blurb}</p>
+          </div>
+          <ul class="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {g.items.map((ex) => {
+              const metric = headlineMetric(ex.slug);
+              return (
+                <li>
+                  <a
+                    href={`/examples/${ex.slug}/`}
+                    class="group flex h-full flex-col rounded-lg border border-border bg-bg-elevated p-5 transition-colors hover:border-interactive/40"
+                  >
+                    <div class="flex items-start justify-between gap-3">
+                      <h3 class="text-base font-semibold text-text-body group-hover:text-interactive">
+                        {ex.title}
+                      </h3>
+                      <div class="flex shrink-0 flex-col items-end gap-1.5">
+                        {newLabel(ex.addedIn) && (
+                          <span class="badge-interactive">{newLabel(ex.addedIn)}</span>
+                        )}
+                        {metric && <span class="badge-success">{metric}</span>}
+                      </div>
+                    </div>
+                    <p class="mt-2 text-body sm:text-sm text-text-muted">{ex.blurb}</p>
+                    <code class="mt-3 block font-mono text-xs text-text-annotation">{ex.slug}</code>
+                  </a>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ))}
+    </div>
+  </section>
+</BaseLayout>

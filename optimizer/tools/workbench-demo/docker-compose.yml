@@ -1,0 +1,98 @@
+# PageSpeed 2.0 - Workbench Demo Environment
+#
+# Four services sharing a named volume, with worker API exposed:
+#   website - Astro SSR origin serving modpagespeed.com on port 4321
+#   origin  - Python HTTP server serving demo content on port 8081
+#   worker  - PageSpeed factory worker daemon (API on port 9880)
+#   nginx   - Nginx with pagespeed module on port 8084
+#
+# The workbench dev server (port 5173) runs on the host and proxies
+# /v1/* requests to the worker API at localhost:9880.
+#
+# The website service builds the modpagespeed.com site from the public
+# repository's website/ tree (We-Amp/pagespeed-optimizer). WEBSITE_DIR names
+# that tree as an ABSOLUTE path; unset, it falls back to
+# <repo root>/website (the relative default below is
+# resolved against this file's directory). The directory must exist:
+# tools/workbench-demo/run.sh checks and exports it before starting the stack.
+#
+# Prerequisites:
+#   1. Clone Cyclone:  git clone https://github.com/We-Amp/cyclone-cache reference/cyclone
+#   2. Build console:  cd tools/workbench && pnpm install && pnpm -C packages/api-client build && pnpm -C packages/web-shell build
+#   3. Build dev image: ./tools/docker-build.sh
+#   4. Optional:       cp "$WEBSITE_DIR/.env.example" "$WEBSITE_DIR/.env"
+#
+# Usage:
+#   docker compose -f tools/workbench-demo/docker-compose.yml up -d
+#   docker compose -f tools/workbench-demo/docker-compose.yml down -v
+
+services:
+  # Astro SSR origin: serves the modpagespeed.com website.
+  website:
+    build:
+      context: ${WEBSITE_DIR:-../../website}
+      dockerfile: Dockerfile
+      # The site imports ../shared/product-facts.mjs, outside the context above.
+      additional_contexts:
+        shared: ../../shared
+      args:
+        # This origin exists so the workbench has pages to optimize; it never
+        # quotes a price to a customer. Build on the committed price list
+        # rather than failing when no credentials can reach the image build.
+        PRICING_ALLOW_STALE: "1"
+    env_file:
+      - path: ${WEBSITE_DIR:-../../website}/.env
+        required: false
+    environment:
+      - HOST=0.0.0.0
+      - PORT=4321
+    expose:
+      - "4321"
+
+  # Origin server: serves demo site content (unoptimized).
+  origin:
+    image: python:3.12-slim
+    working_dir: /var/www
+    command: python3 -m http.server 8081 --bind 0.0.0.0
+    volumes:
+      - ${WEBSITE_DIR:-../../website}/public/demos:/var/www/demos
+    ports:
+      - "127.0.0.1:${WORKBENCH_ORIGIN_PORT:-8081}:8081"
+
+  # PageSpeed factory worker: processes cache notifications,
+  # writes optimized variants, and exposes management API.
+  worker:
+    build:
+      context: ../../
+      dockerfile: tools/e2e/Dockerfile.e2e
+    entrypoint: ["/entrypoint-worker-demo.sh"]
+    shm_size: '256m'
+    volumes:
+      - shared:/shared
+      - ./entrypoint-worker-demo.sh:/entrypoint-worker-demo.sh:ro
+      - ../../tools/workbench/packages/web-shell/dist:/opt/console:ro
+    ports:
+      - "127.0.0.1:${WORKBENCH_API_PORT:-9880}:9880"
+    depends_on:
+      - origin
+      - website
+
+  # Nginx with pagespeed module: intercepts requests, serves from
+  # cache on hit, proxies to Astro website and demo origin on miss.
+  nginx:
+    build:
+      context: ../../
+      dockerfile: tools/e2e/Dockerfile.e2e
+    command: ["nginx", "-g", "daemon off;"]
+    ports:
+      - "127.0.0.1:${WORKBENCH_NGINX_PORT:-8084}:8080"
+    volumes:
+      - shared:/shared
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - origin
+      - website
+      - worker
+
+volumes:
+  shared:

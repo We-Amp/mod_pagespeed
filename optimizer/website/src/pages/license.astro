@@ -1,0 +1,124 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import PageHero from '../components/PageHero.astro';
+import {
+  SOURCE_PUBLICATION as SP,
+  SOURCE_IS_PUBLISHED,
+  LICENSE_CLAUSE,
+  PRODUCT_NAME,
+  V2_LINE,
+  V1_LINE,
+} from '../data/product-facts.mjs';
+
+// The license facts (full name, SPDX id, status) come from product-facts.mjs;
+// the drift guard in test/sync/source-publication-sync.test.ts fails if this
+// page re-states any of them as a literal. Whether the software is described
+// as licensed under the license or as published source derives from the
+// publication status (LICENSE_CLAUSE) — never hard-code either form.
+const product = `${PRODUCT_NAME}`;
+---
+
+<BaseLayout
+  title={`Software license — ${product}`}
+  description={`${product} is ${LICENSE_CLAUSE}: free to run. We-Amp sells support; the packages are the same for everyone.`}
+>
+  <PageHero title="Software license" size="utility" width="prose">
+    <Fragment slot="lede">
+      {product} is {LICENSE_CLAUSE} ({SP.licenseId}) &mdash; the same license the original
+      mod_pagespeed codebase carried. Every feature is available to everyone, in development and in
+      production. The commercial terms for a support subscription live in the{' '}
+      <a href="/terms/" class="text-interactive hover:text-interactive-hover underline">
+        Terms of Service
+      </a>
+      .
+    </Fragment>
+  </PageHero>
+
+  <section class="container-prose pb-16">
+    <div class="space-y-12">
+      <!-- The license -->
+      <div>
+        <h2 class="h2-section text-text-body">The license</h2>
+        <p class="mt-4 text-text-muted">
+          The web-server module and the optimizer worker are licensed under the {SP.license};
+          bundled third-party components are listed in{' '}
+          <code class="rounded bg-bg-elevated px-1 py-0.5 text-xs">THIRD-PARTY-NOTICES</code> under
+          their own licenses. The{' '}
+          <code class="rounded bg-bg-elevated px-1 py-0.5 text-xs">LICENSE</code>,{' '}
+          <code class="rounded bg-bg-elevated px-1 py-0.5 text-xs">NOTICE</code> and{' '}
+          <code class="rounded bg-bg-elevated px-1 py-0.5 text-xs">THIRD-PARTY-NOTICES</code> files
+          ship with every distribution &mdash; the signed .deb and .rpm packages, the Docker images,
+          and the NuGet packages.
+          {SOURCE_IS_PUBLISHED &&
+            ' The source is published; you are free to build, modify, and redistribute it under the same terms.'}
+        </p>
+      </div>
+
+      <div class="rule-ticked-scale" role="presentation" aria-hidden="true"></div>
+
+      <!-- What We-Amp sells -->
+      <div>
+        <h2 class="h2-section text-text-body">What We-Amp sells</h2>
+        <p class="mt-4 text-text-muted">
+          Support. The software and its signed packages are the same for everyone and free;{' '}
+          <a href="/support/" class="text-interactive hover:text-interactive-hover underline">
+            support plans
+          </a>{' '}
+          from the people who build it are what&rsquo;s for sale. Support subscriptions are governed
+          by the{' '}
+          <a href="/terms/" class="text-interactive hover:text-interactive-hover underline">
+            Terms of Service
+          </a>
+          ; the support terms live at{' '}
+          <a
+            href="https://we-amp.com/licensing/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            we-amp.com/licensing/
+          </a>
+          .
+        </p>
+      </div>
+
+      <div class="rule-ticked-scale" role="presentation" aria-hidden="true"></div>
+
+      <!-- Predecessor lines -->
+      <div>
+        <h2 class="h2-section text-text-body">Predecessor lines</h2>
+        <p class="mt-4 text-text-muted">
+          The predecessor lines carry the {SP.license} as well. Running ModPageSpeed {V2_LINE}? See
+          the{' '}
+          <a
+            href="/docs/migrating-to-2-1/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            migration guide
+          </a>
+          . Running mod_pagespeed {V1_LINE}? See the guide to
+          <a
+            href="/docs/migrating-to-2-1/#upgrading-from-1-15"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            upgrading to {product}
+          </a>
+          .
+        </p>
+      </div>
+
+      <div class="rule-ticked-scale" role="presentation" aria-hidden="true"></div>
+
+      <!-- Continuity -->
+      <div>
+        <h2 class="h2-section text-text-body">Continuity</h2>
+        <div class="mt-4 rounded-lg border border-interactive/45 bg-interactive-wash p-4">
+          <p class="text-text-body">
+            The {SP.license} is a perpetual grant that does not depend on We-Amp B.V.&rsquo;s
+            corporate status. If the company is acquired, merged, reorganized, or wound down, the
+            license you hold stays in force, and support subscriptions remain governed by the same
+            Terms of Service.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+</BaseLayout>

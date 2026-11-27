@@ -1,0 +1,30 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// Chip — a squared status chip in one of four tones, optionally on its wash
+// fill, optionally a link. Uppercase is reserved for one-word state labels
+// (HIT, MISS, NEW); callers pass the label as it should render.
+// Surface rule for wash: bg-primary, bg-secondary or bg-elevated only — on
+// bg-recessed a chip keeps a transparent fill (contrast would drop below AA).
+
+interface Props {
+  tone: 'success' | 'accent' | 'interactive' | 'neutral';
+  label: string;
+  wash?: boolean;
+  href?: string;
+}
+
+const { tone, label, wash = false, href } = Astro.props;
+const classes = [`badge-${tone}`, wash ? 'badge-wash' : null];
+---
+
+{href ? (
+  <a href={href} class:list={classes} data-ui="chip">
+    {label}
+  </a>
+) : (
+  <span class:list={classes} data-ui="chip">
+    {label}
+  </span>
+)}

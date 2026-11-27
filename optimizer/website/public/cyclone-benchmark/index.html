@@ -1,0 +1,638 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: Apache-2.0
+     Copyright (c) 2024-2026 We-Amp B.V. -->
+
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cyclone Cache data explorer — mod_pagespeed</title>
+<link rel="canonical" href="https://modpagespeed.com/cyclone-benchmark/">
+<meta name="description" content="Interactive data explorer for the Cyclone vs. file-cache benchmark: head-to-head table plus concurrency, latency, and eviction charts.">
+<meta property="og:title" content="Cyclone Cache data explorer — mod_pagespeed">
+<meta property="og:description" content="Interactive data explorer for the Cyclone vs. file-cache benchmark: head-to-head table plus concurrency, latency, and eviction charts.">
+<meta property="og:image" content="https://modpagespeed.com/og-default.png?v=4">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://modpagespeed.com/cyclone-benchmark/">
+<meta property="og:site_name" content="mod_pagespeed">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@modpagespeed">
+<meta name="twitter:title" content="Cyclone Cache data explorer — mod_pagespeed">
+<meta name="twitter:description" content="Interactive data explorer for the Cyclone vs. file-cache benchmark: head-to-head table plus concurrency, latency, and eviction charts.">
+<meta name="twitter:image" content="https://modpagespeed.com/og-default.png?v=4">
+<style>
+*{box-sizing:border-box}html{-webkit-text-size-adjust:100%}body{margin:0}
+/* ---- dark-first, theme-aware ---- */
+:root{
+  --bg:#0E1113; --panel:#161A1D; --panel2:#1b2124; --line:#242A2E; --grid:#1e2529;
+  --ink:#E6E9EA; --ink-soft:#9BA3A7; --muted:#828b8f;
+  --cyclone:#33C2B3; --cyclone2:#9A8BD6; --file:#C4885A;
+  --amber:#D8A657; --amber-tint:#D8A6571a; --warn:#E0674A; --good:#33C2B3;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 14px 40px rgba(0,0,0,.36);
+  --mono:ui-monospace,"SF Mono","Cascadia Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  --sans:-apple-system,"Segoe UI",system-ui,Roboto,Helvetica,Arial,sans-serif;
+  --disp:"SF Pro Display",-apple-system,"Segoe UI",system-ui,sans-serif;
+}
+@media (prefers-color-scheme:light){
+  :root{
+    --bg:#FAFAF8; --panel:#ffffff; --panel2:#f4f5f1; --line:#E4E4DE; --grid:#edeee8;
+    --ink:#16191B; --ink-soft:#525a5d; --muted:#6b7275;
+    --cyclone:#0E8C7C; --cyclone2:#6B5DC0; --file:#A96B3C;
+    --amber:#9c6a1e; --amber-tint:#D8A65722; --warn:#C24628; --good:#0E8C7C;
+    --shadow:0 1px 2px rgba(20,30,28,.06),0 10px 34px rgba(20,30,28,.06);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0E1113; --panel:#161A1D; --panel2:#1b2124; --line:#242A2E; --grid:#1e2529;
+  --ink:#E6E9EA; --ink-soft:#9BA3A7; --muted:#828b8f;
+  --cyclone:#33C2B3; --cyclone2:#9A8BD6; --file:#C4885A; --amber:#D8A657; --amber-tint:#D8A6571a; --warn:#E0674A; --good:#33C2B3;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 14px 40px rgba(0,0,0,.36);
+}
+:root[data-theme="light"]{
+  --bg:#FAFAF8; --panel:#ffffff; --panel2:#f4f5f1; --line:#E4E4DE; --grid:#edeee8;
+  --ink:#16191B; --ink-soft:#525a5d; --muted:#6b7275;
+  --cyclone:#0E8C7C; --cyclone2:#6B5DC0; --file:#A96B3C; --amber:#9c6a1e; --amber-tint:#D8A65722; --warn:#C24628; --good:#0E8C7C;
+  --shadow:0 1px 2px rgba(20,30,28,.06),0 10px 34px rgba(20,30,28,.06);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:17px;line-height:1.62;-webkit-font-smoothing:antialiased}
+.wrap{max-width:760px;margin:0 auto;padding:0 22px}
+a{color:var(--cyclone);text-decoration:none;border-bottom:1px solid transparent}
+a:hover{border-bottom-color:currentColor}
+strong{color:var(--ink);font-weight:650}
+em{font-style:italic;color:var(--ink)}
+code{font-family:var(--mono);font-size:.88em;background:var(--panel2);border:1px solid var(--line);border-radius:5px;padding:1px 5px}
+
+/* hero */
+.mast{padding:66px 0 30px;border-bottom:1px solid var(--line)}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin:0 0 16px}
+.eyebrow.teal{color:var(--cyclone)}
+h1{font-family:var(--disp);font-size:clamp(30px,5.4vw,50px);line-height:1.05;letter-spacing:-.022em;font-weight:680;margin:0 0 20px;text-wrap:balance}
+.dek{font-size:clamp(18px,2.3vw,21px);line-height:1.5;color:var(--ink-soft);margin:0 0 30px}
+.dek strong{color:var(--ink)}
+.proof{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:0 0 24px}
+.pcard{background:var(--panel);border:1px solid var(--line);border-top:2px solid var(--cyclone);border-radius:13px;padding:18px 16px;box-shadow:var(--shadow)}
+.pcard .pn{font-family:var(--mono);font-size:26px;font-weight:600;color:var(--cyclone);font-variant-numeric:tabular-nums;letter-spacing:-.01em;line-height:1}
+.pcard .pl{font-size:13.5px;color:var(--ink);font-weight:600;margin-top:9px}
+.pcard .ps{font-size:12.5px;color:var(--muted);margin-top:5px;line-height:1.45}
+.cred{font-family:var(--mono);font-size:12px;color:var(--muted);margin:0 0 22px}
+.cred b{color:var(--ink-soft)}
+.keystone{background:var(--amber-tint);border:1px solid var(--line);border-left:3px solid var(--amber);border-radius:11px;padding:15px 18px;font-size:15.5px;color:var(--ink-soft);margin:0}
+.keystone b{color:var(--ink)}
+
+/* sections */
+.sec{padding:44px 0;border-bottom:1px solid var(--line)}
+h2{font-family:var(--disp);font-size:clamp(22px,3.1vw,30px);line-height:1.14;letter-spacing:-.016em;font-weight:660;margin:0 0 16px;text-wrap:balance}
+.sec p{margin:0 0 16px;max-width:68ch}
+.sec ul{margin:0 0 16px;padding:0;list-style:none;display:flex;flex-direction:column;gap:9px}
+.sec ul li{position:relative;padding-left:20px;color:var(--ink-soft);max-width:68ch}
+.sec ul li::before{content:"";position:absolute;left:2px;top:.62em;width:6px;height:6px;border-radius:2px;background:var(--cyclone)}
+.sec ul li strong{color:var(--ink)}
+
+/* callouts — three tiers */
+.callout{border-radius:12px;padding:16px 18px;margin:22px 0 4px;box-shadow:var(--shadow)}
+.callout .k{font-family:var(--mono);font-size:11px;letter-spacing:.13em;text-transform:uppercase;display:block;margin-bottom:7px}
+.callout p{margin:0 0 6px;max-width:64ch}.callout p:last-child{margin:0}
+.callout.know{background:var(--amber-tint);border:1px solid var(--line);border-left:4px solid var(--amber)}
+.callout.know .k{color:var(--amber)}
+.callout.know .lead{font-weight:650;color:var(--ink);font-size:16px}
+.callout.method{background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--muted)}
+.callout.method .k{color:var(--muted)}
+.callout.method p{font-style:italic;color:var(--ink-soft);font-size:14.5px}
+.callout.cta{background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--cyclone)}
+.callout.cta p{color:var(--ink);font-weight:600}
+.gem{margin:30px 0;padding:0 8px;border:0;font-family:var(--disp);font-size:clamp(21px,3.2vw,30px);line-height:1.22;font-weight:600;color:var(--cyclone);text-align:center;text-wrap:balance;letter-spacing:-.01em}
+.gem::before{content:"\201C";opacity:.4}.gem::after{content:"\201D";opacity:.4}
+
+/* charts */
+.chart-takeaway{font-size:14px;color:var(--ink-soft);font-style:italic;margin:0 0 12px;max-width:64ch}
+.controls{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 14px}
+.seg{display:inline-flex;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:3px;box-shadow:var(--shadow);flex-wrap:wrap}
+.seg button{font-family:var(--mono);font-size:12.5px;color:var(--muted);background:none;border:0;padding:8px 13px;border-radius:7px;cursor:pointer;min-height:40px}
+.seg button[aria-pressed="true"]{color:var(--ink);background:var(--bg)}
+.seg button:focus-visible{outline:2px solid var(--cyclone);outline-offset:2px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:15px;padding:20px 20px 12px;box-shadow:var(--shadow)}
+.chart-scroll{overflow-x:auto}
+svg{display:block;width:100%;height:auto;font-family:var(--mono)}
+svg text{fill:var(--muted)}
+.gridline{stroke:var(--grid)} .lbl-val{fill:var(--ink);font-weight:600}
+.legend{display:flex;gap:18px;align-items:center;flex-wrap:wrap;font-family:var(--mono);font-size:12px;margin-bottom:8px}
+.legend .k{display:flex;align-items:center;gap:8px;color:var(--ink-soft)}
+.legend .cap{margin-left:auto;color:var(--muted)}
+.swatch{width:22px;height:3px;border-radius:2px;display:inline-block}
+.sw-c{background:var(--cyclone)} .sw-f{background:var(--file)} .sw-c2{background:var(--cyclone2)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:13px;overflow:hidden;margin-top:20px}
+.stat{background:var(--panel);padding:17px}
+.stat .n{font-family:var(--mono);font-size:23px;font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.stat .n.warn{color:var(--warn)} .stat .n.good{color:var(--good)}
+.stat .c{font-size:12.5px;color:var(--muted);margin-top:5px;line-height:1.4}
+.tbl-scroll{overflow-x:auto;margin:4px 0}
+table{border-collapse:collapse;width:100%;font-family:var(--mono);font-size:13px;min-width:500px}
+th,td{padding:10px 12px;text-align:right;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums;white-space:nowrap}
+th:first-child,td:first-child{text-align:left;position:sticky;left:0;background:var(--bg)}
+thead th{color:var(--muted);font-weight:500;font-size:11px;letter-spacing:.05em;text-transform:uppercase}
+td.win-c{color:var(--cyclone);font-weight:600} td.win-f{color:var(--file);font-weight:600}
+tbody tr:last-child td{border-bottom:0}
+.note{font-family:var(--mono);font-size:11.5px;color:var(--muted);margin-top:10px;max-width:70ch}
+.specs{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.spec{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:19px;box-shadow:var(--shadow)}
+.spec h3{margin:0 0 3px;font-size:15px;font-weight:640}
+.spec .role{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);margin-bottom:13px}
+.spec dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:7px 14px;font-size:12.5px}
+.spec dt{color:var(--muted);font-family:var(--mono);font-size:11px}
+.spec dd{margin:0;color:var(--ink);font-family:var(--mono);font-size:12px;text-align:right}
+.spec .why{margin-top:13px;font-size:12.5px;color:var(--ink-soft);line-height:1.5}
+
+footer{padding:40px 0 72px;color:var(--muted);font-size:13.5px}
+footer p{max-width:68ch;margin:0 0 12px}
+footer .mono{font-family:var(--mono);font-size:12px}
+footer b{color:var(--ink-soft)}
+.theme-toggle{position:fixed;top:15px;right:15px;z-index:9;font-family:var(--mono);font-size:12px;background:var(--panel);border:1px solid var(--line);border-radius:8px;color:var(--ink-soft);padding:8px 11px;cursor:pointer;box-shadow:var(--shadow)}
+.theme-toggle:focus-visible{outline:2px solid var(--cyclone);outline-offset:2px}
+@media (max-width:680px){
+  .proof{grid-template-columns:1fr;gap:10px}
+  .specs{grid-template-columns:1fr}
+  .mast{padding:44px 0 24px}.sec{padding:34px 0}
+}
+/* --- v3 supplement --- */
+.hero{position:relative;padding:64px 0 40px;border-bottom:1px solid var(--panel)}
+.theme{position:absolute;top:8px;right:0;width:40px;height:40px;border-radius:50%;border:1px solid var(--panel);background:var(--panel);color:var(--ink);font-size:18px;cursor:pointer}
+.lead{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:34px 0 8px}
+@media(max-width:760px){.lead{grid-template-columns:repeat(2,1fr)}}
+.hstat{background:var(--panel);border-radius:12px;padding:18px 16px}
+.hn{font-size:30px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums}
+.hn.good{color:var(--cyclone)}
+.hc{margin-top:8px;font-size:12.5px;color:var(--muted);line-height:1.35}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:18px 0}
+@media(max-width:700px){.two{grid-template-columns:1fr}}
+.chart{background:var(--panel);border-radius:14px;padding:14px 12px;margin:18px 0 10px;overflow-x:auto}
+.chart svg{display:block;width:100%;min-width:640px;height:auto}
+.caption{text-align:center;color:var(--muted);font-size:12.5px;margin:-2px 0 12px}
+.feature{background:linear-gradient(180deg,color-mix(in srgb,var(--cyclone) 8%,transparent),transparent);border:1px solid color-mix(in srgb,var(--cyclone) 22%,var(--panel));border-radius:18px;padding:24px 22px;margin:30px 0}
+.sig{margin-top:20px;color:var(--muted);font-size:12.5px;letter-spacing:.04em;text-transform:uppercase}
+.legend{text-align:center;color:var(--muted);font-size:12.5px;margin-bottom:6px}
+.legend .key{display:inline-flex;align-items:center;gap:6px;margin:0 8px}
+.legend .key i{width:12px;height:12px;border-radius:3px;display:inline-block}
+/* --- explorer table --- */
+.tablewrap{overflow-x:auto;margin:16px 0 8px;border-radius:12px;border:1px solid var(--panel)}
+#datatable{width:100%;border-collapse:collapse;font-size:13.5px;min-width:640px}
+#datatable thead th{text-align:left;padding:11px 14px;background:var(--panel);color:var(--muted);font-weight:600;font-size:11.5px;letter-spacing:.03em;text-transform:uppercase;position:sticky;top:0}
+#datatable td{padding:10px 14px;border-top:1px solid var(--panel)}
+#datatable td.mut{color:var(--muted);font-size:12.5px;white-space:nowrap}
+#datatable td.num{text-align:right;font-variant-numeric:tabular-nums;font-weight:600;white-space:nowrap}
+#datatable td.num .u{color:var(--muted);font-weight:400;font-size:11px;margin-left:3px}
+#datatable td.verdict{font-weight:700;white-space:nowrap}
+#datatable td.verdict.good{color:var(--cyclone)}
+#datatable td.verdict.warn{color:var(--file)}
+#datatable tbody tr:hover{background:color-mix(in srgb,var(--cyclone) 6%,transparent)}
+/* zoom / lightbox */
+/* zoom button lives in the section heading (never overlaps chart/table content) */
+h2.has-zoom{display:flex;align-items:center;gap:14px}
+h2.has-zoom .h2t{flex:1 1 auto;min-width:0}
+.zoombtn{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--ink-soft);font-size:16px;line-height:1;cursor:pointer;box-shadow:var(--shadow);opacity:.85;transition:opacity .12s,color .12s}
+.zoombtn:hover{opacity:1;color:var(--ink)}
+.zoombtn:focus-visible{outline:2px solid var(--cyclone);outline-offset:2px;opacity:1}
+/* head-to-head: let the long Scenario column wrap so all 5 columns fit the reading width */
+#datatable th:first-child,#datatable td:first-child{white-space:normal;min-width:150px}
+/* make horizontal scroll discoverable (the OS overlay scrollbar is ~2px and invisible) */
+.tablewrap,.chart,.lightbox-inner,.chart-scroll,.tbl-scroll{scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+.tablewrap::-webkit-scrollbar,.chart::-webkit-scrollbar,.lightbox-inner::-webkit-scrollbar,.chart-scroll::-webkit-scrollbar{height:9px;width:9px}
+.tablewrap::-webkit-scrollbar-thumb,.chart::-webkit-scrollbar-thumb,.lightbox-inner::-webkit-scrollbar-thumb,.chart-scroll::-webkit-scrollbar-thumb{background:var(--line);border-radius:5px}
+.tablewrap::-webkit-scrollbar-track,.chart::-webkit-scrollbar-track,.lightbox-inner::-webkit-scrollbar-track,.chart-scroll::-webkit-scrollbar-track{background:transparent}
+.hscroll-fade{position:relative}
+@media(max-width:720px){.hscroll-fade::after{content:"";position:absolute;top:1px;bottom:10px;right:1px;width:36px;border-radius:0 12px 12px 0;background:linear-gradient(to right,transparent,var(--bg));pointer-events:none;z-index:2}}
+.lightbox{position:fixed;inset:0;z-index:50;display:none;align-items:center;justify-content:center;background:color-mix(in srgb,var(--bg) 80%,#000);padding:24px}
+.lightbox.open{display:flex}
+.lightbox-inner{background:var(--panel);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);padding:22px 22px 18px;max-width:96vw;max-height:92vh;overflow:auto;position:relative}
+.lightbox-inner svg{width:min(1400px,90vw);height:auto;min-width:0;max-width:none}
+.lightbox-inner table{min-width:0;width:auto;font-size:13.5px}
+.lightbox-inner .stats{margin-top:18px}
+.lightbox-close{position:absolute;top:9px;right:12px;background:none;border:0;color:var(--ink-soft);font-size:26px;line-height:1;cursor:pointer;padding:2px 6px}
+.lightbox-close:hover{color:var(--ink)}
+.lightbox-close:focus-visible{outline:2px solid var(--cyclone);outline-offset:2px}
+.lightbox-title{font-family:var(--mono);font-size:11.5px;color:var(--muted);margin:0 34px 14px 0;text-transform:uppercase;letter-spacing:.09em}
+@media(max-width:680px){.lightbox{padding:10px}.lightbox-inner{padding:16px 14px}.lightbox-inner svg{width:88vw}}
+</style></head><body>
+<main class="wrap">
+<header class="hero" style="padding:44px 0 26px">
+  <div class="eyebrow">Cyclone Cache · data explorer</div>
+  <h1 style="font-size:34px">Cyclone vs. the classic file cache — the numbers</h1>
+  <p class="dek">The raw head-to-head medians behind the <a href="/blog/cyclone-cache-vs-file-cache-benchmark/" style="color:var(--cyclone)">benchmark write-up</a>, plus the interactive charts. Two machines: a laptop with a fast NVMe SSD (the conservative case) and a workstation on realistic virtualized storage. 1 GB caches, median of repeated runs on quiesced machines.</p>
+  <button id="themeBtn" class="theme" aria-label="Toggle theme">◐</button>
+</header>
+
+<section>
+  <h2>Head-to-head</h2>
+  <div class="tablewrap">
+    <table id="datatable">
+      <thead><tr><th>Scenario</th><th>Machine</th><th>Cyclone</th><th>File cache</th><th>Winner</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <p class="note">Higher is better for throughput; lower is better for latency and on-disk footprint. Notice the same scenario's advantage grows on the slower (workstation) storage — and that the file cache wins exactly one row: over-provisioned + idle, on the laptop's fast NVMe/APFS SSD.</p>
+</section>
+
+<section>
+  <h2>Concurrency scaling</h2>
+  <div class="controls">
+    <div class="seg" id="cx-machine"><button data-v="tr" aria-pressed="true">Workstation</button><button data-v="mac" aria-pressed="false">Laptop</button></div>
+    <div class="seg" id="cx-payload"><button data-v="100" aria-pressed="false">100 B</button><button data-v="10240" aria-pressed="true">10 KB</button><button data-v="1048576" aria-pressed="false">1 MB</button></div>
+  </div>
+  <div class="chart" id="cx-chart"></div>
+  <div class="caption" id="cx-caption"></div>
+  <div class="stats" id="cx-stats"></div>
+</section>
+
+<section>
+  <h2>Realistic mixed workload, under pressure</h2>
+  <div class="controls"><div class="seg" id="rx-machine"><button data-v="tr" aria-pressed="true">Workstation · ext4</button><button data-v="mac" aria-pressed="false">Laptop · APFS</button></div></div>
+  <div class="chart" id="rx-chart"></div>
+  <div class="stats" id="rx-stats"></div>
+</section>
+
+<section>
+  <h2>Latency distribution (CDF) · before &amp; after</h2>
+  <div class="controls"><div class="seg" id="yx-regime"><button data-v="rb" aria-pressed="true">Read-bound</button><button data-v="pr" aria-pressed="false">Under pressure · 512 MB</button></div></div>
+  <div class="legend" style="justify-content:flex-start;margin-bottom:10px"><span class="key"><i style="background:var(--cyclone)"></i>Cyclone (new)</span><span class="key"><i style="background:var(--cyclone);opacity:.42"></i>Cyclone (previous)</span><span class="key"><i style="background:var(--file)"></i>File cache</span></div>
+  <div class="chart" id="yx-chart"></div>
+  <div class="stats" id="yx-stats"></div>
+  <p class="note">Workstation, in-process RAM tier off. <strong>Read-bound</strong> = the working set is memory-resident; <strong>under pressure</strong> = physical memory capped at 512 MB, so reads fall through to disk. A curve further left and standing up straighter means faster reads with a tighter tail — the gap between Cyclone and the previous build widens under pressure.</p>
+</section>
+
+<section class="feature">
+  <h2>Advantage vs. disk speed</h2>
+  <p>Every headline result as a Cyclone/file-cache ratio, both machines side by side. The slower disk (darker bars) widens the gap in every pair.</p>
+  <div class="chart" id="ax-chart"></div>
+  <div class="legend" id="ax-legend"></div>
+</section>
+
+<section>
+  <h2>Eviction janitor · 100k files</h2>
+  <div class="controls"><div class="seg" id="sx-machine"><button data-v="tr" aria-pressed="true">Workstation · ext4</button><button data-v="mac" aria-pressed="false">Laptop · APFS</button></div></div>
+  <div class="chart" id="sx-chart"></div>
+  <div class="stats" id="sx-stats"></div>
+</section>
+
+<section>
+  <h2>Staying inside the cap</h2>
+  <div class="chart" id="ox-chart"></div>
+</section>
+
+<section>
+  <h2>Size-to-RAM (memory pressure)</h2>
+  <div class="stats" id="gx-stats"></div>
+</section>
+
+<section>
+  <h2>Read-path rework · before &amp; after</h2>
+  <p class="note">A later, controlled re-measure of <em>just</em> the read path (2026-07-14): concurrent reads made lock-free, one per-write sync dropped. Same 64-core workstation, the in-process RAM tier turned <strong>off</strong> — mod_pagespeed's default serve config, with reads coming straight from the mapped volume — physical memory swept to create pressure, average of two runs. This is a different configuration and a different build from every chart above — compare bars only within this chart, not across sections. Faded bars are the previous Cyclone; solid bars are the reworked build.</p>
+  <div class="chart" id="rp-chart"></div>
+  <div class="stats" id="rp-stats"></div>
+</section>
+
+<section>
+  <h2>The machines</h2>
+  <div class="specs" id="specs"></div>
+  <p class="sig">We-Amp B.V. · Cyclone Cache</p>
+</section>
+<div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="Enlarged view">
+  <div class="lightbox-inner">
+    <button class="lightbox-close" id="lb-close" type="button" aria-label="Close enlarged view">&times;</button>
+    <div class="lightbox-title" id="lb-title"></div>
+    <div id="lb-body"></div>
+  </div>
+</div>
+</main>
+<script>
+const DATA = {"threads":[1,2,4,8,16,32,64],"concurrency":{"10240":{"tr":{"cyclone":[43894,81089,166173,340666,675175,1236069,1252859],"file":[52952,109480,203324,321593,365646,328333,268719]},"mac":{"cyclone":[55872,106150,207703,391087,780144,1432308,2090796],"file":[229455,342593,627521,692515,662442,696236,592166]}},"1048576":{"tr":{"cyclone":[2937,5930,11628,23337,44894,89292,164090],"file":[1982,6061,12041,22356,39571,55626,41184]},"mac":{"cyclone":[4793,9896,19774,36959,62428,76361,84704],"file":[5509,10133,17726,23282,21425,21315,20897]}},"100":{"tr":{"cyclone":[1101087,954103,1464501,1577260,1644802,1589699,1533871],"file":[74603,145954,256393,372658,400576,339640,273742]},"mac":{"cyclone":[2341487,2082059,3287807,2391528,2353850,2799238,2715255],"file":[413749,567566,990604,764535,767179,737624,601358]}}},"pressure":{"tr":{"cyc":{"ops":111389,"hit":58.8,"p99":1048.6,"p999":2097.2,"disk":1023.5},"file":{"ops":26997,"hit":67.6,"p99":4194.3,"p999":8388.6,"disk":870.4}},"mac":{"cyc":{"ops":124310,"hit":59.2,"p99":1048.6,"p999":2097.2,"disk":1023.5},"file":{"ops":77712,"hit":67.7,"p99":1048.6,"p999":4194.3,"disk":919.4}}},"overprov":{"tr":{"cyc":{"ops":84156,"hit":80.6,"p99":2097.2,"p999":4194.3,"disk":1023.4},"file":{"ops":29373,"hit":88.8,"p99":4194.3,"p999":8388.6,"disk":232.3}},"mac":{"cyc":{"ops":92888,"hit":80.9,"p99":1048.6,"p999":4194.3,"disk":1023.5},"file":{"ops":111020,"hit":88.6,"p99":1048.6,"p999":4194.3,"disk":231.7}}},"regime":{"mac":{"fits":{"ops":132504,"hit":58.5,"p99":1048.6,"p999":2097.2,"disk":1023.2},"over":{"ops":69524,"hit":88.2,"p99":2097.2,"p999":4194.3,"disk":2305.5},"file_fits":{"ops":78524,"hit":71.9,"p99":1048.6,"p999":4194.3,"disk":936.0},"file_over":{"ops":46993,"hit":90.2,"p99":2097.2,"p999":8388.6,"disk":1548.3}},"tr":{"fits":{"ops":114974,"hit":58.2,"p99":1048.6,"p999":2097.2,"disk":1023.5},"over":{"ops":65161,"hit":88.3,"p99":2097.2,"p999":4194.3,"disk":2305.5},"file_fits":{"ops":27142,"hit":71.9,"p99":4194.3,"p999":8388.6,"disk":990.3},"file_over":{"ops":18340,"hit":90.2,"p99":4194.3,"p999":8388.6,"disk":1548.3}}},"overflow":{"cap":16,"tr":{"cyc":{"disk":15.5,"pps":34875},"file":{"disk":79.5,"pps":6239}},"mac":{"cyc":{"disk":15.5,"pps":47472},"file":{"disk":149.0,"pps":16326}}},"scanner":{"mac":{"series":{"CycloneCache":[33892,35427,32295,24012,24878,26524,40559,46039,47879,50862,50972,51280,51487,51665,51605,51158,51563,51121,51390,51786,51385,51533,51419,51832,51526,51863,51975,52548,51114,51454,50880,50834,50805,50625,50725,50459,49974,50739,50063,47611,47212,40003,42590,47178,49381,49649,50323,50469,51079,49859,48672,49407,50545,51043,51082,51317,51193,37568,46978,49007,47397,45860,48253,49580,49463,46716,47251,49416,49610,50501,51115,50509,51166,51419,51277,51097,52128,49677,45896,50929,50793,50790,51632,49638,50770,51005,51828,51907,49944,45657,46706,47147,51673,51473,51306,51165,51544,51948,51844,51639,50432,50983,51334,50604,51725,51581,52282,52409,52133,52183,51643,49333,46250,48571,47939,47248,48864,49548,41672,44923,49832,47710,50506,50810,51634,51909,51182,52210,51339,50713,50823,51438,51796,51707,51419,51370,51835,51520,51168,51669,51489,51772,51861,52099,52005,52037,51907,52265,51080,48516,48628,48618,46280,48546,48078,44194,41804,44356,45522,43724,46876,51715,50611,51514,50428,51520,51207,51517,51915,51614,51424,51254,52228,51710,51800,51843,52026,52532,52235,52365,52478,52008,52508,52346,52308,51872,51441,52034,52002,52322,51959,51963,52684,53014,52174,52698,50571,51997,52296,52057],"FileCache":[11347,17227,13296,12927,14513,13746,12845,13236,15998,12098,16352,14435,13304,14140,13436,10315,14628,14459,15733,18856,11440,16192,29146,23347,25438,28049,29197,25518,32714,28559,24494,20613,17413,19957,16278,16194,12443,8741,11533,21503,23436,32874,32566,27076,29122,30812,34824,29569,34866,32629,38037,27228,33243,35309,24211,31869,30499,10646,16364,11713,12988,15801,19057,19927,24882,20191,16448,18587,22399,27019,32679,21447,25042,22185,23575,28013,18811,18356,20300,15076,20542,28382,29309,31042,34806,40314,42459,39230,42691,39678,38504,36945,22389,29175,27160,27705,27604,30746,21608,20460,20686,15762,22801,18170,18139,15127,21287,26680,31218,29575,34251,36025,35264,32792,19752,35943,31122,36596,39170,44297,42600,28216,39007,39333,43064,27847,37679,37975,38223,39438,39157,32208,27027,20067,23408,19046,16909,15146,21584,29194,23029,20800,28135,31876,33326,34082,35501,38925,36778,40417,42480,44130,44910,38077,42664,43330,44772,44564,34031,38297,40884,41482,29328,29870,36773,28266,24318,15835,20871,24666,18761,28522,30208,27573,30317,26946,34361,33500,24977,38280,27015,39315,25867,35376,29462,31246,35083,27620,39869,38867,37757,35911,40839,31684,37559,31699,34926,35843,33245,28545]},"tot":{"CycloneCache":{"pps":48990,"secs":2.04,"stall":2.2,"disk":31.5},"FileCache":{"pps":23864,"secs":4.19,"stall":5.1,"disk":164.2}}},"tr":{"series":{"CycloneCache":[27272,27243,27466,27278,27194,27346,33452,37976,37436,38089,37806,37770,37820,37993,37881,37933,37893,37312,37668,37919,37758,37838,37901,37767,37843,34537,37675,37704,37908,37330,37798,37909,37909,37963,37835,37713,37798,37401,37679,37558,37993,37926,37602,37757,37537,37777,37909,37975,37722,37353,37771,37858,37404,37869,37363,37726,37949,37750,37858,37577,37834,37667,37832,37457,37845,37497,37576,37724,37777,37731,37417,37578,37835,37304,37730,37434,37719,37444,37820,37837,37598,37782,37410,37746,37867,37857,37672,37656,37011,37655,36827,37679,37274,37693,37410,37755,37845,37475,37759,37740,37320,37779,37743,37949,37806,37698,37756,37705,37842,37435,37730,37710,37760,37723,37761,37511,37836,37378,37727,37805,37799,36689,32679,35587,37845,37708,37789,37730,37966,37798,37290,37753,37314,37828,38024,38336,38756,38952,38873,39753,40066,40399,40762,40643,40444,40708,40826,39034,39292,40526,40754,40643,40708,40727,40671,40110,40564,40663,40718,40747,39593,38643,38104,38630,37919,40497,40241,39052,38938,38827,38843,39197,38319,39037,38976,38822,38935,38950,38986,38996,39062,38757,38937,38998,38805,39089,38937,38499,38533,38678,38560,38626,38696,39062,38744,38850,38384,39024,38616,38981],"FileCache":[6298,5930,6202,6144,6126,6044,5626,5648,6030,6662,6560,6450,6301,5861,5954,6165,6640,6648,6565,6482,6401,6370,6479,6647,6776,6572,6195,6085,6165,6703,6771,6686,6428,6072,6373,6547,6780,6782,6661,6138,6245,6369,6828,6973,6874,6759,6255,6211,6380,6830,6704,6751,6327,6115,6278,6625,6094,5922,5577,5342,5556,5814,5860,5555,5457,5026,5841,6696,6897,6853,6504,6369,6515,6802,6758,6578,6558,6168,6197,5512,5254,4753,5001,4904,5259,7073,6821,6672,6308,6144,6370,6830,6881,6825,6613,6121,6309,6349,6878,6862,6543,6379,6231,6355,6615,6876,6928,6737,6169,6198,6329,6852,6813,6619,6163,6078,6134,6358,6509,6406,6194,5888,5720,6211,6375,6299,6168,5847,5980,6265,6488,6422,6501,5480,5535,5917,6378,6482,6433,6389,6286,6038,6035,6228,6405,6469,6441,5845,5827,5948,6174,6515,6462,6367,5996,5784,6485,6685,6451,6312,6248,6127,6205,6793,6886,6780,6548,6016,6005,6331,6672,6663,6530,5811,6112,6416,6836,6839,6707,6311,6116,6102,6303,6776,6795,6637,6148,6068,6327,6851,6774,6659,6233,6206,6245,6815,6882,6787,6616,6174]},"tot":{"CycloneCache":{"pps":37697,"secs":2.65,"stall":1.5,"disk":31.5},"FileCache":{"pps":6292,"secs":15.89,"stall":1.5,"disk":59.7}}}},"latency":{"mac":{"cyc":[[0.032,0.0],[0.064,0.00425],[0.128,0.04033],[0.256,0.18532],[0.512,0.45881],[1.024,0.60501],[2.048,0.64678],[4.096,0.69688],[8.192,0.73275],[16.384,0.86247],[32.768,0.91936],[65.536,0.93189],[131.072,0.94875],[262.144,0.96733],[524.288,0.98433],[1048.576,0.99416],[2097.152,0.99934],[4194.304,0.99997],[8388.608,1.0],[16777.216,1.0]],"file":[[0.064,0.00035],[0.128,0.01439],[0.256,0.13651],[0.512,0.32105],[1.024,0.49789],[2.048,0.61272],[4.096,0.7012],[8.192,0.7642],[16.384,0.80749],[32.768,0.88845],[65.536,0.90507],[131.072,0.92137],[262.144,0.94448],[524.288,0.97032],[1048.576,0.98986],[2097.152,0.9977],[4194.304,0.99954],[8388.608,0.99993],[16777.216,0.99997],[33554.432,0.99999],[67108.864,1.0]]},"tr":{"cyc":[[0.128,0.00169],[0.256,0.04407],[0.512,0.24084],[1.024,0.46993],[2.048,0.58028],[4.096,0.64854],[8.192,0.69052],[16.384,0.84182],[32.768,0.90423],[65.536,0.92113],[131.072,0.93848],[262.144,0.96634],[524.288,0.98618],[1048.576,0.99365],[2097.152,0.99906],[4194.304,0.99984],[8388.608,0.99996],[16777.216,0.99999],[33554.432,1.0]],"file":[[0.256,0.01944],[0.512,0.16505],[1.024,0.42234],[2.048,0.48216],[4.096,0.53254],[8.192,0.64446],[16.384,0.76706],[32.768,0.79241],[65.536,0.79512],[131.072,0.89477],[262.144,0.90594],[524.288,0.92669],[1048.576,0.95375],[2097.152,0.98123],[4194.304,0.99674],[8388.608,0.99979],[16777.216,0.99998],[33554.432,0.99999],[67108.864,1.0],[134217.728,1.0]]}},"writepath":{"mac":{"cyc_put":866451,"file_put":50387},"tr":{"cyc_put":330837,"file_put":6725}},"machineName":{"tr":"64-core x86 workstation \u00b7 WSL2/ext4","mac":"Apple-silicon laptop \u00b7 APFS SSD"},"specs":[{"role":"Laptop","name":"Fast core, fast low-latency SSD, few cores","rows":[["CPU","Apple-silicon \u00b7 10 cores (4P + 6E)"],["Memory","16 GB unified"],["Storage","NVMe SSD \u00b7 native APFS (fast, low-latency flash)"],["OS","macOS"]],"why":"A very fast single core and a fast, low-latency SSD, but only ten cores. Single-thread numbers run high and the concurrency curve saturates early. This is the machine where per-file syscall cost is CHEAPEST \u2014 so it is the conservative one for the filesystem-metadata claims. If Cyclone wins here, it wins by more on anything slower."},{"role":"Workstation","name":"Many cores, realistic (virtualized) storage","rows":[["CPU","x86 \u00b7 64 cores / 128 threads"],["Memory","96 GB"],["Storage","ext4 on a virtualized disk (WSL2)"],["OS","Linux"]],"why":"A hundred-plus threads draw the clean concurrency curve, and the virtualized storage stack adds the kind of real filesystem-metadata overhead a production server actually sees. This is where the filesystem cache's per-file open/close/readdir cost shows up \u2014 and where Cyclone's margins widen to 4-6x."}],"latency_ab":{"new":[[1.024,0.11265],[2.048,0.19154],[4.096,0.47382],[8.192,0.78171],[16.384,0.88927],[32.768,0.94161],[65.536,0.94956],[131.072,0.97582],[262.144,0.98908],[524.288,0.98972],[1048.576,0.99794],[2097.152,0.99909],[4194.304,0.99912],[8388.608,1.0],[16777.216,1.0]],"old":[[1.024,0.06686],[2.048,0.14087],[4.096,0.28439],[8.192,0.50359],[16.384,0.64785],[32.768,0.79843],[65.536,0.83291],[131.072,0.87847],[262.144,0.91925],[524.288,0.93991],[1048.576,0.97555],[2097.152,0.98929],[4194.304,0.99173],[8388.608,0.99958],[16777.216,0.99999],[33554.432,1.0]],"file":[[8.192,0.00278],[16.384,0.45985],[32.768,0.66699],[65.536,0.73528],[131.072,0.82717],[262.144,0.86327],[524.288,0.89057],[1048.576,0.92396],[2097.152,0.96313],[4194.304,0.99041],[8388.608,0.99916],[16777.216,0.99999],[33554.432,1.0]]},"latency_pressure":{"new":[[1.024,0.06475],[2.048,0.1625],[4.096,0.35232],[8.192,0.63366],[16.384,0.80698],[32.768,0.86282],[65.536,0.88656],[131.072,0.91178],[262.144,0.93134],[524.288,0.93877],[1048.576,0.95142],[2097.152,0.96267],[4194.304,0.98755],[8388.608,0.9994],[16777.216,0.99999],[33554.432,1.0]],"old":[[1.024,0.05186],[2.048,0.1322],[4.096,0.24555],[8.192,0.43286],[16.384,0.56761],[32.768,0.7153],[65.536,0.75277],[131.072,0.79853],[262.144,0.84094],[524.288,0.86125],[1048.576,0.88426],[2097.152,0.93756],[4194.304,0.95751],[8388.608,0.97678],[16777.216,0.98975],[33554.432,0.99595],[67108.864,0.99895],[134217.728,0.9999],[268435.456,1.0],[536870.912,1.0]],"file":[[8.192,0.00352],[16.384,0.44468],[32.768,0.63476],[65.536,0.69903],[131.072,0.82037],[262.144,0.85773],[524.288,0.88473],[1048.576,0.9177],[2097.152,0.95752],[4194.304,0.98769],[8388.608,0.99866],[16777.216,0.99994],[33554.432,0.99999],[67108.864,1.0]]},"readpath":{"caps":[8192,1024,512,384],"capLabel":["8 GB","1 GB","512 MB","384 MB"],"regime":["read-bound","read-bound","pressure","severe"],"new":[153900,140900,20686,9175],"old":[29100,26850,4756,2833],"file":[14650,14650,13230,12032],"newHit":[79.1,78.9,79.5,79.6],"fileHit":[88.4,88.3,88.4,88.4],"newP999":[2.1,2.1,8.4,16.8],"oldP999":[8.4,8.4,100.0,134.0]}};
+/* ---- helpers ---- */
+const NS="http://www.w3.org/2000/svg";
+const fmt=n=>n>=1e6?(n/1e6).toFixed(n>=1e7?1:2)+"M":n>=1e3?(n/1e3).toFixed(n>=1e5?0:1)+"k":(""+Math.round(n));
+const el=(t,a={})=>{const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);return e};
+function niceMax(v){const p=Math.pow(10,Math.floor(Math.log10(v)));const f=v/p;const n=f<=1?1:f<=2?2:f<=2.5?2.5:f<=5?5:10;return n*p;}
+const MN={tr:"Workstation · ext4 (realistic)",mac:"Laptop · APFS SSD (fast flash)"};
+
+/* ---- CONCURRENCY ---- */
+const cx={m:"tr",p:"10240"};
+function drawConc(){
+  const box={w:940,h:420,l:64,r:20,t:16,b:46};
+  const d=DATA.concurrency[cx.p][cx.m], th=DATA.threads;
+  const maxY=niceMax(Math.max(...d.cyclone,...d.file));
+  const iw=box.w-box.l-box.r, ih=box.h-box.t-box.b;
+  const X=i=>box.l+iw*i/(th.length-1), Y=v=>box.t+ih-ih*v/maxY;
+  const svg=el("svg",{viewBox:`0 0 ${box.w} ${box.h}`,role:"img","aria-label":"Concurrency scaling"});
+  for(let i=0;i<=5;i++){const v=maxY*i/5,y=Y(v);
+    svg.appendChild(el("line",{class:"gridline",x1:box.l,y1:y,x2:box.w-box.r,y2:y,"stroke-width":1}));
+    const tx=el("text",{x:box.l-10,y:y+4,"text-anchor":"end","font-size":12,fill:"var(--muted)"});tx.textContent=fmt(v);svg.appendChild(tx);}
+  th.forEach((t,i)=>{const tx=el("text",{x:X(i),y:box.h-16,"text-anchor":"middle","font-size":12,fill:"var(--muted)"});tx.textContent=t;svg.appendChild(tx);});
+  const xlab=el("text",{x:box.l+iw/2,y:box.h-1,"text-anchor":"middle","font-size":11.5,fill:"var(--muted)"});xlab.textContent="concurrent threads";svg.appendChild(xlab);
+  const mkpath=(arr,color)=>{let dd="";arr.forEach((v,i)=>dd+=(i?"L":"M")+X(i)+" "+Y(v)+" ");
+    svg.appendChild(el("path",{d:dd,fill:"none",stroke:color,"stroke-width":2.6,"stroke-linejoin":"round","stroke-linecap":"round"}));
+    arr.forEach((v,i)=>svg.appendChild(el("circle",{cx:X(i),cy:Y(v),r:3,fill:"var(--panel)",stroke:color,"stroke-width":2})));};
+  mkpath(d.file,"var(--file)");mkpath(d.cyclone,"var(--cyclone)");
+  const li=th.length-1;
+  [[d.cyclone[li],-10,"var(--cyclone)"],[d.file[li],18,"var(--file)"]].forEach(([v,dy,c])=>{const t=el("text",{x:X(li)-6,y:Y(v)+dy,"text-anchor":"end","font-size":12.5,fill:c,"font-weight":600});t.textContent=fmt(v);svg.appendChild(t);});
+  document.getElementById("cx-chart").replaceChildren(svg);
+  const ratio=d.cyclone[li]/d.file[li];
+  const sz=cx.p==="100"?"100 B":cx.p==="10240"?"10 KB":"1 MB";
+  document.getElementById("cx-caption").textContent=`${MN[cx.m]} · ${sz} objects · aggregate ops/s (higher is better)`;
+  const peakFi=d.file.indexOf(Math.max(...d.file));
+  document.getElementById("cx-stats").innerHTML=`
+    <div class="stat"><div class="n good">${ratio.toFixed(1)}×</div><div class="c">Cyclone vs the file cache at 64 threads</div></div>
+    <div class="stat"><div class="n">${fmt(d.cyclone[li]/d.cyclone[0])}×</div><div class="c">Cyclone scaling, 1 → 64 threads</div></div>
+    <div class="stat"><div class="n warn">${DATA.threads[peakFi]} thr</div><div class="c">where the file cache peaks, then declines</div></div>`;
+}
+
+/* ---- REALISTIC PRESSURE (bars) ---- */
+let rxM="tr";
+function drawPressure(){
+  const d=DATA.pressure[rxM], cap=1024;
+  const box={w:940,h:300,l:60,r:16,t:20,b:64};
+  const groups=[
+    {k:"Throughput",unit:"ops/s",c:d.cyc.ops,f:d.file.ops,hi:"c"},
+    {k:"Hit rate",unit:"%",c:d.cyc.hit,f:d.file.hit,hi:"f",raw:true},
+    {k:"p99 latency",unit:"µs · lower better",c:d.cyc.p99,f:d.file.p99,hi:"c"},
+    {k:"p999 tail",unit:"µs · lower better",c:d.cyc.p999,f:d.file.p999,hi:"c"}
+  ];
+  const iw=box.w-box.l-box.r, ih=box.h-box.t-box.b, gw=iw/groups.length;
+  const svg=el("svg",{viewBox:`0 0 ${box.w} ${box.h}`,role:"img","aria-label":"Realistic workload under pressure"});
+  groups.forEach((g,gi)=>{
+    const mx=Math.max(g.c,g.f)*1.18, bx=box.l+gi*gw, bw=Math.min(44,gw*0.28);
+    const y=v=>box.t+ih-ih*v/mx;
+    [["c",g.c,bx+gw/2-bw-6,"var(--cyclone)"],["f",g.f,bx+gw/2+6,"var(--file)"]].forEach(([who,val,xx,col])=>{
+      svg.appendChild(el("rect",{x:xx,y:y(val),width:bw,height:Math.max(2,ih-(y(val)-box.t)),rx:4,fill:col,opacity:who===g.hi?1:.9}));
+      const vt=el("text",{x:xx+bw/2,y:y(val)-7,"text-anchor":"middle","font-size":11.5,fill:"var(--ink)","font-weight":600});
+      vt.textContent=g.raw?val.toFixed(0)+"%":g.unit.startsWith("µs")?fmt(val):fmt(val);svg.appendChild(vt);
+    });
+    const gt=el("text",{x:bx+gw/2,y:box.h-26,"text-anchor":"middle","font-size":12.5,fill:"var(--ink)","font-weight":600});gt.textContent=g.k;svg.appendChild(gt);
+    const ut=el("text",{x:bx+gw/2,y:box.h-11,"text-anchor":"middle","font-size":10.5,fill:"var(--muted)"});ut.textContent=g.unit;svg.appendChild(ut);
+  });
+  document.getElementById("rx-chart").replaceChildren(svg);
+  const op=DATA.overprov[rxM], opr=op.cyc.ops/op.file.ops;
+  document.getElementById("rx-stats").innerHTML=`
+    <div class="stat"><div class="n good">${(d.cyc.ops/d.file.ops).toFixed(1)}×</div><div class="c">Cyclone throughput advantage under pressure</div></div>
+    <div class="stat"><div class="n">${d.cyc.hit.toFixed(0)}% vs ${d.file.hit.toFixed(0)}%</div><div class="c">hit rate — Cyclone lower, yet faster</div></div>
+    <div class="stat"><div class="n">${(d.file.p999/d.cyc.p999).toFixed(1)}×</div><div class="c">Cyclone's better p999 tail (${fmt(d.cyc.p999)} vs ${fmt(d.file.p999)}µs)</div></div>
+    <div class="stat"><div class="n ${opr<1?'warn':'good'}">${opr<1?opr.toFixed(2)+'×':opr.toFixed(1)+'×'}</div><div class="c">${opr<1?'when over-provisioned + idle, the file cache is actually faster here':'Cyclone still wins even over-provisioned on this disk'}</div></div>`;
+}
+
+/* ---- LATENCY DISTRIBUTION (CDF) ---- */
+let yxR="rb";
+function drawLatency(){
+  const d=yxR==="pr"?DATA.latency_pressure:DATA.latency_ab;
+  const box={w:940,h:360,l:56,r:18,t:18,b:52};
+  const iw=box.w-box.l-box.r, ih=box.h-box.t-box.b;
+  const all=[...d.new,...d.old,...d.file].map(p=>p[0]).filter(x=>x>0);
+  const lo=Math.max(0.5,Math.pow(10,Math.floor(Math.log10(Math.min(...all)))));
+  const hi=Math.pow(10,Math.ceil(Math.log10(Math.max(...all))));
+  const lx=v=>Math.log10(Math.max(lo,v)), X=v=>box.l+iw*(lx(v)-lx(lo))/(lx(hi)-lx(lo)), Y=f=>box.t+ih-ih*f;
+  const svg=el("svg",{viewBox:`0 0 ${box.w} ${box.h}`,role:"img","aria-label":"Latency distribution CDF: new vs previous Cyclone vs file cache"});
+  for(let i=0;i<=5;i++){const f=i/5,y=Y(f);svg.appendChild(el("line",{class:"gridline",x1:box.l,y1:y,x2:box.w-box.r,y2:y,"stroke-width":1}));
+    const tx=el("text",{x:box.l-8,y:y+4,"text-anchor":"end","font-size":11.5,fill:"var(--muted)"});tx.textContent=(f*100)+"%";svg.appendChild(tx);}
+  for(let d10=lo;d10<=hi;d10*=10){const x=X(d10);
+    const tx=el("text",{x:x,y:box.h-30,"text-anchor":"middle","font-size":11.5,fill:"var(--muted)"});tx.textContent=d10>=1000?(d10/1000)+"ms":d10+"µs";svg.appendChild(tx);}
+  const xlab=el("text",{x:box.l+iw/2,y:box.h-10,"text-anchor":"middle","font-size":11.5,fill:"var(--muted)"});xlab.textContent="operation latency (log scale) — curves further LEFT are faster";svg.appendChild(xlab);
+  const curve=(pts,col,op)=>{let dd="";pts.forEach((p,i)=>dd+=(i?"L":"M")+X(p[0]).toFixed(1)+" "+Y(p[1]).toFixed(1)+" ");
+    svg.appendChild(el("path",{d:dd,fill:"none",stroke:col,"stroke-opacity":op==null?1:op,"stroke-width":2.6,"stroke-linejoin":"round"}));};
+  const pAt=(pts,q)=>{for(const p of pts)if(p[1]>=q)return p[0];return pts[pts.length-1][0];};
+  curve(d.file,"var(--file)");curve(d.old,"var(--cyclone)",0.42);curve(d.new,"var(--cyclone)");
+  [["new","var(--cyclone)"],["file","var(--file)"]].forEach(([k,c])=>{const v=pAt(d[k],0.999);
+    svg.appendChild(el("line",{x1:X(v),y1:Y(0.999),x2:X(v),y2:box.t+ih,stroke:c,"stroke-width":1,"stroke-dasharray":"3 3",opacity:.55}));});
+  document.getElementById("yx-chart").replaceChildren(svg);
+  const lf=v=>v>=1000?(v/1000).toFixed(v>=10000?0:1)+"ms":Math.round(v)+"µs";
+  const np999=pAt(d.new,0.999),op999=pAt(d.old,0.999),fp999=pAt(d.file,0.999),np50=pAt(d.new,0.5),op50=pAt(d.old,0.5),fp50=pAt(d.file,0.5);
+  document.getElementById("yx-stats").innerHTML=`
+    <div class="stat"><div class="n good">${lf(np50)}</div><div class="c">Cyclone (new) median · previous ${lf(op50)} · file cache ${lf(fp50)}</div></div>
+    <div class="stat"><div class="n">${lf(np999)}</div><div class="c">Cyclone (new) p99.9 tail · previous ${lf(op999)} · file cache ${lf(fp999)}</div></div>
+    <div class="stat"><div class="n good">${(op999/np999).toFixed(op999/np999>=10?0:1)}×</div><div class="c">tighter p99.9 tail than the previous Cyclone (${(fp999/np999).toFixed(0)}× tighter than the file cache)</div></div>`;
+}
+
+/* ---- AMPLIFICATION (ratio across scenarios × machine) ---- */
+function drawAmplify(){
+  const scen=[
+    {k:"Concurrency\n64 thr",get:m=>DATA.concurrency["100"][m].cyclone[6]/DATA.concurrency["100"][m].file[6]},
+    {k:"Under\npressure",get:m=>DATA.pressure[m].cyc.ops/DATA.pressure[m].file.ops},
+    {k:"Janitor\nscan 100k",get:m=>DATA.scanner[m].tot.CycloneCache.pps/DATA.scanner[m].tot.FileCache.pps},
+    {k:"Overflow\nwrite rate",get:m=>DATA.overflow[m].cyc.pps/DATA.overflow[m].file.pps}
+  ];
+  const box={w:940,h:330,l:52,r:16,t:20,b:60};
+  const iw=box.w-box.l-box.r, ih=box.h-box.t-box.b, gw=iw/scen.length;
+  const vals=scen.flatMap(s=>[s.get("mac"),s.get("tr")]);
+  const maxY=niceMax(Math.max(...vals,1));
+  const svg=el("svg",{viewBox:`0 0 ${box.w} ${box.h}`,role:"img","aria-label":"How Cyclone's advantage grows on slower storage"});
+  const Y=v=>box.t+ih-ih*v/maxY;
+  // 1x reference line
+  svg.appendChild(el("line",{x1:box.l,y1:Y(1),x2:box.w-box.r,y2:Y(1),stroke:"var(--muted)","stroke-width":1,"stroke-dasharray":"4 3",opacity:.6}));
+  const rt=el("text",{x:box.w-box.r,y:Y(1)-5,"text-anchor":"end","font-size":10.5,fill:"var(--muted)"});rt.textContent="1× (tie)";svg.appendChild(rt);
+  for(let i=1;i<=Math.round(maxY);i++){const y=Y(i);svg.appendChild(el("line",{class:"gridline",x1:box.l,y1:y,x2:box.w-box.r,y2:y,"stroke-width":1,opacity:.4}));
+    const tx=el("text",{x:box.l-8,y:y+4,"text-anchor":"end","font-size":11,fill:"var(--muted)"});tx.textContent=i+"×";svg.appendChild(tx);}
+  scen.forEach((s,gi)=>{
+    const bx=box.l+gi*gw, bw=Math.min(46,gw*0.3);
+    [["mac",s.get("mac"),bx+gw/2-bw-5,"var(--cyclone2)"],["tr",s.get("tr"),bx+gw/2+5,"var(--cyclone)"]].forEach(([m,v,xx,col])=>{
+      svg.appendChild(el("rect",{x:xx,y:Y(v),width:bw,height:Math.max(2,ih-(Y(v)-box.t)),rx:4,fill:col}));
+      const vt=el("text",{x:xx+bw/2,y:Y(v)-7,"text-anchor":"middle","font-size":12,fill:"var(--ink)","font-weight":700});vt.textContent=v.toFixed(1)+"×";svg.appendChild(vt);
+    });
+    s.k.split("\n").forEach((ln,li)=>{const gt=el("text",{x:bx+gw/2,y:box.h-30+li*14,"text-anchor":"middle","font-size":11.5,fill:"var(--muted)"});gt.textContent=ln;svg.appendChild(gt);});
+  });
+  document.getElementById("ax-chart").replaceChildren(svg);
+  document.getElementById("ax-legend").innerHTML=
+    `<span class="key"><i style="background:var(--cyclone2)"></i>Laptop · fast APFS SSD</span> <span class="key"><i style="background:var(--cyclone)"></i>Workstation · realistic ext4</span> — darker bars (slower disk) are taller in every pair.`;
+}
+
+/* ---- SCANNER sawtooth ---- */
+let sxM="tr";
+function drawScanner(){
+  const box={w:940,h:300,l:58,r:16,t:16,b:40};
+  const S=DATA.scanner[sxM], cyc=S.series.CycloneCache, file=S.series.FileCache, n=Math.max(cyc.length,file.length);
+  const maxY=niceMax(Math.max(...cyc,...file));
+  const iw=box.w-box.l-box.r, ih=box.h-box.t-box.b;
+  const X=i=>box.l+iw*i/(n-1), Y=v=>box.t+ih-ih*v/maxY;
+  const svg=el("svg",{viewBox:`0 0 ${box.w} ${box.h}`,role:"img","aria-label":"Per-batch write throughput while streaming 100k files"});
+  for(let i=0;i<=4;i++){const v=maxY*i/4,y=Y(v);svg.appendChild(el("line",{class:"gridline",x1:box.l,y1:y,x2:box.w-box.r,y2:y,"stroke-width":1}));
+    const tx=el("text",{x:box.l-10,y:y+4,"text-anchor":"end","font-size":11.5,fill:"var(--muted)"});tx.textContent=fmt(v);svg.appendChild(tx);}
+  const draw=(arr,col)=>{let dd="";arr.forEach((v,i)=>dd+=(i?"L":"M")+X(i).toFixed(1)+" "+Y(v).toFixed(1)+" ");
+    svg.appendChild(el("path",{d:dd+`L${X(arr.length-1)} ${box.t+ih} L${box.l} ${box.t+ih} Z`,fill:col,opacity:.10}));
+    svg.appendChild(el("path",{d:dd,fill:"none",stroke:col,"stroke-width":1.8,"stroke-linejoin":"round"}));};
+  draw(file,"var(--file)");draw(cyc,"var(--cyclone)");
+  const xl=el("text",{x:box.l+iw/2,y:box.h-4,"text-anchor":"middle","font-size":11.5,fill:"var(--muted)"});xl.textContent="write batch → (streaming 100,000 files into a small cap; puts/s, higher is better)";svg.appendChild(xl);
+  document.getElementById("sx-chart").replaceChildren(svg);
+  const T=S.tot, ratio=T.CycloneCache.pps/T.FileCache.pps;
+  document.getElementById("sx-stats").innerHTML=`
+    <div class="stat"><div class="n good">${ratio.toFixed(1)}×</div><div class="c">Cyclone faster overall streaming 100k files</div></div>
+    <div class="stat"><div class="n">${fmt(T.CycloneCache.pps)} vs ${fmt(T.FileCache.pps)}</div><div class="c">puts/s — Cyclone flat, file cache dragged by the janitor</div></div>
+    <div class="stat"><div class="n warn">${T.FileCache.disk.toFixed(0)} MB</div><div class="c">file-cache overshoot past the 32 MB cap (Cyclone held it)</div></div>`;
+}
+
+/* ---- OVERFLOW ---- */
+function drawOverflow(){
+  const box={w:940,h:250,l:70,r:20,t:24,b:44};
+  const rows=[["Workstation · ext4","tr"],["Laptop · APFS","mac"]];
+  const maxD=Math.max(DATA.overflow.tr.file.disk,DATA.overflow.mac.file.disk)*1.16;
+  const iw=box.w-box.l-box.r, ih=box.h-box.t-box.b, cap=DATA.overflow.cap;
+  const svg=el("svg",{viewBox:`0 0 ${box.w} ${box.h}`,role:"img","aria-label":"On-disk footprint under overflow"});
+  const x=v=>box.l+iw*v/maxD;
+  svg.appendChild(el("line",{x1:x(cap),y1:box.t-6,x2:x(cap),y2:box.t+ih+4,stroke:"var(--warn)","stroke-width":1.5,"stroke-dasharray":"4 3"}));
+  const ct=el("text",{x:x(cap)+6,y:box.t+2,"font-size":11,fill:"var(--warn)"});ct.textContent=`${cap} MB cap`;svg.appendChild(ct);
+  const rowH=ih/2;
+  rows.forEach((r,ri)=>{
+    const yBase=box.t+ri*rowH+rowH/2, o=DATA.overflow[r[1]];
+    [["Cyclone",o.cyc.disk,"var(--cyclone)",-1],["File cache",o.file.disk,"var(--file)",1]].forEach(([nm,dv,col,off])=>{
+      const yy=yBase+off*19-8, over=dv>cap;
+      svg.appendChild(el("rect",{x:box.l,y:yy,width:Math.max(3,x(dv)-box.l),height:22,rx:4,fill:over?"var(--warn)":col}));
+      const vt=el("text",{x:x(dv)+8,y:yy+15,"font-size":12,fill:"var(--ink)","font-weight":600});
+      vt.textContent=`${dv.toFixed(1)} MB · ${over?(dv/cap).toFixed(1)+"× over":"held cap"}`;svg.appendChild(vt);
+    });
+    const rt=el("text",{x:box.l-10,y:yBase-2,"text-anchor":"end","font-size":11.5,fill:"var(--ink)"});rt.textContent=r[0];svg.appendChild(rt);
+  });
+  document.getElementById("ox-chart").replaceChildren(svg);
+}
+
+/* ---- REGIME callout (size-to-RAM) ---- */
+function drawRegime(){
+  const pick=m=>{const R=DATA.regime[m];return{fits:R.fits.ops,over:R.over.ops,ffits:R.file_fits.ops,fover:R.file_over.ops};};
+  const tr=pick("tr");
+  document.getElementById("gx-stats").innerHTML=`
+    <div class="stat"><div class="n">${fmt(tr.fits)}</div><div class="c">Cyclone ops/s when the cache fits RAM (1 GB in a 2 GB box)</div></div>
+    <div class="stat"><div class="n warn">${fmt(tr.over)}</div><div class="c">…drops to this when oversized past RAM (4 GB) — mmap pressure is real</div></div>
+    <div class="stat"><div class="n good">still ${(tr.over/tr.fover).toFixed(1)}×</div><div class="c">yet even thrashing, it beats the file cache (${fmt(tr.fover)} ops/s)</div></div>`;
+}
+
+/* ---- SPECS ---- */
+function drawSpecs(){
+  const host=document.getElementById("specs");host.innerHTML="";
+  DATA.specs.forEach(s=>{const d=document.createElement("div");d.className="spec";
+    d.innerHTML=`<div class="role">${s.role}</div><h3>${s.name}</h3>
+      <dl>${s.rows.map(r=>`<dt>${r[0]}</dt><dd>${r[1]}</dd>`).join("")}</dl><div class="why">${s.why}</div>`;
+    host.appendChild(d);});
+}
+
+/* ---- toggles + theme ---- */
+function seg(id,cb){const g=document.getElementById(id);if(!g)return;g.addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;[...g.children].forEach(x=>x.setAttribute("aria-pressed",x===b));cb(b.dataset.v);});}
+seg("cx-machine",v=>{cx.m=v;drawConc();});
+seg("cx-payload",v=>{cx.p=v;drawConc();});
+seg("rx-machine",v=>{rxM=v;drawPressure();});
+seg("sx-machine",v=>{sxM=v;drawScanner();});
+seg("yx-regime",v=>{yxR=v;drawLatency();});
+const _root=document.documentElement;
+const _tb=document.getElementById("themeBtn");
+if(_tb)_tb.addEventListener("click",()=>{const cur=_root.getAttribute("data-theme")||(matchMedia("(prefers-color-scheme:dark)").matches?"dark":"light");_root.setAttribute("data-theme",cur==="dark"?"light":"dark");});
+
+drawConc();drawPressure();drawLatency();drawAmplify();drawScanner();drawOverflow();drawRegime();drawSpecs();
+/* ---- raw head-to-head data table ---- */
+function drawTable(){
+  const rows=[];
+  const push=(sc,m,c,f,unit,better)=>rows.push({sc,m:m==='mac'?'Laptop · APFS':'Workstation · ext4',c,f,unit,better});
+  for(const m of ['mac','tr']){
+    push('Concurrency @64 thr · 100 B',m,DATA.concurrency['100'][m].cyclone[6],DATA.concurrency['100'][m].file[6],'ops/s','hi');
+    push('Concurrency @64 thr · 10 KB',m,DATA.concurrency['10240'][m].cyclone[6],DATA.concurrency['10240'][m].file[6],'ops/s','hi');
+    push('Concurrency @64 thr · 1 MB',m,DATA.concurrency['1048576'][m].cyclone[6],DATA.concurrency['1048576'][m].file[6],'ops/s','hi');
+    push('Realistic · under pressure',m,DATA.pressure[m].cyc.ops,DATA.pressure[m].file.ops,'ops/s','hi');
+    push('Realistic · p99 latency',m,DATA.pressure[m].cyc.p99,DATA.pressure[m].file.p99,'µs','lo');
+    push('Realistic · p999 tail',m,DATA.pressure[m].cyc.p999,DATA.pressure[m].file.p999,'µs','lo');
+    push('Over-provisioned + idle',m,DATA.overprov[m].cyc.ops,DATA.overprov[m].file.ops,'ops/s','hi');
+    push('Right-sized · fits in RAM',m,DATA.regime[m].fits.ops,DATA.regime[m].file_fits.ops,'ops/s','hi');
+    push('Cache exceeds RAM · paging to disk',m,DATA.regime[m].over.ops,DATA.regime[m].file_over.ops,'ops/s','hi');
+    push('Janitor sweep · 100k files',m,DATA.scanner[m].tot.CycloneCache.pps,DATA.scanner[m].tot.FileCache.pps,'puts/s','hi');
+    push('Overflow · on-disk (16 MB cap)',m,DATA.overflow[m].cyc.disk,DATA.overflow[m].file.disk,'MB','lo');
+  }
+  const fmtv=(v,u)=>u==='MB'?v.toFixed(1):fmt(v);
+  const tb=document.querySelector('#datatable tbody');
+  tb.innerHTML=rows.map(r=>{
+    const rat=r.better==='hi'?r.c/r.f:r.f/r.c, win=rat>=1;
+    return `<tr><td>${r.sc}</td><td class="mut">${r.m}</td><td class="num">${fmtv(r.c,r.unit)}<span class="u">${r.unit}</span></td><td class="num">${fmtv(r.f,r.unit)}<span class="u">${r.unit}</span></td><td class="verdict ${win?'good':'warn'}">${win?'Cyclone':'File cache'} · ${(win?rat:1/rat).toFixed(2)}×</td></tr>`;
+  }).join('');
+}
+drawTable();
+
+function drawRP(){
+  const d=DATA.readpath, n=d.caps.length;
+  const box={w:940,h:340,l:64,r:16,t:22,b:58};
+  const iw=box.w-box.l-box.r, ih=box.h-box.t-box.b, gw=iw/n;
+  const maxY=niceMax(Math.max(...d.new,...d.old,...d.file));
+  const Y=v=>box.t+ih-ih*v/maxY;
+  const svg=el("svg",{viewBox:`0 0 ${box.w} ${box.h}`,role:"img","aria-label":"Read-path rework before and after"});
+  for(let i=0;i<=5;i++){const v=maxY*i/5,y=Y(v);
+    svg.appendChild(el("line",{x1:box.l,y1:y,x2:box.w-box.r,y2:y,stroke:"var(--line)","stroke-width":1}));
+    const tx=el("text",{x:box.l-10,y:y+4,"text-anchor":"end","font-size":12,fill:"var(--muted)"});tx.textContent=fmt(v);svg.appendChild(tx);}
+  const series=[["old","var(--cyclone)",0.4,"Cyclone (old)"],["new","var(--cyclone)",1,"Cyclone (new)"],["file","var(--file)",1,"File cache"]];
+  const bw=Math.min(38,gw*0.22);
+  for(let gi=0;gi<n;gi++){
+    const cx=box.l+gi*gw+gw/2;
+    series.forEach((s,si)=>{
+      const val=d[s[0]][gi];
+      const xx=cx+(si-1)*(bw+6)-bw/2;
+      svg.appendChild(el("rect",{x:xx,y:Y(val),width:bw,height:Math.max(2,box.t+ih-Y(val)),rx:4,fill:s[1],opacity:s[2]}));
+      const vt=el("text",{x:xx+bw/2,y:Y(val)-6,"text-anchor":"middle","font-size":10.5,fill:"var(--muted)","font-weight":600});
+      vt.textContent=fmt(val);svg.appendChild(vt);
+    });
+    const gt=el("text",{x:cx,y:box.h-30,"text-anchor":"middle","font-size":12.5,fill:"var(--ink)","font-weight":600});gt.textContent=d.capLabel[gi];svg.appendChild(gt);
+    const ut=el("text",{x:cx,y:box.h-15,"text-anchor":"middle","font-size":10.5,fill:"var(--muted)"});ut.textContent=d.regime[gi]+" · phys RAM";svg.appendChild(ut);
+  }
+  const yl=el("text",{x:box.l,y:14,"text-anchor":"start","font-size":11,fill:"var(--muted)"});yl.textContent="throughput (ops/s) — RAM tier off";svg.appendChild(yl);
+  document.getElementById("rp-chart").replaceChildren(svg);
+  const codeDelta=(d.new[0]/d.old[0]).toFixed(1), vsFile=(d.new[0]/d.file[0]).toFixed(1);
+  document.getElementById("rp-stats").innerHTML=`
+    <div class="stat"><div class="n good">${vsFile}×</div><div class="c">new Cyclone vs file cache, read-bound (RAM tier off — mod_pagespeed's default; narrows under pressure)</div></div>
+    <div class="stat"><div class="n good">${codeDelta}×</div><div class="c">new vs previous Cyclone, read-bound (same box, same config — the pure code delta)</div></div>
+    <div class="stat"><div class="n">67–134 → 8–17 ms</div><div class="c">p999 read latency under pressure, old → new</div></div>
+    <div class="stat"><div class="n warn">0.76×</div><div class="c">at 384 MB the file cache still wins; Cyclone's hit rate also runs lower (~79% vs ~88%)</div></div>`;
+}
+drawRP();
+
+/* ---- zoom / lightbox: enlarge any chart or the head-to-head table ---- */
+(function(){
+  const lb=document.getElementById('lightbox');
+  const body=document.getElementById('lb-body');
+  const title=document.getElementById('lb-title');
+  const closeBtn=document.getElementById('lb-close');
+  let lastFocus=null;
+  function openLB(node,label){
+    if(!node) return;
+    const clone=node.cloneNode(true);
+    if(clone.querySelectorAll) clone.querySelectorAll('.zoombtn').forEach(b=>b.remove());
+    body.replaceChildren(clone);
+    title.textContent=label||'';
+    lastFocus=document.activeElement;
+    lb.classList.add('open');
+    document.body.style.overflow='hidden';
+    closeBtn.focus();
+  }
+  function closeLB(){
+    lb.classList.remove('open');
+    body.replaceChildren();
+    document.body.style.overflow='';
+    if(lastFocus&&lastFocus.focus) lastFocus.focus();
+  }
+  closeBtn.addEventListener('click',closeLB);
+  lb.addEventListener('click',e=>{ if(e.target===lb) closeLB(); });
+  document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&lb.classList.contains('open')) closeLB(); });
+  function addZoom(h2,getContent,label){
+    if(!h2||h2.classList.contains('has-zoom')) return;
+    h2.classList.add('has-zoom');
+    const span=document.createElement('span'); span.className='h2t';
+    while(h2.firstChild) span.appendChild(h2.firstChild);
+    h2.appendChild(span);
+    const btn=document.createElement('button'); btn.type='button'; btn.className='zoombtn';
+    btn.setAttribute('aria-label','Enlarge '+(label||'view')); btn.title='Enlarge';
+    btn.innerHTML='&#x26F6;';
+    h2.appendChild(btn);
+    btn.addEventListener('click',()=>openLB(getContent(),label));
+  }
+  document.querySelectorAll('.chart').forEach(chart=>{
+    const h2=chart.closest('section')?.querySelector('h2');
+    const label=(h2?.textContent||'Chart').trim();
+    addZoom(h2,()=>chart.querySelector('svg')||chart,label);
+  });
+  const tw=document.querySelector('.tablewrap');
+  const twH2=tw?.closest('section')?.querySelector('h2');
+  if(twH2) addZoom(twH2,()=>tw.querySelector('table')||tw,'Head-to-head');
+  if(tw && !tw.parentNode.classList.contains('hscroll-fade')){
+    const outer=document.createElement('div'); outer.className='hscroll-fade';
+    tw.parentNode.insertBefore(outer,tw); outer.appendChild(tw);
+  }
+})();
+</script>
+</body></html>

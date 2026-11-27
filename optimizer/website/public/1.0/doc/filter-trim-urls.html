@@ -1,0 +1,331 @@
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+<html>
+  <head>
+    <link rel="canonical" href="https://modpagespeed.com/1.0/doc/filter-trim-urls" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Trim URLs</title>
+    <link rel="stylesheet" href="doc.css" />
+  </head>
+  <body>
+    <div
+      id="archive-banner"
+      style="
+        background-color: #e1f5fe;
+        padding: 12px 24px;
+        text-align: center;
+        font-family: sans-serif;
+        font-size: 14px;
+        line-height: 1.6;
+        position: relative;
+        border-bottom: 1px solid #b3e5fc;
+      "
+    >
+      <span style="display:inline-block;padding:0 20px 0 0;">This is the archived documentation for the original mod_pagespeed releases, 1.14.36.1 and earlier. Those releases receive no security fixes: see the <a href="/docs/end-of-life-releases/" style="color:#0277bd;font-weight:bold;">end-of-life advisory</a>. The current mod_pagespeed is at <a href="https://modpagespeed.com" style="color:#0277bd;font-weight:bold;">modpagespeed.com</a>.</span>
+      <button
+        onclick="this.parentElement.style.display = 'none'"
+        style="
+          position: absolute;
+          right: 12px;
+          top: 50%;
+          transform: translateY(-50%);
+          background: none;
+          border: none;
+          font-size: 18px;
+          cursor: pointer;
+          color: #0277bd;
+          padding: 0 4px;
+        "
+        aria-label="Dismiss"
+      >
+        &times;
+      </button>
+    </div>
+
+    <!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+    <div id="header">
+      <div id="logoline">
+        <div id="logo">
+          <a href="https://www.we-amp.com/"
+            ><img
+              src="/1.0/we-amp.jpg"
+              srcset="/1.0/we-amp.jpg"
+              width="32"
+              height="32"
+              alt="We-Amp logo"
+          /></a>
+          <img
+            src="https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png"
+            srcset="https://www.gstatic.com/images/branding/product/2x/pagespeed_32dp.png"
+            width="32"
+            height="32"
+            alt="pagespeed logo"
+          />
+        </div>
+        <div id="logotext">PageSpeed</div>
+      </div>
+      <div id="navline">
+        <a href="/1.0/doc/">&larr; documentation index</a>
+      </div>
+    </div>
+    <div id="toc"></div>
+
+    <div id="content">
+      <h1>Trim URLs</h1>
+      <h2>Configuration</h2>
+      <p>The 'Trim URLs' filter is enabled by specifying:</p>
+
+      <dl>
+        <dt>Apache:</dt>
+        <dd><pre class="prettyprint">ModPagespeedEnableFilters trim_urls</pre></dd>
+
+        <dt>Nginx:</dt>
+        <dd><pre class="prettyprint">pagespeed EnableFilters trim_urls;</pre></dd>
+      </dl>
+      <p>in the configuration file.</p>
+
+      <h2>Description</h2>
+      <p>
+        This filter trims URLs by resolving them by making them relative to the base URL for the
+        page. E.g. on <code>http://www.example.com/</code>,
+        <code>"http://www.example.com/foo"</code> would be shortened to <code>"foo"</code>. The
+        filter works only on URLs that are the values specified by <code>src</code> or
+        <code>href</code> attributes. It also trims image URLs in CSS if
+        <a href="filter-css-rewrite"><code>rewrite_css</code></a> is enabled.
+      </p>
+      <p>
+        The filter reduces the transfer size of HTML files by shortening most of the URLs. Depending
+        on the HTML file, this filter can significantly reduce the number of bytes transmitted on
+        the network.
+      </p>
+
+      <h2>Operation</h2>
+      <p>
+        The 'Trim URLs' filter removes unnecessary bytes on the wire. While it's useful for
+        development to fully specify your URLs so that links don't break when things move around,
+        these are bytes that are sent unnecessarily on the wire.
+      </p>
+      <p>For example, if the HTML document looks like this:</p>
+      <pre class="prettyprint">
+&lt;html&gt;
+  &lt;head&gt;
+  &lt;base href="http://www.example.com/"&gt;
+  &lt;/head&gt;
+  &lt;body&gt;
+    &lt;a href="http://www.example.com/bar"&gt;Link with long URL&lt;/a&gt;
+    &lt;img src="http://www.othersite.example.org/image.jpg"&gt;
+  &lt;/body&gt;
+&lt;/html&gt;
+</pre
+      >
+      <p>Then PageSpeed will rewrite it to:</p>
+      <pre class="prettyprint">
+&lt;html&gt;
+  &lt;head&gt;
+  &lt;base href="http://www.example.com/"&gt;
+  &lt;/head&gt;
+  &lt;body&gt;
+    &lt;a href="bar"&gt;Link with long URL&lt;/a&gt;
+    &lt;img src="//www.othersite.example.org/image.jpg"&gt;
+  &lt;/body&gt;
+&lt;/html&gt;
+</pre
+      >
+
+      <h3>Example</h3>
+      <p>
+        You can see the filter in action at <code>www.modpagespeed.com</code> on this
+        <a
+          href="https://www.modpagespeed.com/examples/trim_urls.html?ModPagespeed=on&amp;ModPagespeedFilters=trim_urls"
+          >example</a
+        >.
+      </p>
+
+      <h2>Requirements</h2>
+      <p>
+        Only URLs referenced by <code>href</code> and <code>src</code> attributes and, if
+        <a href="filter-css-rewrite"><code>rewrite_css</code></a> is enabled, URLs in CSS files are
+        rewritten. URLs that occur elsewhere are not altered.
+      </p>
+
+      <h2>Risks</h2>
+      <p>
+        Trimming URLs is considered medium risk. It can cause problems if it uses the wrong base
+        URL. This can happen, for example, if you serve HTML that will be pasted verbatim into other
+        HTML pages. If URLs are trimmed on the first page, they will be incorrect for the page they
+        are inserted into. For this reason, it is off by default.
+      </p>
+    </div>
+    <!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+    <div id="footer">
+      <!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+      <div id="navline">
+        <a href="/1.0/doc/">&larr; documentation index</a>
+      </div>
+    </div>
+
+    <script>
+      function buildTocHelper(node, headers) {
+        if (node.nodeType == 1) {
+          // Element node.
+          var nodeName = node.nodeName.toLowerCase();
+          if (
+            nodeName == 'h2' ||
+            nodeName == 'h3' ||
+            nodeName == 'h4' ||
+            nodeName == 'h5' ||
+            nodeName == 'h6'
+          ) {
+            if (node.id) {
+              headers.push([nodeName, node.innerHTML, node.id]);
+              node.appendChild(document.createTextNode('\u00A0')); // nbsp
+              var a = document.createElement('a');
+              a.class = 'header-link';
+              a.href = '#' + node.id;
+              a.textContent = '\uD83D\uDD17'; // link symbol
+              node.appendChild(a);
+            }
+          } else {
+            for (var i = 0; i < node.childNodes.length; i++) {
+              buildTocHelper(node.childNodes[i], headers);
+            }
+          }
+        }
+      }
+
+      function buildToc() {
+        var headers = [];
+        buildTocHelper(document.body, headers);
+        if (headers.length == 0) {
+          return;
+        }
+
+        var toc = document.getElementById('toc');
+        var tocContents = document.createElement('div');
+        tocContents.id = 'toc-contents';
+        tocContents.textContent = 'Contents';
+        toc.appendChild(tocContents);
+
+        var level = 1;
+        var currentUl = null;
+        for (var i = 0; i < headers.length; i++) {
+          var header = headers[i];
+          var headerLevel = header[0];
+          var headerValue = header[1];
+          var headerId = header[2];
+
+          var newLevel = parseInt(headerLevel.substring(1));
+          while (newLevel > level) {
+            // We loop here to handle the case where we have h2 ... h4.  This
+            // isn't a good way to write html, but someone may still do it.
+
+            var newUl = document.createElement('ul');
+            if (currentUl == null) {
+              toc.appendChild(newUl);
+            } else {
+              currentUl.appendChild(newUl);
+            }
+            currentUl = newUl;
+            level++;
+          }
+          while (newLevel < level) {
+            currentUl = currentUl.parentNode;
+            level--;
+          }
+          var li = document.createElement('li');
+          var a = document.createElement('a');
+          a.href = '#' + headerId;
+          a.textContent = headerValue;
+          li.appendChild(a);
+          currentUl.appendChild(li);
+        }
+      }
+
+      function wrapTables() {
+        var tables = document.getElementsByTagName('table');
+        for (var i = 0; i < tables.length; i++) {
+          var table = tables[i];
+          var parent = table.parentNode;
+          var div = document.createElement('div');
+          div.className = 'table-wrapper';
+          parent.insertBefore(div, table);
+          div.appendChild(table);
+        }
+      }
+
+      buildToc();
+      wrapTables();
+    </script>
+  </body>
+</html>

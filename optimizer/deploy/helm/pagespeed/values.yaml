@@ -1,0 +1,134 @@
+# mod_pagespeed Helm Chart - Default Values
+
+replicaCount: 1
+
+# Single image tag for BOTH the worker and nginx images (lockstep): they
+# must run the same build, or the content-hashed async-CSS loader the worker
+# emits won't match what nginx serves -> 404 -> pages render unstyled (FOUC).
+# Empty tracks the chart's appVersion (recommended; bump appVersion in Chart.yaml
+# per release). Do NOT re-add worker.image.tag / nginx.image.tag — the chart
+# rejects them loud to keep the two images on one version.
+image:
+  tag: ""
+
+worker:
+  image:
+    repository: ghcr.io/we-amp/pagespeed-worker
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "2"
+      memory: 1Gi
+  cacheSize: "1073741824"  # 1GB
+  extraArgs: []
+  # - --jpeg-quality
+  # - "80"
+  # - --log-level
+  # - debug
+
+nginx:
+  image:
+    repository: ghcr.io/we-amp/pagespeed-nginx
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+
+backend:
+  host: "127.0.0.1"
+  port: 8081
+
+cache:
+  sizeLimit: 1Gi  # emptyDir sizeLimit
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  # kubernetes.io/ingress.class: nginx
+  # cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  # - secretName: example-tls
+  #   hosts:
+  #     - example.com
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+podAnnotations: {}
+
+# Pod-level security context.
+#
+# The host package's syscall profile is a systemd unit directive, and a pod
+# has no systemd -- so on Kubernetes the equivalent control is the runtime's
+# seccomp profile, set here. RuntimeDefault is the container-runtime default
+# profile (the same one `docker run` applies): without this field the pod
+# runs seccomp UNCONFINED on many clusters, which is strictly weaker than
+# what a plain `docker run` gives you.
+#
+# HEADLESS CHROME: RuntimeDefault argument-filters away the CLONE_NEW*
+# namespace flags, so Chrome cannot build its own layer-1 sandbox under it
+# and browser analysis will refuse (naming the reason -- it never falls back
+# to an unsandboxed browser).
+#
+# The worker image has no USER directive, but its entrypoint drops the daemon
+# to the unprivileged pagespeed user (uid 918) with no-new-privs before
+# exec'ing it, so the non-root half of Chrome's requirement is met in the
+# pod. The seccomp profile is the remaining half: under RuntimeDefault the
+# probe reports browser_sandbox: "unavailable", and the Localhost recipe
+# below is what lifts that. Check GET /v1/health after switching; the probe,
+# not this comment, decides.
+#
+# With that said: if you run browser analysis, stage
+# deploy/chrome-seccomp.json into the kubelet's seccomp profile root
+# (/var/lib/kubelet/seccomp/ by default, e.g. via a DaemonSet or your node
+# image) and switch to:
+#
+#   podSecurityContext:
+#     seccompProfile:
+#       type: Localhost
+#       localhostProfile: pagespeed/chrome-seccomp.json
+#
+# The path is relative to that root, the file must exist on every node that
+# can schedule the pod, and a missing file makes the pod fail to start --
+# loudly, which is the intended failure mode.
+#
+# fsGroup: 918 is the worker's `pagespeed` uid/gid. The worker entrypoint
+# starts as root, takes the shared emptyDir to 918:918 (mode 2750, 0660
+# sockets) and drops to uid 918, so on a permissive cluster the pod needs
+# no fsGroup. The kubelet applies fsGroup before any container starts,
+# though, so the volume arrives group-owned by 918 without relying on the
+# entrypoint's root phase (what the worker needs when it runs as non-root).
+# This alone does not satisfy the restricted PodSecurity standard: both
+# containers still start as root by default. The two agree (same gid), so adding it changes
+# nothing where the entrypoint runs as before.
+podSecurityContext:
+  fsGroup: 918
+  seccompProfile:
+    type: RuntimeDefault
+nodeSelector: {}
+tolerations: []
+affinity: {}

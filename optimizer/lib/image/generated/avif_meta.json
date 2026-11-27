@@ -1,0 +1,38 @@
+{
+  "format": "avif",
+  "n_training_rows": 37384,
+  "n_images": 4318,
+  "target_scores": [
+    40.0,
+    45.0,
+    50.0,
+    55.0,
+    60.0,
+    65.0,
+    70.0,
+    75.0,
+    80.0,
+    85.0,
+    90.0
+  ],
+  "feature_names": [
+    "edge_density",
+    "noise_level",
+    "unique_color_ratio",
+    "photo_metric",
+    "color_entropy",
+    "spatial_freq_low",
+    "spatial_freq_high",
+    "mean_luminance",
+    "luminance_variance",
+    "width",
+    "height",
+    "content_class",
+    "source_format",
+    "has_alpha",
+    "is_grayscale",
+    "target_ssimulacra2",
+    "pixel_count",
+    "source_quality"
+  ]
+}

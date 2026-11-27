@@ -1,0 +1,351 @@
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+<html>
+  <head>
+    <link rel="canonical" href="https://modpagespeed.com/1.0/doc/filter-css-to-head" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Move CSS to Head</title>
+    <link rel="stylesheet" href="doc.css" />
+  </head>
+  <body>
+    <div
+      id="archive-banner"
+      style="
+        background-color: #e1f5fe;
+        padding: 12px 24px;
+        text-align: center;
+        font-family: sans-serif;
+        font-size: 14px;
+        line-height: 1.6;
+        position: relative;
+        border-bottom: 1px solid #b3e5fc;
+      "
+    >
+      <span style="display:inline-block;padding:0 20px 0 0;">This is the archived documentation for the original mod_pagespeed releases, 1.14.36.1 and earlier. Those releases receive no security fixes: see the <a href="/docs/end-of-life-releases/" style="color:#0277bd;font-weight:bold;">end-of-life advisory</a>. The current mod_pagespeed is at <a href="https://modpagespeed.com" style="color:#0277bd;font-weight:bold;">modpagespeed.com</a>.</span>
+      <button
+        onclick="this.parentElement.style.display = 'none'"
+        style="
+          position: absolute;
+          right: 12px;
+          top: 50%;
+          transform: translateY(-50%);
+          background: none;
+          border: none;
+          font-size: 18px;
+          cursor: pointer;
+          color: #0277bd;
+          padding: 0 4px;
+        "
+        aria-label="Dismiss"
+      >
+        &times;
+      </button>
+    </div>
+
+    <!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+    <div id="header">
+      <div id="logoline">
+        <div id="logo">
+          <a href="https://www.we-amp.com/"
+            ><img
+              src="/1.0/we-amp.jpg"
+              srcset="/1.0/we-amp.jpg"
+              width="32"
+              height="32"
+              alt="We-Amp logo"
+          /></a>
+          <img
+            src="https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png"
+            srcset="https://www.gstatic.com/images/branding/product/2x/pagespeed_32dp.png"
+            width="32"
+            height="32"
+            alt="pagespeed logo"
+          />
+        </div>
+        <div id="logotext">PageSpeed</div>
+      </div>
+      <div id="navline">
+        <a href="/1.0/doc/">&larr; documentation index</a>
+      </div>
+    </div>
+    <div id="toc"></div>
+
+    <div id="content">
+      <h1>Move CSS to Head</h1>
+
+      <h2>Configuration</h2>
+      <p>The 'Move CSS to head' filter is enabled by specifying:</p>
+      <dl>
+        <dt>Apache:</dt>
+        <dd><pre class="prettyprint">ModPagespeedEnableFilters move_css_to_head</pre></dd>
+
+        <dt>Nginx:</dt>
+        <dd><pre class="prettyprint">pagespeed EnableFilters move_css_to_head;</pre></dd>
+      </dl>
+      <p>in the configuration file.</p>
+
+      <h2>Description</h2>
+      <p>
+        'Move CSS to head' seeks to reduce the number of times the browser must re-flow the document
+        by ensuring that the CSS styles are all parsed in the head, before any body elements are
+        introduced.
+      </p>
+      <p>
+        This is based on the
+        <a
+          target="_blank"
+          href="https://developers.google.com/speed/docs/best-practices/rendering#PutCSSInHead"
+        >
+          best practice for optimizing browser rendering.
+        </a>
+      </p>
+
+      <h2>Operation</h2>
+      <p>
+        The 'Move CSS to head' filter operates only on CSS
+        <code>&lt;link</code> and <code>&lt;style&gt;</code> tags found after the
+        <code>&lt;/head&gt;</code> and moves these links back into the <code>&lt;head&gt;</code> ...
+        <code>&lt;/head&gt;</code> section.
+      </p>
+      <p>For example, if the HTML document looks like this:</p>
+      <pre class="prettyprint">
+&lt;html&gt;
+  &lt;head&gt;
+  &lt;/head&gt;
+  &lt;body&gt;
+    &lt;script src="script.js" type="text/javascript"&gt;&lt;/script&gt;
+    &lt;div class="blue yellow big bold"&gt;
+      Hello, world!
+    &lt;/div&gt;
+    &lt;style type="text/css"&gt;
+      .foo { color: red; }
+    &lt;/style&gt;
+    &lt;link rel="stylesheet" type="text/css" href="styles/all_styles.css"&gt;
+  &lt;/body&gt;
+&lt;/html&gt;
+</pre
+      >
+      <p>Then PageSpeed will rewrite it into:</p>
+      <pre class="prettyprint">
+&lt;html&gt;
+  &lt;head&gt;
+    &lt;style type="text/css"&gt;
+      .foo { color: red; }
+    &lt;/style&gt;
+    &lt;link rel="stylesheet" type="text/css" href="styles/all_styles.css"&gt;
+  &lt;/head&gt;
+  &lt;body&gt;
+    &lt;script src="script.js" type="text/javascript"&gt;&lt;/script&gt;
+    &lt;div class="blue yellow big bold"&gt;
+      Hello, world!
+    &lt;/div&gt;
+  &lt;/body&gt;
+&lt;/html&gt;
+</pre
+      >
+
+      <p>
+        In some browsers, the original version will flash quickly as the browser will render the
+        "Hello, world!" text before it sees the style tags providing definitions for the CSS
+        classes. This transformation will eliminate that flash, but the end result will be the same.
+      </p>
+
+      <h3>Example</h3>
+      <p>
+        You can see the filter in action at <code>www.modpagespeed.com</code> on this
+        <a
+          href="https://www.modpagespeed.com/examples/move_css_to_head.html?ModPagespeed=on&amp;ModPagespeedFilters=move_css_to_head"
+          >example</a
+        >.
+      </p>
+
+      <h2>Limitations</h2>
+      <p>
+        This filter operates within the scope of a "flush window". Specifically, large, or
+        dynamically generated HTML files may be "flushed" by the resource generator before they are
+        complete. If the filter encounters a flush after the end of the
+        <code>&lt;head&gt;</code> section, subsequently encountered CSS elements will not be moved
+        into the <code>&lt;head&gt;</code> section.
+      </p>
+
+      <h2>Risks</h2>
+      <p>
+        This filter is considered low risk. However, JavaScript that is executed before a CSS
+        element will see a different view of the DOM in the presence of this rewriter: the CSS
+        element will now be in the head. If there is such JavaScript embedded in the middle of a
+        page then this rewriter may change its behavior.
+      </p>
+    </div>
+    <!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+    <div id="footer">
+      <!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+      <div id="navline">
+        <a href="/1.0/doc/">&larr; documentation index</a>
+      </div>
+    </div>
+
+    <script>
+      function buildTocHelper(node, headers) {
+        if (node.nodeType == 1) {
+          // Element node.
+          var nodeName = node.nodeName.toLowerCase();
+          if (
+            nodeName == 'h2' ||
+            nodeName == 'h3' ||
+            nodeName == 'h4' ||
+            nodeName == 'h5' ||
+            nodeName == 'h6'
+          ) {
+            if (node.id) {
+              headers.push([nodeName, node.innerHTML, node.id]);
+              node.appendChild(document.createTextNode('\u00A0')); // nbsp
+              var a = document.createElement('a');
+              a.class = 'header-link';
+              a.href = '#' + node.id;
+              a.textContent = '\uD83D\uDD17'; // link symbol
+              node.appendChild(a);
+            }
+          } else {
+            for (var i = 0; i < node.childNodes.length; i++) {
+              buildTocHelper(node.childNodes[i], headers);
+            }
+          }
+        }
+      }
+
+      function buildToc() {
+        var headers = [];
+        buildTocHelper(document.body, headers);
+        if (headers.length == 0) {
+          return;
+        }
+
+        var toc = document.getElementById('toc');
+        var tocContents = document.createElement('div');
+        tocContents.id = 'toc-contents';
+        tocContents.textContent = 'Contents';
+        toc.appendChild(tocContents);
+
+        var level = 1;
+        var currentUl = null;
+        for (var i = 0; i < headers.length; i++) {
+          var header = headers[i];
+          var headerLevel = header[0];
+          var headerValue = header[1];
+          var headerId = header[2];
+
+          var newLevel = parseInt(headerLevel.substring(1));
+          while (newLevel > level) {
+            // We loop here to handle the case where we have h2 ... h4.  This
+            // isn't a good way to write html, but someone may still do it.
+
+            var newUl = document.createElement('ul');
+            if (currentUl == null) {
+              toc.appendChild(newUl);
+            } else {
+              currentUl.appendChild(newUl);
+            }
+            currentUl = newUl;
+            level++;
+          }
+          while (newLevel < level) {
+            currentUl = currentUl.parentNode;
+            level--;
+          }
+          var li = document.createElement('li');
+          var a = document.createElement('a');
+          a.href = '#' + headerId;
+          a.textContent = headerValue;
+          li.appendChild(a);
+          currentUl.appendChild(li);
+        }
+      }
+
+      function wrapTables() {
+        var tables = document.getElementsByTagName('table');
+        for (var i = 0; i < tables.length; i++) {
+          var table = tables[i];
+          var parent = table.parentNode;
+          var div = document.createElement('div');
+          div.className = 'table-wrapper';
+          parent.insertBefore(div, table);
+          div.appendChild(table);
+        }
+      }
+
+      buildToc();
+      wrapTables();
+    </script>
+  </body>
+</html>

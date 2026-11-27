@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
+# Package-install verification image: Debian 12 (deb flavor).
+#
+# Deliberately NOT digest-pinned. This image is not a build input and ships
+# nothing: it is the environment an installed package is asserted IN, and the
+# assertions are about the package's behaviour against the distro's CURRENT
+# dpkg / systemd-sysusers / systemd-tmpfiles. Pinning it would freeze the very
+# thing the rig exists to observe.
+#
+# systemd is installed (not just the standalone sysusers/tmpfiles helpers)
+# because the same image serves both rig containers: the plain one (PID 1 is
+# the rig script, /run/systemd/system absent, so maintainer scripts take their
+# no-systemd branch) and the booted one (PID 1 is systemd, the unit really
+# runs). tools/packaging/rig/Dockerfile.* are content-hashed into the image
+# tag by daemon-install-rig.sh, so an edit here rebuilds on next use.
+#
+# strace + curl are for the H6 lanes: the syscall census (syscall-census.sh)
+# straces the daemon inside this image, and the census's curl-child posture
+# needs a real curl. Neither is a package dependency -- the shipped deb/rpm
+# still depends on libc alone.
+FROM debian:12@sha256:268fb24c39bca92d326dd83ea3abebe4a3f7751c804ffef23bb6d857dd343ff8
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get -qq update \
+    && apt-get -qq -y install --no-install-recommends \
+        systemd systemd-sysv procps python3 binutils passwd util-linux \
+        strace curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# A booted systemd inside a --privileged container shares the HOST kernel's
+# binfmt_misc table. Stock systemd-binfmt.service registers /usr/lib/binfmt.d/*
+# into it at boot and runs `systemd-binfmt --unregister` on stop, which removes
+# EVERY entry on the host -- including the amd64 emulation handler an Apple
+# Silicon runner needs for its other containers. A guest must never manage the
+# host's binfmt table: mask the service and the binfmt_misc mount units.
+RUN for u in systemd-binfmt.service proc-sys-fs-binfmt_misc.automount proc-sys-fs-binfmt_misc.mount; do \
+        ln -sf /dev/null "/etc/systemd/system/$u"; done
+# A real Chromium for the h6-browser-analysis leg (the package only SUGGESTS
+# one; this is the rig providing what an operator would). Debian's own
+# package works as-is; the symlink is the daemon's compiled-in default path,
+# the same one docker/install-chromium.sh creates for the product images.
+RUN apt-get -qq update \
+    && apt-get -qq -y install --no-install-recommends chromium \
+    && ln -sf /usr/bin/chromium /usr/bin/chrome-headless-shell \
+    && rm -rf /var/lib/apt/lists/*

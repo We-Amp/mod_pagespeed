@@ -1,0 +1,220 @@
+---
+/**
+ * OnThisPage — in-page "On this page" navigation for long documentation pages.
+ *
+ * Server-rendered from Astro's `headings` export, so the links are present in
+ * the initial HTML (works with JavaScript disabled and is crawlable). The
+ * `slug` values already reflect the custom `{#id}` anchors set by
+ * remark-custom-heading-id, so they match the real heading element IDs.
+ *
+ * Two variants render from the same data:
+ *   - `rail`   — sticky right-hand column on wide (xl) screens.
+ *   - `inline` — a collapsible <details> disclosure for narrower screens.
+ *
+ * A single client script (deduplicated by Astro even when the component is
+ * used twice on a page) adds scroll-spy highlighting, a progressive
+ * enhancement; the plain anchor links work without it. The "#" permalink on
+ * each heading is rendered at build time (src/lib/rehype-heading-anchors.mjs)
+ * and styled in global.css.
+ */
+import Icon from './Icon.astro';
+
+interface Heading {
+  depth: number;
+  slug: string;
+  text: string;
+}
+
+interface Props {
+  headings: Heading[];
+  variant?: 'rail' | 'inline';
+  /** Minimum number of qualifying headings before the nav renders at all. */
+  minItems?: number;
+}
+
+const { headings, variant = 'rail', minItems = 3 } = Astro.props;
+
+// h2 + h3 only: deeper headings make the list noisy, h1 is the page title.
+const items = headings.filter((h) => h.depth >= 2 && h.depth <= 3);
+const show = items.length >= minItems;
+---
+
+{show && variant === 'rail' && (
+  <nav aria-label="On this page" class="text-sm">
+    <p class="eyebrow mb-3">On this page</p>
+    <ul class="space-y-1 border-l border-border">
+      {items.map((h) => (
+        <li>
+          <a
+            href={`#${h.slug}`}
+            data-toc-link
+            data-toc-target={h.slug}
+            class:list={[
+              '-ml-px block border-l-2 border-transparent py-1 transition-colors hover:border-border-strong hover:text-text-body',
+              h.depth === 2 ? 'pl-4 text-text-muted' : 'pl-7 text-[0.8125rem] text-text-annotation',
+            ]}
+          >
+            {h.text}
+          </a>
+        </li>
+      ))}
+    </ul>
+  </nav>
+)}
+
+{show && variant === 'inline' && (
+  <details class="mb-8 rounded-lg border border-border bg-bg-secondary">
+    <summary class="flex cursor-pointer select-none items-center justify-between px-4 py-3 text-sm font-semibold text-text-body">
+      On this page
+      <Icon name="chevron-down" class="toc-chevron h-4 w-4 text-text-annotation" />
+    </summary>
+    <nav aria-label="On this page" class="border-t border-border px-2 py-2 text-sm">
+      <ul class="space-y-0.5">
+        {items.map((h) => (
+          <li>
+            <a
+              href={`#${h.slug}`}
+              data-toc-link
+              data-toc-target={h.slug}
+              class:list={[
+                'block rounded px-2 py-1.5 transition-colors hover:bg-bg-primary hover:text-text-body',
+                h.depth === 2
+                  ? 'pl-2 text-text-body'
+                  : 'pl-6 text-[0.8125rem] text-text-annotation',
+              ]}
+            >
+              {h.text}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  </details>
+)}
+
+<style>
+  /* Active section — driven by the scroll-spy script via aria-current. Scoped
+     to this component's links (the hash attribute is on the template elements). */
+  a[data-toc-link][aria-current='location'] {
+    color: var(--color-interactive);
+    border-color: var(--color-interactive);
+    font-weight: 500;
+  }
+  details[open] .toc-chevron {
+    transform: rotate(180deg);
+  }
+</style>
+
+<script>
+  function initOnThisPage() {
+    if (document.documentElement.dataset.tocInit === '1') return;
+    const article = document.querySelector('article');
+    if (!article) return;
+    const headingEls = Array.from(article.querySelectorAll<HTMLElement>('h2[id], h3[id], h4[id]'));
+    const links = Array.from(document.querySelectorAll<HTMLAnchorElement>('[data-toc-link]'));
+    if (!headingEls.length) return;
+    document.documentElement.dataset.tocInit = '1';
+
+    if (!links.length) return;
+
+    // Platform-aware TOC. Docs pages with a platform switcher wrap
+    // platform-specific sections in [data-platform] blocks and show only the
+    // active one (CSS keyed on html[data-active-platform]); the rest are
+    // display:none. A TOC entry pointing into a hidden block cannot be
+    // scrolled to, so map each heading to its platform (null = agnostic) and
+    // hide the entries that belong to a platform that is not currently shown.
+    const headingPlatform = new Map<string, string | null>();
+    for (const h of headingEls) {
+      const panel = h.closest<HTMLElement>('[data-platform]');
+      headingPlatform.set(h.id, panel?.getAttribute('data-platform') ?? null);
+    }
+    let activePlatform = document.documentElement.getAttribute('data-active-platform');
+    const reachable = (id: string) => {
+      const p = headingPlatform.get(id) ?? null;
+      return p === null || p === activePlatform;
+    };
+
+    // Scroll-spy: highlight the TOC entry for the section currently in view.
+    const byTarget = new Map<string, HTMLAnchorElement[]>();
+    for (const l of links) {
+      const t = l.getAttribute('data-toc-target');
+      if (!t) continue;
+      const arr = byTarget.get(t) ?? [];
+      arr.push(l);
+      byTarget.set(t, arr);
+    }
+    const tracked = headingEls.filter((h) => byTarget.has(h.id));
+    if (!tracked.length) return;
+
+    // Show only the entries reachable in the active platform. Toggling the
+    // <li> keeps both the rail and the inline (mobile) lists in sync.
+    function syncPlatform() {
+      activePlatform = document.documentElement.getAttribute('data-active-platform');
+      for (const [id, ls] of byTarget) {
+        const hidden = !reachable(id);
+        for (const l of ls) (l.closest('li') ?? l).toggleAttribute('hidden', hidden);
+      }
+    }
+    syncPlatform();
+
+    let current: string | null = null;
+    function setActive(id: string | null) {
+      if (id === current) return;
+      if (current) byTarget.get(current)?.forEach((l) => l.removeAttribute('aria-current'));
+      current = id;
+      if (id) byTarget.get(id)?.forEach((l) => l.setAttribute('aria-current', 'location'));
+    }
+
+    const visible = new Set<string>();
+    function recompute() {
+      const inView = tracked.find((h) => visible.has(h.id) && reachable(h.id));
+      if (inView) {
+        setActive(inView.id);
+        return;
+      }
+      // Nothing in the detection band (tall section): pick the last reachable
+      // heading scrolled above the header, else the first reachable one.
+      const reachableTracked = tracked.filter((h) => reachable(h.id));
+      let above: string | null = null;
+      for (const h of reachableTracked) {
+        if (h.getBoundingClientRect().top < 80) above = h.id;
+        else break;
+      }
+      setActive(above ?? reachableTracked[0]?.id ?? null);
+    }
+
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) visible.add((e.target as HTMLElement).id);
+          else visible.delete((e.target as HTMLElement).id);
+        }
+        recompute();
+      },
+      { rootMargin: '-72px 0px -70% 0px', threshold: 0 },
+    );
+    for (const h of tracked) io.observe(h);
+
+    // Re-sync when the platform selector flips html[data-active-platform]:
+    // update which entries show and re-pick the highlighted section.
+    new MutationObserver(() => {
+      syncPlatform();
+      recompute();
+    }).observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-active-platform'],
+    });
+
+    // Clicking sets the active state immediately and closes a mobile disclosure.
+    for (const l of links) {
+      l.addEventListener('click', () => {
+        const t = l.getAttribute('data-toc-target');
+        if (t) setActive(t);
+        l.closest('details')?.removeAttribute('open');
+      });
+    }
+  }
+
+  if (document.readyState !== 'loading') initOnThisPage();
+  else document.addEventListener('DOMContentLoaded', initOnThisPage);
+</script>

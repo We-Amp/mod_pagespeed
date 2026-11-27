@@ -1,0 +1,615 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import PageHero from '../components/PageHero.astro';
+import { COMMERCIAL_EMAIL } from '../data/product-facts.mjs';
+
+// Topics: one per offer, each with a one-line hint shown under the select.
+// Values are what the capture endpoint logs as the lead topic. Old values that
+// external links and earlier pages still carry are mapped in TOPIC_ALIASES
+// (read by the prefill script below).
+const TOPICS: Array<{ value: string; label: string; hint: string; commercial: boolean }> = [
+  {
+    value: 'setup',
+    label: 'Setup help',
+    hint: 'Server, OS, web server and version help us reply faster.',
+    commercial: false,
+  },
+  {
+    value: 'support',
+    label: 'Support subscription',
+    hint: 'Tell us which platforms you run and what you want help with.',
+    commercial: true,
+  },
+  {
+    value: 'enterprise',
+    label: 'Enterprise support',
+    hint: 'Platforms and any custom build targets or backports you need.',
+    commercial: true,
+  },
+  {
+    value: 'hosting',
+    label: 'Hosting partner program',
+    hint: 'Host count, control panel and distributions across your fleet.',
+    commercial: true,
+  },
+  {
+    value: 'consulting',
+    label: 'Consulting',
+    hint: 'The site, what is slow, and when you need it fixed.',
+    commercial: true,
+  },
+  {
+    value: 'audit',
+    label: 'Agent-readiness audit',
+    hint: 'The site address, and what you want agents and crawlers to see.',
+    commercial: true,
+  },
+  {
+    value: 'iispeed-transfer',
+    label: 'IISpeed license transfer',
+    hint: 'The order number or the email address the license was bought under.',
+    commercial: true,
+  },
+  {
+    value: 'agents',
+    label: 'AI readability and agents',
+    hint: 'What you need agents to see, and roughly how much crawler traffic you get.',
+    commercial: false,
+  },
+  {
+    value: 'other',
+    label: 'Other (not security)',
+    hint: 'Security reports go to a separate channel, below.',
+    commercial: false,
+  },
+];
+const TOPIC_ALIASES: Record<string, string> = {
+  airead: 'agents',
+  'agent-optimize': 'agents',
+  iispeed: 'iispeed-transfer',
+  transfer: 'iispeed-transfer',
+  partner: 'hosting',
+  hardened: 'support',
+};
+const COMMERCIAL_TOPICS = TOPICS.filter((t) => t.commercial).map((t) => t.value);
+const topicConfig = {
+  hints: Object.fromEntries(TOPICS.map((t) => [t.value, t.hint])),
+  commercial: COMMERCIAL_TOPICS,
+  aliases: TOPIC_ALIASES,
+};
+
+const inputClass =
+  'mt-1 block w-full rounded-md border border-control-border bg-bg-elevated text-text-body px-3 py-2 focus:border-interactive focus:ring-2 focus:ring-interactive';
+
+const nextSteps = [
+  { when: 'usually within 1 business day', what: 'We reply to every message.' },
+  {
+    when: 'within 3 business days',
+    what: 'Enterprise and hosting-partner topics get a written proposal; Standard and Priority are bought at checkout on the pricing page.',
+  },
+  {
+    when: 'within 5 business days of signing',
+    what: 'The onboarding call opens your support channel.',
+  },
+];
+---
+
+<BaseLayout
+  title="Contact mod_pagespeed: setup, support and partners"
+  description="Setup help, support, Enterprise, audits, hosting partners, consulting and IISpeed transfers. One form; we usually reply within one business day (CET)."
+>
+  <PageHero id="contact-title" title="One form for setup, support and partnerships.">
+    <Fragment slot="lede">
+      Setup help, support subscriptions, partnerships and consulting all go through this form. We
+      usually reply within one business day (CET). Security reports have their own channel.
+    </Fragment>
+    <p class="mt-3 text-small text-text-annotation max-w-2xl">
+      Setup steps live in the
+      <a href="/docs/" class="text-interactive hover:text-interactive-hover underline">
+        documentation
+      </a>
+      ; what a subscription covers is on the
+      <a href="/support/" class="text-interactive hover:text-interactive-hover underline">
+        support page
+      </a>
+      .
+    </p>
+  </PageHero>
+
+  <section class="container-prose max-w-3xl pb-20">
+    <ol class="mt-10 grid grid-cols-1 gap-3 sm:grid-cols-3" aria-label="What happens next">
+      {nextSteps.map((step) => (
+        <li class="readout-plate px-4 py-3">
+          <p class="font-mono text-xs text-interactive">{step.when}</p>
+          <p class="mt-1 text-sm text-text-muted">{step.what}</p>
+        </li>
+      ))}
+    </ol>
+
+    <!-- Contact form. JS-enabled clients intercept the submit and POST JSON to the
+         capture endpoint (/ai-readability/api/contact → render service → email +
+         logged), with a mailto: fallback if that POST fails. Without JavaScript the
+         browser posts the form natively to the same endpoint, which answers with a
+         redirect to the thanks page. -->
+    <form
+      id="contact-form"
+      aria-labelledby="contact-title"
+      action="/ai-readability/api/contact"
+      method="post"
+      data-fallback-email={COMMERCIAL_EMAIL}
+      data-topic-config={JSON.stringify(topicConfig)}
+      class="mt-8 rounded-lg border border-border bg-bg-elevated p-6 sm:p-8 space-y-5"
+    >
+      <input type="hidden" name="redirect" value="/contact/thanks/" />
+      <input type="hidden" name="t" value="" data-load-time />
+      <div
+        style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden"
+        aria-hidden="true"
+      >
+        <label for="contact-company">Leave this field empty</label>
+        <input
+          id="contact-company"
+          name="company"
+          type="text"
+          tabindex="-1"
+          autocomplete="new-password"
+        />
+      </div>
+
+      <div>
+        <label for="contact-name" class="eyebrow">
+          {' '}
+          Name{' '}
+        </label>
+        <input
+          id="contact-name"
+          name="name"
+          type="text"
+          required
+          aria-required="true"
+          autocomplete="name"
+          class="mt-1 block w-full rounded-md border border-control-border bg-bg-elevated text-text-body px-3 py-2 focus:border-interactive focus:ring-2 focus:ring-interactive aria-[invalid=true]:border-accent aria-[invalid=true]:ring-1 aria-[invalid=true]:ring-accent"
+        />
+      </div>
+
+      <div>
+        <label for="contact-email" class="eyebrow">
+          {' '}
+          Email{' '}
+        </label>
+        <input
+          id="contact-email"
+          name="email"
+          type="email"
+          required
+          aria-required="true"
+          autocomplete="email"
+          class="mt-1 block w-full rounded-md border border-control-border bg-bg-elevated text-text-body px-3 py-2 focus:border-interactive focus:ring-2 focus:ring-interactive aria-[invalid=true]:border-accent aria-[invalid=true]:ring-1 aria-[invalid=true]:ring-accent"
+        />
+      </div>
+
+      <div>
+        <label for="contact-topic" class="eyebrow">
+          {' '}
+          Topic{' '}
+        </label>
+        <select
+          id="contact-topic"
+          name="topic"
+          required
+          aria-required="true"
+          aria-describedby="contact-topic-hint"
+          class="mt-1 block w-full rounded-md border border-control-border bg-bg-elevated text-text-body px-3 py-2 focus:border-interactive focus:ring-2 focus:ring-interactive"
+        >
+          {TOPICS.map((t) => (
+            <option value={t.value}>{t.label}</option>
+          ))}
+        </select>
+        <p id="contact-topic-hint" class="mt-1 text-sm text-text-annotation" data-topic-hint>
+          {TOPICS[0].hint}
+        </p>
+      </div>
+
+      <fieldset id="contact-qualifiers" class="space-y-4" data-qualifiers hidden disabled>
+        <legend class="eyebrow">About your organization</legend>
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label for="contact-org" class="eyebrow">
+              Company <span class="font-normal text-text-annotation">(optional)</span>
+            </label>
+            <input
+              id="contact-org"
+              name="org"
+              type="text"
+              autocomplete="organization"
+              class={inputClass}
+            />
+          </div>
+          <div>
+            <label for="contact-role" class="eyebrow">
+              Role <span class="font-normal text-text-annotation">(optional)</span>
+            </label>
+            <input
+              id="contact-role"
+              name="role"
+              type="text"
+              autocomplete="organization-title"
+              class={inputClass}
+            />
+          </div>
+        </div>
+        <div>
+          <label for="contact-size" class="eyebrow">
+            Deployment size{' '}
+            <span class="font-normal text-text-annotation">(optional, helps us answer)</span>
+          </label>
+          <input id="contact-size" name="size" type="text" maxlength="200" class={inputClass} />
+        </div>
+      </fieldset>
+
+      <div>
+        <label for="contact-message" class="eyebrow">
+          {' '}
+          Message{' '}
+        </label>
+        <textarea
+          id="contact-message"
+          name="message"
+          rows="6"
+          required
+          aria-required="true"
+          aria-describedby="contact-message-hint"
+          class="mt-1 block w-full rounded-md border border-control-border bg-bg-elevated text-text-body px-3 py-2 focus:border-interactive focus:ring-2 focus:ring-interactive aria-[invalid=true]:border-accent aria-[invalid=true]:ring-1 aria-[invalid=true]:ring-accent"
+        ></textarea>
+        <p id="contact-message-hint" class="mt-1 text-sm text-text-annotation">
+          Plain text is fine. Logs and config snippets help.
+        </p>
+      </div>
+
+      <p class="text-xs text-text-annotation">
+        We use what you send only to reply. See the
+        <a
+          href="https://we-amp.com/privacy/"
+          class="text-interactive hover:text-interactive-hover underline"
+        >
+          privacy policy
+        </a>
+        .
+      </p>
+
+      <div class="flex flex-col gap-2">
+        <button
+          id="contact-submit"
+          type="submit"
+          class="btn-primary"
+          aria-describedby="contact-form-hint"
+        >
+          Send message
+        </button>
+        <p id="contact-form-hint" class="text-xs text-text-annotation">
+          We usually reply within one business day (CET). Prefer email? Reach us at
+          <a
+            href={`mailto:${COMMERCIAL_EMAIL}`}
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            {COMMERCIAL_EMAIL}
+          </a>
+          <button
+            type="button"
+            id="contact-copy-email"
+            data-copy={COMMERCIAL_EMAIL}
+            class="tap-area ml-1 text-interactive hover:text-interactive-hover underline"
+            aria-label="Copy email address"
+          >
+            (copy)
+          </button>
+          .
+        </p>
+        <p id="contact-status" role="status" aria-live="polite" class="min-h-5 text-sm"></p>
+      </div>
+    </form>
+
+    <script>
+      // Spoken through the layout's one status writer (window.siteAnnounce),
+      // like the code-block buttons; the button's own name never changes.
+      const announceCopy = (ok: boolean) =>
+        (window as { siteAnnounce?: (_message: string) => void }).siteAnnounce?.(
+          ok ? 'Copied to clipboard' : 'Copy failed, select the text to copy',
+        );
+
+      // Topic routing. The form carries its topic table (hints, which topics
+      // are commercial, and the aliases older links still use) as JSON in
+      // data-topic-config, rendered from the frontmatter, so this script holds
+      // no copy of it.
+      type TopicConfig = {
+        hints: Record<string, string>;
+        commercial: string[];
+        aliases: Record<string, string>;
+      };
+      const form = document.getElementById('contact-form') as HTMLFormElement | null;
+      // With JavaScript the script validates and speaks its own message (below),
+      // so the browser's bubble is switched off; without it the browser's
+      // validation still guards the native post.
+      if (form) form.noValidate = true;
+      const loadedAt = Date.now();
+      const loadTimeEl = form?.querySelector<HTMLInputElement>('input[data-load-time]');
+      if (loadTimeEl) loadTimeEl.value = String(loadedAt);
+      const config: TopicConfig = JSON.parse(form?.dataset.topicConfig ?? '{}');
+      const topicEl = document.getElementById('contact-topic') as HTMLSelectElement | null;
+      const hintEl = form?.querySelector<HTMLElement>('[data-topic-hint]') ?? null;
+      const qualifiers = form?.querySelector<HTMLFieldSetElement>('[data-qualifiers]') ?? null;
+      const messageEl = document.getElementById('contact-message') as HTMLTextAreaElement | null;
+
+      // Show the optional company / role / deployment-size fields only for the
+      // commercial topics. Hidden fields are disabled so they never post.
+      function syncTopic() {
+        if (!topicEl) return;
+        const topic = topicEl.value;
+        if (hintEl) hintEl.textContent = config.hints?.[topic] ?? '';
+        const commercial = (config.commercial ?? []).includes(topic);
+        if (qualifiers) {
+          qualifiers.hidden = !commercial;
+          qualifiers.disabled = !commercial;
+        }
+      }
+
+      // Pre-fill from the query string: ?topic= (old values mapped to the
+      // current ones), and the hosting-partner qualifiers (?hosts=, ?panel=,
+      // ?distros=) the partner page sends, folded into the message.
+      const params = new URLSearchParams(window.location.search);
+      const rawTopic = (params.get('topic') ?? '').trim().toLowerCase();
+      // ?wedge= names the tool a visitor came from (the crawler cost meter);
+      // only listed values are forwarded into the lead_submit event.
+      const KNOWN_WEDGES = new Set(['crawler-cost']);
+      const rawWedge = (params.get('wedge') ?? '').trim().toLowerCase();
+      const wedgeFromQuery = KNOWN_WEDGES.has(rawWedge) ? rawWedge : '';
+      const wanted = config.aliases?.[rawTopic] ?? rawTopic;
+      if (topicEl && wanted && Array.from(topicEl.options).some((o) => o.value === wanted)) {
+        topicEl.value = wanted;
+      }
+      const prefill = [
+        ['hosts', 'Hosts'],
+        ['panel', 'Control panel'],
+        ['distros', 'Distributions'],
+      ]
+        .map(([key, label]) => {
+          const v = (params.get(key) ?? '').trim().slice(0, 200);
+          return v ? `${label}: ${v}` : '';
+        })
+        .filter(Boolean);
+      if (messageEl && prefill.length && !messageEl.value) {
+        messageEl.value = `${prefill.join('\n')}\n\n`;
+      }
+      topicEl?.addEventListener('change', syncTopic);
+      syncTopic();
+
+      // Copy-to-clipboard for the contact address, so a visitor whose mail client
+      // doesn't open can grab the address without selecting it by hand.
+      const copyBtn = document.getElementById('contact-copy-email') as HTMLButtonElement | null;
+      if (copyBtn) {
+        copyBtn.addEventListener('click', async () => {
+          const addr = copyBtn.dataset.copy ?? '';
+          try {
+            await navigator.clipboard.writeText(addr);
+            announceCopy(true);
+            // Visible feedback only: the button's aria-label stays "Copy email
+            // address", so its accessible name does not change.
+            const prev = copyBtn.textContent;
+            copyBtn.textContent = '(copied)';
+            window.setTimeout(() => {
+              copyBtn.textContent = prev;
+            }, 1500);
+          } catch {
+            // Clipboard API unavailable (e.g. non-secure context) — the address
+            // stays visible and selectable next to this button; say so.
+            announceCopy(false);
+          }
+        });
+      }
+
+      // Intercept submit and POST to the capture endpoint; fall back to a mailto:
+      // to the commercial address if the POST fails, and to the form's native
+      // mailto action if JS is off entirely.
+      const submitBtn = document.getElementById('contact-submit') as HTMLButtonElement | null;
+      const statusEl = document.getElementById('contact-status');
+      const emailInput = document.getElementById('contact-email') as HTMLInputElement | null;
+
+      function setStatus(kind: 'success' | 'error' | null, msg: string) {
+        if (!statusEl) return;
+        // The live region stays in the DOM and is never hidden: only its text
+        // changes, which is what assistive technology announces.
+        statusEl.textContent = msg;
+        statusEl.classList.remove('text-interactive', 'text-accent');
+        if (kind === null) return;
+        if (kind === 'success') {
+          statusEl.classList.add('text-interactive');
+        } else {
+          statusEl.classList.add('text-accent');
+        }
+      }
+
+      form?.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const data = new FormData(form);
+        const name = String(data.get('name') ?? '').trim();
+        const email = String(data.get('email') ?? '').trim();
+        const topic = String(data.get('topic') ?? 'setup');
+        const body = String(data.get('message') ?? '').trim();
+
+        // Client-side validation. Each empty required field is flagged invalid
+        // and points at the status message, which says what is missing; focus
+        // moves to the first of them.
+        const required: Array<[HTMLInputElement | HTMLTextAreaElement | null, string]> = [
+          [document.getElementById('contact-name') as HTMLInputElement | null, name],
+          [emailInput, email],
+          [messageEl, body],
+        ];
+        const empty = required.filter(([, value]) => !value).map(([el]) => el);
+        for (const [el] of required) {
+          if (!el) continue;
+          if (empty.includes(el)) {
+            el.setAttribute('aria-invalid', 'true');
+            el.setAttribute('aria-errormessage', 'contact-status');
+          } else {
+            el.setAttribute('aria-invalid', 'false');
+            el.removeAttribute('aria-errormessage');
+          }
+        }
+        if (empty.length) {
+          setStatus('error', 'Please fill in name, email and message before sending.');
+          empty[0]?.focus();
+          return;
+        }
+        const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+        if (!emailOk) {
+          setStatus('error', 'That email address does not look right. Check it and try again.');
+          // Flag the email field invalid (triggers the visible accent cue), move
+          // focus to it, and point its aria-errormessage at the status message so
+          // assistive tech announces the error against the field.
+          if (emailInput) {
+            emailInput.setAttribute('aria-invalid', 'true');
+            emailInput.setAttribute('aria-errormessage', 'contact-status');
+            emailInput.focus();
+          }
+          return;
+        }
+        // Email passed: clear any prior invalid state from an earlier submit.
+        if (emailInput) {
+          emailInput.setAttribute('aria-invalid', 'false');
+          emailInput.removeAttribute('aria-errormessage');
+        }
+
+        // Qualifiers ride inside the message: the endpoint treats a `company`
+        // key as a bot honeypot, so the company never posts as its own field.
+        // Disabled (hidden) qualifier fields are absent from FormData.
+        const qualifierLines = [
+          ['org', 'Company'],
+          ['role', 'Role'],
+          ['size', 'Deployment size'],
+        ]
+          .map(([key, label]) => {
+            const v = String(data.get(key) ?? '').trim();
+            return v ? `${label}: ${v}` : '';
+          })
+          .filter(Boolean);
+        const message = qualifierLines.length ? `${qualifierLines.join('\n')}\n\n${body}` : body;
+
+        // mailto: fallback (used only if the POST fails) — preserves the
+        // never-lose-a-lead property the mailto-only flow had.
+        const recipient = form.dataset.fallbackEmail ?? '';
+        const label = topicEl?.selectedOptions[0]?.textContent?.trim() ?? topic;
+        const subject = `[${label}] ${name || email || 'website inquiry'}`;
+        const mailtoBody =
+          `From: ${name} <${email}>\n` + `Topic: ${topic}\n` + `\n` + `${message}\n`;
+        const mailtoHref =
+          `mailto:${recipient}` +
+          `?subject=${encodeURIComponent(subject)}` +
+          `&body=${encodeURIComponent(mailtoBody)}`;
+
+        if (submitBtn) {
+          submitBtn.disabled = true;
+          submitBtn.setAttribute('aria-busy', 'true');
+        }
+        setStatus('success', 'Sending…');
+        try {
+          const res = await fetch('/ai-readability/api/contact', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              email,
+              name,
+              topic,
+              message,
+              company: String(data.get('company') ?? ''),
+              t: loadedAt,
+            }),
+          });
+          if (!res.ok) throw new Error(`status ${res.status}`);
+          form.reset();
+          syncTopic();
+          // Fire on a successful POST only (not on click) so validation-blocked
+          // or failed submits don't inflate the contact-conversion count.
+          const umami = (window as any).umami;
+          umami?.track('contact_submit', { topic });
+          // lead_submit — one event per successful form submit, alongside the
+          // form's own event. Properties: channel (contact | quote | quick | newsletter |
+          // hosting; a contact-form submit on the hosting topic reports hosting), topic
+          // (the topic posted to the capture endpoint), wedge (a known wedge id from ?wedge=, empty
+          // otherwise) and source_path (the page path, never the query string).
+          umami?.track('lead_submit', {
+            channel: topic === 'hosting' ? 'hosting' : 'contact',
+            topic,
+            wedge: wedgeFromQuery,
+            source_path: window.location.pathname,
+          });
+          setStatus(
+            'success',
+            'Thanks, your message is in. We usually reply within one business day (CET).',
+          );
+        } catch {
+          // Backend unreachable — open the mail client so the message is never lost.
+          setStatus(
+            'success',
+            `Opening your mail client, addressed to ${recipient}. If nothing happens, copy ${recipient} and email us directly.`,
+          );
+          window.location.href = mailtoHref;
+        } finally {
+          window.setTimeout(() => {
+            if (submitBtn) {
+              submitBtn.disabled = false;
+              submitBtn.removeAttribute('aria-busy');
+            }
+          }, 2000);
+        }
+      });
+    </script>
+    <!-- Security disclosure (separate channel) -->
+    <div class="mt-12 rounded-lg border border-border bg-bg-secondary p-6">
+      <h2 class="text-lg font-semibold text-text-body">Security disclosure</h2>
+      <p class="mt-2 text-sm text-text-muted">
+        Found a vulnerability? Email
+        <a
+          href="mailto:security@modpagespeed.com"
+          class="text-interactive hover:text-interactive-hover underline"
+        >
+          security@modpagespeed.com
+        </a>
+        . See the
+        <a href="/security/" class="text-interactive hover:text-interactive-hover underline">
+          security policy
+        </a>{' '}
+        for safe-harbor terms and what to include in a report.
+      </p>
+    </div>
+
+    <!-- Manage subscription -->
+    <div class="mt-8 rounded-lg border border-border bg-bg-secondary p-6 text-center">
+      <p class="text-sm font-medium text-text-body">Existing IISpeed or 1.x subscription?</p>
+      <p class="mt-2 text-sm text-text-muted">
+        Invoices stay in the
+        <a
+          href="https://mpspro.onfastspring.com/account"
+          rel="noopener noreferrer"
+          data-umami-event="outbound_fastspring_portal"
+          class="text-interactive hover:text-interactive-hover underline transition-colors"
+        >
+          FastSpring customer portal
+        </a>
+        .
+      </p>
+    </div>
+
+    <div class="mt-8 text-center">
+      <p class="text-sm text-text-annotation">
+        <a
+          href="https://we-amp.com/"
+          rel="noopener noreferrer"
+          class="hover:text-text-muted transition-colors"
+        >
+          We-Amp B.V.
+        </a>
+        , The Netherlands
+      </p>
+    </div>
+  </section>
+</BaseLayout>

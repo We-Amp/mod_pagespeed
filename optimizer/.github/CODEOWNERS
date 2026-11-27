@@ -1,0 +1,20 @@
+# Review ownership for the release and supply-chain surface.
+# These paths request the owner's review. The repository does not require code
+# owner review, so GitHub does not block a merge on it: reviewers treat a diff
+# touching any path listed here as a stop and wait for the owner.
+/sbom/ @oschaaf
+/tools/sbom/grype-db-pin.json @oschaaf
+/.github/workflows/release.yml @oschaaf
+/.github/workflows/pipeline-release-optimizer.yml @oschaaf
+/.github/workflows/pipeline-release-nuget.yml @oschaaf
+/tools/ci/check-kernel-bytes.sh @oschaaf
+/tools/sync-html-kernel.sh @oschaaf
+/tools/sync-js-kernel.sh @oschaaf
+/tools/check-html-kernel-membership.sh @oschaaf
+/tools/check-js-kernel-membership.sh @oschaaf
+/lib/html/HTML_KERNEL_PIN @oschaaf
+/lib/js/JS_KERNEL_PIN @oschaaf
+/tools/ci/nupkg_checks.sh @oschaaf
+/tools/ci/check_release_note.sh @oschaaf
+/tools/changelog/ @oschaaf
+/.github/workflows/pipeline-pr.yml @oschaaf

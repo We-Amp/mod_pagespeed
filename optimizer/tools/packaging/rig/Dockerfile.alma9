@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
+# Package-install verification image: AlmaLinux 9 (rpm flavor, the EL9 leg).
+# See Dockerfile.debian12 for why this base is not digest-pinned and why the
+# image carries full systemd.  rpm-build is here because the rig builds the
+# package inside the target distro (rpmbuild is not available on the runner).
+# strace is for the H6 lanes: the syscall census (syscall-census.sh) straces
+# the daemon inside this image. curl is NOT installed -- the base image
+# already ships curl-minimal, and the full curl package conflicts with it.
+# Neither is a package dependency: the shipped rpm still depends on libc
+# alone.
+FROM almalinux:9@sha256:245f8aab832fe800aa42bdab5fad75ebbd8e0b4c9f24820a83c638b177857ae2
+RUN dnf -y install --setopt=install_weak_deps=False \
+        systemd procps-ng python3 rpm-build systemd-rpm-macros binutils \
+        shadow-utils util-linux \
+        strace \
+    && dnf clean all
+
+# A booted systemd inside a --privileged container shares the HOST kernel's
+# binfmt_misc table. Stock systemd-binfmt.service registers /usr/lib/binfmt.d/*
+# into it at boot and runs `systemd-binfmt --unregister` on stop, which removes
+# EVERY entry on the host -- including the amd64 emulation handler an Apple
+# Silicon runner needs for its other containers. A guest must never manage the
+# host's binfmt table: mask the service and the binfmt_misc mount units.
+RUN for u in systemd-binfmt.service proc-sys-fs-binfmt_misc.automount proc-sys-fs-binfmt_misc.mount; do \
+        ln -sf /dev/null "/etc/systemd/system/$u"; done

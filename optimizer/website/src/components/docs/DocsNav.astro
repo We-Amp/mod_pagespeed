@@ -1,0 +1,138 @@
+---
+/**
+ * DocsNav: the docs navigation tree as collapsible groups.
+ *
+ * Each group is a disclosure: a <button aria-expanded aria-controls> named by
+ * the group title, and the list of links it shows or hides.
+ *
+ * The HTML has every group open, so without JavaScript every link is there to
+ * follow. With JavaScript three pieces keep the closed groups from ever being
+ * painted open:
+ *   1. a one-line script before the markup marks the root element
+ *      (`data-docs-nav-js`);
+ *   2. while that mark is set and an instance is not wired yet, a style rule
+ *      hides every list but the current group's. The browser may paint between
+ *      the markup and the script after it (a slow parser, a network chunk
+ *      boundary); this rule is what it paints then. The rule is an inline
+ *      <style> next to the mark, not part of the site stylesheet, so it holds
+ *      whether or not that sheet has loaded yet;
+ *   3. the script after the markup runs once per instance: it closes every
+ *      group but the current one for real (`hidden`, `aria-expanded`), marks
+ *      the instance `data-docs-nav-ready` and wires the toggles. Enter and
+ *      Space come with <button>; focus stays on the toggle, and the links of
+ *      a closed group are out of the tab order.
+ *
+ * Rendered twice on a docs page (the rail and the phone "Docs menu"), so the
+ * list ids carry `idPrefix`.
+ */
+import { getCollection } from 'astro:content';
+import Icon from '../Icon.astro';
+import { docsNavGroups, docsNavLocation } from '../../lib/docs-nav';
+
+interface Props {
+  /** The page being shown: a docs slug, `filters`, or `filters/<name>`. */
+  current: string;
+  /** Prefix for the list ids; unique per instance on the page. */
+  idPrefix: string;
+  /** `menu` is the denser phone variant. */
+  variant?: 'rail' | 'menu';
+}
+
+const { current, idPrefix, variant = 'rail' } = Astro.props;
+const docs = await getCollection('docs');
+const groups = docsNavGroups(docs);
+const here = docsNavLocation(groups, docs, current);
+const pad = variant === 'rail' ? 'px-3' : 'px-2';
+---
+
+<script is:inline>
+  document.documentElement.setAttribute('data-docs-nav-js', '');
+</script>
+<style is:inline>
+  html[data-docs-nav-js]
+    [data-docs-nav]:not([data-docs-nav-ready])
+    .docs-nav-group:not([data-docs-nav-current])
+    > .docs-nav-list {
+    display: none;
+  }
+  html[data-docs-nav-js]
+    [data-docs-nav]:not([data-docs-nav-ready])
+    .docs-nav-group:not([data-docs-nav-current])
+    .docs-nav-chevron {
+    transform: none;
+  }
+</style>
+
+<div data-docs-nav>
+  {groups.map((group, gi) => {
+    const open = group.label === here.group;
+    const listId = `${idPrefix}-group-${gi}`;
+    return (
+      <div class="docs-nav-group" data-docs-nav-current={open ? '' : undefined}>
+        <button
+          type="button"
+          class:list={[
+            'docs-nav-toggle eyebrow flex w-full items-center justify-between rounded-md py-2 text-left transition-colors hover:text-text-body',
+            pad,
+          ]}
+          aria-expanded="true"
+          aria-controls={listId}
+          data-docs-nav-toggle
+        >
+          <span class="min-w-0 flex-1">{group.label}</span>
+          <Icon
+            name="chevron-down"
+            class="docs-nav-chevron h-4 w-4 shrink-0 text-text-annotation"
+          />
+        </button>
+        <ul id={listId} class="docs-nav-list space-y-1 pb-3 pt-1">
+          {group.items.map((item) => (
+            <li>
+              <a
+                href={item.href}
+                aria-current={item.key === here.item ? 'page' : undefined}
+                class:list={[
+                  'block rounded-md py-2 text-sm transition-colors',
+                  pad,
+                  item.key === here.item
+                    ? 'bg-interactive-wash font-medium text-interactive shadow-[inset_2px_0_0_var(--color-interactive)]'
+                    : 'text-text-muted hover:bg-bg-secondary hover:text-text-body',
+                ]}
+              >
+                {item.label}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  })}
+</div>
+
+<script is:inline>
+  (function () {
+    document.querySelectorAll('[data-docs-nav]:not([data-docs-nav-ready])').forEach(function (nav) {
+      nav.setAttribute('data-docs-nav-ready', '');
+      nav.querySelectorAll('[data-docs-nav-toggle]').forEach(function (toggle) {
+        var list = document.getElementById(toggle.getAttribute('aria-controls') || '');
+        if (!list) return;
+        function set(open) {
+          toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+          list.hidden = !open;
+        }
+        if (!toggle.parentElement.hasAttribute('data-docs-nav-current')) set(false);
+        toggle.addEventListener('click', function () {
+          set(toggle.getAttribute('aria-expanded') !== 'true');
+        });
+      });
+    });
+  })();
+</script>
+
+<style>
+  /* The chevron is rendered by the Icon component, so it does not carry this
+     component's scope: address it with :global(). */
+  .docs-nav-toggle[aria-expanded='true'] :global(.docs-nav-chevron) {
+    transform: rotate(180deg);
+  }
+</style>

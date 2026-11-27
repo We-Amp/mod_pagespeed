@@ -1,0 +1,1775 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "mod_pagespeed-2.1",
+  "documentNamespace": "https://spdx.org/spdxdocs/mod_pagespeed-2.1-2026-11-25T12:44:07Z",
+  "creationInfo": {
+    "created": "2026-11-25T12:44:07Z",
+    "creators": [
+      "Tool: generate-sbom.py-1.0",
+      "Organization: We-Amp B.V."
+    ],
+    "licenseListVersion": "3.22"
+  },
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-Package-mod-pagespeed-2.1",
+      "name": "mod_pagespeed-2.1",
+      "versionInfo": "2.10.0",
+      "supplier": "Organization: We-Amp B.V.",
+      "downloadLocation": "https://github.com/We-Amp/pagespeed-optimizer",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0",
+      "licenseDeclared": "Apache-2.0",
+      "copyrightText": "Copyright (c) 2024-2026 We-Amp B.V.",
+      "externalRefs": []
+    },
+    {
+      "SPDXID": "SPDXRef-Package-abseil-cpp",
+      "name": "abseil-cpp",
+      "versionInfo": "20260107.1",
+      "supplier": "Organization: Google Inc.",
+      "downloadLocation": "https://github.com/abseil/abseil-cpp",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0",
+      "licenseDeclared": "Apache-2.0",
+      "copyrightText": "Copyright Google Inc.",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/abseil/abseil-cpp@20260107.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-re2",
+      "name": "re2",
+      "versionInfo": "2025-11-05.bcr.1",
+      "supplier": "Organization: Google Inc.",
+      "downloadLocation": "https://github.com/google/re2",
+      "filesAnalyzed": false,
+      "licenseConcluded": "BSD-3-Clause",
+      "licenseDeclared": "BSD-3-Clause",
+      "copyrightText": "Copyright Google Inc.",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/google/re2@2025-11-05.bcr.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-highway",
+      "name": "highway",
+      "versionInfo": "1.3.0",
+      "supplier": "Organization: Google LLC",
+      "downloadLocation": "https://github.com/google/highway/archive/refs/tags/1.3.0.tar.gz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0",
+      "licenseDeclared": "Apache-2.0",
+      "copyrightText": "Copyright Google LLC",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/google/highway@1.3.0"
+        }
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "07b3c1ba2c1096878a85a31a5b9b3757427af963b1141ca904db2f9f4afe0bc2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-libjpeg-turbo",
+      "name": "libjpeg_turbo",
+      "versionInfo": "2.1.5.1",
+      "supplier": "Organization: D. R. Commander",
+      "downloadLocation": "https://github.com/libjpeg-turbo/libjpeg-turbo/archive/refs/tags/2.1.5.1.tar.gz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "BSD-3-Clause AND IJG",
+      "licenseDeclared": "BSD-3-Clause AND IJG",
+      "copyrightText": "Copyright D. R. Commander",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/libjpeg-turbo/libjpeg-turbo@2.1.5.1"
+        }
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "61846251941e5791005fb7face196eec24541fce04f12570c308557529e92c75"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-jpegli",
+      "name": "jpegli",
+      "versionInfo": "bc19ca2393f79bfe0a4a9518f77e4ad33ce1ab7a",
+      "supplier": "Organization: Google LLC",
+      "downloadLocation": "https://github.com/google/jpegli/archive/bc19ca2393f79bfe0a4a9518f77e4ad33ce1ab7a.tar.gz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "BSD-3-Clause",
+      "licenseDeclared": "BSD-3-Clause",
+      "copyrightText": "Copyright Google LLC",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/google/jpegli@bc19ca2393f79bfe0a4a9518f77e4ad33ce1ab7a"
+        }
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "56e4ec63dc3a5351117f8508a323ab0a946820d37d3089c7e306ec2b4edac4c8"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-libpng",
+      "name": "libpng",
+      "versionInfo": "1.6.58",
+      "supplier": "Organization: Glenn Randers-Pehrson et al.",
+      "downloadLocation": "https://github.com/glennrp/libpng/archive/refs/tags/v1.6.58.tar.gz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Libpng-2.0",
+      "licenseDeclared": "Libpng-2.0",
+      "copyrightText": "Copyright Glenn Randers-Pehrson et al.",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/glennrp/libpng@1.6.58"
+        }
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "a9d4df463d36a6e5f9c29bd6f4967312d17e996c1854f3511f833924eb1993cf"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-libwebp",
+      "name": "libwebp",
+      "versionInfo": "1.6.0",
+      "supplier": "Organization: Google Inc.",
+      "downloadLocation": "https://github.com/webmproject/libwebp/archive/refs/tags/v1.6.0.tar.gz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "BSD-3-Clause",
+      "licenseDeclared": "BSD-3-Clause",
+      "copyrightText": "Copyright Google Inc.",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/webmproject/libwebp@1.6.0"
+        }
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "93a852c2b3efafee3723efd4636de855b46f9fe1efddd607e1f42f60fc8f2136"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-zlib",
+      "name": "zlib",
+      "versionInfo": "1.3.2",
+      "supplier": "Organization: Jean-loup Gailly and Mark Adler",
+      "downloadLocation": "https://github.com/madler/zlib/archive/refs/tags/v1.3.2.tar.gz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Zlib",
+      "licenseDeclared": "Zlib",
+      "copyrightText": "Copyright Jean-loup Gailly and Mark Adler",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/madler/zlib@1.3.2"
+        }
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "b99a0b86c0ba9360ec7e78c4f1e43b1cbdf1e6936c8fa0f6835c0cd694a495a1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-brotli",
+      "name": "brotli",
+      "versionInfo": "1.2.0",
+      "supplier": "Organization: Google Inc.",
+      "downloadLocation": "https://github.com/google/brotli/archive/refs/tags/v1.2.0.tar.gz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "Copyright Google Inc.",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/google/brotli@1.2.0"
+        }
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "816c96e8e8f193b40151dad7e8ff37b1221d019dbcb9c35cd3fadbfe6477dfec"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-giflib",
+      "name": "giflib",
+      "versionInfo": "5.2.2",
+      "supplier": "Organization: Eric S. Raymond",
+      "downloadLocation": "https://sourceforge.net/projects/giflib/",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "Copyright Eric S. Raymond",
+      "externalRefs": [],
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "be7ffbd057cadebe2aa144542fd90c6838c6a083b5e8a9048b8ee3b66b29d5fb"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-optipng",
+      "name": "optipng",
+      "versionInfo": "0.7.8",
+      "supplier": "Organization: Cosmin Truta",
+      "downloadLocation": "https://prdownloads.sourceforge.net/optipng/optipng-0.7.8.tar.gz?download",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Zlib",
+      "licenseDeclared": "Zlib",
+      "copyrightText": "Copyright Cosmin Truta",
+      "externalRefs": [],
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "25a3bd68481f21502ccaa0f4c13f84dcf6b20338e4c4e8c51f2cefbd8513398c"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-libuv",
+      "name": "libuv",
+      "versionInfo": "1.52.0",
+      "supplier": "Organization: libuv project contributors",
+      "downloadLocation": "https://github.com/libuv/libuv/archive/refs/tags/v1.52.0.tar.gz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "Copyright libuv project contributors",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/libuv/libuv@1.52.0"
+        }
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "eee139c05f7c868f5ae7a54b1e155fd5b6ed13a22329958d2ba711faad016353"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-llhttp",
+      "name": "llhttp",
+      "versionInfo": "9.3.1",
+      "supplier": "Organization: Node.js contributors",
+      "downloadLocation": "https://github.com/nodejs/llhttp/archive/refs/tags/release/v9.3.1.tar.gz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "Copyright Node.js contributors",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/nodejs/llhttp@9.3.1"
+        }
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "c14a93f287d3dbd6580d08af968294f8bcc61e1e1e3c34301549d00f3cf09365"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-libaom",
+      "name": "libaom",
+      "versionInfo": "3.13.3",
+      "supplier": "Organization: Alliance for Open Media",
+      "downloadLocation": "https://storage.googleapis.com/aom-releases/libaom-3.13.3.tar.gz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "BSD-2-Clause",
+      "licenseDeclared": "BSD-2-Clause",
+      "copyrightText": "Copyright Alliance for Open Media",
+      "externalRefs": [],
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "446a4ae9741cb8f3eeb98c949d25f91b48cb2b8569cae975c4b737392e9024fc"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-libavif",
+      "name": "libavif",
+      "versionInfo": "1.3.0",
+      "supplier": "Organization: Joe Drago",
+      "downloadLocation": "https://github.com/AOMediaCodec/libavif/archive/refs/tags/v1.3.0.tar.gz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "BSD-2-Clause",
+      "licenseDeclared": "BSD-2-Clause",
+      "copyrightText": "Copyright Joe Drago",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/AOMediaCodec/libavif@1.3.0"
+        }
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "0a545e953cc049bf5bcf4ee467306a2f113a75110edf59e61248873101cd26c1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-ed25519",
+      "name": "ed25519",
+      "versionInfo": "b1f19fab4aebe607805620d25a5e42566ce46a0e",
+      "supplier": "Organization: Orson Peters",
+      "downloadLocation": "https://github.com/orlp/ed25519/archive/b1f19fab4aebe607805620d25a5e42566ce46a0e.tar.gz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Zlib",
+      "licenseDeclared": "Zlib",
+      "copyrightText": "Copyright Orson Peters",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/orlp/ed25519@b1f19fab4aebe607805620d25a5e42566ce46a0e"
+        }
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "aedb26c46d3dc3b721ab37c5248d5c923142e4d56009a9605c470383f32ce77a"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-nlohmann-json",
+      "name": "nlohmann_json",
+      "versionInfo": "3.12.0",
+      "supplier": "Organization: Niels Lohmann",
+      "downloadLocation": "https://github.com/nlohmann/json/archive/refs/tags/v3.12.0.tar.gz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "Copyright Niels Lohmann",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/nlohmann/json@3.12.0"
+        }
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "4b92eb0c06d10683f7447ce9406cb97cd4b453be18d7279320f7b2f025c10187"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-nanosvg",
+      "name": "nanosvg",
+      "versionInfo": "5cefd9847949af6df13f65027fd43af5a7513633",
+      "supplier": "Organization: Mikko Mononen",
+      "downloadLocation": "https://github.com/memononen/nanosvg/archive/5cefd9847949af6df13f65027fd43af5a7513633.tar.gz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Zlib",
+      "licenseDeclared": "Zlib",
+      "copyrightText": "Copyright Mikko Mononen",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/memononen/nanosvg@5cefd9847949af6df13f65027fd43af5a7513633"
+        }
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "01f0892f15c12e364063c07ef643f566372593f60e7010b33707a3804bf74aa1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-libyuv",
+      "name": "libyuv",
+      "versionInfo": "d23308a2a7442be8e559b1b471862fd7588d6a57",
+      "supplier": "Organization: The Chromium Authors",
+      "downloadLocation": "https://chromium.googlesource.com/libyuv/libyuv.git",
+      "filesAnalyzed": false,
+      "licenseConcluded": "BSD-3-Clause",
+      "licenseDeclared": "BSD-3-Clause",
+      "copyrightText": "Copyright The Chromium Authors",
+      "externalRefs": []
+    },
+    {
+      "SPDXID": "SPDXRef-Package-skcms",
+      "name": "skcms",
+      "versionInfo": "bf2d52b98a420c59d991ced59fef8b4243b7dc13",
+      "supplier": "Organization: Google LLC",
+      "downloadLocation": "https://skia.googlesource.com/skcms.git",
+      "filesAnalyzed": false,
+      "licenseConcluded": "BSD-3-Clause",
+      "licenseDeclared": "BSD-3-Clause",
+      "copyrightText": "Copyright Google LLC",
+      "externalRefs": []
+    },
+    {
+      "SPDXID": "SPDXRef-Package-cyclone",
+      "name": "cyclone",
+      "versionInfo": "2d4db3015c5de022cfd1bd7b40af7771b6d96664",
+      "supplier": "Organization: We-Amp B.V.",
+      "downloadLocation": "https://github.com/We-Amp/cyclone-cache",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0",
+      "licenseDeclared": "Apache-2.0",
+      "copyrightText": "Copyright We-Amp B.V.",
+      "externalRefs": []
+    },
+    {
+      "SPDXID": "SPDXRef-Package-vtracer",
+      "name": "vtracer",
+      "versionInfo": "0.6.5",
+      "supplier": "Organization: visioncortex",
+      "downloadLocation": "https://crates.io/crates/vtracer/0.6.5",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "licenseDeclared": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright visioncortex",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/vtracer@0.6.5"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-visioncortex",
+      "name": "visioncortex",
+      "versionInfo": "0.8.10",
+      "supplier": "Organization: visioncortex",
+      "downloadLocation": "https://crates.io/crates/visioncortex/0.8.10",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "licenseDeclared": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright visioncortex",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/visioncortex@0.8.10"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-image",
+      "name": "image",
+      "versionInfo": "0.23.14",
+      "supplier": "Organization: The image-rs Developers",
+      "downloadLocation": "https://crates.io/crates/image/0.23.14",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "Copyright The image-rs Developers",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/image@0.23.14"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-rayon",
+      "name": "rayon",
+      "versionInfo": "1.12.0",
+      "supplier": "Organization: Josh Stone, Niko Matsakis",
+      "downloadLocation": "https://crates.io/crates/rayon/1.12.0",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "licenseDeclared": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright Josh Stone, Niko Matsakis",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/rayon@1.12.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-rayon-core",
+      "name": "rayon-core",
+      "versionInfo": "1.13.0",
+      "supplier": "Organization: Josh Stone, Niko Matsakis",
+      "downloadLocation": "https://crates.io/crates/rayon-core/1.13.0",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "licenseDeclared": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright Josh Stone, Niko Matsakis",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/rayon-core@1.13.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-crossbeam-deque",
+      "name": "crossbeam-deque",
+      "versionInfo": "0.8.6",
+      "supplier": "Organization: The Crossbeam Project Developers",
+      "downloadLocation": "https://crates.io/crates/crossbeam-deque/0.8.6",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "licenseDeclared": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright The Crossbeam Project Developers",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/crossbeam-deque@0.8.6"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-crossbeam-epoch",
+      "name": "crossbeam-epoch",
+      "versionInfo": "0.9.20",
+      "supplier": "Organization: The Crossbeam Project Developers",
+      "downloadLocation": "https://crates.io/crates/crossbeam-epoch/0.9.20",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "licenseDeclared": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright The Crossbeam Project Developers",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/crossbeam-epoch@0.9.20"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-crossbeam-utils",
+      "name": "crossbeam-utils",
+      "versionInfo": "0.8.21",
+      "supplier": "Organization: The Crossbeam Project Developers",
+      "downloadLocation": "https://crates.io/crates/crossbeam-utils/0.8.21",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "licenseDeclared": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright The Crossbeam Project Developers",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/crossbeam-utils@0.8.21"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-num-traits",
+      "name": "num-traits",
+      "versionInfo": "0.2.19",
+      "supplier": "Organization: The Rust Project Developers",
+      "downloadLocation": "https://crates.io/crates/num-traits/0.2.19",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "licenseDeclared": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright The Rust Project Developers",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/num-traits@0.2.19"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-num-integer",
+      "name": "num-integer",
+      "versionInfo": "0.1.46",
+      "supplier": "Organization: The Rust Project Developers",
+      "downloadLocation": "https://crates.io/crates/num-integer/0.1.46",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "licenseDeclared": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright The Rust Project Developers",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/num-integer@0.1.46"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-num-iter",
+      "name": "num-iter",
+      "versionInfo": "0.1.45",
+      "supplier": "Organization: The Rust Project Developers",
+      "downloadLocation": "https://crates.io/crates/num-iter/0.1.45",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "licenseDeclared": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright The Rust Project Developers",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/num-iter@0.1.45"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-num-rational",
+      "name": "num-rational",
+      "versionInfo": "0.3.2",
+      "supplier": "Organization: The Rust Project Developers",
+      "downloadLocation": "https://crates.io/crates/num-rational/0.3.2",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "licenseDeclared": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright The Rust Project Developers",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/num-rational@0.3.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-itertools",
+      "name": "itertools",
+      "versionInfo": "0.8.2",
+      "supplier": "Organization: bluss",
+      "downloadLocation": "https://crates.io/crates/itertools/0.8.2",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "licenseDeclared": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright bluss",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/itertools@0.8.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-bytemuck",
+      "name": "bytemuck",
+      "versionInfo": "1.25.0",
+      "supplier": "Organization: Lokathor",
+      "downloadLocation": "https://crates.io/crates/bytemuck/1.25.0",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Zlib OR Apache-2.0 OR MIT",
+      "licenseDeclared": "Zlib OR Apache-2.0 OR MIT",
+      "copyrightText": "Copyright Lokathor",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/bytemuck@1.25.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-byteorder",
+      "name": "byteorder",
+      "versionInfo": "1.5.0",
+      "supplier": "Organization: Andrew Gallant",
+      "downloadLocation": "https://crates.io/crates/byteorder/1.5.0",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Unlicense",
+      "licenseDeclared": "MIT OR Unlicense",
+      "copyrightText": "Copyright Andrew Gallant",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/byteorder@1.5.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-bit-vec",
+      "name": "bit-vec",
+      "versionInfo": "0.6.3",
+      "supplier": "Organization: Alexis Beingessner",
+      "downloadLocation": "https://crates.io/crates/bit-vec/0.6.3",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "licenseDeclared": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright Alexis Beingessner",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/bit-vec@0.6.3"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-gif",
+      "name": "gif",
+      "versionInfo": "0.11.4",
+      "supplier": "Organization: The image-rs Developers",
+      "downloadLocation": "https://crates.io/crates/gif/0.11.4",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "licenseDeclared": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright The image-rs Developers",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/gif@0.11.4"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-png",
+      "name": "png",
+      "versionInfo": "0.16.8",
+      "supplier": "Organization: The image-rs Developers",
+      "downloadLocation": "https://crates.io/crates/png/0.16.8",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "licenseDeclared": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright The image-rs Developers",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/png@0.16.8"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-jpeg-decoder",
+      "name": "jpeg-decoder",
+      "versionInfo": "0.1.22",
+      "supplier": "Organization: The image-rs Developers",
+      "downloadLocation": "https://crates.io/crates/jpeg-decoder/0.1.22",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "licenseDeclared": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright The image-rs Developers",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/jpeg-decoder@0.1.22"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-tiff",
+      "name": "tiff",
+      "versionInfo": "0.6.1",
+      "supplier": "Organization: The image-rs Developers",
+      "downloadLocation": "https://crates.io/crates/tiff/0.6.1",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "Copyright The image-rs Developers",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/tiff@0.6.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-roots",
+      "name": "roots",
+      "versionInfo": "0.0.6",
+      "supplier": "Organization: Mikhail Vorotilov",
+      "downloadLocation": "https://crates.io/crates/roots/0.0.6",
+      "filesAnalyzed": false,
+      "licenseConcluded": "BSD-2-Clause",
+      "licenseDeclared": "BSD-2-Clause",
+      "copyrightText": "Copyright Mikhail Vorotilov",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/roots@0.0.6"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-cfg-if",
+      "name": "cfg-if",
+      "versionInfo": "1.0.4",
+      "supplier": "Organization: Alex Crichton",
+      "downloadLocation": "https://crates.io/crates/cfg-if/1.0.4",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "licenseDeclared": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright Alex Crichton",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/cfg-if@1.0.4"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-libc",
+      "name": "libc",
+      "versionInfo": "0.2.186",
+      "supplier": "Organization: The Rust Project Developers",
+      "downloadLocation": "https://crates.io/crates/libc/0.2.186",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "licenseDeclared": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright The Rust Project Developers",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/libc@0.2.186"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-smallvec",
+      "name": "smallvec",
+      "versionInfo": "1.15.1",
+      "supplier": "Organization: The Servo Project Developers",
+      "downloadLocation": "https://crates.io/crates/smallvec/1.15.1",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "licenseDeclared": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright The Servo Project Developers",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/smallvec@1.15.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-either",
+      "name": "either",
+      "versionInfo": "1.16.0",
+      "supplier": "Organization: bluss",
+      "downloadLocation": "https://crates.io/crates/either/1.16.0",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "licenseDeclared": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright bluss",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/either@1.16.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-fastrand",
+      "name": "fastrand",
+      "versionInfo": "2.4.1",
+      "supplier": "Organization: Stjepan Glavina",
+      "downloadLocation": "https://crates.io/crates/fastrand/2.4.1",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "licenseDeclared": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright Stjepan Glavina",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/fastrand@2.4.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-deflate",
+      "name": "deflate",
+      "versionInfo": "0.8.6",
+      "supplier": "Organization: oyvindln",
+      "downloadLocation": "https://crates.io/crates/deflate/0.8.6",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "licenseDeclared": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright oyvindln",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/deflate@0.8.6"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-weezl",
+      "name": "weezl",
+      "versionInfo": "0.1.12",
+      "supplier": "Organization: HeroicKatora",
+      "downloadLocation": "https://crates.io/crates/weezl/0.1.12",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "licenseDeclared": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright HeroicKatora",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/weezl@0.1.12"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-adler",
+      "name": "adler",
+      "versionInfo": "1.0.2",
+      "supplier": "Organization: Jonas Schievink",
+      "downloadLocation": "https://crates.io/crates/adler/1.0.2",
+      "filesAnalyzed": false,
+      "licenseConcluded": "0BSD OR MIT OR Apache-2.0",
+      "licenseDeclared": "0BSD OR MIT OR Apache-2.0",
+      "copyrightText": "Copyright Jonas Schievink",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/adler@1.0.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-adler32",
+      "name": "adler32",
+      "versionInfo": "1.2.0",
+      "supplier": "Organization: Remi Rampin",
+      "downloadLocation": "https://crates.io/crates/adler32/1.2.0",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Zlib",
+      "licenseDeclared": "Zlib",
+      "copyrightText": "Copyright Remi Rampin",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/adler32@1.2.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-crc32fast",
+      "name": "crc32fast",
+      "versionInfo": "1.5.0",
+      "supplier": "Organization: Sam Rijs, Alex Crichton",
+      "downloadLocation": "https://crates.io/crates/crc32fast/1.5.0",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "licenseDeclared": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright Sam Rijs, Alex Crichton",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/crc32fast@1.5.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-bitflags",
+      "name": "bitflags",
+      "versionInfo": "1.3.2",
+      "supplier": "Organization: The Rust Project Developers",
+      "downloadLocation": "https://crates.io/crates/bitflags/1.3.2",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "licenseDeclared": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright The Rust Project Developers",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/bitflags@1.3.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-autocfg",
+      "name": "autocfg",
+      "versionInfo": "1.5.1",
+      "supplier": "Organization: Josh Stone",
+      "downloadLocation": "https://crates.io/crates/autocfg/1.5.1",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "licenseDeclared": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright Josh Stone",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/autocfg@1.5.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-flo-curves",
+      "name": "flo_curves",
+      "versionInfo": "0.3.1",
+      "supplier": "Organization: Andrew Hunter",
+      "downloadLocation": "https://crates.io/crates/flo_curves/0.3.1",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0",
+      "licenseDeclared": "Apache-2.0",
+      "copyrightText": "Copyright Andrew Hunter",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/flo_curves@0.3.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-color-quant",
+      "name": "color_quant",
+      "versionInfo": "1.1.0",
+      "supplier": "Organization: PistonDevelopers",
+      "downloadLocation": "https://crates.io/crates/color_quant/1.1.0",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "Copyright PistonDevelopers",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/color_quant@1.1.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-scoped-threadpool",
+      "name": "scoped_threadpool",
+      "versionInfo": "0.1.9",
+      "supplier": "Organization: Marvin L\u00f6bel",
+      "downloadLocation": "https://crates.io/crates/scoped_threadpool/0.1.9",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "Copyright Marvin L\u00f6bel",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/scoped_threadpool@0.1.9"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-miniz-oxide",
+      "name": "miniz_oxide",
+      "versionInfo": "0.3.7",
+      "supplier": "Organization: Frommi",
+      "downloadLocation": "https://crates.io/crates/miniz_oxide/0.3.7",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "Copyright Frommi",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/miniz_oxide@0.3.7"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-miniz-oxide-0.4.4",
+      "name": "miniz_oxide",
+      "versionInfo": "0.4.4",
+      "supplier": "Organization: Frommi",
+      "downloadLocation": "https://crates.io/crates/miniz_oxide/0.4.4",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Zlib OR Apache-2.0",
+      "licenseDeclared": "MIT OR Zlib OR Apache-2.0",
+      "copyrightText": "Copyright Frommi",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/miniz_oxide@0.4.4"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-svelte",
+      "name": "svelte",
+      "versionInfo": "5.55.9",
+      "supplier": "Organization: Rich Harris",
+      "downloadLocation": "https://www.npmjs.com/package/svelte/v/5.55.9",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "Copyright Rich Harris",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/svelte@5.55.9"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-uplot",
+      "name": "uplot",
+      "versionInfo": "1.6.32",
+      "supplier": "Organization: Leon Sorokin",
+      "downloadLocation": "https://www.npmjs.com/package/uplot/v/1.6.32",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "Copyright Leon Sorokin",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/uplot@1.6.32"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-pixelmatch",
+      "name": "pixelmatch",
+      "versionInfo": "7.2.0",
+      "supplier": "Organization: Volodymyr Agafonkin",
+      "downloadLocation": "https://www.npmjs.com/package/pixelmatch/v/7.2.0",
+      "filesAnalyzed": false,
+      "licenseConcluded": "ISC",
+      "licenseDeclared": "ISC",
+      "copyrightText": "Copyright Volodymyr Agafonkin",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/pixelmatch@7.2.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-pngjs",
+      "name": "pngjs",
+      "versionInfo": "7.0.0",
+      "supplier": "Organization: Luke Page",
+      "downloadLocation": "https://www.npmjs.com/package/pngjs/v/7.0.0",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "Copyright Luke Page",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/pngjs@7.0.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-d3-axis",
+      "name": "d3-axis",
+      "versionInfo": "3.0.0",
+      "supplier": "Organization: Mike Bostock",
+      "downloadLocation": "https://www.npmjs.com/package/d3-axis/v/3.0.0",
+      "filesAnalyzed": false,
+      "licenseConcluded": "ISC",
+      "licenseDeclared": "ISC",
+      "copyrightText": "Copyright Mike Bostock",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/d3-axis@3.0.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-d3-format",
+      "name": "d3-format",
+      "versionInfo": "3.1.2",
+      "supplier": "Organization: Mike Bostock",
+      "downloadLocation": "https://www.npmjs.com/package/d3-format/v/3.1.2",
+      "filesAnalyzed": false,
+      "licenseConcluded": "ISC",
+      "licenseDeclared": "ISC",
+      "copyrightText": "Copyright Mike Bostock",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/d3-format@3.1.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-d3-scale",
+      "name": "d3-scale",
+      "versionInfo": "4.0.2",
+      "supplier": "Organization: Mike Bostock",
+      "downloadLocation": "https://www.npmjs.com/package/d3-scale/v/4.0.2",
+      "filesAnalyzed": false,
+      "licenseConcluded": "ISC",
+      "licenseDeclared": "ISC",
+      "copyrightText": "Copyright Mike Bostock",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/d3-scale@4.0.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-d3-selection",
+      "name": "d3-selection",
+      "versionInfo": "3.0.0",
+      "supplier": "Organization: Mike Bostock",
+      "downloadLocation": "https://www.npmjs.com/package/d3-selection/v/3.0.0",
+      "filesAnalyzed": false,
+      "licenseConcluded": "ISC",
+      "licenseDeclared": "ISC",
+      "copyrightText": "Copyright Mike Bostock",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/d3-selection@3.0.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-d3-array",
+      "name": "d3-array",
+      "versionInfo": "3.2.4",
+      "supplier": "Organization: Mike Bostock",
+      "downloadLocation": "https://www.npmjs.com/package/d3-array/v/3.2.4",
+      "filesAnalyzed": false,
+      "licenseConcluded": "ISC",
+      "licenseDeclared": "ISC",
+      "copyrightText": "Copyright Mike Bostock",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/d3-array@3.2.4"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-d3-interpolate",
+      "name": "d3-interpolate",
+      "versionInfo": "3.0.1",
+      "supplier": "Organization: Mike Bostock",
+      "downloadLocation": "https://www.npmjs.com/package/d3-interpolate/v/3.0.1",
+      "filesAnalyzed": false,
+      "licenseConcluded": "ISC",
+      "licenseDeclared": "ISC",
+      "copyrightText": "Copyright Mike Bostock",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/d3-interpolate@3.0.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-d3-time",
+      "name": "d3-time",
+      "versionInfo": "3.1.0",
+      "supplier": "Organization: Mike Bostock",
+      "downloadLocation": "https://www.npmjs.com/package/d3-time/v/3.1.0",
+      "filesAnalyzed": false,
+      "licenseConcluded": "ISC",
+      "licenseDeclared": "ISC",
+      "copyrightText": "Copyright Mike Bostock",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/d3-time@3.1.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-d3-time-format",
+      "name": "d3-time-format",
+      "versionInfo": "4.1.0",
+      "supplier": "Organization: Mike Bostock",
+      "downloadLocation": "https://www.npmjs.com/package/d3-time-format/v/4.1.0",
+      "filesAnalyzed": false,
+      "licenseConcluded": "ISC",
+      "licenseDeclared": "ISC",
+      "copyrightText": "Copyright Mike Bostock",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/d3-time-format@4.1.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-d3-color",
+      "name": "d3-color",
+      "versionInfo": "3.1.0",
+      "supplier": "Organization: Mike Bostock",
+      "downloadLocation": "https://www.npmjs.com/package/d3-color/v/3.1.0",
+      "filesAnalyzed": false,
+      "licenseConcluded": "ISC",
+      "licenseDeclared": "ISC",
+      "copyrightText": "Copyright Mike Bostock",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/d3-color@3.1.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-Microsoft.IO.RecyclableMemoryStream",
+      "name": "Microsoft.IO.RecyclableMemoryStream",
+      "versionInfo": "3.0.1",
+      "supplier": "Organization: Microsoft",
+      "downloadLocation": "https://www.nuget.org/packages/Microsoft.IO.RecyclableMemoryStream/3.0.1",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "Copyright Microsoft",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:nuget/Microsoft.IO.RecyclableMemoryStream@3.0.1"
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "spdxElementId": "SPDXRef-DOCUMENT",
+      "relationshipType": "DESCRIBES",
+      "relatedSpdxElement": "SPDXRef-Package-mod-pagespeed-2.1"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-abseil-cpp"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-re2"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-highway"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-libjpeg-turbo"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-jpegli"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-libpng"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-libwebp"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-zlib"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-brotli"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-giflib"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-optipng"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-libuv"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-llhttp"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-libaom"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-libavif"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-ed25519"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-nlohmann-json"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-nanosvg"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-libyuv"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-skcms"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-cyclone"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-vtracer"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-visioncortex"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-image"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-rayon"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-rayon-core"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-crossbeam-deque"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-crossbeam-epoch"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-crossbeam-utils"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-num-traits"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-num-integer"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-num-iter"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-num-rational"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-itertools"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-bytemuck"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-byteorder"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-bit-vec"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-gif"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-png"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-jpeg-decoder"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-tiff"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-roots"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-cfg-if"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-libc"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-smallvec"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-either"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-fastrand"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-deflate"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-weezl"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-adler"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-adler32"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-crc32fast"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-bitflags"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-autocfg"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-flo-curves"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-color-quant"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-scoped-threadpool"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-miniz-oxide"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-miniz-oxide-0.4.4"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-svelte"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-uplot"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-pixelmatch"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-pngjs"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-d3-axis"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-d3-format"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-d3-scale"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-d3-selection"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-d3-array"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-d3-interpolate"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-d3-time"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-d3-time-format"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-d3-color"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-mod-pagespeed-2.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-Microsoft.IO.RecyclableMemoryStream"
+    }
+  ]
+}

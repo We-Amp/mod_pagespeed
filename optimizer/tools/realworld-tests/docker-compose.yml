@@ -1,0 +1,64 @@
+# mod_pagespeed - Real-World Website Proxy Tests
+#
+# Two services sharing a named volume, proxying directly to real internet sites.
+# No custom origin — nginx acts as a reverse proxy to external websites.
+#
+# Prerequisites:
+#   1. Clone Cyclone:  git clone <cyclone-repo> reference/cyclone
+#   2. Build dev image: ./tools/docker-build.sh
+#
+# Usage:
+#   docker compose -f tools/realworld-tests/docker-compose.yml up -d
+#   cd tools/realworld-tests && pytest -v
+#   docker compose -f tools/realworld-tests/docker-compose.yml down -v
+
+services:
+  # PageSpeed factory worker: processes cache notifications,
+  # writes optimized variants, and exposes management API.
+  worker:
+    build:
+      context: ../../
+      dockerfile: tools/e2e/Dockerfile.e2e
+    entrypoint: ["/entrypoint-worker-realworld.sh"]
+    shm_size: '256m'
+    volumes:
+      - shared:/shared
+      - ./entrypoint-worker-realworld.sh:/entrypoint-worker-realworld.sh:ro
+      - ../../tools/workbench/packages/web-shell/dist:/opt/console:ro
+    ports:
+      - "127.0.0.1:${REALWORLD_WORKER_PORT:-9882}:9882"
+
+  # Nginx with pagespeed module: reverse proxy to real internet sites,
+  # serves from cache on hit.
+  nginx:
+    build:
+      context: ../../
+      dockerfile: tools/e2e/Dockerfile.e2e
+    command: ["nginx", "-g", "daemon off;"]
+    ports:
+      - "127.0.0.1:${REALWORLD_NGINX_PORT:-8083}:8083"
+    volumes:
+      - shared:/shared
+      - ./nginx-realworld.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - worker
+      - httpbin
+
+  # Local httpbin: deterministic, programmable HTTP responses.
+  # Replaces the public httpbin.org upstream, which times out under CI load.
+  # go-httpbin listens on :8080 by default.
+  #
+  # Pinned to a real, multi-arch (linux/amd64 + linux/arm64) tag by digest.
+  # The previous v2.23.1 tag does not exist in the registry, so `compose up`
+  # failed pulling it (manifest unknown): the x64 leg failed at stack startup
+  # and the arm64 leg hung retrying the pull. The image is distroless (no
+  # shell/wget), so no in-container healthcheck is possible; nginx instead
+  # resolves this service at request time (see nginx-realworld.conf), so the
+  # stack starts cleanly regardless of go-httpbin readiness/ordering.
+  httpbin:
+    image: ghcr.io/mccutchen/go-httpbin:v2.16.1@sha256:0b5ee23649a6cb94fd990a6d6bf414d8b4bddcf6f783ab8dcb389a6bcbc5a926
+    expose:
+      - "8080"
+
+volumes:
+  shared:

@@ -1,0 +1,100 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// The no-JavaScript way to send an inquiry from a scan page: a plain form post
+// to the contact endpoint, which answers with a redirect to the thanks page.
+// Rendered once per page, next to the scan box, which the layout hides when
+// scripts are off (data-scan-needs-js). Field names match the JS lead
+// form's payload; `company` is the honeypot, hidden off-screen the same way
+// the site's quick-message form hides it.
+interface Props {
+  /** The contact topic posted with the inquiry. */
+  topic: string;
+}
+const { topic } = Astro.props;
+
+const field =
+  'mt-1 block w-full rounded-md border border-control-border bg-bg-elevated text-text-body px-3 py-2 focus:border-interactive focus:ring-2 focus:ring-interactive';
+---
+
+<noscript>
+  <section
+    class="mx-auto max-w-xl px-4 sm:px-6 lg:px-8 pb-12"
+    aria-labelledby="noscript-lead-title"
+    data-pagefind-ignore
+  >
+    <div class="rounded-lg border border-border bg-bg-elevated p-6">
+      <h2 id="noscript-lead-title" class="text-lg font-semibold text-text-body">
+        The scan needs JavaScript
+      </h2>
+      <p class="mt-2 text-sm text-text-muted">
+        Turn on JavaScript to run a scan. Or send us your email address and a question below. We
+        usually reply within one business day (CET).
+      </p>
+      <form
+        method="post"
+        action="/ai-readability/api/contact"
+        data-ui="noscript-lead"
+        class="mt-4 space-y-4"
+      >
+        <input type="hidden" name="topic" value={topic} />
+        <input type="hidden" name="redirect" value="/contact/thanks/" />
+        <div
+          style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden"
+          aria-hidden="true"
+        >
+          <label for="noscript-company">Leave this field empty</label>
+          <input
+            id="noscript-company"
+            name="company"
+            type="text"
+            tabindex="-1"
+            autocomplete="new-password"
+          />
+        </div>
+        <div>
+          <label for="noscript-email" class="eyebrow">
+            Email
+          </label>
+          <input
+            id="noscript-email"
+            name="email"
+            type="email"
+            required
+            autocomplete="email"
+            class={field}
+          />
+        </div>
+        <div>
+          <label for="noscript-name" class="eyebrow">
+            Name
+          </label>
+          <input id="noscript-name" name="name" type="text" autocomplete="name" class={field} />
+        </div>
+        <div>
+          <label for="noscript-url" class="eyebrow">
+            Site address
+          </label>
+          <input
+            id="noscript-url"
+            name="url"
+            type="text"
+            inputmode="url"
+            autocomplete="url"
+            class={field}
+          />
+        </div>
+        <div>
+          <label for="noscript-message" class="eyebrow">
+            Message
+          </label>
+          <textarea id="noscript-message" name="message" rows="4" class={field}></textarea>
+        </div>
+        <button type="submit" class="btn-primary">
+          Send message
+        </button>
+      </form>
+    </div>
+  </section>
+</noscript>

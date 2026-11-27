@@ -1,0 +1,47 @@
+<!-- SPDX-License-Identifier: Apache-2.0
+     Copyright (c) 2024-2026 We-Amp B.V. -->
+
+<Project>
+
+  <PropertyGroup>
+    <LangVersion>13.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+  <!-- NuGet package metadata (only applies to packable projects) -->
+  <PropertyGroup Condition="'$(IsPackable)' != 'false'">
+    <Version>2.10.0</Version>
+    <Authors>We-Amp</Authors>
+    <Company>We-Amp B.V.</Company>
+    <Copyright>Copyright (c) 2024-2026 We-Amp B.V.</Copyright>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageProjectUrl>https://modpagespeed.com/features/#aspnet-core</PackageProjectUrl>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>icon.png</PackageIcon>
+    <PackageReleaseNotes>Release notes for this version: https://modpagespeed.com/docs/release-notes/#v$(Version.Replace('.','-'))
+See CHANGELOG.md in the repository for the full history.</PackageReleaseNotes>
+    <!-- Source Link: the source is public, so the packages carry the
+         repository URL and commit and debuggers can fetch the exact source
+         through Source Link. The .NET SDK bundles Microsoft.SourceLink.GitHub. -->
+    <RepositoryUrl>https://github.com/We-Amp/pagespeed-optimizer</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <!-- Embed the portable PDB (with the Source Link map) in the assembly so a
+         debugger can step into the source without a separate symbol package. -->
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(IsPackable)' != 'false'">
+    <None Include="$(MSBuildThisFileDirectory)../../LICENSE" Pack="true" PackagePath="" />
+    <None Include="$(MSBuildThisFileDirectory)../../NOTICE" Pack="true" PackagePath="" />
+    <None Include="$(MSBuildThisFileDirectory)../../THIRD-PARTY-NOTICES" Pack="true" PackagePath="" />
+    <None Include="$(MSBuildThisFileDirectory)icon.png" Pack="true" PackagePath="" />
+    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="README.md" />
+  </ItemGroup>
+
+</Project>

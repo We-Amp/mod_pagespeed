@@ -1,0 +1,431 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
+name: Website
+
+# Website gate: website/ is the modpagespeed.com site, and this tree is its
+# source of truth -- every site change lands here through a pull request.
+# This workflow is what stands between such a change and main:
+#
+#   website-build       the content guards (no version-pinned URLs in
+#                       non-frozen content; the 2.1 manifest does not lag the
+#                       shipped release), npm ci, the source checks (npm run
+#                       format:check for Prettier, npm run lint for ESLint
+#                       plus astro check), the vitest unit + sync gates, a
+#                       production build, and the built-output content lint
+#                       (npm run check:content), so nothing that cannot
+#                       render or that contradicts its own data ships.
+#   website-reference-drift
+#                       the generated configuration and filter references
+#                       still match the product source at the pinned tag.
+#   website-playwright  the browser suite in website/tests/ against the dev
+#                       server, so the pages behave, not just build.
+#   website-lighthouse  Lighthouse budgets (mobile, median of 3 runs) on the
+#                       built site: accessibility, best-practices and SEO
+#                       must not regress; performance is warn-only because a
+#                       hosted runner is too noisy to gate on.
+#
+# All jobs run on GitHub-hosted runners with first-party actions only. The
+# build runs with PRICING_ALLOW_STALE=1: a hosted build holds no pricing API
+# credentials, so it proceeds on the committed pricing file, loudly
+# (fetch-pricing.js refuses without this). Deploying the site is the
+# operator's step, from this tree; nothing in this workflow deploys.
+#
+# Two ways in for a pull request, switched by the repository variable
+# WEBSITE_GATE (docs/ci/pipelines.md, "WEBSITE_GATE"):
+#   * unset or any value but `off` (the default): the CI pipeline calls it
+#     (pipeline-pr.yml, job `website`) for a pull request or merge group that
+#     changes the site or its sources, so its result feeds the required
+#     `CI gate`, and every job of a direct pull_request run skips (the
+#     `direct_pr_off` term below), so nothing runs twice;
+#   * `off` (rollback only): this workflow's own pull_request trigger runs
+#     it, as an advisory check outside `CI gate`.
+# A called run has inputs.called set (its default); a direct run has no
+# inputs. In the merge queue only the build and reference drift run: the
+# browser suite and Lighthouse ran on the same change in the pull request. A
+# push to main that changes the tree this gate owns runs it directly, and the
+# nightly runs the full-width geometry sweep. The concurrency group keeps only
+# the newest run per caller and ref.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'website/**'
+      - 'shared/product-facts.mjs'
+      - '.github/workflows/website.yml'
+      # Sources the generated references are derived from (reference drift gates).
+      - 'src/worker/main.cc'
+      - 'src/nginx/ngx_pagespeed_module.cc'
+      - 'docker/nginx-version.txt'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'website/**'
+      - 'shared/product-facts.mjs'
+      - '.github/workflows/website.yml'
+      - 'src/worker/main.cc'
+      - 'src/nginx/ngx_pagespeed_module.cc'
+      - 'docker/nginx-version.txt'
+  # Called by pipeline-pr.yml for pull requests and merge groups unless
+  # WEBSITE_GATE is `off`.
+  workflow_call:
+    inputs:
+      called:
+        description: Set by the caller; a direct run has no inputs
+        type: boolean
+        default: true
+  # Nightly full-width geometry sweep (website-playwright only; the other
+  # jobs skip on a schedule). Pull requests run the 375px column.
+  schedule:
+    - cron: '30 2 * * *'
+
+concurrency:
+  # github.workflow is the caller's name when called, so a called run and a
+  # direct one never share a group.
+  group: website-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  website-build:
+    permissions:
+      contents: read
+      # Only the merge queue lookup of the release window step reads a pull request.
+      pull-requests: read
+    name: Website unit tests & build (ubuntu)
+    # direct_pr_off: a direct pull_request run skips unless WEBSITE_GATE is
+    # `off` (the CI pipeline runs the gate then). Same term on every job.
+    if: github.event_name != 'schedule' && !(github.event_name == 'pull_request' && !inputs.called && vars.WEBSITE_GATE != 'off')
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Every version-coupled fragment on the site flows through getRelease()
+      # or the release-aware components in website/src/components/release/,
+      # so the rendered version follows the manifest. A literal
+      # /releases/vX.Y.Z/ URL in docs, pages, components or layouts bypasses
+      # that and goes stale on the next release. Blog posts under
+      # website/src/content/blog/ are frozen by design (dated announcements)
+      # and exempt.
+      - name: Guard against version-pinned URLs in non-frozen content
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          violations=$(find website/src/content website/src/pages website/src/components website/src/layouts \
+            -type f \( -name '*.md' -o -name '*.mdx' -o -name '*.astro' \) \
+            -not -path '*/content/blog/*' \
+            -exec grep -lE 'releases/v[0-9]+\.[0-9]+\.[0-9]+/' {} + 2>/dev/null || true)
+          if [ -n "$violations" ]; then
+            echo "::error::version-pinned /releases/vX.Y.Z/ URLs in non-frozen content:"
+            echo "$violations"
+            echo ""
+            echo "Use getRelease() or the components in website/src/components/release/ instead;"
+            echo "see website/src/components/release/README.md."
+            exit 1
+          fi
+          echo "No version-pinned URLs in non-frozen content."
+
+      # Release window: the live-state guards below and in the unit tests
+      # compare the repository with state a release moves in two steps (the
+      # tag, packages and chart first; the site's manifest, version map and
+      # literals in the sync pull request after). On the pull request that is
+      # the second step (`auto/sync-release-manifests`) or the release lane's
+      # own (`release/*`), from this repository, they warn instead of failing;
+      # on main pushes and every ordinary pull request they fail as before.
+      # RELEASE_WINDOW=1 reaches the later steps through GITHUB_ENV. The
+      # built-output content lint is NOT part of this: it reads committed
+      # content, so a failure there is a real content defect and stays one.
+      - name: Detect a release window
+        working-directory: ${{ github.workspace }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REF_NAME: ${{ github.ref_name }}
+        run: bash website/scripts/release-window.sh
+
+      # The 2.1 manifest (website/src/content/releases-2.1/release.yaml) is
+      # what <Version /> and getRelease() render, so if it lags the latest
+      # shipped release the whole site quietly advertises an old version.
+      # The authoritative "shipped" marker is the latest stable v2.* tag of
+      # the public mod_pagespeed repository (the serving module's home; a
+      # 2.1 release carries that tag). The comparison is "must not lag": a
+      # manifest ahead of every tag never fires.
+      #
+      # A fresh tag legitimately precedes the manifest bump for a short
+      # while, so a lag is a warning until the tag is GRACE_HOURS old and an
+      # error after that. The tag date comes from the GitHub API (ls-remote
+      # carries no dates); if it cannot be read the lag is treated as stale
+      # and fails -- closed, not open. In a release window (above) a lag or a
+      # stale image tag is a warning at any tag age.
+      #
+      # Only the current line is checked here. The 2.0 and 1.1 manifests
+      # describe frozen or end-of-life lines whose versions no longer move,
+      # and the Helm chart's appVersion is checked where the chart is
+      # packaged, not here. The logic lives in scripts/check-version-drift.sh
+      # (tested by test/release-window.test.ts).
+      - name: Guard against 2.1 version drift
+        working-directory: ${{ github.workspace }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GRACE_HOURS: "6"
+        run: bash website/scripts/check-version-drift.sh
+
+      # Node 22 LTS, matching the site's own test environment. npm cache is
+      # keyed on the site's lockfile so dependency installs stay warm across
+      # content-only changes.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Prettier over the page, component, test and script sources (never the
+      # Markdown content; see website/.prettierignore). Fix a failure locally
+      # with `npm run format`.
+      - name: format:check
+        run: npm run format:check
+
+      # ESLint (eslint-plugin-astro, website/eslint.config.js) and astro
+      # check (type errors in .astro and .ts sources). Warnings and hints do
+      # not fail the step; errors do. Cheap: seconds, on the install above.
+      - name: lint
+        run: npm run lint
+
+      # Live-state tests (the package index, the Helm chart) read
+      # RELEASE_WINDOW from the "Detect a release window" step.
+      - name: Unit tests (vitest)
+        run: npx vitest run
+
+      - name: Production build
+        env:
+          PRICING_ALLOW_STALE: "1"
+        run: npm run build
+
+      - name: Build-output tests (vitest, after build)
+        # Gates that read dist/ (built-output tests) skip before the build; run them for real.
+        run: npx vitest run
+
+      # Lint what the build actually wrote: every page under dist/ (the
+      # frozen /1.0/ archive aside) must carry exactly one <title> (15-65
+      # chars) and one <h1>, indexable pages a 50-165 char description and
+      # an absolute canonical, no two pages the same description, and the
+      # visible text free of "daemon" (the process is the worker) and of
+      # "mod_pagespeed 2.0" naming the current product. Justified exceptions
+      # live in website/scripts/content-lint-allow.json. See
+      # scripts/check-built-content.mjs for the rule table.
+      - name: Built-output content lint
+        run: npm run check:content
+
+  # The configuration and filter references on the site are generated from
+  # the product's source (website/scripts/generate-references.mjs): the
+  # native module's option tables and filter tables come from the public
+  # mod_pagespeed tree at the tag pinned in
+  # website/src/data/reference/source-pin.json, the worker flags and the
+  # thin-module directives from this tree. This job re-clones that tag,
+  # regenerates into a temporary directory and fails on any difference from
+  # the committed JSON, and then checks that the two pages' generated regions
+  # match a fresh render. So a module change, a worker flag change or a stale
+  # pin shows up here; bumping the pin at release time is a one-line change
+  # plus `npm run gen:references`. The generator and renderer are plain
+  # Node scripts without dependencies, so no npm install is needed.
+  website-reference-drift:
+    permissions:
+      contents: read
+    name: Reference data matches the pinned module source (ubuntu)
+    if: github.event_name != 'schedule' && !(github.event_name == 'pull_request' && !inputs.called && vars.WEBSITE_GATE != 'off')
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Clone mod_pagespeed at the pinned tag
+        run: |
+          set -euo pipefail
+          tag=$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync("website/src/data/reference/source-pin.json","utf8")).mod_pagespeed)')
+          case "$tag" in
+            v2.*) ;;
+            *) echo "::error::source-pin.json does not name a v2.* tag: '$tag'"; exit 1 ;;
+          esac
+          git clone --quiet --depth 1 --branch "$tag" https://github.com/We-Amp/mod_pagespeed.git "$RUNNER_TEMP/mod_pagespeed"
+          echo "pinned tag: $tag ($(git -C "$RUNNER_TEMP/mod_pagespeed" rev-parse HEAD))"
+
+      - name: Regenerate the reference data and compare with the committed JSON
+        working-directory: website
+        run: |
+          set -euo pipefail
+          node scripts/generate-references.mjs --module-src "$RUNNER_TEMP/mod_pagespeed" --out "$RUNNER_TEMP/reference"
+          fail=0
+          for f in source-pin.json module-directives.json worker-flags.json thin-module-directives.json filters.json; do
+            if ! diff -u "src/data/reference/$f" "$RUNNER_TEMP/reference/$f"; then
+              echo "::error::src/data/reference/$f differs from a fresh generation at the pinned tag; run 'npm run gen:references' (or bump source-pin.json) and commit the result."
+              fail=1
+            fi
+          done
+          exit "$fail"
+
+      - name: Rendered reference regions are current
+        working-directory: website
+        run: node scripts/render-references.mjs --check
+
+  # The browser suite: website/tests/*.spec.ts against the Astro dev server,
+  # which playwright.config.ts starts itself (webServer: npm run dev, baseURL
+  # http://localhost:4321) -- no production build is needed, and the specs
+  # that touch legacy static paths the dev server does not serve skip
+  # themselves. Chromium only, as the config's projects declare (the mobile
+  # project is a Chromium device profile). Nothing in the suite reaches the
+  # live site or a third-party service: external targets are asserted as
+  # hrefs or intercepted with page.route(), so the job runs on a hosted
+  # runner with no secrets and no specs are excluded.
+  website-playwright:
+    permissions:
+      contents: read
+    name: Website browser suite (Playwright, ubuntu)
+    # Not in the merge queue: it ran on the same change in the pull request.
+    if: github.event_name != 'merge_group' && !(github.event_name == 'pull_request' && !inputs.called && vars.WEBSITE_GATE != 'off')
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: ${{ github.event_name == 'schedule' && 90 || 45 }}
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium (with system dependencies)
+        env:
+          UBUNTU_MIRROR: ${{ vars.UBUNTU_MIRROR }}
+        run: |
+          # setup only configures apt retries and the mirror; --with-deps
+          # runs its own apt-get update.
+          bash ../tools/ci/apt-robust.sh setup
+          npx playwright install --with-deps chromium
+
+      # CI=true switches the config to CI mode (one worker, one retry,
+      # forbidOnly, always a fresh dev server). PRICING_ALLOW_STALE is set
+      # for parity with the build job: the dev server does not run the
+      # pricing prebuild, but nothing in this job may fail on missing
+      # pricing credentials.
+      - name: Playwright
+        env:
+          CI: "true"
+          PRICING_ALLOW_STALE: "1"
+          # Pull requests measure the 375px column of the geometry oracle; the
+          # nightly run ("all") sweeps every width.
+          GEOMETRY_WIDTHS: ${{ github.event_name == 'schedule' && 'all' || '375' }}
+        run: npx playwright test
+
+      # Traces, screenshots and the HTML report of a failed run, for
+      # forensics. Paths are workspace-relative (upload-artifact ignores
+      # the job's working-directory default).
+      - name: Upload Playwright forensics
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: website-playwright-forensics
+          path: |
+            website/test-results/**
+            website/playwright-report/**
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # Lighthouse budgets over the BUILT site, so the gate measures what ships:
+  # the key landing and docs pages, served by `astro preview` (the node
+  # adapter's own standalone server) on 127.0.0.1, mobile form factor
+  # (Lighthouse's default; desktop is the opt-in), median of 3 runs per URL
+  # (aggregationMethod: median in the assertions — lhci's default is the
+  # optimistic best-of-N) — see website/lighthouserc.json. Accessibility,
+  # best-practices and SEO budgets are errors; performance is a warning
+  # because a hosted runner's timing noise would fail good changes.
+  # Everything runs inside the runner: @lhci/cli writes its HTML reports to
+  # website/.lighthouseci/ with upload.target=filesystem (nothing is sent
+  # anywhere), and those reports are attached as the job artifact. The
+  # analytics host is blocked (blockedUrlPatterns), so a CI run records no
+  # pageview and the best-practices score owes nothing to a third-party
+  # host. The Chromium comes from Playwright (already a dev dependency) via
+  # CHROME_PATH, so no extra browser download source; it runs with
+  # --no-sandbox because the ubuntu-24.04 hosted image restricts
+  # unprivileged user namespaces and that Chromium ships no setuid sandbox
+  # helper. package.json forces lighthouse 13.5.0 under @lhci/cli, whose own
+  # pin (12.6.1) cannot audit current Chrome builds.
+  website-lighthouse:
+    permissions:
+      contents: read
+    name: Website Lighthouse budgets (ubuntu)
+    # Not in the merge queue: it ran on the same change in the pull request.
+    if: github.event_name != 'schedule' && github.event_name != 'merge_group' && !(github.event_name == 'pull_request' && !inputs.called && vars.WEBSITE_GATE != 'off')
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install chromium
+
+      - name: Production build
+        env:
+          PRICING_ALLOW_STALE: "1"
+        run: npm run build
+
+      - name: Resolve Playwright Chromium path
+        id: chrome
+        run: >
+          echo "path=$(node -e 'const {chromium} = require("playwright-core");
+          process.stdout.write(chromium.executablePath())')" >> "$GITHUB_OUTPUT"
+
+      - name: Run Lighthouse CI
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.path }}
+        run: npx lhci autorun
+
+      # The HTML reports of every run, whether the budgets held or not —
+      # a failed assertion is exactly when they are needed for forensics.
+      # Paths are workspace-relative (upload-artifact ignores the job's
+      # working-directory default).
+      - name: Upload Lighthouse reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: website-lighthouse-reports
+          path: website/.lighthouseci/*.html
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: warn

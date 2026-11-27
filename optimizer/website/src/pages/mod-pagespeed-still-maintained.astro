@@ -1,0 +1,555 @@
+---
+import { ORGANIZATION_PUBLISHER } from '../data/organization';
+import { OG_DEFAULT_IMAGE_URL } from '../data/og-image';
+import BaseLayout from '../layouts/BaseLayout.astro';
+import SectionHeader from '../components/instrument/SectionHeader.astro';
+import {
+  V1_LINE,
+  LAST_UPSTREAM_VERSION,
+  V2_GA_DATE,
+  NGINX_APT_MATRIX,
+  NGINX_APT_ARCHES,
+  LICENSE_CLAUSE,
+  LICENSE_CLAUSE_CAP,
+} from '../data/product-facts.mjs';
+import { productRef } from '../data/software-jsonld';
+
+// Answers the literal query "is mod_pagespeed still maintained / dead /
+// deprecated". Captures the P0#1 maintained-successor / orphan-capture cluster:
+// developers who find an archived project and a "won't build" stack and need to
+// know whether someone is keeping it alive. The page documents the status
+// (dormant 2024-2025, active again in 2026, CVEs cleared, signed packages),
+// then points at the drop-in continuation rather than re-pitching features. It
+// owns the maintenance-status intent only; it links to
+// /alternatives/mod-pagespeed/, /download/, and the 1.15 docs rather than
+// restating them.
+//
+// Every dated/numeric claim below is grounded in the verified change inventory
+// (2026-06-13): the last Google-era stable release (1.13.35.2, Feb 2018), the
+// move to the ASF incubator and its single incubating release (1.14.36.1, Aug
+// 2020), the podling retirement (2023-03-17), the GitHub repository archival (2025-04-10), the commit-per-year gap (2024=0,
+// 2025=0, 633+ in 2026 after development resumed 2026-01-24), the CVE
+// clearances (libwebp 1.1.0->1.5.0 clearing CVE-2023-4863; curl 8.x; nginx
+// CVE-2026-49975 ABI drift handled), and the pre-convergence product-line split. The inventory
+// gives no year for the Google->ASF handoff itself, so no handoff year is
+// stated as fact below.
+//
+// PROVENANCE: We-Amp helped maintain mod_pagespeed and prepared its last
+// Google-era and Apache-incubator-era releases, as an external contributor.
+// Never "ex-Google", never employed by Google, never "the maintainer".
+
+const title = 'Is mod_pagespeed still maintained? Yes, actively in 2026';
+const description = `Yes. We-Amp ships the current mod_pagespeed, ${LICENSE_CLAUSE}, with the dependency CVEs cleared and signed apt/yum packages.`;
+
+// TechArticle FIRST (seo.spec.ts asserts the first JSON-LD block's @type), then
+// FAQPage. A status/answer page is a developer reference, so TechArticle fits.
+const articleJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'TechArticle',
+  headline: 'Is mod_pagespeed still maintained?',
+  description,
+  url: 'https://modpagespeed.com/mod-pagespeed-still-maintained/',
+  about: [
+    { '@type': 'Thing', name: 'mod_pagespeed' },
+    { '@type': 'Thing', name: 'ngx_pagespeed' },
+    // The maintained product, by the shared node's @id.
+    await productRef(),
+  ],
+  image: OG_DEFAULT_IMAGE_URL,
+  author: { '@type': 'Organization', name: 'We-Amp B.V.' },
+  publisher: ORGANIZATION_PUBLISHER,
+};
+
+// FAQ — single source for the visible <dl> and the FAQPage JSON-LD. The first
+// question is the verbatim searcher query (drives AI Overviews); answers are
+// plain text, so no stripHtml is needed.
+const faqEntries = [
+  {
+    q: 'Is mod_pagespeed still maintained?',
+    a: `Yes. After a dormant period in 2024 and 2025, We-Amp picked the project back up and resumed active development in January 2026; We-Amp helped maintain mod_pagespeed and prepared its last Google-era and Apache-incubator-era releases as an external contributor. The maintained line today is mod_pagespeed, ${LICENSE_CLAUSE}, with the dependency CVEs cleared and signed apt and yum packages.`,
+  },
+  {
+    q: 'Is mod_pagespeed dead or deprecated?',
+    a: `The original Google and Apache-incubator repositories are archived and read-only (the Apache podling retired on 2023-03-17, and its GitHub repositories were archived on 2025-04-10), so in that sense the upstream project stopped. The codebase itself is not dead: it is maintained — today as the current mod_pagespeed, ${LICENSE_CLAUSE} — with current dependencies and modern packaging. "Deprecated" describes the archived upstream, not the software you can run today.`,
+  },
+  {
+    q: 'Why did mod_pagespeed go quiet?',
+    a:
+      'Google moved mod_pagespeed and ngx_pagespeed to an Apache Software Foundation incubator. The incubator produced one release, ' +
+      LAST_UPSTREAM_VERSION +
+      ', in August 2020, then went inactive. The podling retired in March 2023, and its GitHub repositories — zero commits in 2024 and zero in 2025 — were archived in April 2025. The code was also effectively un-buildable on modern systems, because it built with a 2012-era gyp and Python 2 toolchain pinned to Ubuntu 14.',
+  },
+  {
+    q: 'Who maintains mod_pagespeed now?',
+    a: 'We-Amp B.V., a Dutch company. We-Amp helped maintain the open-source project and prepared its last releases throughout the Google era and the Apache incubation, as an external committer on the project. Development resumed on 2026-01-24, with more than 633 commits landing in 2026 after the two-year gap.',
+  },
+  {
+    q: 'Is the maintained version a drop-in replacement?',
+    a: 'The current mod_pagespeed keeps the same directives and the same filter names as the version you already run — 1.14 and 1.15 configurations carry over unchanged. The visible change is that the build system was migrated from gyp to Bazel, the cache backend was replaced, and the dependencies were brought current — not the directive surface.',
+  },
+  {
+    q: 'Were the security vulnerabilities fixed?',
+    a: 'The dependency CVEs were cleared by bumping the vendored libraries. libwebp went from 1.1.0 to 1.5.0, which clears CVE-2023-4863 (exploited in the wild); the image codecs (libpng, giflib, libjpeg-turbo) were brought current; curl was moved to the 8.x line and bumped specifically to clear a CVE cluster; and on the nginx side, when the Ubuntu CVE-2026-49975 patch shifted a struct and hung our prebuilt module (built against upstream nginx rather than the patched source each distro ships), we fixed the packaging to build per-distro and added a runtime guard.',
+  },
+  {
+    q: 'How do mod_pagespeed 1.15 and the 2.0 re-architecture fit into the current mod_pagespeed?',
+    a: 'They converged. The current mod_pagespeed continues both: the original module — same directives, Apache and nginx — plus a separate optimizer worker process, under one Apache-2.0 open-source license. The IIS package ships as a signed installer on the mod_pagespeed GitHub release.',
+  },
+];
+
+const faqJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: faqEntries.map((entry) => ({
+    '@type': 'Question',
+    name: entry.q,
+    acceptedAnswer: { '@type': 'Answer', text: entry.a },
+  })),
+};
+
+// Maintenance-status timeline — single source for the rendered list. Each row
+// is a verified fact from the change inventory; the muted/accent treatment maps
+// the dormant gap to a caution tone and the resumption to an interactive tone.
+const timeline = [
+  {
+    when: 'Feb 2018',
+    what: 'Google publishes the last Google-era stable release, 1.13.35.2. The project then moves to an Apache Software Foundation incubator.',
+    tone: 'neutral' as const,
+  },
+  {
+    when: 'Aug 2020',
+    what:
+      'The incubator publishes one release, ' +
+      LAST_UPSTREAM_VERSION +
+      '. The build still depends on a 2012-era gyp and Python 2 toolchain.',
+    tone: 'neutral' as const,
+  },
+  {
+    when: '2024 – 2025',
+    what: 'Dormant. Zero commits in 2024, zero in 2025. The podling had retired on 2023-03-17; its GitHub repositories are archived and made read-only on 2025-04-10.',
+    tone: 'caution' as const,
+  },
+  {
+    when: 'Jan 2026',
+    what: 'Active development resumes on 2026-01-24. The build is migrated from gyp to Bazel, dependencies are brought current, and the dependency CVEs are cleared.',
+    tone: 'live' as const,
+  },
+  {
+    when: '2026',
+    what:
+      'More than 633 commits land. mod_pagespeed ' +
+      V1_LINE +
+      ' ships as signed apt and yum packages, and the from-scratch ModPageSpeed 2.0 rewrite goes GA on ' +
+      V2_GA_DATE +
+      '.',
+    tone: 'live' as const,
+  },
+  {
+    when: '2026',
+    what: `The lines converge: mod_pagespeed 2 ships as the successor to both — same directives, plus the optimizer worker — ${LICENSE_CLAUSE}.`,
+    tone: 'live' as const,
+  },
+];
+
+const toneClasses: Record<'neutral' | 'caution' | 'live', string> = {
+  neutral: 'border-border bg-bg-elevated',
+  caution: 'border-accent/40 bg-accent-wash',
+  live: 'border-interactive/40 bg-interactive/10',
+};
+---
+
+<BaseLayout
+  title={title}
+  description={description}
+  jsonLd={[articleJsonLd, faqJsonLd]}
+  breadcrumbLeafName="Is mod_pagespeed still maintained?"
+>
+  <article class="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 py-16">
+    <nav class="text-sm text-text-annotation" aria-label="Breadcrumb">
+      <a href="/" class="hover:text-text-body">
+        Home
+      </a>
+      <span class="mx-1">/</span>
+      <span>Is mod_pagespeed still maintained?</span>
+    </nav>
+
+    <SectionHeader
+      id="still-maintained"
+      as="h1"
+      eyebrow="Maintenance status"
+      title="Is mod_pagespeed still maintained?"
+    >
+      <p>
+        Yes. The original Google and Apache-incubator repositories are archived, and the project
+        went dormant in 2024 and 2025. It is maintained again: We-Amp ships the current
+        mod_pagespeed, the open-source (Apache-2.0) continuation, with the dependency CVEs cleared
+        and signed apt and yum packages. This page sets out what stopped, what did not, and what
+        there is to run today.
+      </p>
+    </SectionHeader>
+
+    <!-- The short answer, stated plainly up top for AI Overviews / featured snippets -->
+    <section class="mt-10">
+      <div class="rounded-card border border-interactive/40 bg-interactive/10 p-6 md:p-8">
+        <h2 class="h2-section text-text-body">The short answer</h2>
+        <p class="mt-3 text-text-body">
+          mod_pagespeed is maintained. We-Amp B.V. helped maintain the open-source project and
+          prepared its last releases throughout the Google era and the Apache incubation, as an
+          external committer on the project. After a two-year gap, active development resumed on
+          2026-01-24, with more than 633 commits landing in 2026. The maintained line is the current
+          mod_pagespeed, an open-source (Apache-2.0) drop-in continuation with the same directives
+          and filter names. It converges the 1.15 line and the from-scratch ModPageSpeed 2.0 rewrite
+          (GA {V2_GA_DATE}) into one product.
+        </p>
+        <div class="mt-5 flex flex-wrap gap-3">
+          <a
+            href="/download/"
+            class="btn-primary"
+            data-umami-event="cta_stillmaintained_download_hero"
+          >
+            Install the maintained build
+          </a>
+          <a
+            href="/alternatives/mod-pagespeed/"
+            class="btn-secondary"
+            data-umami-event="cta_stillmaintained_alternatives_hero"
+          >
+            The maintained mod_pagespeed <span aria-hidden="true">&rarr;</span>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <hr class="rule-ticked my-14" />
+
+    <!-- What "dead" actually refers to -->
+    <section>
+      <h2 class="h2-section text-text-body">
+        What &ldquo;dead&rdquo; refers to, and what it doesn&rsquo;t
+      </h2>
+      <p class="mt-4 text-text-body">
+        When people call mod_pagespeed dead or deprecated, they are describing the upstream
+        repositories. Google moved the project to an Apache Software Foundation incubator, which
+        published a single release,{' '}
+        <code class="text-[0.9em] bg-bg-elevated px-1 rounded">{LAST_UPSTREAM_VERSION}</code>, in
+        August 2020. The incubator then went quiet: the podling retired on
+        <span class="whitespace-nowrap">2023-03-17</span>, and its GitHub repositories were archived
+        and made read-only on <span class="whitespace-nowrap">2025-04-10</span>. That part is true:
+        the original repositories are frozen.
+      </p>
+      <p class="mt-4 text-text-body">
+        Two things are separate from that. First, the codebase had also become un-buildable on
+        modern systems, because it built with a 2012-era gyp and Python&nbsp;2 toolchain pinned to
+        Ubuntu&nbsp;14 &mdash; which is why a fresh build attempt fails before it produces a module.
+        Second, the software you can run today is not the archived upstream. It is the current
+        mod_pagespeed, maintained with a modern build system, current dependencies, and signed
+        packages. &ldquo;Archived upstream&rdquo; and &ldquo;nothing to run&rdquo; are not the same
+        statement.
+      </p>
+    </section>
+
+    <hr class="rule-ticked my-14" />
+
+    <!-- The timeline: dormant -> active -->
+    <section>
+      <h2 class="h2-section text-text-body">The maintenance timeline</h2>
+      <p class="mt-4 text-text-body">
+        The clearest way to read the status is the commit history: the project stopped, then started
+        again. The figures below are the commit counts per calendar year.
+      </p>
+      <ol class="mt-8 space-y-4">
+        {timeline.map((row) => (
+          <li class={`rounded-card border p-5 md:p-6 ${toneClasses[row.tone]}`}>
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-baseline sm:gap-5">
+              <span class="display-num shrink-0 font-mono text-sm font-semibold uppercase tracking-wide text-text-body sm:w-28">
+                {row.when}
+              </span>
+              <span class="text-sm text-text-body">{row.what}</span>
+            </div>
+          </li>
+        ))}
+      </ol>
+      <p class="mt-6 text-sm text-text-muted">
+        Commits per year, for reference: <span class="display-num">2020</span> = 61,
+        <span class="display-num">2021</span> = 4, <span class="display-num">2022</span> = 6,
+        <span class="display-num">2023</span> = 7, <span class="display-num">2024</span> = 0,
+        <span class="display-num">2025</span> = 0, then more than
+        <span class="display-num">633</span> in <span class="display-num">2026</span>.
+      </p>
+    </section>
+
+    <hr class="rule-ticked my-14" />
+
+    <!-- The security argument: a dormant fork ships 2020-era decoders -->
+    <section>
+      <h2 class="h2-section text-text-body">Why maintenance matters here specifically</h2>
+      <p class="mt-4 text-text-body">
+        A web-optimization module decodes attacker-controlled image bytes while it rewrites them, so
+        the image codecs are an exposed surface. A build frozen at the August 2020 incubator release
+        still ships the 2020 versions of those decoders. The maintained line cleared them in 1.15
+        and carries those versions forward:
+      </p>
+      <ul class="mt-5 space-y-3 text-sm text-text-body">
+        <li>
+          <code class="text-[0.9em] bg-bg-elevated px-1 rounded">libwebp</code>
+          <span class="text-text-annotation">1.1.0 &rarr; 1.5.0</span> &mdash; clears
+          <span class="whitespace-nowrap">CVE-2023-4863</span>, the libwebp heap overflow that was
+          exploited in the wild.
+        </li>
+        <li>
+          The image codecs <code class="text-[0.9em] bg-bg-elevated px-1 rounded">libpng</code>,{' '}
+          <code class="text-[0.9em] bg-bg-elevated px-1 rounded">giflib</code>, and{' '}
+          <code class="text-[0.9em] bg-bg-elevated px-1 rounded">libjpeg-turbo</code> were brought
+          to current upstream versions.
+        </li>
+        <li>
+          <code class="text-[0.9em] bg-bg-elevated px-1 rounded">curl</code> moved to the 8.x line
+          and was bumped to clear a CVE cluster, with the HTTP fetcher rewritten on top of it.
+        </li>
+        <li>
+          An Ubuntu security patch to nginx (<span class="whitespace-nowrap">CVE-2026-49975</span>)
+          changed the module ABI, so our prebuilt nginx module &mdash; built against upstream nginx
+          rather than each distro&rsquo;s patched source &mdash; was no longer compatible. We fixed
+          it with per-distro builds and a runtime compatibility guard. Ongoing fixes like this are
+          what a maintained line provides.
+        </li>
+      </ul>
+      <p class="mt-5 text-text-body">
+        The maintained line is also enrolled in{' '}
+        <a
+          href="https://github.com/anthropics/oss-scanner/blob/main/projects/mod_pagespeed/project.yaml"
+          rel="noopener noreferrer"
+          class="text-interactive hover:text-interactive-hover underline"
+        >
+          Anthropic&rsquo;s OSS Scanner
+        </a>
+        .
+      </p>
+      <p class="mt-3 text-text-body">
+        It is also fuzzed continuously by{' '}
+        <a
+          href="https://github.com/google/oss-fuzz/tree/master/projects/mod_pagespeed"
+          rel="noopener noreferrer"
+          class="text-interactive hover:text-interactive-hover underline"
+        >
+          OSS-Fuzz
+        </a>
+        , Google&rsquo;s fuzzing service for open-source projects.
+      </p>
+      <p class="mt-5 text-sm text-text-muted">
+        The{' '}
+        <a
+          href="/blog/mod-pagespeed-1-1-release/"
+          class="text-interactive hover:text-interactive-hover underline"
+        >
+          mod_pagespeed {V1_LINE} release write-up
+        </a>{' '}
+        walks through the full dependency graph and the sanitizer coverage behind these fixes.
+      </p>
+    </section>
+
+    <hr class="rule-ticked my-14" />
+
+    <!-- One product, what to run -->
+    <section>
+      <h2 class="h2-section text-text-body">What there is to run today</h2>
+      <p class="mt-4 text-text-body">
+        The maintained line is the current mod_pagespeed — one product, converging the two lines
+        We-Amp shipped through 2026.
+      </p>
+      <div class="mt-8 grid grid-cols-1 max-w-xl">
+        <div class="rounded-card border border-border bg-bg-elevated p-6">
+          <p class="text-xs font-semibold uppercase tracking-wide text-interactive">
+            The maintained product
+          </p>
+          <p class="mt-1 text-2xl font-bold text-text-body">mod_pagespeed</p>
+          <p class="mt-3 text-sm text-text-muted">
+            The maintained continuation of the original module, {LICENSE_CLAUSE}. Same directives,
+            same filter names, so your existing configuration carries over. Runs on Apache and
+            nginx, with a separate optimizer worker process doing the heavy lifting outside the web
+            server.
+          </p>
+          <p class="mt-4 text-sm">
+            <a
+              href="/alternatives/mod-pagespeed/"
+              class="font-medium text-interactive hover:text-interactive-hover underline underline-offset-4"
+            >
+              The maintained mod_pagespeed &rarr;
+            </a>
+          </p>
+        </div>
+      </div>
+      <p class="mt-6 text-sm text-text-muted">
+        The IIS package ships as a signed installer on the mod_pagespeed GitHub release. See the
+        <a
+          href="/docs/migrating-to-2-1/#upgrading-from-1-15"
+          class="font-medium text-interactive hover:text-interactive-hover underline underline-offset-4"
+        >
+          upgrade guide
+        </a>
+        . Running ModPageSpeed 2.0 Docker/Helm? See the
+        <a
+          href="/docs/migrating-to-2-1/"
+          class="font-medium text-interactive hover:text-interactive-hover underline underline-offset-4"
+        >
+          migration guide
+        </a>
+        .
+      </p>
+      <p class="mt-4 text-sm text-text-muted">
+        Running IISpeed? Its license transfers to mod_pagespeed at no cost — request it through the
+        <a
+          href="/contact/?topic=iispeed-transfer"
+          class="font-medium text-interactive hover:text-interactive-hover underline underline-offset-4"
+        >
+          license-transfer form
+        </a>
+        .
+      </p>
+      <p class="mt-6 text-sm text-text-muted">
+        mod_pagespeed is {LICENSE_CLAUSE}: free to install and run. Support is what&rsquo;s for
+        sale; see{' '}
+        <a href="/pricing/" class="text-interactive hover:text-interactive-hover underline">
+          support
+        </a>
+        .
+      </p>
+    </section>
+
+    <hr class="rule-ticked my-14" />
+
+    <!-- Concrete install snippet: the genuine artifact (anti-doorway) -->
+    <section>
+      <h2 class="h2-section text-text-body">Installing the maintained build</h2>
+      <p class="mt-4 text-text-body">
+        The maintained packages are signed and live at{' '}
+        <a
+          href="https://packages.modpagespeed.com/"
+          rel="noopener noreferrer external"
+          class="text-interactive hover:text-interactive-hover underline"
+        >
+          packages.modpagespeed.com
+        </a>
+        . On Debian and Ubuntu the nginx module installs from apt &mdash; no compiling the 2020
+        toolchain:
+      </p>
+      <pre class="mt-4 overflow-x-auto rounded-md bg-bg-recessed p-4 text-xs sm:text-sm"><code class="text-text-body">{`# add the signed repo, then:
+apt-get install nginx-module-pagespeed
+
+# the package drops the module in and adds a modules-enabled
+# auto-include — there is no load_module line to copy by hand.
+# enable it in a server {} block:
+server {
+    pagespeed on;
+    pagespeed FileCachePath /var/cache/pagespeed;
+}`}</code></pre>
+      <p class="mt-4 text-sm text-text-muted">
+        The signed apt matrix is exact-version-pinned to each distro&rsquo;s stock nginx (
+        {NGINX_APT_MATRIX}), for {NGINX_APT_ARCHES}. The Apache module ships across the same distros
+        via apt, and there is an el9 yum tree. The pin is required: nginx&rsquo;s{' '}
+        <code class="text-[0.9em] bg-bg-elevated px-1 rounded">--with-compat</code> does not relax
+        the dynamic-module version check, so each module is built against its distro&rsquo;s exact
+        nginx. See the{' '}
+        <a href="/docs/" class="text-interactive hover:text-interactive-hover underline">
+          mod_pagespeed documentation
+        </a>{' '}
+        and the{' '}
+        <a
+          href="/docs/production-deployment/"
+          class="text-interactive hover:text-interactive-hover underline"
+        >
+          production deployment guide
+        </a>
+        , or the{' '}
+        <a href="/demo/" class="text-interactive hover:text-interactive-hover underline">
+          live demo
+        </a>{' '}
+        for a running instance.
+      </p>
+    </section>
+
+    <!-- CTA -->
+    <section class="mt-14">
+      <div class="rounded-card border border-border bg-bg-secondary p-6 md:p-8">
+        <h2 class="h2-section text-text-body">Move off the archived build</h2>
+        <p class="mt-3 text-text-body">
+          If you are running a frozen 2020-era build, the maintained mod_pagespeed is a drop-in
+          replacement: the directives are unchanged, and the dependency CVEs are cleared. It is{' '}
+          {LICENSE_CLAUSE} &mdash; install and run it freely. Support is what&rsquo;s for sale; the
+          software and its signed packages are the same for everyone.
+        </p>
+        <div class="mt-6 flex flex-wrap gap-3">
+          <a href="/download/" class="btn-primary" data-umami-event="cta_stillmaintained_download">
+            Download &amp; run &rarr;
+          </a>
+          <a
+            href="/alternatives/mod-pagespeed/"
+            class="btn-secondary"
+            data-umami-event="cta_stillmaintained_alternatives"
+          >
+            Read about the maintained module &rarr;
+          </a>
+        </div>
+        <p class="mt-3 text-xs text-text-annotation">
+          {LICENSE_CLAUSE_CAP}. Support plans available.
+        </p>
+      </div>
+    </section>
+
+    <!-- FAQ — visible Q&A mirrors the FAQPage JSON-LD verbatim -->
+    <section class="mt-16">
+      <h2 class="h2-section text-text-body">mod_pagespeed maintenance: common questions</h2>
+      <dl class="mt-8 space-y-6">
+        {faqEntries.map((entry) => (
+          <div class="border-b border-border pb-6">
+            <dt class="font-semibold text-text-body">{entry.q}</dt>
+            <dd class="mt-2 text-sm text-text-muted">{entry.a}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+
+    <!-- See also -->
+    <section class="mt-16 border-t border-border pt-8">
+      <p class="text-base font-semibold uppercase tracking-wide text-text-body">See also:</p>
+      <ul class="mt-4 space-y-2 text-sm">
+        <li>
+          <a
+            href="/alternatives/ngx-pagespeed/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            ngx_pagespeed, maintained
+          </a>{' '}
+          &mdash; the nginx side, including why the old source tree no longer builds.
+        </li>
+        <li>
+          <a
+            href="/blog/mod-pagespeed-deprecated-2026/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            Is mod_pagespeed deprecated? What actually happened
+          </a>{' '}
+          &mdash; the longer write-up behind this status page.
+        </li>
+        <li>
+          <a
+            href="/blog/why-i-rebuilt-mod-pagespeed/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            Why we rebuilt mod_pagespeed
+          </a>{' '}
+          &mdash; the reasoning behind the 2.0 rewrite.
+        </li>
+        <li>
+          <a
+            href="/pagespeed-markers/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            PageSpeed markers reference
+          </a>{' '}
+          &mdash; what the runtime attributes and headers on a live install mean.
+        </li>
+      </ul>
+    </section>
+  </article>
+</BaseLayout>

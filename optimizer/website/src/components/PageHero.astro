@@ -1,0 +1,51 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// PageHero — the opening block of a page: optional breadcrumb, optional mono
+// eyebrow, the page's h1, an optional lede, then whatever the page adds
+// (buttons, notes, an install command). Left-aligned, on the left edge the
+// header logo and the page's sections share. Styles are in global.css
+// (.page-hero, .page-hero-title, .page-hero-lede).
+//
+// Slots: `before` (a breadcrumb above the eyebrow), `title` (an h1 with
+// markup; otherwise the `title` prop), `lede`, and the default slot after it.
+// `width="prose"` keeps the hero on the reading-width column of a prose page
+// (same left edge, narrower box).
+
+interface Props {
+  title?: string;
+  eyebrow?: string;
+  size?: 'marketing' | 'utility';
+  width?: 'page' | 'prose';
+  id?: string;
+  class?: string;
+}
+
+const { title, eyebrow, size = 'marketing', width = 'page', id, class: extraClass } = Astro.props;
+
+const hasLede = Astro.slots.has('lede');
+---
+
+<section
+  class:list={[
+    'page-hero',
+    `page-hero--${size}`,
+    width === 'prose' ? 'container-prose' : 'mx-auto max-w-6xl px-4 sm:px-6 lg:px-8',
+    extraClass,
+  ]}
+  aria-labelledby={id}
+  data-ui="page-hero"
+>
+  <slot name="before" />
+  {eyebrow && <p class="eyebrow">{eyebrow}</p>}
+  <h1 id={id} class:list={['page-hero-title text-text-body', eyebrow && 'mt-3']}>
+    {Astro.slots.has('title') ? <slot name="title" /> : title}
+  </h1>
+  {hasLede && (
+    <div class="lede page-hero-lede">
+      <slot name="lede" />
+    </div>
+  )}
+  <slot />
+</section>

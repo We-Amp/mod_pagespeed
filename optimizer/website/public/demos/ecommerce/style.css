@@ -1,0 +1,353 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Copyright (c) 2024-2026 We-Amp B.V. */
+
+/* ===== ShopGrid E-Commerce - Verbose CSS for PageSpeed 2.0 Demo ===== */
+
+/* Reset: remove default browser margins and use border-box */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* Color palette: warm amber accent on clean neutrals */
+:root {
+  --primary: #e67e22;
+  --primary-dark: #d35400;
+  --text-dark: #2c3e50;
+  --text-muted: #7f8c8d;
+  --text-light: #bdc3c7;
+  --bg-white: #ffffff;
+  --bg-light: #f8f9fa;
+  --bg-dark: #2c3e50;
+  --border: #ecf0f1;
+  --shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow-hover: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+/* Base: system font stack for performance */
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--text-dark);
+  background-color: var(--bg-light);
+}
+
+/* Nav bar: sticky top with logo, links, and cart */
+.nav-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 16px;
+  padding-right: 32px;
+  padding-bottom: 16px;
+  padding-left: 32px;
+  background-color: var(--bg-white);
+  box-shadow: var(--shadow);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.nav-bar .logo {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--primary);
+  text-decoration: none;
+}
+
+/* Nav links: horizontal flex with hover transitions */
+.nav-bar .nav-links {
+  display: flex;
+  gap: 24px;
+  list-style-type: none;
+}
+
+.nav-bar .nav-links a {
+  color: var(--text-dark);
+  text-decoration: none;
+  font-weight: 500;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  transition-property: color;
+  transition-duration: 0.15s;
+}
+
+.nav-bar .nav-links a:hover {
+  color: var(--primary);
+}
+
+/* Cart button with item count badge */
+.cart-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background-color: var(--primary);
+  color: var(--bg-white);
+  border-style: none;
+  border-radius: 8px;
+  padding-top: 10px;
+  padding-right: 20px;
+  padding-bottom: 10px;
+  padding-left: 20px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition-property: background-color;
+  transition-duration: 0.15s;
+}
+
+.cart-btn:hover {
+  background-color: var(--primary-dark);
+}
+
+.cart-btn .count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--bg-white);
+  color: var(--primary);
+  border-radius: 50%;
+  width: 22px;
+  height: 22px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* Hero banner: gradient background with centered CTA */
+.hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding-top: 80px;
+  padding-right: 32px;
+  padding-bottom: 80px;
+  padding-left: 32px;
+  background-image: linear-gradient(135deg, #e67e22 0%, #d35400 50%, #2c3e50 100%);
+  color: var(--bg-white);
+}
+
+.hero h1 {
+  font-size: 42px;
+  font-weight: 800;
+  margin-bottom: 16px;
+}
+
+.hero p {
+  font-size: 20px;
+  opacity: 0.9;
+  margin-bottom: 32px;
+  max-width: 600px;
+}
+
+.hero .cta {
+  display: inline-block;
+  padding-top: 14px;
+  padding-right: 36px;
+  padding-bottom: 14px;
+  padding-left: 36px;
+  background-color: var(--bg-white);
+  color: var(--primary);
+  text-decoration: none;
+  border-radius: 8px;
+  font-weight: 700;
+  transition-property: transform, box-shadow;
+  transition-duration: 0.3s;
+}
+
+.hero .cta:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.16);
+}
+
+/* Filter bar: horizontal pill buttons */
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  padding-top: 32px;
+  padding-right: 32px;
+  padding-bottom: 16px;
+  padding-left: 32px;
+  max-width: 1200px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.filters button {
+  padding-top: 8px;
+  padding-right: 20px;
+  padding-bottom: 8px;
+  padding-left: 20px;
+  border-width: 2px;
+  border-style: solid;
+  border-color: var(--border);
+  border-radius: 999px;
+  background-color: var(--bg-white);
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition-property: border-color, color;
+  transition-duration: 0.15s;
+}
+
+.filters button:hover,
+.filters button.active {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+/* Product grid: responsive CSS Grid */
+.products {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 24px;
+  padding-top: 16px;
+  padding-right: 32px;
+  padding-bottom: 64px;
+  padding-left: 32px;
+  max-width: 1200px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* Product card: image + info with hover lift */
+.card {
+  background-color: var(--bg-white);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: var(--shadow);
+  transition-property: transform, box-shadow;
+  transition-duration: 0.3s;
+}
+
+.card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-hover);
+}
+
+.card img {
+  width: 100%;
+  height: 240px;
+  object-fit: cover;
+  display: block;
+}
+
+.card .info {
+  padding-top: 20px;
+  padding-right: 20px;
+  padding-bottom: 20px;
+  padding-left: 20px;
+}
+
+.card .cat {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--primary);
+  margin-bottom: 6px;
+}
+
+.card h2 {
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.card .price {
+  font-size: 28px;
+  font-weight: 800;
+  margin-bottom: 16px;
+}
+
+.card .price .old {
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--text-light);
+  text-decoration: line-through;
+  margin-left: 8px;
+}
+
+/* Add-to-cart: full-width button per card */
+.card .add-btn {
+  display: block;
+  width: 100%;
+  padding-top: 12px;
+  padding-bottom: 12px;
+  background-color: var(--primary);
+  color: var(--bg-white);
+  border-style: none;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition-property: background-color;
+  transition-duration: 0.15s;
+}
+
+.card .add-btn:hover {
+  background-color: var(--primary-dark);
+}
+
+/* Footer: dark with column links */
+.footer {
+  background-color: var(--bg-dark);
+  color: var(--bg-white);
+  padding-top: 48px;
+  padding-right: 32px;
+  padding-bottom: 24px;
+  padding-left: 32px;
+}
+
+.footer .grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 32px;
+  max-width: 1200px;
+  margin-left: auto;
+  margin-right: auto;
+  margin-bottom: 32px;
+}
+
+.footer h3 {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 16px;
+}
+
+.footer ul {
+  list-style-type: none;
+}
+
+.footer ul li {
+  margin-bottom: 8px;
+}
+
+.footer ul a {
+  color: var(--text-light);
+  text-decoration: none;
+  font-size: 14px;
+  transition-property: color;
+  transition-duration: 0.15s;
+}
+
+.footer ul a:hover {
+  color: #f39c12;
+}
+
+.footer .copy {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 14px;
+  padding-top: 24px;
+  border-top-width: 1px;
+  border-top-style: solid;
+  border-top-color: rgba(255, 255, 255, 0.1);
+}

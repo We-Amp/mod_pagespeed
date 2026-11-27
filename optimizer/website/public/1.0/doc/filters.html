@@ -1,0 +1,374 @@
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+<html>
+  <head>
+    <!-- Legacy 1.0 archive hub, retired in favor of /docs/filters/. noindex,follow
+         drops it from the index so it stops competing for "pagespeed filters"
+         (SEO de-cannibalization, 2026-06-18) while keeping the archive reachable
+         and its outbound links to the per-filter pages crawlable. The
+         self-canonical is intentionally left unchanged: a cross-URL canonical
+         combined with noindex risks propagating the noindex to the canonical
+         target (/docs/filters/), the page we are promoting. -->
+    <meta name="robots" content="noindex,follow" />
+    <link rel="canonical" href="https://modpagespeed.com/1.0/doc/filters" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PageSpeed Filters</title>
+    <link rel="stylesheet" href="doc.css" />
+  </head>
+  <body>
+    <div
+      id="archive-banner"
+      style="
+        background-color: #e1f5fe;
+        padding: 12px 24px;
+        text-align: center;
+        font-family: sans-serif;
+        font-size: 14px;
+        line-height: 1.6;
+        position: relative;
+        border-bottom: 1px solid #b3e5fc;
+      "
+    >
+      <span style="display:inline-block;padding:0 20px 0 0;">This is the archived documentation for the original mod_pagespeed releases, 1.14.36.1 and earlier. Those releases receive no security fixes: see the <a href="/docs/end-of-life-releases/" style="color:#0277bd;font-weight:bold;">end-of-life advisory</a>. The current mod_pagespeed is at <a href="https://modpagespeed.com" style="color:#0277bd;font-weight:bold;">modpagespeed.com</a>.</span>
+      <button
+        onclick="this.parentElement.style.display = 'none'"
+        style="
+          position: absolute;
+          right: 12px;
+          top: 50%;
+          transform: translateY(-50%);
+          background: none;
+          border: none;
+          font-size: 18px;
+          cursor: pointer;
+          color: #0277bd;
+          padding: 0 4px;
+        "
+        aria-label="Dismiss"
+      >
+        &times;
+      </button>
+    </div>
+
+    <!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+    <div id="header">
+      <div id="logoline">
+        <div id="logo">
+          <a href="https://www.we-amp.com/"
+            ><img
+              src="/1.0/we-amp.jpg"
+              srcset="/1.0/we-amp.jpg"
+              width="32"
+              height="32"
+              alt="We-Amp logo"
+          /></a>
+          <img
+            src="https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png"
+            srcset="https://www.gstatic.com/images/branding/product/2x/pagespeed_32dp.png"
+            width="32"
+            height="32"
+            alt="pagespeed logo"
+          />
+        </div>
+        <div id="logotext">PageSpeed</div>
+      </div>
+      <div id="navline">
+        <a href="/1.0/doc/">&larr; documentation index</a>
+      </div>
+    </div>
+    <div id="toc"></div>
+
+    <div id="content">
+      <h1>PageSpeed Filters</h1>
+
+      <p>
+        PageSpeed improves web page latency by changing the resources on that web page to implement
+        web performance
+        <a
+          target="_blank"
+          href="https://developers.google.com/speed/docs/best-practices/rules_intro"
+          >best practices</a
+        >. Each sort of change that PageSpeed makes is embodied in a <em>filter</em>. The filters
+        are run in a pre-defined order, but can be enabled and disabled in the server
+        <a href="configuration">configuration file</a>.
+      </p>
+      <p>
+        Some filters simply alter HTML content, such as removing excess whitespace, attributes, or
+        attribute values that will be ignored.
+      </p>
+      <p>
+        Other filters change references to CSS, JavaScript, or images to point to more optimized
+        versions, because they:
+      </p>
+      <ul>
+        <li>are smaller,</li>
+        <li>combine multiple files into one, and</li>
+        <li>extend the cache lifetime</li>
+      </ul>
+
+      <h2>Categories of filters</h2>
+      <p>
+        Filters are of many categories that fit under performance best practices. The current set of
+        filters fits in these categories as follows:
+      </p>
+      <a target="_blank" href="https://developers.google.com/speed/docs/best-practices/caching">
+        <h3>Optimize Caching</h3>
+      </a>
+      <ul>
+        <li><a href="filter-canonicalize-js">Canonicalize JavaScript Libraries</a></li>
+        <li><a href="filter-cache-extend">Extend Cache</a></li>
+        <li><a href="filter-cache-extend-pdfs">Extend Cache PDFs</a></li>
+        <li><a href="filter-local-storage-cache">Local Storage Cache</a></li>
+        <li><a href="filter-css-outline">Outline CSS</a></li>
+        <li><a href="filter-js-outline">Outline JavaScript</a></li>
+      </ul>
+
+      <a target="_blank" href="https://developers.google.com/speed/docs/best-practices/rtt">
+        <h3>Minimize Round Trip Times</h3>
+      </a>
+      <ul>
+        <li><a href="filter-css-combine">Combine CSS</a></li>
+        <li><a href="filter-flatten-css-imports">Flatten CSS @imports</a></li>
+        <li><a href="filter-css-inline">Inline CSS</a></li>
+        <li><a href="filter-css-inline-google-fonts">Inline Google Fonts API CSS</a></li>
+        <li><a href="filter-js-combine">Combine JavaScript</a></li>
+        <li><a href="filter-js-inline">Inline JavaScript</a></li>
+        <li><a href="filter-css-above-scripts">Move CSS Above Scripts</a></li>
+        <li><a href="domains#shard">Configuration file directive to shard domains</a></li>
+        <li><a href="filter-image-sprite">Sprite Images</a></li>
+        <li><a href="filter-insert-dns-prefetch">Pre-Resolve DNS</a></li>
+      </ul>
+
+      <a target="_blank" href="https://developers.google.com/speed/docs/best-practices/request">
+        <h3>Minimize Request Overhead</h3>
+      </a>
+      <ul>
+        <li><a href="filter-domain-rewrite">Rewrite Domains</a></li>
+        <li><a href="domains#mapping_rewrite">Configuration file directive to map domains</a></li>
+      </ul>
+
+      <a target="_blank" href="https://developers.google.com/speed/docs/best-practices/payload">
+        <h3>Minimize Payload Size</h3>
+      </a>
+      <ul>
+        <li><a href="filter-whitespace-collapse">Collapse Whitespace</a></li>
+        <li><a href="filter-head-combine">Combine Heads</a></li>
+        <li><a href="filter-attribute-elide">Elide Attributes</a></li>
+        <li><a href="filter-js-minify">Minify JavaScript</a></li>
+        <li><a href="filter-image-optimize">Optimize Images</a></li>
+        <li><a href="filter-prioritize-critical-css">Prioritize Critical CSS</a></li>
+        <li><a href="filter-dedup-inlined-images">Deduplicate Inlined Images</a></li>
+        <li><a href="filter-comment-remove">Remove Comments</a></li>
+        <li><a href="filter-quote-remove">Remove Quotes</a></li>
+        <li><a href="filter-css-rewrite">Rewrite CSS</a></li>
+        <li><a href="filter-rewrite-style-attributes">Rewrite Style Attributes</a></li>
+        <li><a href="filter-trim-urls">Trim URLs</a></li>
+      </ul>
+
+      <a target="_blank" href="https://developers.google.com/speed/docs/best-practices/rendering">
+        <h3>Optimize Browser Rendering</h3></a
+      >
+      <ul>
+        <li><a href="filter-convert-meta-tags">Convert Meta Tags</a></li>
+        <li><a href="filter-js-defer">Defer Javascript</a></li>
+        <li><a href="filter-hint-preload-subresources">Hint Resource Preloading</a></li>
+        <li><a href="filter-inline-preview-images">Inline Preview Images</a></li>
+        <li><a href="filter-lazyload-images">Lazily Load Images</a></li>
+        <li><a href="filter-image-responsive">Make Images Responsive</a></li>
+        <li><a href="filter-css-to-head">Move CSS to Head</a></li>
+        <li><a href="filter-image-optimize">Optimize Images</a></li>
+        <li><a href="reference-image-optimize#progressive">Convert JPEG to Progressive</a></li>
+        <li><a href="filter-rewrite-style-attributes">Rewrite Style Attributes</a></li>
+      </ul>
+
+      <h3>Other</h3>
+      <ul>
+        <li><a href="filter-head-add">Add Head</a></li>
+        <li><a href="filter-instrumentation-add">Add Instrumentation</a></li>
+        <li><a href="filter-source-maps-include">Include JavaScript Source Maps</a></li>
+        <li><a href="filter-css-inline-import">Inline @import to Link</a></li>
+        <li><a href="filter-insert-ga">Insert Google Analytics Snippet</a></li>
+        <li><a href="filter-make-show-ads-async">Make Google AdSense Async</a></li>
+        <li><a href="filter-make-google-analytics-async">Make Google Analytics Async</a></li>
+        <li><a href="filter-pedantic">Pedantic</a></li>
+        <li><a href="module-run-experiment">Run Experiment</a></li>
+      </ul>
+
+      <p>
+        In some cases, a filter such as 'Optimize Images' helps both minimize request overhead and
+        optimize browser rendering.
+      </p>
+    </div>
+    <!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+    <div id="footer">
+      <!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+      <div id="navline">
+        <a href="/1.0/doc/">&larr; documentation index</a>
+      </div>
+    </div>
+
+    <script>
+      function buildTocHelper(node, headers) {
+        if (node.nodeType == 1) {
+          // Element node.
+          var nodeName = node.nodeName.toLowerCase();
+          if (
+            nodeName == 'h2' ||
+            nodeName == 'h3' ||
+            nodeName == 'h4' ||
+            nodeName == 'h5' ||
+            nodeName == 'h6'
+          ) {
+            if (node.id) {
+              headers.push([nodeName, node.innerHTML, node.id]);
+              node.appendChild(document.createTextNode('\u00A0')); // nbsp
+              var a = document.createElement('a');
+              a.class = 'header-link';
+              a.href = '#' + node.id;
+              a.textContent = '\uD83D\uDD17'; // link symbol
+              node.appendChild(a);
+            }
+          } else {
+            for (var i = 0; i < node.childNodes.length; i++) {
+              buildTocHelper(node.childNodes[i], headers);
+            }
+          }
+        }
+      }
+
+      function buildToc() {
+        var headers = [];
+        buildTocHelper(document.body, headers);
+        if (headers.length == 0) {
+          return;
+        }
+
+        var toc = document.getElementById('toc');
+        var tocContents = document.createElement('div');
+        tocContents.id = 'toc-contents';
+        tocContents.textContent = 'Contents';
+        toc.appendChild(tocContents);
+
+        var level = 1;
+        var currentUl = null;
+        for (var i = 0; i < headers.length; i++) {
+          var header = headers[i];
+          var headerLevel = header[0];
+          var headerValue = header[1];
+          var headerId = header[2];
+
+          var newLevel = parseInt(headerLevel.substring(1));
+          while (newLevel > level) {
+            // We loop here to handle the case where we have h2 ... h4.  This
+            // isn't a good way to write html, but someone may still do it.
+
+            var newUl = document.createElement('ul');
+            if (currentUl == null) {
+              toc.appendChild(newUl);
+            } else {
+              currentUl.appendChild(newUl);
+            }
+            currentUl = newUl;
+            level++;
+          }
+          while (newLevel < level) {
+            currentUl = currentUl.parentNode;
+            level--;
+          }
+          var li = document.createElement('li');
+          var a = document.createElement('a');
+          a.href = '#' + headerId;
+          a.textContent = headerValue;
+          li.appendChild(a);
+          currentUl.appendChild(li);
+        }
+      }
+
+      function wrapTables() {
+        var tables = document.getElementsByTagName('table');
+        for (var i = 0; i < tables.length; i++) {
+          var table = tables[i];
+          var parent = table.parentNode;
+          var div = document.createElement('div');
+          div.className = 'table-wrapper';
+          parent.insertBefore(div, table);
+          div.appendChild(table);
+        }
+      }
+
+      buildToc();
+      wrapTables();
+    </script>
+  </body>
+</html>

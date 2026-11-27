@@ -1,0 +1,91 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// Home section 01: the install procedure. The three steps as one caption row,
+// the per-platform install command with a copy button, then the stack panel
+// and the product card.
+//
+// The markup keeps the indentation it has inside the page layout: the build
+// does not compress HTML, so this indentation is the whitespace of the page.
+// The class names are styled by the page's global style block in
+// src/pages/index.astro. Keep the component imports below in this order: it
+// decides the order of the inline style blocks in <head> (see the note in
+// src/pages/index.astro).
+
+import InstallTabs from '../InstallTabs.astro';
+import SectionHeader from '../instrument/SectionHeader.astro';
+import Product from './Product.astro';
+
+// The install commands, one per platform: the package repository line, then
+// the Debian and Ubuntu package lines of the apt/yum page, verbatim (on nginx
+// the worker goes in first, as its own command, so the module can add the
+// nginx user to the worker's group). The repository line repeats the download
+// page's command; test/sync/install-command-sync.test.ts fails when either
+// part drifts from its source.
+const REPOSITORY_INSTALL_COMMAND =
+  'curl -fsSL https://packages.modpagespeed.com/install.sh | sudo sh';
+const installPlatforms = [
+  {
+    id: 'nginx',
+    label: 'nginx',
+    command: `${REPOSITORY_INSTALL_COMMAND}\nsudo apt-get install pagespeed-optimizer\nsudo apt-get install nginx-module-pagespeed`,
+    copyEvent: 'cta_home_cmd_nginx',
+  },
+  {
+    id: 'apache',
+    label: 'Apache',
+    command: `${REPOSITORY_INSTALL_COMMAND}\nsudo apt-get install mod-pagespeed`,
+    copyEvent: 'cta_home_cmd_apache',
+  },
+];
+---
+
+  <section class="py-13 sm:py-18" aria-labelledby="s-procedure">
+    <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+      <SectionHeader
+        id="s-procedure"
+        index="01"
+        eyebrow="Procedure"
+        title="Install. Configure. Verify."
+      >
+        Three steps: add optimization to your server, set the options you want, and check the
+        response headers.
+      </SectionHeader>
+      <ol class="step-row mt-8">
+        <li>
+          <p class="step-no"><span>STEP 1</span></p>
+          <h3 class="mt-2 font-semibold text-text-body">Install</h3>
+          <p class="mt-1 text-body text-text-muted">
+            <code class="text-sm">apt</code> or <code class="text-sm">dnf</code> install the signed
+            package for Apache or nginx. The optimizer worker installs alongside.
+          </p>
+        </li>
+        <li>
+          <p class="step-no"><span>STEP 2</span></p>
+          <h3 class="mt-2 font-semibold text-text-body">Tell it what to optimize</h3>
+          <p class="mt-1 text-body text-text-muted">
+            Keeps the mod_pagespeed 1.14/1.15 directives. Enable filters and set the cache path.
+          </p>
+        </li>
+        <li>
+          <p class="step-no"><span>STEP 3</span></p>
+          <h3 class="mt-2 font-semibold text-text-body">Check the response headers</h3>
+          <p class="mt-1 text-body text-text-muted">
+            <code class="text-sm [overflow-wrap:anywhere]">curl -I your-site | grep -iE 'page-?speed'</code>. A PageSpeed
+            response header confirms the module is active.
+          </p>
+        </li>
+      </ol>
+      <div class="mt-8 max-w-2xl">
+        <InstallTabs
+          name="home-install"
+          groupLabel="Select platform"
+          copyLabel="Copy install command"
+          copiedLabel="Copied"
+          platforms={installPlatforms}
+        />
+      </div>
+      <Product />
+    </div>
+  </section>

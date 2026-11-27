@@ -1,0 +1,132 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright (c) 2024-2026 We-Amp B.V. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Northwind Outfitters</title>
+<link rel="stylesheet" href="/bootstrap.min.css">
+</head>
+<body>
+<nav class="navbar navbar-expand-lg bg-body-tertiary">
+  <div class="container-fluid">
+    <a class="navbar-brand" href="#">Northwind</a>
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#nav" aria-controls="nav" aria-expanded="false" aria-label="Toggle navigation">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+    <div class="collapse navbar-collapse" id="nav">
+      <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+        <li class="nav-item"><a class="nav-link active" aria-current="page" href="#">Home</a></li>
+        <li class="nav-item"><a class="nav-link" href="#">Shop</a></li>
+        <li class="nav-item dropdown">
+          <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">Collections</a>
+          <ul class="dropdown-menu">
+            <li><a class="dropdown-item" href="#">Hiking</a></li>
+            <li><a class="dropdown-item" href="#">Climbing</a></li>
+            <li><hr class="dropdown-divider"></li>
+            <li><a class="dropdown-item" href="#">Clearance</a></li>
+          </ul>
+        </li>
+        <li class="nav-item"><a class="nav-link disabled" aria-disabled="true">Stores</a></li>
+      </ul>
+      <form class="d-flex" role="search">
+        <input class="form-control me-2" type="search" placeholder="Search" aria-label="Search">
+        <button class="btn btn-outline-success" type="submit">Search</button>
+      </form>
+    </div>
+  </div>
+</nav>
+
+<main>
+  <div class="px-4 py-5 my-5 text-center">
+    <h1 class="display-5 fw-bold text-body-emphasis">Gear for the long way round</h1>
+    <div class="col-lg-6 mx-auto">
+      <p class="lead mb-4">Packs, shells and boots tested on three continents. Free returns for a year, and repairs for as long as you own it.</p>
+      <div class="d-grid gap-2 d-sm-flex justify-content-sm-center">
+        <button type="button" class="btn btn-primary btn-lg px-4 gap-3">Shop new arrivals</button>
+        <button type="button" class="btn btn-outline-secondary btn-lg px-4">Find a store</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="album py-5 bg-body-tertiary">
+    <div class="container">
+      <div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 g-3">
+        <div class="col">
+          <div class="card shadow-sm">
+            <img class="card-img-top" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" width="100%" height="225" alt="">
+            <div class="card-body">
+              <h5 class="card-title">Ridge 38 pack</h5>
+              <p class="card-text">A frameless 38 litre pack for fast days above the tree line.</p>
+              <div class="d-flex justify-content-between align-items-center">
+                <div class="btn-group">
+                  <button type="button" class="btn btn-sm btn-outline-secondary">View</button>
+                  <button type="button" class="btn btn-sm btn-outline-secondary">Add</button>
+                </div>
+                <small class="text-body-secondary">$189</small>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="col">
+          <div class="card shadow-sm">
+            <img class="card-img-top" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" width="100%" height="225" alt="">
+            <div class="card-body">
+              <h5 class="card-title">Storm shell</h5>
+              <p class="card-text">Three-layer waterproof with pit zips and a helmet hood.</p>
+              <div class="d-flex justify-content-between align-items-center">
+                <div class="btn-group">
+                  <button type="button" class="btn btn-sm btn-outline-secondary">View</button>
+                  <button type="button" class="btn btn-sm btn-outline-secondary">Add</button>
+                </div>
+                <small class="text-body-secondary">$329</small>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="col">
+          <div class="card shadow-sm">
+            <img class="card-img-top" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" width="100%" height="225" alt="">
+            <div class="card-body">
+              <h5 class="card-title">Talus mid boot</h5>
+              <p class="card-text">Resoleable leather boot with a stiff shank for scree.</p>
+              <div class="d-flex justify-content-between align-items-center">
+                <div class="btn-group">
+                  <button type="button" class="btn btn-sm btn-outline-secondary">View</button>
+                  <button type="button" class="btn btn-sm btn-outline-secondary">Add</button>
+                </div>
+                <small class="text-body-secondary">$245</small>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="container px-4 py-5">
+    <h2 class="pb-2 border-bottom">Why Northwind</h2>
+    <div class="row g-4 py-5 row-cols-1 row-cols-lg-3">
+      <div class="col d-flex align-items-start">
+        <div><h3 class="fs-2 text-body-emphasis">Tested</h3><p>Every product spends a season with our guides before it ships.</p></div>
+      </div>
+      <div class="col d-flex align-items-start">
+        <div><h3 class="fs-2 text-body-emphasis">Repaired</h3><p>Send it back when it breaks. We fix it or replace it.</p></div>
+      </div>
+      <div class="col d-flex align-items-start">
+        <div><h3 class="fs-2 text-body-emphasis">Recycled</h3><p>Worn-out gear becomes insulation for the next batch.</p></div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer class="container py-5">
+  <div class="row">
+    <div class="col-12 col-md"><small class="d-block mb-3 text-body-secondary">&copy; 2026 Northwind Outfitters</small></div>
+    <div class="col-6 col-md"><h5>Help</h5><ul class="list-unstyled text-small"><li><a class="link-secondary text-decoration-none" href="#">Returns</a></li><li><a class="link-secondary text-decoration-none" href="#">Repairs</a></li></ul></div>
+    <div class="col-6 col-md"><h5>About</h5><ul class="list-unstyled text-small"><li><a class="link-secondary text-decoration-none" href="#">Team</a></li><li><a class="link-secondary text-decoration-none" href="#">Careers</a></li></ul></div>
+  </div>
+</footer>
+</body>
+</html>

@@ -1,0 +1,245 @@
+---
+import { OG_DEFAULT_IMAGE_URL } from '../../data/og-image';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PageHero from '../../components/PageHero.astro';
+import TermPanel from '../../components/instrument/TermPanel.astro';
+import {
+  APACHE_PLATFORM_ROWS,
+  LICENSE_CLAUSE,
+  MODULE_APT_SHORT,
+  NGINX_APT_SHORT,
+  NGINX_PLATFORM_ROWS,
+  NGINX_RPM_SHORT,
+  REPOSITORY_KEY,
+  formatFingerprint,
+} from '../../data/product-facts.mjs';
+
+const pageDescription = `Signed apt and yum repository for the mod_pagespeed Apache and nginx modules: ${MODULE_APT_SHORT}, AlmaLinux, RHEL and Rocky 9 and 10.`;
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'TechArticle',
+  headline: 'Install mod_pagespeed from packages.modpagespeed.com (apt + yum)',
+  description: `Signed apt and yum repository for the mod_pagespeed Apache and nginx modules on ${MODULE_APT_SHORT}, and AlmaLinux/RHEL/Rocky 9 and 10. One-line install configures the repo and pulls the package.`,
+  about: 'mod_pagespeed',
+  image: OG_DEFAULT_IMAGE_URL,
+  author: { '@type': 'Organization', name: 'We-Amp B.V.' },
+  publisher: {
+    '@type': 'Organization',
+    name: 'We-Amp B.V.',
+    logo: {
+      '@type': 'ImageObject',
+      url: 'https://modpagespeed.com/logo.svg',
+    },
+  },
+  url: 'https://modpagespeed.com/download/apt-yum/',
+};
+---
+
+<BaseLayout
+  title="Install mod_pagespeed on Apache & nginx via apt / yum"
+  description={pageDescription}
+  jsonLd={jsonLd}
+>
+  <PageHero size="utility" width="prose" eyebrow="mod_pagespeed">
+    <Fragment slot="title">
+      Install from <code class="font-mono max-lg:wrap-anywhere">packages.modpagespeed.com</code>
+    </Fragment>
+    <Fragment slot="lede">
+      A signed apt and yum repository for the mod_pagespeed Apache and nginx modules. One line
+      detects the distro, installs the GPG signing key, writes the source file, and pulls the
+      package. The nginx module ships prebuilt for {NGINX_APT_SHORT} (amd64 and arm64), and for
+      RHEL/AlmaLinux/Rocky {NGINX_RPM_SHORT}, each pinned to that distro's stock nginx.
+    </Fragment>
+  </PageHero>
+
+  <section class="container-prose pb-16">
+    <div class="rounded-card border border-border bg-bg-secondary p-6">
+      <p class="eyebrow" id="apt-yum-install-lead">
+        Install
+      </p>
+      <div class="mt-3">
+        <TermPanel
+          labelledby="apt-yum-install-lead"
+          lines={[
+            {
+              text: 'curl -fsSL https://packages.modpagespeed.com/install.sh | sudo sh',
+              tone: 'strong',
+              event: 'cta_download_apt_yum_oneliner',
+            },
+          ]}
+        />
+      </div>
+      <p class="mt-4 text-sm text-text-muted" id="apt-yum-apache-lead">
+        Then install the module for your server. Apache:
+      </p>
+      <div class="mt-2">
+        <TermPanel
+          labelledby="apt-yum-apache-lead"
+          lines={[
+            {
+              text: `# ${MODULE_APT_SHORT}
+sudo apt-get install mod-pagespeed
+
+# AlmaLinux / RHEL / Rocky 9 and 10
+sudo dnf install mod-pagespeed`,
+              tone: 'strong',
+            },
+          ]}
+        />
+      </div>
+      <p class="mt-4 text-sm text-text-muted" id="apt-yum-nginx-lead">
+        nginx:
+      </p>
+      <div class="mt-2">
+        <TermPanel
+          labelledby="apt-yum-nginx-lead"
+          lines={[
+            {
+              text: `# ${NGINX_APT_SHORT}: the worker first, then the module
+sudo apt-get install pagespeed-optimizer
+sudo apt-get install nginx-module-pagespeed
+
+# AlmaLinux / RHEL / Rocky 9 and 10
+sudo dnf install pagespeed-optimizer
+sudo dnf install nginx-module-pagespeed`,
+              tone: 'strong',
+            },
+          ]}
+        />
+      </div>
+      <p class="mt-4 text-sm text-text-muted">
+        Install the <code class="font-mono">pagespeed-optimizer</code> worker before the native
+        nginx module, as two separate commands: the module package adds the nginx user to the
+        worker's group only when that group already exists, and in one transaction dnf runs the
+        module's script first. If the module went in first or alongside, run{' '}
+        <code class="font-mono">sudo usermod -a -G pagespeed www-data</code> on Debian and Ubuntu or{' '}
+        <code class="font-mono">sudo usermod -a -G pagespeed nginx</code> on Enterprise Linux, and
+        restart nginx. Then{' '}
+        <a href="/docs/installation-module/#native-nginx-module" class="text-interactive underline">
+          configure nginx
+        </a>{' '}
+        to hand optimization to the worker and to serve the admin console, which nginx does not
+        serve until you set its path. Without the worker, the module runs on its own filters only.
+      </p>
+      <p class="mt-4 text-sm text-text-muted">
+        Installing <code class="font-mono">nginx-module-pagespeed</code> drops a modules-enabled
+        auto-include snippet — there is nothing to copy by hand. Each{' '}
+        <code class="font-mono">.so</code> is pinned to its distro's exact stock nginx version
+        (nginx's <code class="font-mono">--with-compat</code> does not relax that check), so
+        upgrading nginx past the stock version needs a matching rebuild —{' '}
+        <a href="/contact/" class="text-interactive underline">
+          contact us
+        </a>
+        for a pinned build. This is also the prebuilt fix{' '}
+        <a
+          href="/blog/ngx-pagespeed-wont-build-modern-nginx/"
+          class="text-interactive hover:text-interactive-hover underline"
+        >
+          if your ngx_pagespeed build is failing
+        </a>{' '}
+        on a modern nginx in the first place.
+      </p>
+    </div>
+
+    <h2 class="h2-section mt-14 text-text-body">Supported today</h2>
+    <p class="mt-4 text-sm font-semibold text-text-body">
+      nginx (<code class="font-mono">nginx-module-pagespeed</code>)
+    </p>
+    <ul class="mt-2 space-y-2 text-text-body">
+      {NGINX_PLATFORM_ROWS.map((row) => (
+        <li class="flex items-start gap-3">
+          <span class="mt-1 flex-shrink-0 text-text-annotation font-bold">&bull;</span>
+          <span>{row}</span>
+        </li>
+      ))}
+    </ul>
+    <p class="mt-6 text-sm font-semibold text-text-body">
+      Apache (<code class="font-mono">mod-pagespeed</code>)
+    </p>
+    <ul class="mt-2 space-y-2 text-text-body">
+      {APACHE_PLATFORM_ROWS.map((row) => (
+        <li class="flex items-start gap-3">
+          <span class="mt-1 flex-shrink-0 text-text-annotation font-bold">&bull;</span>
+          <span>{row}</span>
+        </li>
+      ))}
+    </ul>
+    <p class="mt-4 text-sm text-text-annotation">
+      Debian 11 (bullseye) is end of life and no longer supported: upgrade to Debian 12 or later to
+      install mod_pagespeed.
+    </p>
+    <p class="mt-4 text-sm text-text-annotation">
+      EL8 is no longer in the generic yum repo.{' '}
+      <a href="/contact/" class="text-interactive underline">
+        Contact us
+      </a>{' '}
+      if you run an nginx version we don't yet package and need a pinned build.
+    </p>
+    <p class="mt-4 text-sm text-text-annotation">
+      cPanel / EasyApache 4: the <code class="font-mono">ea-apache24-mod_pagespeed</code> package
+      covers EL8 and EL9 (x86_64) and auto-enables on cPanel hosts. See the{' '}
+      <a href="/docs/cpanel/" class="text-interactive underline">
+        cPanel guide
+      </a>
+      .
+    </p>
+    <p class="mt-4 text-sm text-text-annotation">
+      Running ngx_pagespeed? See{' '}
+      <a href="https://ngxpagespeed.com/" class="text-interactive underline">
+        ngxpagespeed.com
+      </a>
+      .
+    </p>
+
+    <h2 class="h2-section mt-14 text-text-body">How it works</h2>
+    <p class="mt-4 text-text-body">
+      The install script detects the distribution, fetches the repository signing key (fingerprint{' '}
+      <code class="font-mono wrap-anywhere">{formatFingerprint(REPOSITORY_KEY.fingerprint)}</code>),
+      and writes a single source file:
+      <code class="font-mono wrap-anywhere">/etc/apt/sources.list.d/modpagespeed.list</code> on apt,
+      or
+      <code class="font-mono wrap-anywhere">/etc/yum.repos.d/modpagespeed.repo</code> on yum.
+      Credentials and URLs stay out of the source file itself — apt credentials live in
+      <code class="font-mono">/etc/apt/auth.conf.d/</code>; the yum file is mode <code>0600</code>.
+    </p>
+    <p class="mt-4 text-text-body">
+      Subsequent <code class="font-mono">apt-get upgrade</code> /
+      <code class="font-mono">dnf upgrade</code> picks up new releases automatically.
+    </p>
+
+    <h2 class="h2-section mt-14 text-text-body">License</h2>
+    <p class="mt-4 text-text-body">
+      The package is the same mod_pagespeed build as the direct download links. Install it and it
+      optimizes right away, including{' '}
+      <a
+        href="/blog/nginx-image-optimization-module/"
+        class="text-interactive hover:text-interactive-hover underline"
+      >
+        automatic WebP image optimization via the nginx module
+      </a>
+      . mod_pagespeed is {LICENSE_CLAUSE} — free in development and in production; what We-Amp sells
+      is{' '}
+      <a
+        href="/pricing/"
+        data-umami-event="cta_commercial"
+        data-umami-event-offer="support"
+        data-umami-event-surface="download-apt-yum"
+        data-umami-event-position="license_section"
+        class="text-interactive underline"
+      >
+        support
+      </a>
+      ; the software and its signed packages are the same for everyone. First-time setup is covered
+      in the{' '}
+      <a href="/docs/getting-started/" class="text-interactive underline">
+        getting-started guide
+      </a>
+      ; see{' '}
+      <a href="/download/" class="text-interactive underline">
+        /download/
+      </a>{' '}
+      for the full integration matrix (Apache, nginx, IIS, ASP.NET Core).
+    </p>
+  </section>
+</BaseLayout>

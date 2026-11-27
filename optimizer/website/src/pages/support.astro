@@ -1,0 +1,467 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// /support/ — the commercial product page: what a support subscription buys,
+// the three tiers, signed packages and images (what ships today, with a verify
+// recipe), the hosting partner program, the
+// consulting and integration handoff, the path for existing customers, and the FAQ.
+//
+// Facts: tiers from SUPPORT_TIERS, the pricing status and commercial address
+// from product-facts.mjs, the signing-key URL from the 2.1 release manifest.
+// Prices, the checkout links and the first-response targets come with the tier
+// rows; /pricing/ is the buying page. Signed artifacts are described
+// only by what ships today; security fixes reach everyone at the same time
+// (there is no private or subscriber repository), and nothing here claims a
+// provenance on packages.
+
+import BaseLayout from '../layouts/BaseLayout.astro';
+import SupportTiers from '../components/SupportTiers.astro';
+import PageHero from '../components/PageHero.astro';
+import Icon from '../components/Icon.astro';
+import { faqSupport } from '../data/faq-support';
+import { stripHtml } from '../data/faq-shared';
+import {
+  PRODUCT_NAME,
+  COMMERCIAL_EMAIL,
+  LICENSE_CLAUSE,
+  LICENSING_TERMS_URL,
+  PRICING_LINE,
+  LEGACY_1X_KEY,
+  RELEASE_KEY,
+  RELEASE_KEY_PAGE_URL,
+  RELEASE_VERIFY_URL,
+  REPOSITORY_KEY,
+  formatFingerprint,
+  RESPONSE_TARGETS_LINE,
+  SOURCE_PUBLICATION,
+} from '../data/product-facts.mjs';
+
+const PRODUCT = `${PRODUCT_NAME}`;
+// Two keys, each labelled by what it signs (product-facts.mjs): the repository
+// key for apt/dnf, the release key for SHA256SUMS.asc on GitHub releases.
+// Same fingerprints the download page and the apt/yum page show.
+const KEY_FINGERPRINT = formatFingerprint(REPOSITORY_KEY.fingerprint);
+const RELEASE_FINGERPRINT = formatFingerprint(RELEASE_KEY.fingerprint);
+const LEGACY_1X_FINGERPRINT = formatFingerprint(LEGACY_1X_KEY.fingerprint);
+const SBOM_URL = 'https://github.com/We-Amp/pagespeed-optimizer/tree/main/sbom';
+const CONSULTING_URL = 'https://we-amp.com/consulting/';
+
+const verifyRecipe = [
+  `# apt and dnf repositories: the repository signing key`,
+  `curl -fsSL ${REPOSITORY_KEY.public_url} -o modpagespeed.asc`,
+  `gpg --show-keys --with-fingerprint modpagespeed.asc   # expect ${KEY_FINGERPRINT}`,
+  `gpg --dearmor < modpagespeed.asc | sudo tee /usr/share/keyrings/modpagespeed.gpg > /dev/null   # apt: deb [signed-by=/usr/share/keyrings/modpagespeed.gpg] ...`,
+  `# files from a mod_pagespeed GitHub release (2.5.0 on): the release signing key`,
+  `curl -fsSLO ${RELEASE_KEY.public_url}`,
+  `gpg --show-keys --with-fingerprint RELEASE-SIGNING-KEY.asc   # expect ${RELEASE_FINGERPRINT}`,
+  // A keyring holding only this key: gpg --verify against the normal keyring
+  // would accept a good signature from any key in it.
+  `gpg --dearmor < RELEASE-SIGNING-KEY.asc > release.gpg && gpgv --keyring ./release.gpg SHA256SUMS.asc SHA256SUMS && sha256sum --check --ignore-missing SHA256SUMS   # macOS: shasum -a 256 --check --ignore-missing SHA256SUMS`,
+].join('\n');
+
+const jsonLd = [
+  {
+    '@context': 'https://schema.org',
+    '@type': 'WebPage',
+    name: `Support for ${PRODUCT}`,
+    url: 'https://modpagespeed.com/support/',
+    description: `Support subscriptions for ${PRODUCT} from We-Amp B.V.: a direct channel to the engineers who build it, first-response targets per tier, and advance notice of security releases.`,
+    publisher: { '@type': 'Organization', name: 'We-Amp B.V.', url: 'https://we-amp.com/' },
+  },
+  {
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: faqSupport.map((entry) => ({
+      '@type': 'Question',
+      name: entry.q,
+      acceptedAnswer: { '@type': 'Answer', text: stripHtml(entry.a) },
+    })),
+  },
+];
+
+// "What a subscription buys" — instrument-register readout: key, value, line.
+const buys: Array<{ key: string; value: string; detail: string }> = [
+  {
+    key: 'channel',
+    value: 'direct',
+    detail: 'Tickets and email go to the engineers who build the product. Nobody in between.',
+  },
+  {
+    key: 'response',
+    value: 'by severity',
+    detail:
+      'First-response targets per tier, on CET business days. Severity 1 (production down): within 8 business hours on Priority, 4 on Enterprise.',
+  },
+  {
+    key: 'security updates',
+    value: 'advance notice',
+    detail:
+      'Advance notice of a planned security release: date, severity, affected versions and impact class. If a vulnerability is already public or exploited, the notice goes out with the release.',
+  },
+  {
+    key: 'scope',
+    value: 'people and response',
+    detail:
+      'A subscription covers the people at your organization who can open tickets, and our response; it does not depend on how many servers you run.',
+  },
+];
+---
+
+<BaseLayout
+  title={`${PRODUCT} support from the people who build it`}
+  description="Support subscriptions for mod_pagespeed: a direct line to its engineers, response targets, advance notice of security releases."
+  jsonLd={jsonLd}
+>
+  <PageHero
+    id="support-title"
+    eyebrow={`Support · ${PRODUCT}`}
+    title={`Support from the engineers who build ${PRODUCT}`}
+  >
+    <Fragment slot="lede">
+      {PRODUCT} and its rule packs are free and open; you pay us for support and expertise. Both are{' '}
+      {LICENSE_CLAUSE} and do the same thing with or without a subscription. A subscription decides
+      who answers when something breaks.
+    </Fragment>
+    <div class="mt-8 flex flex-wrap gap-3">
+      <a
+        href="#tiers"
+        class="btn-primary"
+        data-umami-event="cta_commercial"
+        data-umami-event-offer="support"
+        data-umami-event-surface="support"
+        data-umami-event-position="hero_pricing"
+      >
+        <span>
+          See prices <span aria-hidden="true">&rarr;</span>
+        </span>
+      </a>
+      <a
+        href="/contact/?topic=support"
+        class="btn-secondary"
+        data-umami-event="cta_commercial"
+        data-umami-event-offer="support"
+        data-umami-event-surface="support"
+        data-umami-event-position="hero_contact"
+      >
+        Talk to an engineer
+      </a>
+    </div>
+  </PageHero>
+
+  <div class="rule-ticked mx-auto max-w-6xl" role="presentation" aria-hidden="true"></div>
+
+  {/* What a subscription buys */}
+  <section id="what-you-get" class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 section">
+    <h2 class="h2-section text-text-body">What a subscription buys</h2>
+    <dl class="mt-8 readout-plate divide-y divide-border">
+      {buys.map((row) => (
+        <div class="grid grid-cols-1 gap-1 px-5 py-4 sm:grid-cols-[16rem_1fr] sm:gap-6">
+          <dt class="font-mono text-sm">
+            <span class="text-text-annotation">{row.key}:</span>{' '}
+            <span class="text-interactive">{row.value}</span>
+          </dt>
+          <dd class="text-small text-text-muted">{row.detail}</dd>
+        </div>
+      ))}
+    </dl>
+    <p class="mt-6 text-body text-text-muted max-w-3xl">
+      Subscriptions are governed by the{' '}
+      <a href={LICENSING_TERMS_URL} class="text-interactive hover:text-interactive-hover underline">
+        support terms
+      </a>{' '}
+      together with the{' '}
+      <a href="/terms/" class="text-interactive hover:text-interactive-hover underline">
+        terms of service
+      </a>
+      .
+    </p>
+  </section>
+
+  {/* Tiers */}
+  <section id="tiers" class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 section">
+    <h2 class="h2-section text-text-body">Three tiers</h2>
+    <p class="mt-4 text-text-muted max-w-3xl">
+      Tiers differ in fleet size, response targets and what each adds. The software, and everything
+      signed and attested, is the same in all three.
+    </p>
+    <div class="mt-10">
+      <SupportTiers surface="support" />
+    </div>
+    <p class="mt-6 text-body text-text-muted" data-pricing-status>
+      {PRICING_LINE}
+      {RESPONSE_TARGETS_LINE}
+    </p>
+  </section>
+
+  {/* Signed packages and images */}
+  <section id="hardened-builds" class="border-t border-border bg-bg-secondary section">
+    <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+      <p class="eyebrow">For your security team</p>
+      <h2 class="mt-3 h2-section text-text-body">Signed packages and images</h2>
+      <p class="mt-4 text-text-muted max-w-3xl">
+        Every install of {PRODUCT} runs the same software from the same source, whatever the support
+        tier. Here is what is signed today, for everyone.
+      </p>
+
+      <div class="mt-10 grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <div class="card">
+          <h3 class="font-semibold text-text-body">What ships today, for everyone</h3>
+          <ul class="mt-4 space-y-3 text-body text-text-muted">
+            <li class="flex gap-2">
+              <Icon name="key-round" class="mt-1 h-4 w-4 shrink-0 text-interactive" />
+              <span>
+                The apt and yum repositories at{' '}
+                <code class="text-small">packages.modpagespeed.com</code> are GPG-signed with the
+                repository signing key (RSA 4096, fingerprint{' '}
+                <code class="text-small break-all">{KEY_FINGERPRINT}</code>); apt and dnf verify
+                what they install against that key.
+              </span>
+            </li>
+            <li class="flex gap-2">
+              <Icon name="check" class="mt-1 h-4 w-4 shrink-0 text-interactive" />
+              <span>
+                Every release asset on GitHub is listed in a{' '}
+                <code class="text-small">SHA256SUMS</code> file published with the release. On the
+                module's releases (from 2.5.0 on), <code class="text-small">SHA256SUMS.asc</code>{' '}
+                signs that file with a separate key, the{' '}
+                <a
+                  href={RELEASE_KEY_PAGE_URL}
+                  class="text-interactive hover:text-interactive-hover underline"
+                >
+                  release signing key
+                </a>{' '}
+                (fingerprint <code class="text-small break-all">{RELEASE_FINGERPRINT}</code>; steps
+                in{' '}
+                <a
+                  href={RELEASE_VERIFY_URL}
+                  class="text-interactive hover:text-interactive-hover underline"
+                >
+                  Verifying a Release
+                </a>
+                ). The Windows installer is also Authenticode-signed by We-Amp B.V.
+              </span>
+            </li>
+            <li class="flex gap-2">
+              <Icon name="database" class="mt-1 h-4 w-4 shrink-0 text-interactive" />
+              <span>
+                An SPDX 2.3 SBOM, with a VEX document, is published in the
+                <a
+                  href={SBOM_URL}
+                  rel="noopener noreferrer"
+                  class="text-interactive hover:text-interactive-hover underline"
+                >
+                  <code class="text-small">sbom/</code> directory
+                </a>{' '}
+                of the source tree. Every release from 2.6.0 on carries its SPDX SBOM and VEX.
+              </span>
+            </li>
+            <li class="flex gap-2">
+              <Icon name="shield-check" class="mt-1 h-4 w-4 shrink-0 text-interactive" />
+              <span>
+                The container images on GHCR are signed with keyless cosign and carry an SBOM
+                attestation and build provenance; the{' '}
+                <a
+                  href="/docs/deployment/#verify-the-images"
+                  class="text-interactive hover:text-interactive-hover underline"
+                >
+                  verify commands
+                </a>{' '}
+                are in the deployment guide.
+              </span>
+            </li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3 class="font-semibold text-text-body">Security releases</h3>
+          <ul class="mt-4 space-y-3 text-body text-text-muted">
+            <li class="flex gap-2">
+              <Icon name="shield-check" class="mt-1 h-4 w-4 shrink-0 text-interactive" />
+              <span>
+                Security fixes reach everyone at the same time, as regular releases through the
+                channel you installed from.
+              </span>
+            </li>
+            <li class="flex gap-2">
+              <Icon name="check" class="mt-1 h-4 w-4 shrink-0 text-interactive" />
+              <span>
+                Subscribers get advance notice of a planned security release: the date, the
+                severity, the affected versions and the impact class. When a vulnerability is
+                already public or being exploited, the notice goes out with the release. Priority
+                and Enterprise subscribers also get vulnerability notifications timed to the EU
+                Cyber Resilience Act reporting windows. Every release from 2.6.0 on carries its SPDX
+                SBOM and VEX, for everyone.
+              </span>
+            </li>
+          </ul>
+          <p class="mt-4 text-body text-text-muted">
+            Everything is the same software under the {SOURCE_PUBLICATION.license}. A subscription
+            adds support, not a different license.
+          </p>
+          <a
+            href="/contact/?topic=support"
+            class="btn-secondary mt-6"
+            data-umami-event="cta_commercial"
+            data-umami-event-offer="support"
+            data-umami-event-surface="support"
+            data-umami-event-position="hardened_builds"
+          >
+            Ask about support
+          </a>
+        </div>
+      </div>
+
+      <div id="verify" class="mt-10">
+        <h3 class="font-semibold text-text-body">Verify what you install today</h3>
+        <p class="mt-2 text-body text-text-muted max-w-3xl">
+          Two keys for two jobs. For the repositories: fetch the repository key, check its
+          fingerprint and pin apt to it. For files downloaded from a mod_pagespeed GitHub release:
+          fetch the release signing key, check its fingerprint, verify the signature on{' '}
+          <code>SHA256SUMS</code> against a keyring that holds only that key, then check the files
+          against it.
+        </p>
+        <pre
+          tabindex="0"
+          class="mt-4 overflow-x-auto rounded-lg bg-bg-recessed p-4 text-xs text-text-body"
+        ><code>{verifyRecipe}</code></pre>
+        <p class="mt-3 text-small text-text-annotation">
+          On dnf, the{' '}
+          <a
+            href="/download/apt-yum/"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            repository file
+          </a>{' '}
+          sets <code>gpgcheck=1</code> against the same key.
+        </p>
+        <p class="mt-3 text-small text-text-annotation">
+          An older key, fingerprint <code class="break-all">{LEGACY_1X_FINGERPRINT}</code>, signed
+          the 1.x direct downloads (per-file <code>.asc</code>) and the source tags v2.1.0 to
+          v2.4.0. It signs nothing new from 20 October 2026 and is being revoked: use it only to
+          check those older signatures, and treat any signature it made after that date as not ours.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  {/* Hosting partners + consulting */}
+  <section class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 section">
+    <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <div id="hosting-partners" class="card flex flex-col">
+        <h2 class="text-xl font-semibold text-text-body">Hosting partner program</h2>
+        <p class="mt-3 flex-1 text-body text-text-muted">
+          For providers running {PRODUCT} across a multi-tenant fleet: Priority-level support for
+          your second- and third-line team, plus cPanel/EA4 and distribution-channel upkeep. One
+          agreement per provider, unlimited hosted domains.
+        </p>
+        <a
+          href="/hosting-partners/"
+          class="btn-secondary mt-6 self-start"
+          data-umami-event="cta_commercial"
+          data-umami-event-offer="hosting"
+          data-umami-event-surface="support"
+          data-umami-event-position="hosting_card"
+        >
+          <span>
+            The partner program <span aria-hidden="true">&rarr;</span>
+          </span>
+        </a>
+      </div>
+      <div id="consulting" class="card flex flex-col">
+        <h2 class="text-xl font-semibold text-text-body">Consulting and integration</h2>
+        <p class="mt-3 flex-1 text-body text-text-muted">
+          When the question is your site rather than the software, We-Amp's consulting practice
+          takes over: a fixed-price performance and configuration audit delivered as a written
+          report, integration into your stack, rules written for your own sites, and longer
+          engagements on caching and reverse-proxy infrastructure.
+        </p>
+        <a
+          href={CONSULTING_URL}
+          class="btn-secondary mt-6 self-start"
+          data-umami-event="cta_commercial"
+          data-umami-event-offer="consulting"
+          data-umami-event-surface="support"
+          data-umami-event-position="consulting_card"
+        >
+          <span>
+            Consulting at we-amp.com <span aria-hidden="true">&rarr;</span>
+          </span>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  {/* Existing customers + how to reach us */}
+  <section class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 pb-16">
+    <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <div id="existing-customers" class="rounded-lg border border-border bg-bg-secondary p-6">
+        <h2 class="text-xl font-semibold text-text-body">Already a customer?</h2>
+        <p class="mt-3 text-body text-text-muted">
+          IISpeed and mod_pagespeed 1.x license holders move to {PRODUCT} at no cost, and paid terms
+          are honored to expiry. To transfer a license or renew into a support subscription, use the{' '}
+          <a
+            href="/contact/?topic=iispeed-transfer"
+            class="text-interactive hover:text-interactive-hover underline"
+            data-umami-event="cta_commercial"
+            data-umami-event-offer="support"
+            data-umami-event-surface="support"
+            data-umami-event-position="existing_customers"
+          >
+            contact form with the topic “IISpeed license transfer”
+          </a>{' '}
+          and include the order number or the email address the license was bought under. Existing
+          customers keep their current rate when they move to a support subscription.
+        </p>
+      </div>
+      <div id="reach-us" class="rounded-lg border border-border bg-bg-secondary p-6">
+        <h2 class="text-xl font-semibold text-text-body">How to reach us</h2>
+        <p class="mt-3 text-body text-text-muted">
+          The{' '}
+          <a href="/contact/" class="text-interactive hover:text-interactive-hover underline">
+            contact form
+          </a>
+          , or email{' '}
+          <a
+            href={`mailto:${COMMERCIAL_EMAIL}`}
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            {COMMERCIAL_EMAIL}
+          </a>
+          . We usually reply within one business day (CET). Vulnerability reports go to{' '}
+          <a
+            href="mailto:security@modpagespeed.com"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            security@modpagespeed.com
+          </a>{' '}
+          under the{' '}
+          <a href="/security/" class="text-interactive hover:text-interactive-hover underline">
+            security policy
+          </a>
+          , never to the commercial address.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  {/* FAQ */}
+  <section id="faq" class="border-t border-border section">
+    <div class="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
+      <h2 class="h2-section text-center text-text-body">Support questions</h2>
+      <div class="mt-8 space-y-3">
+        {faqSupport.map((entry) => (
+          <details class="group rounded-lg border border-border bg-bg-elevated">
+            <summary class="flex items-center justify-between gap-3 cursor-pointer list-none px-4 py-3 text-body font-semibold text-text-body">
+              <span>{entry.q}</span>
+              <Icon
+                name="chevron-down"
+                class="h-5 w-5 shrink-0 text-text-muted group-open:rotate-180"
+              />
+            </summary>
+            <p class="px-4 pb-4 pt-1 max-w-prose text-body text-text-muted" set:html={entry.a} />
+          </details>
+        ))}
+      </div>
+    </div>
+  </section>
+</BaseLayout>

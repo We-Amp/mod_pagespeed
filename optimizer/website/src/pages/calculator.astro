@@ -1,0 +1,509 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import PageHero from '../components/PageHero.astro';
+---
+
+<BaseLayout
+  title="Bandwidth savings calculator — mod_pagespeed"
+  description="Enter monthly pageviews, page weight and your cost per GB to estimate the bandwidth and yearly cost mod_pagespeed saves on images, CSS and JavaScript."
+>
+  <PageHero
+    id="calculator"
+    size="utility"
+    width="prose"
+    eyebrow="Bandwidth savings only."
+    title="Savings calculator"
+  >
+    <Fragment slot="lede">
+      Faster load times and better Core Web Vitals are upside this calculator doesn't count.
+    </Fragment>
+  </PageHero>
+
+  <section class="container-prose pb-20">
+    <!-- Inputs -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-8">
+      <div>
+        <label for="pageviews" class="eyebrow">
+          {' '}
+          Monthly pageviews{' '}
+        </label>
+        <input
+          type="number"
+          inputmode="numeric"
+          id="pageviews"
+          value="10000000"
+          min="0"
+          class="mt-2 block w-full rounded-md border border-control-border px-4 py-3 text-text-body bg-bg-elevated focus:border-interactive focus:ring-2 focus:ring-interactive sm:text-sm"
+        />
+      </div>
+      <div>
+        <label for="pageweight" class="eyebrow">
+          {' '}
+          Average page weight (KB){' '}
+        </label>
+        <input
+          type="number"
+          inputmode="numeric"
+          id="pageweight"
+          value="2500"
+          min="0"
+          class="mt-2 block w-full rounded-md border border-control-border px-4 py-3 text-text-body bg-bg-elevated focus:border-interactive focus:ring-2 focus:ring-interactive sm:text-sm"
+        />
+      </div>
+      <div>
+        <label for="bwcost" class="eyebrow">
+          {' '}
+          Bandwidth cost per GB ($){' '}
+        </label>
+        <input
+          type="number"
+          inputmode="decimal"
+          id="bwcost"
+          value="0.085"
+          min="0"
+          step="0.005"
+          aria-describedby="bwcost-hint"
+          class="mt-2 block w-full rounded-md border border-control-border px-4 py-3 text-text-body bg-bg-elevated focus:border-interactive focus:ring-2 focus:ring-interactive sm:text-sm"
+        />
+        <p id="bwcost-hint" class="mt-1 text-xs text-text-annotation">
+          AWS CloudFront, GCP, Azure typically $0.05–$0.12/GB
+        </p>
+      </div>
+      <div>
+        <label for="sites" class="eyebrow">
+          {' '}
+          Number of sites{' '}
+        </label>
+        <input
+          type="number"
+          inputmode="numeric"
+          id="sites"
+          value="1"
+          min="1"
+          max="100"
+          aria-describedby="sites-hint"
+          class="mt-2 block w-full rounded-md border border-control-border px-4 py-3 text-text-body bg-bg-elevated focus:border-interactive focus:ring-2 focus:ring-interactive sm:text-sm"
+        />
+        <p id="sites-hint" class="mt-1 text-xs text-text-annotation">
+          The software is free on every site and every server &mdash; the count only sizes the
+          bandwidth math.
+        </p>
+      </div>
+    </div>
+
+    <!-- Results -->
+    <div class="mt-12 rounded-card border border-border bg-bg-elevated p-8">
+      <h2 class="text-lg font-semibold text-text-body">Your estimated savings</h2>
+      {/* Headline output — annual savings + ROI dominates */}
+      <div
+        class="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-6"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        <div class="readout-plate p-4">
+          <p class="text-sm text-text-muted">Annual savings</p>
+          <p id="annual-savings" class="display-num mt-1 text-3xl font-bold text-text-body">
+            —
+          </p>
+        </div>
+        <div class="readout-plate p-4">
+          <p class="text-sm text-text-muted">ROI</p>
+          <p id="roi" class="display-num mt-1 text-3xl font-bold text-text-body">
+            —
+          </p>
+        </div>
+      </div>
+
+      <p class="mt-1 text-xs text-text-annotation">
+        Illustrative estimate, not measured product output. We measure 48&ndash;69% page-weight
+        reduction across our demo pages; this calculator uses a conservative 60%. Actual savings
+        depend on your content mix, original image formats, and quality settings.
+      </p>
+
+      {/* Methodology — intermediate monthly numbers, collapsed by default */}
+      <details class="mt-6 group">
+        <summary class="text-sm font-medium text-text-body cursor-pointer select-none">
+          Show methodology — monthly breakdown
+        </summary>
+        <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div class="readout-plate p-4">
+            <p class="text-sm text-text-muted">Current monthly bandwidth</p>
+            <p id="current-bw" class="display-num mt-1 text-2xl font-bold text-text-body">
+              —
+            </p>
+          </div>
+          <div class="readout-plate p-4">
+            <p class="text-sm text-text-muted">Optimized bandwidth</p>
+            <p id="optimized-bw" class="display-num mt-1 text-2xl font-bold text-interactive">
+              —
+            </p>
+          </div>
+          <div class="readout-plate p-4">
+            <p class="text-sm text-text-muted">Bandwidth saved</p>
+            <p id="saved-bw" class="display-num mt-1 text-2xl font-bold text-text-body">
+              —
+            </p>
+          </div>
+          <div class="readout-plate p-4">
+            <p class="text-sm text-text-muted">Monthly bandwidth savings</p>
+            <p id="cost-savings" class="display-num mt-1 text-2xl font-bold text-text-body">
+              —
+            </p>
+          </div>
+          <div class="readout-plate p-4">
+            <p class="text-sm text-text-muted">Monthly software cost (open source)</p>
+            <p id="mps-cost" class="display-num mt-1 text-2xl font-bold text-text-body">
+              —
+            </p>
+          </div>
+          <div class="readout-plate p-4">
+            <p class="text-sm text-text-muted">Net monthly savings</p>
+            <p id="net-savings" class="display-num mt-1 text-2xl font-bold text-text-body">
+              —
+            </p>
+          </div>
+        </div>
+      </details>
+
+      <!-- CWV estimate -->
+      <div class="mt-6 rounded-lg border border-interactive/40 bg-interactive/10 p-4">
+        <p class="text-sm text-text-body">
+          <span class="font-semibold">Illustrative LCP improvement: ~40% faster</span> — an estimate
+          derived from the assumed 60% page-weight reduction, not a measured product output.
+          Industry studies (Google, Deloitte) report that a 100ms improvement in load time can lift
+          conversions by roughly 1&ndash;2%.
+        </p>
+      </div>
+
+      <!-- Bar chart -->
+      <div class="mt-8">
+        <h3 class="text-sm font-medium text-text-body mb-3">Bandwidth comparison</h3>
+        <div class="space-y-3">
+          <div>
+            <div class="flex justify-between text-sm mb-1">
+              <span class="text-text-muted">Before optimization</span>
+              <span id="bar-before-label" class="font-medium text-text-body">
+                —
+              </span>
+            </div>
+            <div class="h-8 w-full rounded-md bg-bg-recessed overflow-hidden">
+              <div
+                id="bar-before"
+                class="h-full rounded-md bg-border-strong"
+                style="width: 0%"
+              ></div>
+            </div>
+          </div>
+          <div>
+            <div class="flex justify-between text-sm mb-1">
+              <span class="text-text-muted">After optimization</span>
+              <span id="bar-after-label" class="font-medium text-interactive">
+                —
+              </span>
+            </div>
+            <div class="h-8 w-full rounded-md bg-bg-recessed overflow-hidden">
+              <div id="bar-after" class="h-full rounded-md bg-interactive" style="width: 0%"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* CTA — context-aware: Enterprise pitch when the site count reaches
+          the point where the Enterprise floor undercuts per-site Business
+          pricing, otherwise download CTA with computed break-even line. The
+          single anchor element is mutated in-place by calculate() so href +
+          label + sub-line stay reactive to input changes. */}
+      <div class="mt-8 flex flex-col items-center gap-3 text-center">
+        <div class="flex flex-wrap items-center justify-center gap-4">
+          <a
+            id="calculator-cta"
+            href="/download/"
+            class="btn-primary"
+            data-umami-event="calculator_cta_download"
+          >
+            Download &amp; run &rarr;
+          </a>
+          <a
+            id="calculator-trial-cta"
+            href="/pricing/"
+            class="btn-secondary"
+            data-umami-event="calculator_cta_trial"
+          >
+            Support pricing &rarr;
+          </a>
+        </div>
+        <p id="calculator-cta-sub" class="text-sm text-text-muted">
+          The software is free — the savings above are all net.
+        </p>
+      </div>
+    </div>
+
+    <!-- Context -->
+    <div class="mt-8 rounded-lg border border-border bg-bg-secondary p-6">
+      <h3 class="text-sm font-semibold text-text-body">Beyond bandwidth savings</h3>
+      <p class="mt-2 text-sm text-text-muted">
+        This calculator counts bandwidth cost alone. The rest of the return on{' '}
+        <a
+          href="/blog/economics-of-image-optimization/"
+          class="text-interactive underline hover:text-interactive"
+        >
+          image and CSS/JS optimization
+        </a>{' '}
+        is harder to price, and larger:
+      </p>
+      <ul class="mt-3 space-y-2 text-sm text-text-muted">
+        <li class="flex items-start gap-2">
+          <span class="mt-0.5 text-interactive">&#8226;</span>
+          <span>
+            <span class="font-medium text-text-body">Better Core Web Vitals</span> — Smaller pages
+            load faster, improving LCP and reducing CLS. Google uses CWV as a ranking signal. That
+            means this impacts your revenue, not just your metrics.
+          </span>
+        </li>
+        <li class="flex items-start gap-2">
+          <span class="mt-0.5 text-interactive">&#8226;</span>
+          <span>
+            <span class="font-medium text-text-body">Higher conversions</span> — Industry data shows
+            every 100ms of load time improvement can increase conversions by 1–2%.
+          </span>
+        </li>
+        <li class="flex items-start gap-2">
+          <span class="mt-0.5 text-interactive">&#8226;</span>
+          <span>
+            <span class="font-medium text-text-body">No engineering time</span> — No build pipeline,
+            no manual srcset, no image optimization workflow. Automatic and continuous.
+          </span>
+        </li>
+        <li class="flex items-start gap-2">
+          <span class="mt-0.5 text-interactive">&#8226;</span>
+          <span>
+            <span class="font-medium text-text-body">Free software vs. CDN usage fees</span> &mdash;
+            mod_pagespeed costs nothing regardless of traffic or server count. CDN and image-CDN
+            optimization (Cloudflare Business $200/mo per site, Cloudinary usage-based) scales with
+            your bill.
+          </span>
+        </li>
+      </ul>
+      <p class="mt-4 text-xs text-text-annotation">
+        The estimate above counts image and CSS/JS savings from the variant-aware cache in
+        mod_pagespeed. The optimizer worker does that work off the request path; the in-process
+        module inside Apache and nginx minifies CSS/JS and transcodes images to WebP on the same
+        pagespeed directives your configuration already uses. The IIS package ships as a signed
+        installer on the mod_pagespeed GitHub release. See the optimizations side by side on the
+        <a href="/examples/" class="text-interactive underline hover:text-interactive">
+          filter examples
+        </a>
+        , or read the case for
+        <a
+          href="/self-hosted-image-optimization/"
+          class="text-interactive underline hover:text-interactive"
+        >
+          self-hosted image optimization
+        </a>
+        .
+      </p>
+    </div>
+  </section>
+
+  <script>
+    const pageviewsInput = document.getElementById('pageviews') as HTMLInputElement;
+    const pageweightInput = document.getElementById('pageweight') as HTMLInputElement;
+    const bwcostInput = document.getElementById('bwcost') as HTMLInputElement;
+    const sitesInput = document.getElementById('sites') as HTMLInputElement;
+
+    // Fire calculator_result analytics event at most once per pageview,
+    // after the first calculation that produces real numbers (pricing loaded).
+    let calculatorResultFired = false;
+    function bucketAnnualSavings(n: number): string {
+      const v = Math.abs(n);
+      if (v < 1_000) return '<1k';
+      if (v < 10_000) return '1k-10k';
+      if (v < 50_000) return '10k-50k';
+      if (v < 250_000) return '50k-250k';
+      return '>250k';
+    }
+
+    function formatBw(tb: number): string {
+      if (tb >= 1) return tb.toFixed(2) + ' TB';
+      const gb = tb * 1024;
+      if (gb >= 1) return gb.toFixed(1) + ' GB';
+      return (gb * 1024).toFixed(0) + ' MB';
+    }
+
+    function formatMoney(n: number): string {
+      if (n >= 0)
+        return (
+          '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+        );
+      // Unicode minus (U+2212) for a proper typographic negative sign.
+      return (
+        '\u2212$' +
+        Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      );
+    }
+
+    // Cost formatting (the software cost is always zero — USD rendering only).
+    function formatMpsCost(n: number): string {
+      const cur: string | undefined = undefined;
+      if (!cur || cur === 'USD') return formatMoney(n);
+      try {
+        const fmt = new Intl.NumberFormat(undefined, {
+          style: 'currency',
+          currency: cur,
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        });
+        return n >= 0 ? fmt.format(n) : '\u2212' + fmt.format(Math.abs(n));
+      } catch {
+        return formatMoney(n);
+      }
+    }
+
+    function calculate() {
+      const pageviews = parseFloat(pageviewsInput.value) || 0;
+      const pageWeightKB = parseFloat(pageweightInput.value) || 0;
+      const bwCostPerGB = parseFloat(bwcostInput.value) || 0;
+      const sites = Math.max(1, parseInt(sitesInput.value) || 1);
+
+      // Current monthly bandwidth in TB
+      const currentTB = (pageviews * pageWeightKB) / 1024 / 1024 / 1024;
+      // Optimized bandwidth (estimated 60% reduction — typical for image-heavy content)
+      const optimizedTB = currentTB * 0.4;
+      // Bandwidth saved
+      const savedTB = currentTB * 0.6;
+      const savedGB = savedTB * 1024;
+      // Cost savings
+      const costSavings = savedGB * bwCostPerGB;
+      // Monthly software cost — zero on the open-source line
+      // The software is free (Apache-2.0): the cost side of the ledger is zero.
+      const mpsUnitPrice = 0;
+      if (mpsUnitPrice === null) {
+        // Pricing not yet loaded — show dashes for price-dependent fields
+        const el = (id: string) => document.getElementById(id);
+        const currentBw = el('current-bw');
+        const optimizedBw = el('optimized-bw');
+        const savedBw = el('saved-bw');
+        const barBefore = el('bar-before') as HTMLElement | null;
+        const barAfter = el('bar-after') as HTMLElement | null;
+        const barBeforeLabel = el('bar-before-label');
+        const barAfterLabel = el('bar-after-label');
+        if (currentBw) currentBw.textContent = formatBw(currentTB);
+        if (optimizedBw) optimizedBw.textContent = formatBw(optimizedTB);
+        if (savedBw) savedBw.textContent = formatBw(savedTB);
+        if (el('cost-savings'))
+          el('cost-savings')!.textContent = formatMoney(savedGB * bwCostPerGB);
+        if (el('mps-cost')) el('mps-cost')!.textContent = '\u2014';
+        if (el('net-savings')) el('net-savings')!.textContent = '\u2014';
+        if (el('annual-savings')) el('annual-savings')!.textContent = '\u2014';
+        if (el('roi')) el('roi')!.textContent = '\u2014';
+        const pct = currentTB > 0 ? Math.round((optimizedTB / currentTB) * 100) : 0;
+        if (barBefore) barBefore.style.width = currentTB > 0 ? '100%' : '0%';
+        if (barAfter) barAfter.style.width = pct + '%';
+        if (barBeforeLabel) barBeforeLabel.textContent = formatBw(currentTB);
+        if (barAfterLabel) barAfterLabel.textContent = formatBw(optimizedTB);
+        return;
+      }
+      // Per-site licensing: one Business license per site, servers don't count.
+      const mpsCost = mpsUnitPrice * sites;
+      // Net savings
+      const netSavings = costSavings - mpsCost;
+      // ROI
+      const roi = mpsCost > 0 ? (netSavings / mpsCost) * 100 : 0;
+      // Annual
+      const annualSavings = netSavings * 12;
+
+      // Update outputs
+      const el = (id: string) => document.getElementById(id);
+
+      const currentBw = el('current-bw');
+      const optimizedBw = el('optimized-bw');
+      const savedBw = el('saved-bw');
+      const costSavingsEl = el('cost-savings');
+      const mpsCostEl = el('mps-cost');
+      const netSavingsEl = el('net-savings');
+      const annualEl = el('annual-savings');
+      const roiEl = el('roi');
+      const barBefore = el('bar-before') as HTMLElement | null;
+      const barAfter = el('bar-after') as HTMLElement | null;
+      const barBeforeLabel = el('bar-before-label');
+      const barAfterLabel = el('bar-after-label');
+
+      if (currentBw) currentBw.textContent = formatBw(currentTB);
+      if (optimizedBw) optimizedBw.textContent = formatBw(optimizedTB);
+      if (savedBw) savedBw.textContent = formatBw(savedTB);
+      if (costSavingsEl) costSavingsEl.textContent = formatMoney(costSavings);
+      if (mpsCostEl) {
+        mpsCostEl.textContent = formatMpsCost(mpsCost);
+        if (sites > 1) {
+          mpsCostEl.textContent = '';
+          mpsCostEl.appendChild(document.createTextNode(formatMpsCost(mpsCost) + ' '));
+          const siteSpan = document.createElement('span');
+          siteSpan.className = 'text-sm font-normal text-text-annotation';
+          siteSpan.textContent = '(' + sites + ' sites)';
+          mpsCostEl.appendChild(siteSpan);
+        }
+      }
+      // Positive values stay on the body text colour; negative values step
+      // down to the muted text colour. No chromatic green/red: the leading
+      // Unicode minus (U+2212) in formatMoney carries sign information.
+      const POS = 'text-text-body';
+      const NEG = 'text-text-muted';
+      function applySignColor(el: HTMLElement, positive: boolean) {
+        // Clear any previous state before applying the current one.
+        el.classList.remove(POS, NEG);
+        el.classList.add(positive ? POS : NEG);
+      }
+
+      if (netSavingsEl) {
+        netSavingsEl.textContent = formatMoney(netSavings);
+        applySignColor(netSavingsEl as HTMLElement, netSavings >= 0);
+      }
+      if (annualEl) {
+        annualEl.textContent = formatMoney(annualSavings);
+        applySignColor(annualEl as HTMLElement, annualSavings >= 0);
+      }
+      if (roiEl) {
+        // Zero software cost: ROI as a ratio is unbounded — say so instead of 0%.
+        roiEl.textContent = mpsCost > 0 ? roi.toFixed(0) + '%' : '\u221e';
+        applySignColor(roiEl as HTMLElement, true);
+      }
+
+      // Bar chart
+      const pct = currentTB > 0 ? Math.round((optimizedTB / currentTB) * 100) : 0;
+      if (barBefore) barBefore.style.width = currentTB > 0 ? '100%' : '0%';
+      if (barAfter) barAfter.style.width = pct + '%';
+      if (barBeforeLabel) barBeforeLabel.textContent = formatBw(currentTB);
+      if (barAfterLabel) barAfterLabel.textContent = formatBw(optimizedTB);
+
+      // CTA: the software is free — the only action is to install it. The
+      // sub-line keeps the honest framing: savings are gross, cost is zero.
+      const ctaEl = el('calculator-cta') as HTMLAnchorElement | null;
+      const ctaSubEl = el('calculator-cta-sub');
+      const trialCtaEl = el('calculator-trial-cta');
+      if (ctaEl && ctaSubEl) {
+        if (trialCtaEl) trialCtaEl.classList.remove('hidden');
+        ctaEl.href = '/download/';
+        ctaEl.textContent = 'Download & run \u2192';
+        ctaEl.setAttribute('data-umami-event', 'calculator_cta_download');
+        ctaSubEl.textContent = 'The software is free \u2014 the savings above are all net.';
+      }
+
+      // Analytics: fire once per pageview when we have real numbers.
+      if (!calculatorResultFired && currentTB > 0) {
+        calculatorResultFired = true;
+        (window as any).umami?.track('calculator_result', {
+          annual_savings_bucket: bucketAnnualSavings(annualSavings),
+        });
+      }
+    }
+
+    pageviewsInput.addEventListener('input', calculate);
+    pageweightInput.addEventListener('input', calculate);
+    bwcostInput.addEventListener('input', calculate);
+    sitesInput.addEventListener('input', calculate);
+
+    // Initial calculation
+    calculate();
+  </script>
+</BaseLayout>

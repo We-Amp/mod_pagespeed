@@ -1,0 +1,2 @@
+# Fixture allowlist for the good tree: legacy.yml is a pre-conversion caller.
+legacy.yml  # allowed until converted

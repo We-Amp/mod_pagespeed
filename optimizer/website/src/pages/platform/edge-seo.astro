@@ -1,0 +1,121 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// /platform/edge-seo/ — the edge-SEO-at-the-origin direction: what the pack
+// fixes, who it is for, how it works, and one interest form
+// (edge-seo) with an optional "sites you manage" count. The pack is free and
+// available now, as /packs/ says.
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PageHero from '../../components/PageHero.astro';
+import PlatformInterestForm from '../../components/PlatformInterestForm.astro';
+
+const fixes = [
+  { what: 'Canonical tags', how: 'set where missing, by rule.' },
+  { what: 'hreflang', how: 'clusters completed and made reciprocal across the language variants.' },
+  {
+    what: 'Titles and meta descriptions',
+    how: 'repaired per URL pattern, from a rule, not a CMS edit.',
+  },
+  { what: 'Structured data', how: 'injected as JSON-LD from your rules.' },
+];
+
+const description =
+  'The free edge-SEO pack for canonicals, hreflang, titles and structured data in the HTML stream on your server.';
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'WebPage',
+  name: 'Edge SEO at the origin for mod_pagespeed',
+  url: 'https://modpagespeed.com/platform/edge-seo/',
+  description,
+};
+---
+
+<BaseLayout
+  title="Edge SEO at the origin for mod_pagespeed"
+  description={description}
+  ogImage="/og-cards/platform-edge-seo.png?v=3"
+  jsonLd={jsonLd}
+>
+  <PageHero
+    id="edge-seo-title"
+    width="prose"
+    class="max-w-3xl"
+    eyebrow="Edge SEO at the origin"
+    title="Technical SEO fixes at serve time, for sites that are not on a CDN"
+  >
+    <Fragment slot="lede">
+      Edge workers can turn technical SEO into a deploy instead of a CMS ticket, for sites behind a
+      CDN. This pack does the same work at the origin, in the HTML stream the interceptor already
+      rewrites.
+    </Fragment>
+  </PageHero>
+
+  <section class="container-prose max-w-3xl pb-16">
+    <div>
+      <h2 class="text-lg font-semibold text-text-body">What it fixes</h2>
+      <ul class="mt-3 space-y-2 text-sm text-text-muted">
+        {fixes.map((f) => (
+          <li class="flex gap-2">
+            <span class="mt-2 h-1 w-1 flex-none rounded-full bg-interactive" aria-hidden="true" />
+            <span>
+              <span class="font-semibold text-text-body">{f.what}</span> {f.how}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+
+    <div class="mt-10">
+      <h2 class="text-lg font-semibold text-text-body">Who it is for</h2>
+      <p class="mt-2 text-text-muted">
+        Agencies and in-house SEO teams whose sites are not behind a CDN with edge workers, and
+        whose CMS releases take weeks. The fix is a rule you deploy on the server; once enforced, it
+        applies to every matching page it serves.
+      </p>
+    </div>
+
+    <div class="mt-10">
+      <h2 class="text-lg font-semibold text-text-body">How it works</h2>
+      <p class="mt-2 text-text-muted">
+        The interceptor parses HTML responses as a stream on your server. A pack adds rules to that
+        pass (the edge-SEO pack today; the others are planned): match a URL pattern or an element,
+        then set, rewrite or inject. The CMS is untouched; the rule changes what is served.
+      </p>
+    </div>
+
+    <p class="readout-plate mt-10 px-4 py-3 text-sm text-text-muted">
+      <span class="font-mono text-xs text-interactive">Status</span>
+      <br />
+      The edge-SEO pack is free and available now. The other packs are planned. Leave your details
+      to shape them.
+      <a href="/packs/" class="text-interactive hover:text-interactive-hover underline">
+        See the pack catalogue.
+      </a>
+      <a
+        href="/docs/rule-packs/"
+        class="ml-2 text-interactive hover:text-interactive-hover underline"
+      >
+        Read the rule packs reference.
+      </a>
+    </p>
+
+    <div class="mt-10 rounded-lg border border-border bg-bg-elevated p-6 sm:p-8">
+      <h2 class="text-lg font-semibold text-text-body">Tell us you need this</h2>
+      <p class="mt-2 text-sm text-text-muted">
+        Leave an email, and roughly how many sites you would run it on. We email you when the
+        compliance or privacy packs ship.
+      </p>
+      <PlatformInterestForm wedge="edge-seo" pack="Edge SEO at the origin" sites={true} />
+    </div>
+
+    <p class="mt-8 text-sm text-text-annotation">
+      All planned directions are on the
+      <a href="/platform/" class="text-interactive hover:text-interactive-hover underline">
+        transform packs page
+      </a>
+      .
+    </p>
+  </section>
+</BaseLayout>

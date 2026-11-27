@@ -1,0 +1,3 @@
+<script>window.__pwned=1</script> - - [10/Oct/2026:13:55:36 +0000] "GET /<img src=x onerror=alert(1)> HTTP/1.1" 200 10 "javascript:alert(1)" "<script>document.title='pwned'</script> GPTBot/1.0"
+"><svg onload=alert(1)> - - [10/Oct/2026:13:55:37 +0000] "GET /a HTTP/1.1" 200 10 "-" "SentinelBot-9f3a7c/1.0 <b>bold</b>"
+not a line at all

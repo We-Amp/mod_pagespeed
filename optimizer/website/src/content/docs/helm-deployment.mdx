@@ -1,0 +1,308 @@
+---
+title: 'Deploy with Helm'
+description: 'Install mod_pagespeed on Kubernetes with the official Helm chart: a two-container pod (module + optimizer worker), values, autoscaling and upgrades.'
+order: 5
+group: 'Install'
+lastUpdated: 2026-10-22
+---
+
+import ImageTag from '../../components/release/ImageTag.astro';
+
+The official Helm chart deploys mod_pagespeed as a two-container pod: the module
+and the optimizer worker run as separate containers in the same pod, sharing
+an `emptyDir` volume for the Cyclone cache. This page covers installation,
+configuration, scaling, and upgrades.
+
+Machine-readable recipe for coding agents: [modpagespeed.com/recipes/helm.md](https://modpagespeed.com/recipes/helm.md) (see [Install with a coding agent](/docs/agent-install/)).
+
+## Prerequisites
+
+- Kubernetes 1.28+
+- Helm 3.12+
+- A running origin server accessible from the cluster
+
+The chart pulls the public `ghcr.io/we-amp/pagespeed-worker` and
+`ghcr.io/we-amp/pagespeed-nginx` images directly -- no registry credentials
+required.
+
+## Architecture
+
+Each pod contains two containers:
+
+```text
++-----------------------------------------+
+|  Pod                                    |
+|  +----------------+  +---------------+  |
+|  |  nginx         |  |  worker       |  |
+|  |  (port 80)     |  |               |  |
+|  +-------+--------+  +-------+-------+  |
+|          |                    |          |
+|          +--- /data (emptyDir) ---+     |
+|          |  cache.vol              |     |
+|          |  pagespeed.sock         |     |
+|          |  pagespeed.sock.health  |     |
+|          |  pagespeed.sock.mgmt    |     |
+|          +-------------------------+     |
++-----------------------------------------+
+```
+
+- **nginx** serves HTTP traffic on port 80. On cache miss, it proxies to your
+  origin and sends a notification to the worker via Unix socket.
+- **worker** reads original content from the shared cache, optimizes it, and
+  writes variants back. It creates the cache file and Unix sockets at startup.
+- **emptyDir** is the shared volume mounted at `/data` in both containers. Its
+  lifetime is tied to the pod -- cache is rebuilt after pod restarts.
+- **One PID namespace.** The chart sets `shareProcessNamespace: true`, so
+  both cache writers share one namespace, as in the compose files, and the
+  pod's pause container is PID 1 and reaps orphaned processes. (The cache
+  itself is safe across PID namespaces, and because the cache is a per-pod
+  `emptyDir` and both containers use one image tag, an upgrade never mixes
+  builds on one cache.) The setting is not configurable. Both containers can
+  see each other's processes, including the worker's command line: keep
+  secrets in environment variables, not in `worker.extraArgs`.
+
+## Installation
+
+The chart is published to a Helm repository hosted on `modpagespeed.com`. Add it
+once -- there is no repository to clone.
+
+```bash
+helm repo add weamp https://modpagespeed.com/charts
+helm repo update
+```
+
+### Quick start
+
+```bash
+helm install pagespeed weamp/pagespeed \
+  --set backend.host=<your-origin>.default.svc.cluster.local \
+  --set backend.port=8080
+```
+
+Replace `<your-origin>.default.svc.cluster.local` with the Kubernetes service name
+(or IP) of your origin server.
+
+### With a custom values file
+
+Create a `my-values.yaml`:
+
+```yaml
+replicaCount: 2
+
+backend:
+  host: <your-origin>.default.svc.cluster.local
+  port: 8080
+
+worker:
+  cacheSize: '1073741824' # 1 GB
+
+cache:
+  sizeLimit: 2Gi
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: <your-domain>
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: cdn-tls
+      hosts:
+        - <your-domain>
+```
+
+Install with:
+
+```bash
+helm install pagespeed weamp/pagespeed -f my-values.yaml
+```
+
+## Configuration reference
+
+### Backend (origin server)
+
+| Value          | Default     | Description                  |
+| -------------- | ----------- | ---------------------------- |
+| `backend.host` | `127.0.0.1` | Origin server hostname or IP |
+| `backend.port` | `8081`      | Origin server port           |
+
+### Worker
+
+| Value                     | Default                           | Description                     |
+| ------------------------- | --------------------------------- | ------------------------------- |
+| `worker.image.repository` | `ghcr.io/we-amp/pagespeed-worker` | Worker container image          |
+| `image.tag`               | `2.10.0` (unset in the chart: tracks its `appVersion`) | One tag for both images; `worker.image.tag` and `nginx.image.tag` are rejected |
+| `worker.cacheSize`        | `1073741824` (1 GB)               | Cyclone cache size in bytes     |
+| `worker.extraArgs`        | `[]`                              | Additional CLI flags for worker |
+
+Pass additional worker flags via `extraArgs`:
+
+```yaml
+worker:
+  extraArgs:
+    - --jpeg-quality
+    - '80'
+    - --log-level
+    - debug
+    - --no-proactive-savedata-variants
+```
+
+### nginx
+
+| Value                    | Default                          | Description           |
+| ------------------------ | -------------------------------- | --------------------- |
+| `nginx.image.repository` | `ghcr.io/we-amp/pagespeed-nginx` | Nginx container image |
+
+### Cache volume
+
+| Value             | Default | Description         |
+| ----------------- | ------- | ------------------- |
+| `cache.sizeLimit` | `1Gi`   | emptyDir size limit |
+
+The `sizeLimit` caps the disk space the emptyDir volume can consume. Set this
+higher than `worker.cacheSize` to account for Unix socket files and any
+temporary data. A good rule: set `sizeLimit` to at least 1.5x `worker.cacheSize`.
+
+### Service and Ingress
+
+| Value               | Default     | Description              |
+| ------------------- | ----------- | ------------------------ |
+| `service.type`      | `ClusterIP` | Kubernetes Service type  |
+| `service.port`      | `80`        | Service port             |
+| `ingress.enabled`   | `false`     | Create an Ingress object |
+| `ingress.className` | `""`        | Ingress class name       |
+
+### Autoscaling
+
+| Value                                        | Default | Description            |
+| -------------------------------------------- | ------- | ---------------------- |
+| `autoscaling.enabled`                        | `false` | Enable HPA             |
+| `autoscaling.minReplicas`                    | `1`     | Minimum pod count      |
+| `autoscaling.maxReplicas`                    | `10`    | Maximum pod count      |
+| `autoscaling.targetCPUUtilizationPercentage` | `70`    | CPU target for scaling |
+
+## Resource recommendations
+
+The worker is CPU-intensive (image encoding) and benefits from memory for the
+decode/encode pipeline. Nginx is lightweight.
+
+### Small deployment (< 500 images)
+
+```yaml
+worker:
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+    limits: { cpu: '1', memory: 512Mi }
+  cacheSize: '268435456' # 256 MB
+nginx:
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+```
+
+### Medium deployment (500-5000 images)
+
+```yaml
+worker:
+  resources:
+    requests: { cpu: 500m, memory: 512Mi }
+    limits: { cpu: '2', memory: 1Gi }
+  cacheSize: '1073741824' # 1 GB
+nginx:
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { cpu: '1', memory: 512Mi }
+```
+
+### Large deployment (5000+ images)
+
+```yaml
+worker:
+  resources:
+    requests: { cpu: '1', memory: 1Gi }
+    limits: { cpu: '4', memory: 2Gi }
+  cacheSize: '4294967296' # 4 GB
+nginx:
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+    limits: { cpu: '1', memory: 512Mi }
+cache:
+  sizeLimit: 6Gi
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+```
+
+## Upgrading
+
+Refresh the repository first to pick up newer chart versions, then upgrade:
+
+```bash
+helm repo update
+helm upgrade pagespeed weamp/pagespeed -f my-values.yaml
+```
+
+Or update just the image tag. The chart takes one `image.tag` for both images
+(unset, it tracks the chart `appVersion`); the per-image `worker.image.tag`
+and `nginx.image.tag` keys are rejected:
+
+<pre>
+  <code class="language-bash">
+    {`helm upgrade pagespeed weamp/pagespeed --reuse-values --set image.tag=`}
+    <ImageTag line="2.1" />
+  </code>
+</pre>
+
+The emptyDir cache is lost on pod restart. After an upgrade, the cache rebuilds
+as requests arrive -- the first few responses will be cache misses while the
+worker re-optimizes content. This is expected and resolves within minutes under
+normal traffic.
+
+## Uninstalling
+
+```bash
+helm uninstall pagespeed
+```
+
+This removes all Kubernetes resources created by the chart (Deployment, Service,
+Ingress, HPA). The emptyDir volumes are deleted with the pods.
+
+## Verifying the deployment
+
+After installation, check that both containers are running:
+
+```bash
+kubectl get pods -l app.kubernetes.io/name=pagespeed
+```
+
+Both containers in the pod should show `READY`:
+
+```text
+NAME                         READY   STATUS    RESTARTS   AGE
+pagespeed-6d4b8f9c7-x2k9m   2/2     Running   0          45s
+```
+
+Port-forward to test locally:
+
+```bash
+kubectl port-forward svc/pagespeed 8080:80 &
+sleep 2
+# GET twice (the module does not cache HEAD, so curl -I never shows a HIT)
+curl -s -o /dev/null -D - http://localhost:8080/ | grep -i x-pagespeed
+# X-PageSpeed: MISS
+curl -s -o /dev/null -D - http://localhost:8080/ | grep -i x-pagespeed
+# X-PageSpeed: HIT
+kill %%
+```
+
+## Next steps
+
+- [Configuration Reference](/docs/configuration/) -- All worker flags and nginx
+  directives
+- [License](/docs/license/) -- Apache License 2.0, support subscriptions
+- [Deployment Guide](/docs/deployment/) -- Docker Compose, systemd, and
+  production operations
+- [Troubleshooting](/docs/troubleshooting/) -- Diagnose common issues

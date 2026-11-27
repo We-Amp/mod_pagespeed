@@ -1,0 +1,62 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// The version map: which version number each artifact of a release carries,
+// one row per release since 2.1.0, newest first, from src/data/version-map.mjs.
+// The current release (the release manifest's semver) is marked. The same rows
+// render as a Markdown table in the agent files (src/lib/docs-markdown.mjs).
+//
+// Usage (MDX or .astro): <VersionMap />
+
+import { getRelease } from '../../lib/release';
+import {
+  VERSION_MAP,
+  VERSION_MAP_COLUMNS,
+  VERSION_MAP_NOTE,
+  versionRowCells,
+} from '../../data/version-map.mjs';
+
+const current = (await getRelease('2.1')).release.semver;
+---
+
+<div class="not-prose my-6">
+  <div
+    class="overflow-x-auto rounded-card border border-border"
+    tabindex="0"
+    role="region"
+    aria-label="Version numbers per artifact for each release"
+  >
+    <table class="w-full text-left text-sm">
+      <thead>
+        <tr class="bg-bg-elevated">
+          {VERSION_MAP_COLUMNS.map((col) => (
+            <th scope="col" class="py-3 px-4 font-semibold text-text-body align-bottom">
+              {col}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody class="text-text-body">
+        {VERSION_MAP.map((row) => {
+          const cells = versionRowCells(row);
+          const isCurrent = row.release === current;
+          return (
+            <tr class={`border-t border-border ${isCurrent ? 'bg-interactive/10' : ''}`}>
+              <th scope="row" class="py-3 px-4 font-mono font-semibold whitespace-nowrap">
+                {cells[0]}
+                {isCurrent && (
+                  <span class="ml-2 font-sans text-xs font-normal text-text-muted">current</span>
+                )}
+              </th>
+              {cells.slice(1).map((cell, i) => (
+                <td class={`py-3 px-4 ${i === 0 ? 'whitespace-nowrap' : 'font-mono'}`}>{cell}</td>
+              ))}
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  </div>
+  <p class="mt-3 text-sm text-text-muted">{VERSION_MAP_NOTE}</p>
+</div>
