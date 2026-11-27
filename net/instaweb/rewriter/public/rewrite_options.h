@@ -289,12 +289,29 @@ class RewriteOptions {
   // Serve-variants is the mode that stores HTML pages and serves their
   // Markdown copies to requests that ask for one; a server that does not
   // store and serve yet runs it exactly as report-only.  The value
-  // serve-cached-html is reserved: setting it is refused with a warning and
-  // leaves the option as it was.
+  // serve-cached-html, which a later release adds, is accepted with a warning
+  // as serve-variants: it serves the Markdown copies only, so a configuration
+  // written for that release keeps loading and keeps serving them.
   enum DaemonHtmlCacheMode {
     kDaemonHtmlCacheOff,
     kDaemonHtmlCacheReportOnly,
     kDaemonHtmlCacheServeVariants,
+  };
+
+  // The settings of the serve-cached-html mode a later release adds.  This
+  // release parses and keeps them so that a configuration written for that
+  // release keeps loading; they change nothing here, and setting one warns
+  // that it takes effect with serve-cached-html.
+  // DaemonHtmlCacheServeScope: which requests may get a stored page.
+  enum DaemonHtmlCacheServeScope {
+    kDaemonHtmlCacheServeScopeAgents,
+    kDaemonHtmlCacheServeScopeAll,
+  };
+  // DaemonHtmlCacheCredentialed: whether a request with a cookie outside the
+  // ignore list may store and be served a page the origin marks public.
+  enum DaemonHtmlCacheCredentialed {
+    kDaemonHtmlCacheCredentialedAnonymousOnly,
+    kDaemonHtmlCacheCredentialedExplicitPublic,
   };
 
   // Any new Option added should have a corresponding name here that must be
@@ -468,6 +485,11 @@ class RewriteOptions {
   static const char kRulePackFile[];
   static const char kRulePackMode[];
   static const char kDaemonHtmlCache[];
+  static const char kDaemonHtmlCacheCredentialed[];
+  static const char kDaemonHtmlCacheIgnoreCookie[];
+  static const char kDaemonHtmlCacheIgnoreCookies[];
+  static const char kDaemonHtmlCacheMaxAge[];
+  static const char kDaemonHtmlCacheServeScope[];
   static const char kDaemonHtmlMaxBytes[];
   static const char kRulePackRequireSigned[];
   static const char kRulePackTrustKey[];
@@ -1610,6 +1632,10 @@ class RewriteOptions {
   static bool ParseFromString(StringPiece value_string, RulePackMode* value);
   static bool ParseFromString(StringPiece value_string,
                               DaemonHtmlCacheMode* value);
+  static bool ParseFromString(StringPiece value_string,
+                              DaemonHtmlCacheServeScope* value);
+  static bool ParseFromString(StringPiece value_string,
+                              DaemonHtmlCacheCredentialed* value);
   static bool ParseFromString(StringPiece value_string, int* value) {
     return StringToInt(value_string, value);
   }
@@ -2948,6 +2974,27 @@ class RewriteOptions {
   void set_daemon_html_cache(DaemonHtmlCacheMode x) {
     set_option(x, &daemon_html_cache_);
   }
+  // The serve-cached-html settings (see DaemonHtmlCacheServeScope): stored,
+  // and read by nothing in this release.
+  DaemonHtmlCacheServeScope daemon_html_cache_serve_scope() const {
+    return daemon_html_cache_serve_scope_.value();
+  }
+  // Seconds, 0 to kDaemonHtmlCacheMaxAgeLimitS; 0 means no cap.
+  int64 daemon_html_cache_max_age_s() const {
+    return daemon_html_cache_max_age_.value();
+  }
+  static constexpr int64 kDaemonHtmlCacheMaxAgeLimitS = 86400;
+  DaemonHtmlCacheCredentialed daemon_html_cache_credentialed() const {
+    return daemon_html_cache_credentialed_.value();
+  }
+  bool daemon_html_cache_ignore_cookies() const {
+    return daemon_html_cache_ignore_cookies_.value();
+  }
+  // The DaemonHtmlCacheIgnoreCookie lines of the scope that set them, in
+  // order, separated by single spaces.
+  const GoogleString& daemon_html_cache_ignore_cookie() const {
+    return daemon_html_cache_ignore_cookie_.value();
+  }
   int64 daemon_html_max_bytes() const { return daemon_html_max_bytes_.value(); }
   void set_daemon_html_max_bytes(int64 x) {
     set_option(x, &daemon_html_max_bytes_);
@@ -3300,6 +3347,16 @@ class RewriteOptions {
   // or false when it gives none.
   static bool DeprecatedOptionMessage(StringPiece name, StringPiece arg1,
                                       StringPiece arg2, GoogleString* message);
+
+  // For a setting a later release gives an effect (the serve-cached-html
+  // mode and its settings), the warning the parser gives once it is
+  // accepted; empty for any other setting.
+  static GoogleString LaterReleaseOptionWarning(StringPiece name,
+                                                StringPiece arg);
+
+  // Whether a DaemonHtmlCacheIgnoreCookie value is one cookie name, or a
+  // prefix of one followed by '*'.
+  static bool IsValidDaemonHtmlCacheIgnoreCookie(StringPiece value);
 
   // An option name that is no longer accepted at all (a configuration that
   // sets it fails to load), with what to do instead.
@@ -3937,6 +3994,8 @@ class RewriteOptions {
   static GoogleString ToString(LazyloadImagesMode x);
   static GoogleString ToString(RulePackMode x);
   static GoogleString ToString(DaemonHtmlCacheMode x);
+  static GoogleString ToString(DaemonHtmlCacheServeScope x);
+  static GoogleString ToString(DaemonHtmlCacheCredentialed x);
   static GoogleString ToString(const ResourceCategorySet& x);
   static GoogleString ToString(const BeaconUrl& beacon_url);
   static GoogleString ToString(const MobTheme& mob_theme);
@@ -4530,6 +4589,11 @@ class RewriteOptions {
   bool rule_pack_files_set_here_ = false;
   Option<RulePackMode> rule_pack_mode_;
   Option<DaemonHtmlCacheMode> daemon_html_cache_;
+  Option<DaemonHtmlCacheServeScope> daemon_html_cache_serve_scope_;
+  Option<int64> daemon_html_cache_max_age_;
+  Option<DaemonHtmlCacheCredentialed> daemon_html_cache_credentialed_;
+  Option<bool> daemon_html_cache_ignore_cookies_;
+  Option<GoogleString> daemon_html_cache_ignore_cookie_;
   Option<int64> daemon_html_max_bytes_;
   Option<bool> rule_pack_require_signed_;
   // Sorted by key id. Not an Option: merged key by key, not part of the

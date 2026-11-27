@@ -109,9 +109,9 @@ TEST_F(EnvoyVHostConfigTest, KnownCustomOptionIsSet) {
   EXPECT_EQ(0, rec.Count("Failed"));
 }
 
-// DaemonHtmlCache takes serve-variants on this server too; the value
-// reserved for a later release is refused with a warning and changes
-// nothing.  (The mode itself is inert here: http_filter_test.)
+// DaemonHtmlCache takes serve-variants on this server too; serve-cached-html,
+// the mode a later release adds, is accepted with a warning as
+// serve-variants.  (The mode itself is inert here: http_filter_test.)
 TEST_F(EnvoyVHostConfigTest, DaemonHtmlCacheModesParse) {
   RecordingHandler rec;
   EnvoyRewriteOptions options(&thread_system_);
@@ -120,12 +120,63 @@ TEST_F(EnvoyVHostConfigTest, DaemonHtmlCacheModesParse) {
   EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
             options.daemon_html_cache());
   EXPECT_EQ(0, rec.Count("Failed"));
-  ApplyVHostCustomOption(&options, "example.com", "DaemonHtmlCache",
-                         "serve-cached-html", &rec);
+  EXPECT_TRUE(ApplyVHostCustomOption(&options, "example.com", "DaemonHtmlCache",
+                                     "report-only", &rec));
+  EXPECT_TRUE(ApplyVHostCustomOption(&options, "example.com", "DaemonHtmlCache",
+                                     "serve-cached-html", &rec));
   EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
             options.daemon_html_cache());
-  EXPECT_EQ(1, rec.Count("serve-cached-html' is not available"));
+  EXPECT_EQ(1, rec.Count("it runs as serve-variants"));
   EXPECT_EQ(0, rec.Count("Failed"));
+}
+
+// The settings of the serve-cached-html mode are accepted on this server, each
+// with one warning, and change nothing; an invalid value is refused with the
+// generic warning.
+TEST_F(EnvoyVHostConfigTest, DaemonHtmlCacheLaterReleaseSettingsParse) {
+  const struct {
+    const char* name;
+    const char* value;
+    bool valid;
+  } kLines[] = {
+      {"DaemonHtmlCacheServeScope", "agents", true},
+      {"DaemonHtmlCacheServeScope", "all", true},
+      {"DaemonHtmlCacheServeScope", "some", false},
+      {"DaemonHtmlCacheMaxAge", "0", true},
+      {"DaemonHtmlCacheMaxAge", "86400", true},
+      {"DaemonHtmlCacheMaxAge", "-5", false},
+      {"DaemonHtmlCacheCredentialed", "anonymous-only", true},
+      {"DaemonHtmlCacheCredentialed", "explicit-public", true},
+      {"DaemonHtmlCacheCredentialed", "nobody", false},
+      {"DaemonHtmlCacheIgnoreCookies", "on", true},
+      {"DaemonHtmlCacheIgnoreCookies", "off", true},
+      {"DaemonHtmlCacheIgnoreCookies", "2", false},
+      {"DaemonHtmlCacheIgnoreCookie", "_my_ab", true},
+      {"DaemonHtmlCacheIgnoreCookie", "_my_prefix*", true},
+      {"DaemonHtmlCacheIgnoreCookie", "a b", false},
+  };
+  EnvoyRewriteOptions options(&thread_system_);
+  int warnings = 0;
+  int failures = 0;
+  for (const auto& line : kLines) {
+    RecordingHandler rec;
+    EXPECT_EQ(line.valid, ApplyVHostCustomOption(&options, "example.com",
+                                                 line.name, line.value, &rec))
+        << line.name << " " << line.value;
+    warnings += rec.Count("takes effect with DaemonHtmlCache serve-cached-html");
+    failures += rec.Count("Failed to set option");
+  }
+  EXPECT_EQ(10, warnings);
+  EXPECT_EQ(5, failures);
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeScopeAll,
+            options.daemon_html_cache_serve_scope());
+  EXPECT_EQ(86400, options.daemon_html_cache_max_age_s());
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheCredentialedExplicitPublic,
+            options.daemon_html_cache_credentialed());
+  EXPECT_FALSE(options.daemon_html_cache_ignore_cookies());
+  EXPECT_EQ("_my_ab _my_prefix*", options.daemon_html_cache_ignore_cookie());
+  // Nothing reads them: the mode stays as it was.
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheOff, options.daemon_html_cache());
 }
 
 TEST_F(EnvoyVHostConfigTest, ExactMatch) {

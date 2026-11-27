@@ -24,6 +24,7 @@
 
 #include "net/instaweb/rewriter/public/option_context.h"
 #include "pagespeed/kernel/base/null_message_handler.h"
+#include "pagespeed/kernel/base/null_mutex.h"
 #include "pagespeed/kernel/base/stdio_file_system.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -31,6 +32,7 @@
 #include "test/net/instaweb/rewriter/rewrite_options_test_base.h"
 #include "test/pagespeed/kernel/base/gmock.h"
 #include "test/pagespeed/kernel/base/gtest.h"
+#include "test/pagespeed/kernel/base/mock_message_handler.h"
 #include "test/pagespeed/kernel/base/null_thread_system.h"
 
 namespace net_instaweb {
@@ -126,22 +128,100 @@ TEST_F(ApacheConfigTest, SetFromHtaccessSurvivesMergeAndClone) {
   EXPECT_TRUE(clone->set_from_htaccess());
 }
 
-// DaemonHtmlCache: serve-variants parses (and runs as report-only on this
-// server for now); the value reserved for a later release is refused with
-// a warning, not a configuration error, and leaves the option as it was.
+// DaemonHtmlCache: serve-variants parses; serve-cached-html, the mode a later
+// release adds, is accepted with a warning and runs as serve-variants, so a
+// configuration written for that release keeps loading and keeps serving
+// the Markdown copies.
 TEST_F(ApacheConfigTest, DaemonHtmlCacheModesParse) {
   GoogleString msg;
-  NullMessageHandler handler;
+  MockMessageHandler handler(new NullMutex);
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            config_.ParseAndSetOptionFromName1("DaemonHtmlCache", "report-only",
+                                               &msg, &handler));
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheReportOnly,
+            config_.daemon_html_cache());
   EXPECT_EQ(RewriteOptions::kOptionOk,
             config_.ParseAndSetOptionFromName1(
                 "DaemonHtmlCache", "serve-variants", &msg, &handler));
   EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
             config_.daemon_html_cache());
+  EXPECT_EQ(0, handler.MessagesOfType(kWarning));
+  ASSERT_EQ(RewriteOptions::kOptionOk,
+            config_.ParseAndSetOptionFromName1("DaemonHtmlCache", "off", &msg,
+                                               &handler));
   EXPECT_EQ(RewriteOptions::kOptionOk,
             config_.ParseAndSetOptionFromName1(
                 "DaemonHtmlCache", "serve-cached-html", &msg, &handler));
   EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
             config_.daemon_html_cache());
+  EXPECT_EQ(1, handler.MessagesOfType(kWarning));
+  EXPECT_EQ(RewriteOptions::kOptionValueInvalid,
+            config_.ParseAndSetOptionFromName1("DaemonHtmlCache", "serve",
+                                               &msg, &handler));
+}
+
+// The settings of the serve-cached-html mode load on this server, every value
+// of each, with one warning each and no effect; an invalid value fails the
+// configuration.
+TEST_F(ApacheConfigTest, DaemonHtmlCacheLaterReleaseSettingsParse) {
+  struct Line {
+    const char* name;
+    const char* value;
+    bool valid;
+  };
+  const Line kLines[] = {
+      {"DaemonHtmlCacheServeScope", "agents", true},
+      {"DaemonHtmlCacheServeScope", "all", true},
+      {"DaemonHtmlCacheServeScope", "some", false},
+      {"DaemonHtmlCacheMaxAge", "0", true},
+      {"DaemonHtmlCacheMaxAge", "86400", true},
+      {"DaemonHtmlCacheMaxAge", "60", true},
+      {"DaemonHtmlCacheMaxAge", "86401", false},
+      {"DaemonHtmlCacheCredentialed", "explicit-public", true},
+      {"DaemonHtmlCacheCredentialed", "anonymous-only", true},
+      {"DaemonHtmlCacheCredentialed", "anyone", false},
+      {"DaemonHtmlCacheIgnoreCookies", "off", true},
+      {"DaemonHtmlCacheIgnoreCookies", "on", true},
+      {"DaemonHtmlCacheIgnoreCookies", "sometimes", false},
+      {"DaemonHtmlCacheIgnoreCookie", "_my_ab", true},
+      {"DaemonHtmlCacheIgnoreCookie", "_my_pref*", true},
+      {"DaemonHtmlCacheIgnoreCookie", "a=b", false},
+  };
+  MockMessageHandler handler(new NullMutex);
+  int warnings = 0;
+  for (const Line& line : kLines) {
+    GoogleString msg;
+    EXPECT_EQ(line.valid ? RewriteOptions::kOptionOk
+                         : RewriteOptions::kOptionValueInvalid,
+              config_.ParseAndSetOptionFromName1(line.name, line.value, &msg,
+                                                 &handler))
+        << line.name << " " << line.value;
+    if (line.valid) ++warnings;
+    EXPECT_EQ(warnings, handler.MessagesOfType(kWarning))
+        << line.name << " " << line.value;
+  }
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeScopeAll,
+            config_.daemon_html_cache_serve_scope());
+  EXPECT_EQ(60, config_.daemon_html_cache_max_age_s());
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheCredentialedAnonymousOnly,
+            config_.daemon_html_cache_credentialed());
+  EXPECT_TRUE(config_.daemon_html_cache_ignore_cookies());
+  EXPECT_EQ("_my_ab _my_pref*", config_.daemon_html_cache_ignore_cookie());
+}
+
+// Each is a directive in the httpd command table (one argument, virtual-host
+// scope, like DaemonHtmlCache), so httpd accepts the line at all.
+TEST_F(ApacheConfigTest, DaemonHtmlCacheLaterReleaseSettingsAreDirectives) {
+  for (const char* name :
+       {"DaemonHtmlCacheServeScope", "DaemonHtmlCacheMaxAge",
+        "DaemonHtmlCacheCredentialed", "DaemonHtmlCacheIgnoreCookies",
+        "DaemonHtmlCacheIgnoreCookie"}) {
+    const RewriteOptions::PropertyBase* property =
+        RewriteOptions::LookupOptionByName(name);
+    ASSERT_NE(nullptr, property) << name;
+    EXPECT_EQ(RewriteOptions::kServerScope, property->scope()) << name;
+    EXPECT_NE(nullptr, property->help_text()) << name;
+  }
 }
 
 TEST_F(ApacheConfigTest, DaemonPathsDefaultToUnconfigured) {

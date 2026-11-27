@@ -1167,19 +1167,27 @@ TEST_F(RewriteOptionsTest, DaemonHtmlCacheOption) {
   EXPECT_EQ(signature_before, options_.signature());
 }
 
-// The value reserved for a later release is refused with a warning, not a
-// configuration error, and leaves the option as it was; on every path a
-// port's configuration takes.
-TEST_F(RewriteOptionsTest,
-       DaemonHtmlCacheServeCachedHtmlIsRefusedWithAWarning) {
+// The mode a later release adds is accepted with a warning as serve-variants
+// (the Markdown-only part of it), not refused, so a configuration written for
+// that release keeps loading and keeps serving the Markdown copies; on every
+// path a port's configuration takes.
+TEST_F(RewriteOptionsTest, DaemonHtmlCacheServeCachedHtmlRunsAsServeVariants) {
   GoogleString msg;
   MockMessageHandler handler(new NullMutex);
   EXPECT_EQ(RewriteOptions::kOptionOk,
             options_.ParseAndSetOptionFromName1(
                 "DaemonHtmlCache", "serve-cached-html", &msg, &handler));
-  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheOff, options_.daemon_html_cache());
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
+            options_.daemon_html_cache());
   EXPECT_EQ(1, handler.MessagesOfType(kWarning));
   EXPECT_EQ(1, handler.TotalMessages());
+  EXPECT_NE(GoogleString::npos,
+            RewriteOptions::LaterReleaseOptionWarning("DaemonHtmlCache",
+                                                      "serve-cached-html")
+                .find("it runs as serve-variants, which serves the Markdown "
+                      "copies of stored pages only"));
+  EXPECT_EQ("", RewriteOptions::LaterReleaseOptionWarning("DaemonHtmlCache",
+                                                          "serve-variants"));
 
   ASSERT_EQ(RewriteOptions::kOptionOk,
             options_.ParseAndSetOptionFromName1("DaemonHtmlCache",
@@ -1188,15 +1196,26 @@ TEST_F(RewriteOptionsTest,
             options_.ParseAndSetOptionFromNameWithScope(
                 "DaemonHtmlCache", "Serve-Cached-HTML",
                 RewriteOptions::kProcessScopeStrict, &msg, &handler));
-  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheReportOnly,
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
             options_.daemon_html_cache());
+  EXPECT_EQ(2, handler.MessagesOfType(kWarning));
+  // serve-variants itself, and the other modes, do not warn.
+  ASSERT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1(
+                "DaemonHtmlCache", "serve-variants", &msg, &handler));
   EXPECT_EQ(2, handler.MessagesOfType(kWarning));
 
   // With no handler the caller gets the warning as the message.
   msg.clear();
+  ASSERT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1("DaemonHtmlCache", "off",
+                                                &msg, &handler));
+  msg.clear();
   EXPECT_EQ(RewriteOptions::kOptionOk,
             options_.ParseAndSetOptionFromName1(
                 "DaemonHtmlCache", "serve-cached-html", &msg, nullptr));
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
+            options_.daemon_html_cache());
   EXPECT_NE(GoogleString::npos, msg.find("serve-cached-html' is not available"))
       << msg;
 
@@ -1207,13 +1226,158 @@ TEST_F(RewriteOptionsTest,
                 RewriteOptions::kDirectoryScope, &msg, &handler));
   EXPECT_EQ(2, handler.MessagesOfType(kWarning));
 
-  // The handler-less setter (a configuration source with its own warning
-  // for a refused value) refuses it as a value.
+  // The handler-less setter maps it the same way.
+  ASSERT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1("DaemonHtmlCache",
+                                                "report-only", &msg, &handler));
   EXPECT_EQ(
-      RewriteOptions::kOptionValueInvalid,
+      RewriteOptions::kOptionOk,
       options_.SetOptionFromName("DaemonHtmlCache", "serve-cached-html", &msg));
-  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheReportOnly,
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
             options_.daemon_html_cache());
+  // The configuration dump names what runs.
+  EXPECT_EQ("serve-variants",
+            RewriteOptions::ToString(options_.daemon_html_cache()));
+}
+
+// The settings of the serve-cached-html mode a later release adds parse and
+// are kept, with one warning each that they take effect with that mode; an
+// invalid value is a configuration error, as it is in that release.
+TEST_F(RewriteOptionsTest, DaemonHtmlCacheLaterReleaseSettingsParseInert) {
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeScopeAgents,
+            options_.daemon_html_cache_serve_scope());
+  EXPECT_EQ(60, options_.daemon_html_cache_max_age_s());
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheCredentialedAnonymousOnly,
+            options_.daemon_html_cache_credentialed());
+  EXPECT_TRUE(options_.daemon_html_cache_ignore_cookies());
+  EXPECT_EQ("", options_.daemon_html_cache_ignore_cookie());
+  const GoogleString signature_before = [this] {
+    RewriteOptions copy(&thread_system_);
+    copy.ComputeSignature();
+    return copy.signature();
+  }();
+
+  MockMessageHandler handler(new NullMutex);
+  int warnings = 0;
+  // Each accepted line warns once, naming the setting.
+  auto set = [&](const char* name, const char* value) {
+    GoogleString msg;
+    RewriteOptions::OptionSettingResult result =
+        options_.ParseAndSetOptionFromName1(name, value, &msg, &handler);
+    if (result == RewriteOptions::kOptionOk) {
+      ++warnings;
+      EXPECT_EQ(warnings, handler.MessagesOfType(kWarning)) << name;
+      EXPECT_NE(GoogleString::npos,
+                RewriteOptions::LaterReleaseOptionWarning(name, value)
+                    .find(StrCat("'", name,
+                                 "' takes effect with DaemonHtmlCache "
+                                 "serve-cached-html")))
+          << name;
+      // Without a handler, the caller gets the warning as the message.
+      GoogleString alone;
+      RewriteOptions copy(&thread_system_);
+      EXPECT_EQ(RewriteOptions::kOptionOk,
+                copy.ParseAndSetOptionFromName1(name, value, &alone, nullptr));
+      EXPECT_EQ(RewriteOptions::LaterReleaseOptionWarning(name, value), alone);
+    } else {
+      EXPECT_EQ(warnings, handler.MessagesOfType(kWarning)) << name;
+    }
+    return result;
+  };
+  const RewriteOptions::OptionSettingResult kOk = RewriteOptions::kOptionOk;
+  const RewriteOptions::OptionSettingResult kInvalid =
+      RewriteOptions::kOptionValueInvalid;
+
+  EXPECT_EQ(kOk, set("DaemonHtmlCacheServeScope", "all"));
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeScopeAll,
+            options_.daemon_html_cache_serve_scope());
+  EXPECT_EQ(kOk, set("DaemonHtmlCacheServeScope", "Agents"));
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeScopeAgents,
+            options_.daemon_html_cache_serve_scope());
+  EXPECT_EQ(kInvalid, set("DaemonHtmlCacheServeScope", "browsers"));
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeScopeAgents,
+            options_.daemon_html_cache_serve_scope());
+
+  EXPECT_EQ(kOk, set("DaemonHtmlCacheMaxAge", "0"));
+  EXPECT_EQ(0, options_.daemon_html_cache_max_age_s());
+  EXPECT_EQ(kOk, set("DaemonHtmlCacheMaxAge", "86400"));
+  EXPECT_EQ(86400, options_.daemon_html_cache_max_age_s());
+  EXPECT_EQ(kOk, set("DaemonHtmlCacheMaxAge", "300"));
+  EXPECT_EQ(300, options_.daemon_html_cache_max_age_s());
+  for (const char* bad : {"86401", "-1", "60s", "", "1e3"}) {
+    EXPECT_EQ(kInvalid, set("DaemonHtmlCacheMaxAge", bad)) << bad;
+  }
+  EXPECT_EQ(300, options_.daemon_html_cache_max_age_s());
+
+  EXPECT_EQ(kOk, set("DaemonHtmlCacheCredentialed", "explicit-public"));
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheCredentialedExplicitPublic,
+            options_.daemon_html_cache_credentialed());
+  EXPECT_EQ(kOk, set("DaemonHtmlCacheCredentialed", "anonymous-only"));
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheCredentialedAnonymousOnly,
+            options_.daemon_html_cache_credentialed());
+  EXPECT_EQ(kInvalid, set("DaemonHtmlCacheCredentialed", "rfc9111"));
+
+  EXPECT_EQ(kOk, set("DaemonHtmlCacheIgnoreCookies", "off"));
+  EXPECT_FALSE(options_.daemon_html_cache_ignore_cookies());
+  EXPECT_EQ(kOk, set("DaemonHtmlCacheIgnoreCookies", "on"));
+  EXPECT_TRUE(options_.daemon_html_cache_ignore_cookies());
+  EXPECT_EQ(kInvalid, set("DaemonHtmlCacheIgnoreCookies", "maybe"));
+
+  // Repeatable: each line adds a name or a prefix.
+  EXPECT_EQ(kOk, set("DaemonHtmlCacheIgnoreCookie", "_my_ab"));
+  EXPECT_EQ(kOk, set("DaemonHtmlCacheIgnoreCookie", "hubspotutk"));
+  EXPECT_EQ(kOk, set("DaemonHtmlCacheIgnoreCookie", "__hs*"));
+  EXPECT_EQ("_my_ab hubspotutk __hs*",
+            options_.daemon_html_cache_ignore_cookie());
+  // A name given twice is kept once.
+  EXPECT_EQ(kOk, set("DaemonHtmlCacheIgnoreCookie", "hubspotutk"));
+  EXPECT_EQ("_my_ab hubspotutk __hs*",
+            options_.daemon_html_cache_ignore_cookie());
+  for (const char* bad : {"", "a b", "a;b", "a=b", "_h*j", "**", "a\tb"}) {
+    EXPECT_EQ(kInvalid, set("DaemonHtmlCacheIgnoreCookie", bad)) << bad;
+  }
+  EXPECT_EQ("_my_ab hubspotutk __hs*",
+            options_.daemon_html_cache_ignore_cookie());
+
+  // Server scope, like DaemonHtmlCache: refused per directory.
+  GoogleString msg;
+  EXPECT_NE(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromNameWithScope(
+                "DaemonHtmlCacheMaxAge", "10", RewriteOptions::kDirectoryScope,
+                &msg, &handler));
+  EXPECT_EQ(300, options_.daemon_html_cache_max_age_s());
+
+  // Inert: nothing they change re-keys cached work.
+  options_.ComputeSignature();
+  EXPECT_EQ(signature_before, options_.signature());
+}
+
+// A scope's first DaemonHtmlCacheIgnoreCookie line replaces the list it
+// merges over; the list and the other settings merge like any option.
+TEST_F(RewriteOptionsTest, DaemonHtmlCacheLaterReleaseSettingsMerge) {
+  NullMessageHandler handler;
+  GoogleString msg;
+  RewriteOptions global(&thread_system_);
+  ASSERT_EQ(RewriteOptions::kOptionOk,
+            global.ParseAndSetOptionFromName1("DaemonHtmlCacheIgnoreCookie",
+                                              "global_a", &msg, &handler));
+  ASSERT_EQ(RewriteOptions::kOptionOk,
+            global.ParseAndSetOptionFromName1("DaemonHtmlCacheMaxAge", "120",
+                                              &msg, &handler));
+  RewriteOptions vhost(&thread_system_);
+  ASSERT_EQ(RewriteOptions::kOptionOk,
+            vhost.ParseAndSetOptionFromName1("DaemonHtmlCacheIgnoreCookie",
+                                             "vhost_b", &msg, &handler));
+  ASSERT_EQ(RewriteOptions::kOptionOk,
+            vhost.ParseAndSetOptionFromName1("DaemonHtmlCacheServeScope",
+                                             "all", &msg, &handler));
+  RewriteOptions merged(&thread_system_);
+  merged.Merge(global);
+  merged.Merge(vhost);
+  EXPECT_EQ("vhost_b", merged.daemon_html_cache_ignore_cookie());
+  EXPECT_EQ(120, merged.daemon_html_cache_max_age_s());
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeScopeAll,
+            merged.daemon_html_cache_serve_scope());
 }
 
 TEST_F(RewriteOptionsTest, RulePackOptionsDefaultParseAndRoundTrip) {
@@ -1766,6 +1930,11 @@ TEST_F(RewriteOptionsTest, LookupOptionByNameTest) {
       RewriteOptions::kRulePackFile,
       RewriteOptions::kRulePackMode,
       RewriteOptions::kDaemonHtmlCache,
+      RewriteOptions::kDaemonHtmlCacheCredentialed,
+      RewriteOptions::kDaemonHtmlCacheIgnoreCookie,
+      RewriteOptions::kDaemonHtmlCacheIgnoreCookies,
+      RewriteOptions::kDaemonHtmlCacheMaxAge,
+      RewriteOptions::kDaemonHtmlCacheServeScope,
       RewriteOptions::kDaemonHtmlMaxBytes,
       RewriteOptions::kRulePackRequireSigned,
       RewriteOptions::kRunningExperiment,

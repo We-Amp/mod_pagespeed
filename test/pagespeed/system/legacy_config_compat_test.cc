@@ -894,6 +894,35 @@ const ProcessContext& ProcessContextForBinary() {
   return kProcessContextEnvironment->context();
 }
 
+// The directives of the serve-cached-html mode a later release adds, every
+// value of each and an invalid one: accepted, with a warning, so that a
+// configuration written for that release keeps loading here (a package
+// rollback must not stop the server), and refused when the value is one that
+// release refuses too.
+struct LaterReleaseLine {
+  const char* line;  // without the ModPagespeed prefix
+  bool loads;
+};
+const LaterReleaseLine kLaterReleaseLines[] = {
+    {"DaemonHtmlCache serve-cached-html", true},
+    {"DaemonHtmlCacheServeScope agents", true},
+    {"DaemonHtmlCacheServeScope all", true},
+    {"DaemonHtmlCacheServeScope everyone", false},
+    {"DaemonHtmlCacheMaxAge 0", true},
+    {"DaemonHtmlCacheMaxAge 60", true},
+    {"DaemonHtmlCacheMaxAge 86400", true},
+    {"DaemonHtmlCacheMaxAge 86401", false},
+    {"DaemonHtmlCacheCredentialed anonymous-only", true},
+    {"DaemonHtmlCacheCredentialed explicit-public", true},
+    {"DaemonHtmlCacheCredentialed anyone", false},
+    {"DaemonHtmlCacheIgnoreCookies on", true},
+    {"DaemonHtmlCacheIgnoreCookies off", true},
+    {"DaemonHtmlCacheIgnoreCookies maybe", false},
+    {"DaemonHtmlCacheIgnoreCookie _my_ab", true},
+    {"DaemonHtmlCacheIgnoreCookie _my_prefix*", true},
+    {"DaemonHtmlCacheIgnoreCookie a=b", false},
+};
+
 class LegacyConfigCompatTest : public testing::Test {
  protected:
   void SetUp() override {
@@ -1114,6 +1143,44 @@ TEST_F(LegacyConfigCompatTest, NginxDirectivesKeepLoading) {
   });
 }
 
+// The later release's directives load in an http and a server block, each
+// with one warning; a location block refuses them, as it refuses
+// DaemonHtmlCache.
+TEST_F(LegacyConfigCompatTest, NginxLaterReleaseDirectivesLoadInert) {
+  const NgxTables tables = ReadNgxTables();
+  std::unique_ptr<OptionParsingFactory> factory = NewFactory();
+  RecordingHandler handler;
+  SystemRewriteOptions options("later-nginx", &thread_system_);
+  for (const LaterReleaseLine& c : kLaterReleaseLines) {
+    Directive d;
+    d.text = c.line;
+    d.args = Words(c.line);
+    for (RewriteOptions::OptionScope scope :
+         {RewriteOptions::kProcessScopeStrict, RewriteOptions::kServerScope}) {
+      d.scope = scope;
+      const Result result =
+          ApplyNginx(d, tables, &options, factory.get(), &handler);
+      EXPECT_EQ(c.loads ? Outcome::kAcceptedWithWarning : Outcome::kRefused,
+                result.outcome)
+          << c.line << " [" << result.message << "]";
+      if (c.loads) {
+        EXPECT_EQ(1, handler.warnings()) << c.line;
+      }
+    }
+    d.scope = RewriteOptions::kDirectoryScope;
+    EXPECT_EQ(Outcome::kRefused,
+              ApplyNginx(d, tables, &options, factory.get(), &handler).outcome)
+        << c.line << " in a location block";
+  }
+  // The mode runs as serve-variants; the settings are kept and change
+  // nothing.
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
+            options.daemon_html_cache());
+  EXPECT_EQ(86400, options.daemon_html_cache_max_age_s());
+  EXPECT_EQ("_my_ab _my_prefix*",
+            options.daemon_html_cache_ignore_cookie());
+}
+
 #endif  // !LEGACY_CONFIG_APACHE
 
 #ifdef LEGACY_CONFIG_APACHE
@@ -1153,6 +1220,43 @@ TEST_F(LegacyConfigCompatTest, ApacheRefusalsAreSeen) {
         ApplyApache(d, mod_instaweb, &config, factory.get(), &handler).outcome)
         << line;
   }
+}
+
+// The later release's directives are commands httpd knows, and load in the
+// main server configuration and in a <VirtualHost>, each with one warning;
+// <Directory> refuses them, as it refuses DaemonHtmlCache.
+TEST_F(LegacyConfigCompatTest, ApacheLaterReleaseDirectivesLoadInert) {
+  const GoogleString mod_instaweb = ReadSource(kModInstawebCc);
+  std::unique_ptr<OptionParsingFactory> factory = NewFactory();
+  RecordingHandler handler;
+  ApacheConfig config("later-apache", &thread_system_);
+  for (const LaterReleaseLine& c : kLaterReleaseLines) {
+    const GoogleString line = StrCat("ModPagespeed", c.line);
+    Directive d;
+    d.text = line;
+    d.args = Words(line);
+    for (ApacheWhere where :
+         {ApacheWhere::kServerConfig, ApacheWhere::kVirtualHost}) {
+      const Result result =
+          ApplyApache(d, mod_instaweb, &config, factory.get(), &handler, where);
+      EXPECT_EQ(c.loads ? Outcome::kAcceptedWithWarning : Outcome::kRefused,
+                result.outcome)
+          << line << " [" << result.message << "]";
+      if (c.loads) {
+        EXPECT_EQ(1, handler.warnings()) << line;
+      }
+    }
+    EXPECT_EQ(Outcome::kRefused,
+              ApplyApache(d, mod_instaweb, &config, factory.get(), &handler,
+                          ApacheWhere::kDirectory)
+                  .outcome)
+        << line << " in <Directory>";
+  }
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
+            config.daemon_html_cache());
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheCredentialedExplicitPublic,
+            config.daemon_html_cache_credentialed());
+  EXPECT_FALSE(config.daemon_html_cache_ignore_cookies());
 }
 
 #endif  // LEGACY_CONFIG_APACHE

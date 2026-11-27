@@ -309,8 +309,8 @@ TEST_F(IisConfigurationTest, HonorRequestFreshnessDefaultsOffAndParses) {
 }
 
 // DaemonHtmlCache takes serve-variants here too (inert on this server, like
-// report-only); the value reserved for a later release is refused, with the
-// file's own warning, and leaves the option as it was.
+// report-only); serve-cached-html, the mode a later release adds, is accepted
+// with a warning as serve-variants, in either line form.
 TEST_F(IisConfigurationTest, DaemonHtmlCacheModesParse) {
   IisRewriteOptions variants(nullptr);
   ParseAndGetConfig("pagespeed DaemonHtmlCache serve-variants\n", "",
@@ -318,13 +318,67 @@ TEST_F(IisConfigurationTest, DaemonHtmlCacheModesParse) {
   EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
             variants.daemon_html_cache());
 
-  IisRewriteOptions reserved(nullptr);
-  ParseAndGetConfig(
+  RecordingMessageHandler recorder;
+  ConfigurationFile* cf = CreateTestConfigFile(
       "pagespeed DaemonHtmlCache report-only\n"
       "pagespeed DaemonHtmlCache serve-cached-html\n",
-      "", &reserved);
-  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheReportOnly,
-            reserved.daemon_html_cache());
+      &recorder, global_config_, nullptr);
+  std::map<std::string, std::string> input;
+  input["config"] = "base";
+  IisRewriteOptions later(nullptr);
+  TestConfigFileGetConfig(cf, input, later);
+  TestConfigFileRelease(cf);
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
+            later.daemon_html_cache());
+  EXPECT_EQ(1, recorder.CountContaining("it runs as serve-variants"));
+  EXPECT_EQ(0, recorder.CountContaining("Error handling config line"));
+
+  // The legacy "name value" line form maps it the same way.
+  IisRewriteOptions legacy(nullptr);
+  ParseAndGetConfig("DaemonHtmlCache serve-cached-html\n", "", &legacy);
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
+            legacy.daemon_html_cache());
+}
+
+// The settings of the serve-cached-html mode load from pagespeed.config, every
+// value of each, with one warning each and no effect; an invalid value is
+// refused with the parser's warning and leaves the setting as it was.
+TEST_F(IisConfigurationTest, DaemonHtmlCacheLaterReleaseSettingsParse) {
+  RecordingMessageHandler recorder;
+  ConfigurationFile* cf = CreateTestConfigFile(
+      "pagespeed DaemonHtmlCacheServeScope agents\n"
+      "pagespeed DaemonHtmlCacheServeScope all\n"
+      "pagespeed DaemonHtmlCacheServeScope some\n"
+      "pagespeed DaemonHtmlCacheMaxAge 0\n"
+      "pagespeed DaemonHtmlCacheMaxAge 86400\n"
+      "pagespeed DaemonHtmlCacheMaxAge 86401\n"
+      "pagespeed DaemonHtmlCacheCredentialed anonymous-only\n"
+      "pagespeed DaemonHtmlCacheCredentialed explicit-public\n"
+      "pagespeed DaemonHtmlCacheCredentialed nobody\n"
+      "pagespeed DaemonHtmlCacheIgnoreCookies on\n"
+      "pagespeed DaemonHtmlCacheIgnoreCookies off\n"
+      "pagespeed DaemonHtmlCacheIgnoreCookies 2\n"
+      "pagespeed DaemonHtmlCacheIgnoreCookie _my_ab\n"
+      "pagespeed DaemonHtmlCacheIgnoreCookie _my_prefix*\n"
+      "pagespeed DaemonHtmlCacheIgnoreCookie a=b\n",
+      &recorder, global_config_, nullptr);
+  std::map<std::string, std::string> input;
+  input["config"] = "base";
+  IisRewriteOptions rwo(nullptr);
+  TestConfigFileGetConfig(cf, input, rwo);
+  TestConfigFileRelease(cf);
+
+  EXPECT_EQ(10, recorder.CountContaining(
+                    "takes effect with DaemonHtmlCache serve-cached-html"));
+  EXPECT_EQ(5, recorder.CountContaining("Error handling config line"));
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeScopeAll,
+            rwo.daemon_html_cache_serve_scope());
+  EXPECT_EQ(86400, rwo.daemon_html_cache_max_age_s());
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheCredentialedExplicitPublic,
+            rwo.daemon_html_cache_credentialed());
+  EXPECT_FALSE(rwo.daemon_html_cache_ignore_cookies());
+  EXPECT_EQ("_my_ab _my_prefix*", rwo.daemon_html_cache_ignore_cookie());
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheOff, rwo.daemon_html_cache());
 }
 
 // A quoted value with spaces and a backslash path survives byte for byte:
