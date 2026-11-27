@@ -234,6 +234,15 @@ function Make-Replay([string]$From, [string]$To, [int]$Age = 7, [switch]$Alter) 
     $keep += "Age: $Age"
     [IO.File]::WriteAllText("$Root\stored\$To.replay", (($keep -join "`r`n") + "`r`n"))
     $body = [IO.File]::ReadAllBytes("$Root\stored\$From.body")
+    # The module stores a statically compressed page inflated (it reads it
+    # through its inflater), so the hit replays the inflated bytes.
+    if (@($hdrs | Where-Object { $_ -match '^Content-Encoding:\s*gzip' }).Count -gt 0) {
+        $in = New-Object IO.MemoryStream (, $body)
+        $gz = New-Object IO.Compression.GZipStream ($in, [IO.Compression.CompressionMode]::Decompress)
+        $out = New-Object IO.MemoryStream
+        $gz.CopyTo($out)
+        $body = $out.ToArray()
+    }
     if ($Alter) {
         $t = [Text.Encoding]::UTF8.GetString($body).Replace("<title>probe</title>", "<title>probe hit</title>")
         $body = [Text.Encoding]::UTF8.GetBytes($t)
@@ -260,7 +269,7 @@ function Freb-Order([string]$Case, [string]$Url) {
                 if (-not $n) { $n = "" + $data["Notification"] }
                 $current = "{0}/{1}{2}" -f $data["ModuleName"], $n, $(if ($data["fIsPostNotification"] -eq "true") { "(post)" } else { "" })
                 if ($n -in @("RESOLVE_REQUEST_CACHE", "SEND_RESPONSE")) { $seen += $current }
-            } elseif ($name -like "*COMPRESSION*" -or $name -eq "GENERAL_SET_RESPONSE_HEADER" -or $name -like "URL_REWRITE*" -or $name -like "*OUTBOUND*" -or $name -like "*REWRITE*") {
+            } elseif ($name -like "*COMPRESSION*" -or $name -like "OUTPUT_CACHE*" -or $name -like "HTTPSYS_CACHE*" -or $name -eq "GENERAL_SET_RESPONSE_HEADER" -or $name -like "URL_REWRITE*" -or $name -like "*OUTBOUND*" -or $name -like "*REWRITE*") {
                 $vals = ($data.Keys | Sort-Object | ForEach-Object { "$_=" + $data[$_] }) -join " "
                 if ($vals.Length -gt 240) { $vals = $vals.Substring(0, 240) }
                 Show $Case "freb.event" ("in {0}: {1} {2}" -f $current, $name, $vals)
@@ -387,7 +396,8 @@ function Setup {
     ) -join "`r`n") + "`r`n")
     # Output-cache profiles for .html: oc and oc2 (the kernel cache too).
     foreach ($s in @("oc", "oc2")) {
-        [IO.File]::WriteAllText("$dir\$s\web.config", '<?xml version="1.0" encoding="utf-8"?><configuration><system.webServer><caching enabled="true" enableKernelCache="true"><profiles><add extension=".html" policy="CacheUntilChange" kernelCachePolicy="CacheUntilChange" location="Any" /></profiles></caching></system.webServer></configuration>')
+        [IO.File]::WriteAllText("$dir\$s\web.config", '<?xml version="1.0" encoding="utf-8"?><configuration><system.webServer><caching enabled="true" enableKernelCache="true"><profiles><add extension=".html" policy="CacheUntilChange" kernelCachePolicy="CacheUntilChange" location="Any" /><add extension=".txt" policy="CacheForTimePeriod" duration="00:00:30" kernelCachePolicy="DontCache" location="Any" /></profiles></caching></system.webServer></configuration>')
+        [IO.File]::WriteAllText("$dir\$s\ctl.txt", ("output cache control body`r`n" * 20))
     }
     # A non-idempotent outbound rule pair: a marker appended to every <a
     # href>, and one appended to a response header (absent: the rule writes
@@ -418,6 +428,10 @@ function Setup {
     # Every verb reaches the .ashx handler (the unsafe-method cases).
     Add-WebConfigurationProperty -PSPath $Apphost -Location $Main -Filter "system.webServer/handlers" -Name "." -AtIndex 0 -Value @{ name = "probe-ashx-all-verbs"; path = "*.ashx"; verb = "*"; type = "System.Web.UI.SimpleHandlerFactory"; preCondition = "integratedMode" }
     $mods = @(Get-WebConfiguration "system.webServer/modules/add" -PSPath $Apphost | ForEach-Object { $_.name })
+    # ASP.NET's file authorization asks for write access to the handler
+    # file for PUT, DELETE and PATCH; the unsafe-method cases need the
+    # handler to answer.
+    Remove-WebConfigurationProperty -PSPath $Apphost -Location $Main -Filter "system.webServer/modules" -Name "." -AtElement @{ name = "FileAuthorization" }
     if ($mods -contains "WebDAVModule") { Remove-WebConfigurationProperty -PSPath $Apphost -Location $Main -Filter "system.webServer/modules" -Name "." -AtElement @{ name = "WebDAVModule" } }
     Set-ItemProperty "IIS:\Sites\$Main" -Name traceFailedRequestsLogging -Value @{ enabled = $true; directory = $FrebDir; maxLogFiles = 500 }
     Add-WebConfigurationProperty -PSPath $Apphost -Location $Main -Filter "system.webServer/tracing/traceFailedRequests" -Name "." -Value @{ path = "*" }
@@ -599,8 +613,13 @@ function Run {
             Probe-Request "$($c[0])_plain" $c[1] "GET" @{} -Quiet
             if ($script:Last.Text -match 'probe hit') { $marked++ }
         }
+        if ($c[0] -like "oc*") { Freb-Order "$($c[0])_hit" $c[1] }
         Show $c[0] "after 4 hits ($($c[2])) and 4 plain GETs" ("hits reached the pipeline {0}/4; plain GETs reached it {1}/4; plain GETs carrying the hit's bytes {2}/4; kernel cache: {3}" -f (Reached "$($c[0])_hit"), (Reached "$($c[0])_plain"), $marked, (Kernel-Hits $c[1]))
     }
+    # Controls: a static text file the module leaves alone (kernel cache),
+    # and one under a user-mode output-cache profile.
+    for ($i = 0; $i -lt 3; $i++) { Probe-Request "octl" "/oc/ctl.txt" "GET" @{} -Quiet }
+    Freb-Order "octl" "/oc/ctl.txt"
     for ($i = 0; $i -lt 4; $i++) { Probe-Request "ktxt" "/plain.txt" "GET" @{} -Quiet }
     Show "ktxt" "control: a static file the module leaves alone" ("reached the pipeline {0}/4; kernel cache: {1}" -f (Reached "ktxt"), (Kernel-Hits "/plain.txt"))
     Set-Caching $false
