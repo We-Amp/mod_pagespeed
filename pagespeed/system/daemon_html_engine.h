@@ -168,8 +168,8 @@ struct DaemonHtmlRequestFacts {
   bool has_origin = false;
   // The first AJAX marker the request carries (DaemonHtmlAjaxMarker), or
   // empty.  A request with one is never stored and never served.  With a
-  // library that publishes C API 1.15 the request guard decides instead,
-  // from request_headers.
+  // library that publishes C API 1.15 the request guard reads the markers
+  // too, from request_headers, and refuses either way.
   GoogleString ajax_marker;
   // Every request header line as received, name and value, unfiltered: what
   // the request guard (ps_html_request_guard) reads for the headers a cache

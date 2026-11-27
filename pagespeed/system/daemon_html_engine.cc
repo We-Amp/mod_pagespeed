@@ -1308,6 +1308,12 @@ void DaemonHtmlEngine::EvaluateRequestPolicy(
     refuse("request_header", name);
   }
 
+  // The port's own reading of the AJAX markers stays a second reader: the
+  // guard reads them too, and a refusal never rests on one reader alone.
+  if (!facts.ajax_marker.empty()) {
+    refuse("request_header", facts.ajax_marker);
+  }
+
   // The cookies: none, only ignore-listed ones, or a blocking one.
   if (facts.has_cookie) {
     GoogleString detail;
