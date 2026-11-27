@@ -93,6 +93,12 @@ expect_bad bad-release-env-no-candidate 'rule release-env'
 expect_bad bad-release-env-no-dry-run 'rule release-env'
 expect_bad bad-release-env-no-rehearsal 'rule release-env'
 expect_bad bad-release-env-no-if 'rule release-env'
+# env-tag-ref: a job of the release environment refuses a branch ref in its if:.
+expect_good good-env-tag-ref
+expect_good good-env-tag-ref-nginxorg
+for d in module-no-ref module-no-tag mapping expression other-workflow nginxorg-unguarded or always; do
+  expect_bad "bad-env-tag-ref-${d}" 'rule env-tag-ref'
+done
 # adopt-shape: the adoption conditions, the artifacts an adopting run holds
 # and the adopt job's own uploads match tools/ci/release_adopt.py.
 expect_good good-adopt

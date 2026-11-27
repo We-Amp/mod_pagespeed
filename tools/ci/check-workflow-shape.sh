@@ -95,6 +95,16 @@
 #       steps of these jobs and must run before any secret is readable; a
 #       secret at job level (env:, with:) or in an earlier step would be
 #       readable by them;
+#   (env-tag-ref) in every workflow: a job that names an environment does so
+#       on one line with a literal name (no mapping form, no expression), and
+#       each job with `environment: release` has a one-line if: with no ||,
+#       always(, failure( or cancelled( (bar !cancelled()) that carries
+#       startsWith(github.ref, 'refs/tags/ in its one-line if:, so a run on a
+#       branch never requests the environment (in pipeline-release-module.yml
+#       also github.ref == format('refs/tags/{0}', needs.version.outputs.tag));
+#       the one exception is nginx-org-rebuild.yml, whose release jobs run on
+#       the ref its event-guard job pins (a module-v* tag, or exactly
+#       refs/heads/master);
 #   (yaml-alias) in every workflow's jobs: section, no YAML anchor or alias
 #       on a job or on a job-level key other than steps: and env:, and no
 #       `<<:` merge key: the gate reads the text and cannot resolve them;
@@ -308,6 +318,42 @@ release_env_if_records() {
       if (index($0, "needs.version.outputs.dry_run == \047false\047")) has_dry=1
       if (index($0, "needs.version.outputs.candidate != \047true\047")) has_cand=1
       if (index($0, "needs.version.outputs.rehearsal != \047true\047")) has_reh=1
+    }
+    END { flush() }
+  ' "$1"
+}
+
+# Facts for the env-tag-ref rule, one per line, tab separated: "<job> <line>
+# <kind>", kind being "form" (an environment that is not a one-line literal
+# name), "noref" (environment: release without the tag-ref term in its if:)
+# or "notag" (pipeline-release-module.yml: without the term that binds the
+# ref to the version job's tag).
+env_tag_ref_records() { # FILE MODULE_LANE(0|1)
+  awk -v tab="${TAB}" -v lane="$2" '
+    function flush() {
+      if (job != "" && rel_line > 0) {
+        if (bypass) printf "%s%s%d%sbypass\n", job, tab, rel_line, tab
+        if (!has_ref) printf "%s%s%d%snoref\n", job, tab, rel_line, tab
+        else if (lane == 1 && !has_tag) printf "%s%s%d%snotag\n", job, tab, rel_line, tab
+      }
+    }
+    /^[[:space:]]*#/ { next }
+    /^jobs:[[:space:]]*$/ { injobs=1; next }
+    injobs && /^[^[:space:]#]/ { flush(); injobs=0; job="" }
+    injobs && /^  [^[:space:]]/ { flush(); job=$1; sub(/:$/, "", job); rel_line=0; has_ref=0; has_tag=0; bypass=0; next }
+    injobs && /^    ["\047]?environment["\047]?[[:space:]]*:/ {
+      v=$0; sub(/^[^:]*:[[:space:]]*/, "", v); sub(/[[:space:]]+#.*$/, "", v)
+      if (v == "" || index(v, "${{") || index(v, "{") || v !~ /^["\047]?[A-Za-z0-9_-]+["\047]?$/) { printf "%s%s%d%sform\n", job, tab, NR, tab; next }
+      gsub(/["\047]/, "", v)
+      if (v == "release") rel_line=NR
+    }
+    injobs && /^    if:/ {
+      if (index($0, "startsWith(github.ref, \047refs/tags/")) has_ref=1
+      if (index($0, "github.ref == format(\047refs/tags/{0}\047, needs.version.outputs.tag)")) has_tag=1
+      # The terms must all hold: no ||, and no status function that runs
+      # the job whatever they say (!cancelled() only adds a condition).
+      c=$0; gsub(/[[:space:]]+/, "", c); gsub(/!cancelled\(\)/, "", c)
+      if (index(c, "||") || index(c, "always(") || index(c, "failure(") || index(c, "cancelled(")) bypass=1
     }
     END { flush() }
   ' "$1"
@@ -877,6 +923,32 @@ EOF
 $(release_env_if_records "${wf}")
 EOF
   fi
+  # (env-tag-ref) a job of the release environment refuses a branch ref in its
+  # if:, so no deployment is requested from one. nginx-org-rebuild.yml runs its
+  # release jobs on the ref its event guard pins instead.
+  et_lane=0
+  [ "${base}" != "pipeline-release-module.yml" ] || et_lane=1
+  et_guarded=0
+  if [ "${base}" = "nginx-org-rebuild.yml" ]; then
+    # shellcheck disable=SC2016  # literal workflow text
+    if grep -qF '          [[ "$REF" =~ ^refs/tags/module-v[0-9]+\.[0-9]+\.[0-9]+$ ]] \' "${wf}" \
+      || { grep -qxF '          ALLOWED_REFS: "refs/heads/master"' "${wf}" && grep -qE '^          \[ "\$REF" = "\$ALLOWED_REFS" \] \|\| \{ .*exit 1; \}$' "${wf}"; }; then
+      et_guarded=1
+    fi
+  fi
+  while IFS=$'\t' read -r sjob sline skind; do
+    [ -n "${sjob}" ] || continue
+    case "${skind}" in
+      form) err "${wf}:${sline}: job '${sjob}' names its environment in a form the gate cannot read; write \`environment: <name>\` on one line (rule env-tag-ref)" ;;
+      noref)
+        [ "${et_guarded}" = 1 ] && continue
+        err "${wf}:${sline}: job '${sjob}' names environment release but its if: lacks startsWith(github.ref, 'refs/tags/...') (rule env-tag-ref)" ;;
+      bypass) err "${wf}:${sline}: job '${sjob}' names environment release but its if: has ||, always(, failure( or cancelled( (other than !cancelled()), which can bypass its ref terms (rule env-tag-ref)" ;;
+      notag) err "${wf}:${sline}: job '${sjob}' names environment release but its if: lacks github.ref == format('refs/tags/{0}', needs.version.outputs.tag) (rule env-tag-ref)" ;;
+    esac
+  done <<EOF
+$(env_tag_ref_records "${wf}" "${et_lane}")
+EOF
   if [ "${base}" = "pipeline-release-module.yml" ] && grep -q '^  adopt:[[:space:]]*$' "${wf}"; then
     while IFS= read -r aprob; do
       [ -n "${aprob}" ] || continue
