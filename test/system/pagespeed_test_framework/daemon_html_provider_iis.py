@@ -46,6 +46,7 @@ import os
 import socket
 import ssl
 import subprocess
+import threading
 import time
 from typing import Dict, Iterable, List, Optional, Set, Tuple
 from urllib.parse import quote, urlsplit
@@ -399,8 +400,9 @@ class IisProvider(conf.Provider):
         # and each purge went on, for process_ids(): client ports are reused.
         self.process_ports: Dict[str, List[Tuple[int, float, float]]] = {}
         self.purge_ports: List[Tuple[int, float, float]] = []
-        self.last_port = 0
-        self.last_window = (0, 0.0, 0.0)
+        # The last request's window, per thread: a row's background step
+        # sends while its next step does.
+        self._sent = threading.local()
         self.max_processes = 1
         self.live: dict = {}
         self.mode = "off"
@@ -738,7 +740,7 @@ class IisProvider(conf.Provider):
         try:
             if c.sock is None:
                 c.connect()
-            self.last_port = c.sock.getsockname()[1]
+            port = c.sock.getsockname()[1]
             sent_ms = time.time() * 1000
             c.putrequest(method, path, skip_host=True, skip_accept_encoding=True)
             c.putheader("Host", host)
@@ -747,7 +749,7 @@ class IisProvider(conf.Provider):
             c.endheaders()
             r = c.getresponse()
             body = r.read()
-            self.last_window = (self.last_port, sent_ms, time.time() * 1000)
+            self._sent.window = (port, sent_ms, time.time() * 1000)
             return conf.Response(r.status, list(r.getheaders()), body)
         finally:
             if conn is None:
@@ -776,7 +778,7 @@ class IisProvider(conf.Provider):
         c = self._pinned_connection(process)
         try:
             r = self._send(method, path, host or ROW_HOST, headers, conn=c)
-            self.process_ports.setdefault(process, []).append(self.last_window)
+            self.process_ports.setdefault(process, []).append(self._sent.window)
             return r
         finally:
             c.close()
@@ -921,7 +923,7 @@ class IisProvider(conf.Provider):
         r = self._send("POST", target, ROW_HOST,
                        [("X-Requested-With", "XMLHttpRequest"), ("Content-Length", "0")],
                        tls=conn is not None, conn=conn)
-        self.purge_ports.append(self.last_window)
+        self.purge_ports.append(self._sent.window)
         if r.status != 200:
             raise conf.ProviderUnsupported(f"POST {target}: {r.status} {r.body[:200]!r}")
 
@@ -939,7 +941,7 @@ class IisProvider(conf.Provider):
         try:
             if form == "PURGE":
                 r = self._send("PURGE", path, host, [], tls=tls, conn=conn)
-                self.purge_ports.append(self.last_window)
+                self.purge_ports.append(self._sent.window)
                 if r.status != 200:
                     raise conf.ProviderUnsupported(f"PURGE {url}: {r.status} {r.body[:200]!r}")
             elif form == "query":
