@@ -33304,7 +33304,11 @@
             "response": {
               "status": 200
             },
-            "expect": {}
+            "expect": {
+              "counters": {
+                "daemon_html_invalidated_unsafe": 1
+              }
+            }
           },
           {
             "kind": "serve",
@@ -33437,7 +33441,11 @@
             "response": {
               "status": 200
             },
-            "expect": {}
+            "expect": {
+              "counters": {
+                "daemon_html_invalidated_unsafe": 1
+              }
+            }
           },
           {
             "kind": "serve",
@@ -33548,7 +33556,11 @@
             "response": {
               "status": 200
             },
-            "expect": {}
+            "expect": {
+              "counters": {
+                "daemon_html_invalidate_failed": 1
+              }
+            }
           },
           {
             "kind": "capture",
