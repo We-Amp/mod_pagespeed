@@ -148,16 +148,24 @@ function Read-ProbeLog([string]$Id) {
 function Trace-Count { if (Test-Path $Trace) { @(Get-Content -LiteralPath $Trace).Count } else { 0 } }
 function Trace-Since([int]$N) { if (Test-Path $Trace) { @(Get-Content -LiteralPath $Trace) | Select-Object -Skip $N } }
 
+# The worker's statistics (JSON, or "name: value" lines).
 function Get-Stats {
     $r = Invoke-Raw $PMain "/pagespeed_admin/statistics"
     $s = @{}
-    foreach ($l in ($r.Text -split "`n")) {
-        if ($l -match '^\s*(daemon_[a-z0-9_]+):?\s+(-?\d+)\s*$') { $s[$Matches[1]] = [int64]$Matches[2] }
+    $t = $r.Text.Trim()
+    if ($t.StartsWith("{")) {
+        $v = (ConvertFrom-Json $t).variables
+        foreach ($p in $v.PSObject.Properties) { if ($p.Name -like "daemon_*") { $s[$p.Name] = [int64]$p.Value } }
+    } else {
+        foreach ($l in ($t -split "`n")) {
+            if ($l -match '^\s*(daemon_[a-z0-9_]+):?\s*(-?\d+)\s*$') { $s[$Matches[1]] = [int64]$Matches[2] }
+        }
     }
     $s
 }
 
 function Show-StatsDelta([string]$Case, $Before, $After) {
+    if ($After.Count -eq 0) { Show $Case "stats.moved" "statistics unreadable"; return }
     $moved = @()
     foreach ($k in ($After.Keys | Sort-Object)) {
         $d = $After[$k] - [int64]$Before[$k]
@@ -189,7 +197,9 @@ function Probe-Request([string]$Case, [string]$Target, [string]$Method = "GET", 
         Show $Case "wire.body" (Body-Facts $r)
         foreach ($l in (Read-ProbeLog $id)) { Show $Case "probe" ($l -replace '^id=[^|]*\|t=\d+\|', '') }
     }
-    $r
+    # The response is left in $script:Last: everything a function writes
+    # is output, and these lines are the report.
+    $script:Last = $r
 }
 
 # The multiset of header lines, compared by name: Date and Server by
@@ -485,18 +495,19 @@ function Module-Order {
 # A miss recorded by B, then the hit B answers from that record.
 function Miss-Then-Hit([string]$Case, [string]$Target, [hashtable]$Extra = @{}, [string]$Stored = "", [switch]$Freb) {
     if (-not $Stored) { $Stored = $Case }
-    $miss = Probe-Request "${Case}_miss" $Target "GET" ($Extra + @{ "X-Probe-Act" = "B.capture"; "X-Probe-Stored" = $Stored })
+    Probe-Request "${Case}_miss" $Target "GET" ($Extra + @{ "X-Probe-Act" = "B.capture"; "X-Probe-Stored" = $Stored })
+    $miss = $script:Last
     if ($Freb) { Freb-Order "${Case}_miss" $Target }
     Make-Replay $Stored $Stored
     $t0 = Trace-Count; $s0 = Get-Stats
-    $hit = Probe-Request "${Case}_hit" $Target "GET" ($Extra + @{ "X-Probe-Act" = "B.serve_html"; "X-Probe-Stored" = $Stored })
+    Probe-Request "${Case}_hit" $Target "GET" ($Extra + @{ "X-Probe-Act" = "B.serve_html"; "X-Probe-Stored" = $Stored })
+    $hit = $script:Last
     Start-Sleep -Milliseconds 600
     $s1 = Get-Stats
     if ($Freb) { Freb-Order "${Case}_hit" $Target }
     foreach ($l in (Trace-Since $t0)) { Show "${Case}_hit" "trace" ($l -replace '^\d+ \d+ ', '') }
     Show-StatsDelta "${Case}_hit" $s0 $s1
     Compare-Wire $Case $miss $hit
-    @($miss, $hit)
 }
 
 function Run {
@@ -508,37 +519,37 @@ function Run {
 
     # 1 + 2: does the PageSpeed module's send rewrite a page answered at
     # RESOLVE_REQUEST_CACHE, and is that answer captured?
-    $null = Miss-Then-Hit "core" "/page.html" @{} "page" -Freb
+    Miss-Then-Hit "core" "/page.html" @{} "page" -Freb
     # The same with a changed body: a capture of the hit would store it.
     Make-Replay "page" "page_hit_marked" -Alter
     $s0 = Get-Stats; $t0 = Trace-Count
-    $null = Probe-Request "core_marked_hit" "/page.html" "GET" @{ "X-Probe-Act" = "B.serve_html"; "X-Probe-Stored" = "page_hit_marked" }
+    Probe-Request "core_marked_hit" "/page.html" "GET" @{ "X-Probe-Act" = "B.serve_html"; "X-Probe-Stored" = "page_hit_marked" }
     Start-Sleep -Milliseconds 600
     foreach ($l in (Trace-Since $t0)) { Show "core_marked_hit" "trace" ($l -replace '^\d+ \d+ ', '') }
     Show-StatsDelta "core_marked_hit" $s0 (Get-Stats)
     # Module context set at RESOLVE_REQUEST_CACHE under B's id: seen at B's
     # first send and at H's (B's image, send first) after the rewriter
     # resumed the request.
-    $null = Probe-Request "ctx_hit" "/page.html" "GET" @{ "X-Probe-Act" = "B.serve_html,B.ctx"; "X-Probe-Stored" = "page" }
+    Probe-Request "ctx_hit" "/page.html" "GET" @{ "X-Probe-Act" = "B.serve_html,B.ctx"; "X-Probe-Stored" = "page" }
 
     # 3: compression on a hit as on a miss.
-    $null = Miss-Then-Hit "gzip" "/sub/page.html" @{ "Accept-Encoding" = "gzip" } "sub_gz"
+    Miss-Then-Hit "gzip" "/sub/page.html" @{ "Accept-Encoding" = "gzip" } "sub_gz"
     # The hit replays bytes the capture holds inflated (the module inflates
     # a statically compressed page before it stores it).
-    $null = Miss-Then-Hit "gzip_plain_store" "/sub/page.html" @{} "sub_plain"
-    $hitgz = Probe-Request "gzip_plain_store_hit_ae" "/sub/page.html" "GET" @{ "Accept-Encoding" = "gzip"; "X-Probe-Act" = "B.serve_html"; "X-Probe-Stored" = "sub_plain" }
+    Miss-Then-Hit "gzip_plain_store" "/sub/page.html" @{} "sub_plain"
+    Probe-Request "gzip_plain_store_hit_ae" "/sub/page.html" "GET" @{ "Accept-Encoding" = "gzip"; "X-Probe-Act" = "B.serve_html"; "X-Probe-Stored" = "sub_plain" }
 
     # 3: URL Rewrite outbound rules, in both module orders.
     if (Rewrite-Installed) {
         Show "rw" "module order (installed)" (Module-Order)
-        $null = Miss-Then-Hit "rw_installed" "/rw/page.html" @{} "rw_installed" -Freb
-        $null = Miss-Then-Hit "rw_installed_gz" "/rw/page.html" @{ "Accept-Encoding" = "gzip" } "rw_installed_gz"
+        Miss-Then-Hit "rw_installed" "/rw/page.html" @{} "rw_installed" -Freb
+        Miss-Then-Hit "rw_installed_gz" "/rw/page.html" @{ "Accept-Encoding" = "gzip" } "rw_installed_gz"
         $mods = @(Get-WebConfiguration "system.webServer/modules/add" -PSPath $Apphost | ForEach-Object { $_.name })
         $other = if ([Array]::IndexOf($mods, "RewriteModule") -gt [Array]::IndexOf($mods, "PageSpeedModule")) { "before" } else { "after" }
         Move-RewriteModule $other
         Show "rw" "module order (moved $other)" (Module-Order)
-        $null = Miss-Then-Hit "rw_moved" "/rw2/page.html" @{} "rw_moved" -Freb
-        $null = Miss-Then-Hit "rw_moved_gz" "/rw2/page.html" @{ "Accept-Encoding" = "gzip" } "rw_moved_gz"
+        Miss-Then-Hit "rw_moved" "/rw2/page.html" @{} "rw_moved" -Freb
+        Miss-Then-Hit "rw_moved_gz" "/rw2/page.html" @{ "Accept-Encoding" = "gzip" } "rw_moved_gz"
         # What the module stored, read back through its Markdown copy:
         # whether the links carry the outbound marker.
         foreach ($t in @("/rw/page.html", "/rw2/page.html")) {
@@ -568,6 +579,7 @@ function Run {
         $r = Invoke-Raw $PMain $u[1] $u[0] @{ "X-Probe-Id" = "unsafe$k-0" }
         Start-Sleep -Milliseconds 400
         Show "unsafe$k" "request" ("{0} {1} -> {2} {3}" -f $u[0], $u[1], $r.Status, (($r.Lines | Where-Object { $_ -match '^(Location|Content-Location):' }) -join "; "))
+        if ($r.Status -ge 400) { Show "unsafe$k" "body" (($r.Text -replace '<[^>]*>', ' ' -replace '\s+', ' ').Trim() | ForEach-Object { $_.Substring(0, [Math]::Min(300, $_.Length)) }) }
         foreach ($l in (Read-ProbeLog "unsafe$k-0")) {
             if ($l -match '\|mod=PipeProbeB\|ev=send\|' -or $l -match '\|ev=resolve_cache\|') { Show "unsafe$k" "probe" ($l -replace '^id=[^|]*\|t=\d+\|', '') }
         }
@@ -578,28 +590,30 @@ function Run {
     Set-Caching $true
     Recycle
     Clear-ProbeLogs
-    $null = Miss-Then-Hit "kseed" "/kern/page.html" @{} "kseed"
+    Miss-Then-Hit "kseed" "/kern/page.html" @{} "kseed"
     Make-Replay "kseed" "kmark" -Alter
     foreach ($c in @(@("kern", "/kern/page.html", "B.serve_html,B.nodisarm"), @("kern2", "/kern2/page.html", "B.serve_html"), @("oc", "/oc/page.html", "B.serve_html,B.nodisarm"), @("oc2", "/oc2/page.html", "B.serve_html"))) {
-        for ($i = 0; $i -lt 4; $i++) { $null = Probe-Request "$($c[0])_hit" $c[1] "GET" @{ "X-Probe-Act" = $c[2]; "X-Probe-Stored" = "kmark" } -Quiet }
+        for ($i = 0; $i -lt 4; $i++) { Probe-Request "$($c[0])_hit" $c[1] "GET" @{ "X-Probe-Act" = $c[2]; "X-Probe-Stored" = "kmark" } -Quiet }
         $marked = 0
         for ($i = 0; $i -lt 4; $i++) {
-            $r = Probe-Request "$($c[0])_plain" $c[1] "GET" @{} -Quiet
-            if ($r.Text -match 'probe hit') { $marked++ }
+            Probe-Request "$($c[0])_plain" $c[1] "GET" @{} -Quiet
+            if ($script:Last.Text -match 'probe hit') { $marked++ }
         }
         Show $c[0] "after 4 hits ($($c[2])) and 4 plain GETs" ("hits reached the pipeline {0}/4; plain GETs reached it {1}/4; plain GETs carrying the hit's bytes {2}/4; kernel cache: {3}" -f (Reached "$($c[0])_hit"), (Reached "$($c[0])_plain"), $marked, (Kernel-Hits $c[1]))
     }
-    for ($i = 0; $i -lt 4; $i++) { $null = Probe-Request "ktxt" "/plain.txt" "GET" @{} -Quiet }
+    for ($i = 0; $i -lt 4; $i++) { Probe-Request "ktxt" "/plain.txt" "GET" @{} -Quiet }
     Show "ktxt" "control: a static file the module leaves alone" ("reached the pipeline {0}/4; kernel cache: {1}" -f (Reached "ktxt"), (Kernel-Hits "/plain.txt"))
     Set-Caching $false
     Recycle
 
     # 6: HEAD on the hit path.
-    $hm = Probe-Request "head_miss" "/page.html" "HEAD" @{}
-    $hh = Probe-Request "head_hit" "/page.html" "HEAD" @{ "X-Probe-Act" = "B.serve_html"; "X-Probe-Stored" = "page" }
+    Probe-Request "head_miss" "/page.html" "HEAD" @{}
+    $hm = $script:Last
+    Probe-Request "head_hit" "/page.html" "HEAD" @{ "X-Probe-Act" = "B.serve_html"; "X-Probe-Stored" = "page" }
+    $hh = $script:Last
     Compare-Wire "head" $hm $hh
-    $gm = Probe-Request "get_vs_head" "/page.html" "GET" @{ "X-Probe-Act" = "B.serve_html"; "X-Probe-Stored" = "page" } -Quiet
-    Compare-Wire "head_vs_get_hit" $gm $hh
+    Probe-Request "get_vs_head" "/page.html" "GET" @{ "X-Probe-Act" = "B.serve_html"; "X-Probe-Stored" = "page" } -Quiet
+    Compare-Wire "head_vs_get_hit" $script:Last $hh
 
     # 6: path forms. Each is a first request for its spelling of p/q.html:
     # what IIS and the module's global hook hold at RESOLVE_REQUEST_CACHE,
