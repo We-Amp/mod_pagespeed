@@ -39,7 +39,11 @@
 #                  tracing, and starts the optimizer service
 # -Phase run       drives the matrix and prints one block per case
 # -Phase teardown  restores the backup, the optimizer service's command
-#                  line and state, and removes the probe's files
+#                  line and state, and removes the probe's files. What
+#                  stays: the module package and URL Rewrite when the run
+#                  installed them, the IIS features, and the probe site's
+#                  entries in the optimizer volume (restore the guest's
+#                  checkpoint to drop them)
 #
 # Every case prints lines "CASE <id> | <what> | <value>". INFO only: the
 # probe records behaviour, it does not judge it.

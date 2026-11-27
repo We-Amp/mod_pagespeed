@@ -17,8 +17,11 @@
 // PRIORITY_ALIAS_FIRST instead, to show what the other end of the send
 // order sees. IIS calls RegisterModule once per module entry, so two
 // entries may name one image (the probe scripts register "G" on A's image,
-// and the serve-cached-html matrix "H" on B's) and each registration keeps
-// its own name, id and priorities.
+// and the serve-cached-html matrix "H" on B's). Each registration keeps its
+// own name and priorities. Whether two entries of one image get distinct
+// module ids is not assumed: the register line and every send record the
+// ids (IIS is documented by the PageSpeed module itself to give both
+// entries of one image the same id).
 //
 // Every notification is written as one line to
 //   C:\pipeprobe\log\<module name>-<pid>.log
@@ -257,8 +260,10 @@ std::string ServerVariable(IHttpContext* ctx, PCSTR name) {
   return out;
 }
 
-// The whole byte range of a file chunk, read without moving any file
-// pointer the server relies on.
+// The whole byte range of a file chunk, read at explicit OVERLAPPED
+// offsets. On a handle opened for overlapped I/O no file pointer moves; on
+// a synchronous one ReadFile does move it, which is harmless because
+// http.sys sends a file chunk by its own ByteRange.
 bool ReadFileChunk(const HTTP_DATA_CHUNK& c, std::string* out) {
   HANDLE h = c.FromFileHandle.FileHandle;
   if (h == nullptr || h == INVALID_HANDLE_VALUE) return false;
@@ -615,15 +620,16 @@ class Probe : public CHttpModule {
     const bool more = (flags & HTTP_SEND_RESPONSE_FLAG_MORE_DATA) != 0;
     const bool hbs = provider->GetHeadersBeingSent() != FALSE;
     HTTP_RESPONSE* raw = resp->GetRawHttpResponse();
-    char tmp[256];
+    char tmp[384];
     _snprintf_s(tmp, sizeof(tmp), _TRUNCATE,
                 "seq=%ld|depth=%ld|gdepth=%ld|flags=0x%lx|more=%d|hbs=%d|"
-                "status=%u|served=%d|method=%s|own_ctx=%d|b_ctx=%d|",
+                "status=%u|served=%d|method=%s|own_ctx=%d|b_ctx=%d|"
+                "own_id=%p|b_id=%p|",
                 sends_, depth, global_depth, flags, more ? 1 : 0, hbs ? 1 : 0,
                 raw != nullptr ? raw->StatusCode : 0, served_ ? 1 : 0,
                 ctx->GetRequest()->GetHttpMethod(),
                 HasContext(ctx, info_->id) ? 1 : 0,
-                HasContext(ctx, IdOf('B')) ? 1 : 0);
+                HasContext(ctx, IdOf('B')) ? 1 : 0, info_->id, IdOf('B'));
     LogLine(id_, "send", std::string(tmp) + ChunkDump(resp) +
                              "|hdrs=" + HeaderDump(resp));
     REQUEST_NOTIFICATION_STATUS status = RQ_NOTIFICATION_CONTINUE;
@@ -834,6 +840,19 @@ class Probe : public CHttpModule {
       LogLine(id_, "act.serve_html", "no stored page");
       return RQ_NOTIFICATION_CONTINUE;
     }
+    const bool head = _stricmp(ctx->GetRequest()->GetHttpMethod(), "HEAD") == 0;
+    // Request memory, taken before the response is touched so a failure
+    // leaves it untouched: IIS and the rewriter read the chunk after this
+    // notification has returned.
+    void* mem = nullptr;
+    if (!head && !body.empty()) {
+      mem = ctx->AllocateRequestMemory(static_cast<DWORD>(body.size()));
+      if (mem == nullptr) {
+        LogLine(id_, "act.serve_html", "no request memory");
+        return RQ_NOTIFICATION_CONTINUE;
+      }
+      memcpy(mem, body.data(), body.size());
+    }
     served_ = true;
     IHttpResponse* r = ctx->GetResponse();
     if (!HasAction(ctx, "nodisarm")) DisarmCaches(r);
@@ -857,16 +876,7 @@ class Probe : public CHttpModule {
     char len[24];
     _snprintf_s(len, sizeof(len), _TRUNCATE, "%zu", body.size());
     r->SetHeader("Content-Length", len, static_cast<USHORT>(strlen(len)), TRUE);
-    const bool head = _stricmp(ctx->GetRequest()->GetHttpMethod(), "HEAD") == 0;
-    if (!head && !body.empty()) {
-      // Request memory: IIS and the rewriter read the chunk after this
-      // notification has returned.
-      void* mem = ctx->AllocateRequestMemory(static_cast<DWORD>(body.size()));
-      if (mem == nullptr) {
-        LogLine(id_, "act.serve_html", "no request memory");
-        return RQ_NOTIFICATION_CONTINUE;
-      }
-      memcpy(mem, body.data(), body.size());
+    if (mem != nullptr) {
       HTTP_DATA_CHUNK c = {};
       c.DataChunkType = HttpDataChunkFromMemory;
       c.FromMemory.pBuffer = mem;
@@ -946,8 +956,10 @@ extern "C" __declspec(dllexport) HRESULT __stdcall RegisterModule(
                          reinterpret_cast<LPCSTR>(&RegisterModule), &self)) {
     GetModuleFileNameA(self, image, MAX_PATH);
   }
+  char idtext[32];
+  _snprintf_s(idtext, sizeof(idtext), _TRUNCATE, "|id=%p", mod->id);
   LogLine("-", "register",
-          std::string(mod->send_first ? "send=first" : "send=last") +
+          std::string(mod->send_first ? "send=first" : "send=last") + idtext +
               "|image=" + image);
   return S_OK;
 }

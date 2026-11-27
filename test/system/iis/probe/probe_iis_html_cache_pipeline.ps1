@@ -83,6 +83,9 @@ try {
             $p.ExitCode
         }
         Say "SETUP | module package install | exit $rc"
+        # A failed install would leave an older package to be probed, and
+        # its results attributed to the wrong build.
+        if ("$rc" -ne "0" -and "$rc" -ne "3010") { Say "PRECONDITION | the module package did not install (msiexec exit $rc)"; exit 2 }
     }
     $pre = Invoke-Command -Session $session -ArgumentList $Matrix -ScriptBlock {
         param($Matrix)
