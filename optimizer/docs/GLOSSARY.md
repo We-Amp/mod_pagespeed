@@ -18,3 +18,5 @@ changing the behaviour, not this file.
 | **Cyclone stripe** | A partition of the on-disk cache volume; Cyclone derives the stripe count from the volume size, so nginx and the worker must agree on size or the same key resolves to different stripes (cross-process reads/writes go invisible). | `docs/multi-process-cache-stripes.md`; `src/nginx/ngx_pagespeed_module.cc` (`MakeNginxCacheConfig`) |
 | **volume_size** | Cache volume byte size in `PageSpeedCacheConfig`. The worker sets it via `--cache-size`; **nginx must set `volume_size = 0`** to auto-detect from the existing file (matching size keeps the stripe layout consistent). | `lib/cache/cache.h` (`PageSpeedCacheConfig::volume_size`); CLAUDE.md → Cross-Process Cache Sharing |
 | **RewriteDriver** | The mod_pagespeed filter orchestrator (2000+ LOC, 60+ filters) that mod_pagespeed 2 deliberately does **not** port — 2.0 calls the underlying PSOL components directly. | CLAUDE.md → Project Overview (key design decision) |
+
+<!-- spike: docs-only change -->

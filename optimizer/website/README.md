@@ -29,3 +29,5 @@ node scripts/visual-diff.mjs dist --base <base checkout>/website --head <head ch
 ```
 
 It prints what differs and exits 1, or `normalized dist diff: empty` and exits 0. Like `shots`, it reads the build-id tag of each side and refuses a side built without `SITE_BUILD_ID`, two equal ids, or the same directory given twice. On-demand routes are not in `dist/`; the screenshots cover those. "Empty" means the same prerendered markup and the same set of CSS rules, not an identical build: the CSS comparison ignores rule order, so a rule that moves between sheets is not a difference and neither is a reordering that changes the cascade, and client JavaScript bundles, images, fonts and other static files are not compared.
+
+<!-- spike: website-only change -->
