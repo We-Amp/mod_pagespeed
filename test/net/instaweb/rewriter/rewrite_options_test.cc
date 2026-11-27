@@ -1335,7 +1335,8 @@ TEST_F(RewriteOptionsTest, DaemonHtmlCacheLaterReleaseSettingsParseInert) {
   EXPECT_EQ(kOk, set("DaemonHtmlCacheIgnoreCookie", "hubspotutk"));
   EXPECT_EQ("_my_ab hubspotutk __hs*",
             options_.daemon_html_cache_ignore_cookie());
-  for (const char* bad : {"", "a b", "a,b", "a;b", "a=b", "_h*j", "**", "a\tb"}) {
+  for (const char* bad :
+       {"", "a b", "a,b", "a;b", "a=b", "_h*j", "**", "a\tb"}) {
     EXPECT_EQ(kInvalid, set("DaemonHtmlCacheIgnoreCookie", bad)) << bad;
   }
   EXPECT_EQ("_my_ab hubspotutk __hs*",
@@ -4956,10 +4957,10 @@ TEST_F(RewriteOptionsTest, NegativeDeadlineFetchWaitIsServerScopeOnly) {
             options.ParseAndSetOptionFromNameWithScope(
                 name, "60000", RewriteOptions::kQueryScope, &msg, &handler));
   // Not from .htaccess or a directory block.
-  EXPECT_EQ(RewriteOptions::kOptionNameUnknown,
-            options.ParseAndSetOptionFromNameWithScope(
-                name, "60000", RewriteOptions::kDirectoryScope, &msg,
-                &handler));
+  EXPECT_EQ(
+      RewriteOptions::kOptionNameUnknown,
+      options.ParseAndSetOptionFromNameWithScope(
+          name, "60000", RewriteOptions::kDirectoryScope, &msg, &handler));
   // Not from remote configuration.
   EXPECT_EQ(RewriteOptions::kOptionNameUnknown,
             options.SetOptionFromRemoteConfig(name, "60000"));
