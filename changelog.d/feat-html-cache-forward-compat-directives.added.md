@@ -3,8 +3,9 @@
   seconds, default 3600; it only ever shortens the lifetime the origin gives
   a page), `DaemonHtmlCacheCredentialed anonymous-only|explicit-public`,
   `DaemonHtmlCacheIgnoreCookies on|off` and the repeatable
-  `DaemonHtmlCacheIgnoreCookie <name|prefix*>` are accepted on Apache, nginx,
-  IIS and Envoy, with a warning each that they take effect with
+  `DaemonHtmlCacheIgnoreCookie <name|prefix*>` (one name or prefix per line;
+  on Envoy, where a virtual host option is set once, a comma-separated list)
+  are accepted on Apache, nginx, IIS and Envoy, with a warning each that they take effect with
   `DaemonHtmlCache serve-cached-html`; in this release they have no effect. An
   invalid value is refused, as for any other directive: a configuration error
   on Apache and nginx, a logged and skipped line on IIS and Envoy. `DaemonHtmlCache

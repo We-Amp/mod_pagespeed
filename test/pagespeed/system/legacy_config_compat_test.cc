@@ -894,33 +894,46 @@ const ProcessContext& ProcessContextForBinary() {
   return kProcessContextEnvironment->context();
 }
 
-// The directives of the serve-cached-html mode a later release adds, every
-// value of each and an invalid one: accepted, with a warning, so that a
+// The directives of the serve-cached-html mode a later release adds, one line
+// for every value and form that release accepts, and the lines just outside
+// it.  Every `loads` line is accepted, with a warning, so that a
 // configuration written for that release keeps loading here (a package
-// rollback must not stop the server), and refused when the value is one that
-// release refuses too.
+// rollback must not stop the server); that release accepts no form outside
+// this list.  Every other line is a configuration error, as it is there.
+// DaemonHtmlCacheIgnoreCookie takes one name or prefix per line.
 struct LaterReleaseLine {
   const char* line;  // without the ModPagespeed prefix
   bool loads;
 };
 const LaterReleaseLine kLaterReleaseLines[] = {
     {"DaemonHtmlCache serve-cached-html", true},
+    {"DaemonHtmlCache Serve-Cached-HTML", true},
+    {"DaemonHtmlCache serve-everything", false},
     {"DaemonHtmlCacheServeScope agents", true},
     {"DaemonHtmlCacheServeScope all", true},
+    {"DaemonHtmlCacheServeScope ALL", true},
     {"DaemonHtmlCacheServeScope everyone", false},
+    {"DaemonHtmlCacheServeScope agents all", false},
     {"DaemonHtmlCacheMaxAge 0", true},
     {"DaemonHtmlCacheMaxAge 60", true},
+    {"DaemonHtmlCacheMaxAge 3600", true},
     {"DaemonHtmlCacheMaxAge 86400", true},
     {"DaemonHtmlCacheMaxAge 86401", false},
+    {"DaemonHtmlCacheMaxAge -1", false},
+    {"DaemonHtmlCacheMaxAge 60s", false},
     {"DaemonHtmlCacheCredentialed anonymous-only", true},
     {"DaemonHtmlCacheCredentialed explicit-public", true},
     {"DaemonHtmlCacheCredentialed anyone", false},
+    {"DaemonHtmlCacheCredentialed rfc9111", false},
     {"DaemonHtmlCacheIgnoreCookies on", true},
     {"DaemonHtmlCacheIgnoreCookies off", true},
     {"DaemonHtmlCacheIgnoreCookies maybe", false},
     {"DaemonHtmlCacheIgnoreCookie _my_ab", true},
     {"DaemonHtmlCacheIgnoreCookie _my_prefix*", true},
+    {"DaemonHtmlCacheIgnoreCookie _my_ab _my_cd", false},
+    {"DaemonHtmlCacheIgnoreCookie _my_ab,_my_cd", false},
     {"DaemonHtmlCacheIgnoreCookie a=b", false},
+    {"DaemonHtmlCacheIgnoreCookie _my*ab", false},
 };
 
 class LegacyConfigCompatTest : public testing::Test {
@@ -1177,6 +1190,8 @@ TEST_F(LegacyConfigCompatTest, NginxLaterReleaseDirectivesLoadInert) {
   EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
             options.daemon_html_cache());
   EXPECT_EQ(86400, options.daemon_html_cache_max_age_s());
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeScopeAll,
+            options.daemon_html_cache_serve_scope());
   EXPECT_EQ("_my_ab _my_prefix*", options.daemon_html_cache_ignore_cookie());
 }
 

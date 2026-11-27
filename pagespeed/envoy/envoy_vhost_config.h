@@ -49,6 +49,9 @@ struct VHostEntry {
 // that is no longer an option but is in the shared deprecated table is
 // accepted as a no-op and logged as deprecated (the wording nginx uses, with
 // a "VHost <pattern>:" prefix); any other failure logs "Failed to set option".
+// DaemonHtmlCacheIgnoreCookie takes a comma-separated list here (a virtual
+// host's options are a map, so the name can appear once): each element is
+// checked as one name, and an invalid element refuses the whole value.
 // Returns true if the option was set.
 bool ApplyVHostCustomOption(EnvoyRewriteOptions* options,
                             const std::string& host_pattern,

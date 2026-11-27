@@ -1335,7 +1335,7 @@ TEST_F(RewriteOptionsTest, DaemonHtmlCacheLaterReleaseSettingsParseInert) {
   EXPECT_EQ(kOk, set("DaemonHtmlCacheIgnoreCookie", "hubspotutk"));
   EXPECT_EQ("_my_ab hubspotutk __hs*",
             options_.daemon_html_cache_ignore_cookie());
-  for (const char* bad : {"", "a b", "a;b", "a=b", "_h*j", "**", "a\tb"}) {
+  for (const char* bad : {"", "a b", "a,b", "a;b", "a=b", "_h*j", "**", "a\tb"}) {
     EXPECT_EQ(kInvalid, set("DaemonHtmlCacheIgnoreCookie", bad)) << bad;
   }
   EXPECT_EQ("_my_ab hubspotutk __hs*",
