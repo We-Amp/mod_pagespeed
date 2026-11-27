@@ -1236,8 +1236,10 @@ TEST_F(RewriteOptionsTest, DaemonHtmlCacheServeCachedHtmlRunsAsServeVariants) {
   EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
             options_.daemon_html_cache());
   // The configuration dump names what runs.
-  EXPECT_EQ("serve-variants",
-            RewriteOptions::ToString(options_.daemon_html_cache()));
+  EXPECT_NE(GoogleString::npos,
+            options_.OptionsToString().find("serve-variants"));
+  EXPECT_EQ(GoogleString::npos,
+            options_.OptionsToString().find("serve-cached-html"));
 }
 
 // The settings of the serve-cached-html mode a later release adds parse and
