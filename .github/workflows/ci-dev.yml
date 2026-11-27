@@ -16,7 +16,9 @@ on:
         default: false
 
 concurrency:
-  group: ci-dev
+  # Keyed on the ref: a stray dispatch from another ref runs no jobs (both
+  # jobs require refs/heads/ci-dev) and must not cancel a ci-dev run.
+  group: ci-dev-${{ github.ref }}
   cancel-in-progress: true
 
 permissions: {}

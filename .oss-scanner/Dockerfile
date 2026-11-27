@@ -101,8 +101,8 @@ RUN pip3 install --no-cache-dir --break-system-packages requests==2.32.4 pytest=
 
 # nginx source, configured and built once: the nginx_repository Bazel rule reads
 # /usr/local/src/nginx, and the built binary serves the nginx system tests.
-ENV NGINX_VERSION=1.30.5
-ENV NGINX_SHA256=6c20565aa2325cb82216ae804f4a4ff1875179014759a381c42ddc8e11c4906d
+ENV NGINX_VERSION=1.30.8
+ENV NGINX_SHA256=f867314ada32e717b949930859656c48a72dc6657aec598db58af2f98a40e1c1
 RUN curl -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" -o /tmp/nginx.tar.gz \
     && echo "${NGINX_SHA256}  /tmp/nginx.tar.gz" | sha256sum -c - \
     && tar -xzf /tmp/nginx.tar.gz -C /usr/local/src \
