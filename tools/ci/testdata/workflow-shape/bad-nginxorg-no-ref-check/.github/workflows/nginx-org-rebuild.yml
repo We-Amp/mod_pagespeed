@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+name: x
+on:
+  workflow_dispatch:
+    inputs:
+      module_tag:
+        required: true
+        type: string
+      dry_run:
+        required: true
+        type: boolean
+        default: true
+permissions:
+  contents: read
+jobs:
+  event-guard:
+    runs-on: ubuntu-24.04
+    steps:
+      - env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          ACTOR: ${{ github.actor }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          MODULE_TAG: ${{ inputs.module_tag }}
+          ALLOWED_REFS: "refs/heads/master"
+        run: |
+          set -euo pipefail
+          [ "$EVENT" = workflow_dispatch ] || { echo "::error::only a dispatch runs this lane"; exit 1; }
+          for a in "$ACTOR" "$TRIGGERING_ACTOR"; do
+            case "$a" in *"[bot]") echo "::error::a dispatch or re-run by an app or bot account ($a) is not allowed"; exit 1 ;; esac
+          done
+          [[ "$MODULE_TAG" =~ ^module-v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::module_tag must be module-vX.Y.Z"; exit 1; }
+  plan:
+    needs: event-guard
+    runs-on: ubuntu-24.04
+    outputs:
+      module_tag: ${{ steps.inputs.outputs.module_tag }}
+      dry_run: ${{ steps.inputs.outputs.dry_run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - id: inputs
+        env:
+          MODULE_TAG: ${{ inputs.module_tag }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: echo "module_tag=${MODULE_TAG}" >> "$GITHUB_OUTPUT"
+  sign:
+    needs: [plan]
+    if: ${{ !cancelled() && needs.plan.outputs.dry_run == 'false' }}
+    runs-on: ubuntu-24.04
+    environment: release
+    env:
+      MODULE_TAG: ${{ needs.plan.outputs.module_tag }}
+    steps:
+      - run: echo "sign ${MODULE_TAG}"

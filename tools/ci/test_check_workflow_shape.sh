@@ -93,6 +93,11 @@ expect_bad bad-release-env-no-candidate 'rule release-env'
 expect_bad bad-release-env-no-dry-run 'rule release-env'
 expect_bad bad-release-env-no-rehearsal 'rule release-env'
 expect_bad bad-release-env-no-if 'rule release-env'
+# release-env, the nginx.org lane: a dispatch on master for module_tag, pinned.
+expect_good good-nginxorg-lane
+for d in tag-ref no-ref-check no-tag-check bot-allowed push no-dry-run ref-name input-in-run checkout-master skips-plan; do
+  expect_bad "bad-nginxorg-${d}" 'rule release-env'
+done
 # adopt-shape: the adoption conditions, the artifacts an adopting run holds
 # and the adopt job's own uploads match tools/ci/release_adopt.py.
 expect_good good-adopt

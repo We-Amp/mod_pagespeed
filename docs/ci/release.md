@@ -1101,23 +1101,27 @@ moves on its own schedule, and a dynamic module loads only into the exact
 nginx it was built against, so the lane rebuilds the current module release
 for each new nginx.org stable patch without a module release.
 
-**Dispatch.** By a person, on the tag of the current module release:
+**Dispatch.** By a person, on `master`, naming the current module release:
 
 ```
-gh workflow run nginx-org-rebuild.yml --ref module-vX.Y.Z \
+gh workflow run nginx-org-rebuild.yml --ref master -f module_tag=module-vX.Y.Z \
   -f nginx_version=A.B.C -f nginx_sha256=<sha256 of nginx-A.B.C.tar.gz> -f dry_run=true
 ```
+
+The event guard refuses another event, an app or bot actor, any ref but
+`refs/heads/master` (a tag included) and a `module_tag` outside
+`module-vX.Y.Z`; the input reaches the scripts through the environment only.
 
 `lane_revision` (default 0) rebuilds the same module and nginx pair;
 `previous_nginx_version` and `previous_nginx_sha256` are needed only for a
 cell's first ship (below). `dry_run` defaults to true: build, test and
 validate, sign and release nothing.
 
-**What it checks before it builds** (`plan`): the input grammar; that the tag
-is the module release `/releases/latest` names, published and not a
-pre-release; that no tag or release exists yet for this pair and revision;
+**What it checks before it builds** (`plan`): the input grammar; that
+`module_tag` is the module release `/releases/latest` names, published and
+not a pre-release; that no tag or release exists yet for this pair and revision;
 the release's `SHA256SUMS` signature against `RELEASE-SIGNING-KEY.asc`, the
-manifest and source tarball rows, and that the tag's commit is the
+manifest and source tarball rows, and that the commit of `module_tag` is the
 manifest's `source_sha`; the nginx tarball against the given sha256, and its
 signature against nginx.org's signing keys pinned in
 `tools/ci/nginx-org-source-signers.asc`; and, per cell, the newest published
@@ -1130,8 +1134,8 @@ dispatch.
 
 **Build and tests.** The packages are built from the release's own source
 tarball (its commit stamp must be the release commit) with the build scripts
-of that tree, driven by `tools/ci/release_nginx.sh` from `master`, so the
-leg table, the gates and the tests can change without a module release. Then
+of that tree, driven by `tools/ci/release_nginx.sh` from the run's commit, so
+the leg table, the gates and the tests can change without a module release. Then
 the exact-set check, the version and nginx pin of every package, the
 symbol-leak gate and the load check (nginx.org's nginx on each cell, and the
 `nginx:<version>` image for Debian 13). The upgrade tests
@@ -1166,15 +1170,34 @@ dry run of this lane does not record it.
 
 Every job runs on a GitHub-hosted runner.
 
-**Where each part comes from.** The workflow file runs from the release tag
-(the `release` environment admits only `module-v*` refs), so the lane exists
-from the first module release whose tree carries it, and a change to the
-workflow file takes effect with the next module release. Everything it runs
-comes from `master`: the tooling, the tests, the key files and the key
-fingerprints (`tools/ci/nginx_org_lane.sh pins`), so a new nginx.org signing
-key or a gate change needs no release. The build scripts of the packages are
-the release tree's; a tree that cannot build the lane's version shape fails
-the version check before anything is published.
+**Where each part comes from.** The workflow file runs from `master`, at the
+commit the dispatch was made at (`github.sha`), so a fix to the lane takes
+effect for the current module release without a new one. Every checkout in
+the workflow names that commit, never the moving `master` ref, so the plan,
+the approval and the signing jobs run the one reviewed tree; the plan's
+summary, and the names of the `release` jobs, show the workflow commit,
+`module_tag` and `source_sha` the approval is for. From that commit come the
+tooling (`tools/ci`), the tests (`test/package-test`), the key files and the
+key fingerprints (`tools/ci/nginx_org_lane.sh pins`), so a new nginx.org
+signing key or a gate change needs no release. The module release itself
+comes from `module_tag` and nothing else: its signed `SHA256SUMS`, its
+manifest and its source tarball. Everything the build runs inside a leg's
+container (`install/nginx/build_module_in_container.sh`,
+`install/nginx/build_nginx_deb.sh`, `install/nginx/build_nginx_rpm.sh`, the
+Bazel files, the patches, `net/instaweb/public/VERSION`) is the tarball's,
+extracted into a directory of its own; the driver copies only
+`release_nginx.sh` and its three helpers from the run's commit, and the
+gates and tests from that commit only read the built packages. A tree that cannot build the lane's
+version shape fails the version check before anything is published.
+
+The SLSA provenance of a lane release names `refs/heads/master`, the ref the
+run was at; the manifest's `source_sha` binds the files to the module
+release (SECURITY.md has the verify command). A real run of this lane needs
+the `release` environment's deployment policy to admit `refs/heads/master`
+besides the `module-v*` tags. A dry run never reaches the environment:
+`sign-checksums` and `create-release` are skipped by their `if:` before the
+environment is evaluated, and the provenance call runs only after
+`sign-checksums`.
 
 ## Tooling
 

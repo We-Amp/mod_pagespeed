@@ -74,6 +74,11 @@
 #       needs.version.outputs.rehearsal != 'true', so a dry run, a candidate
 #       run and a rehearsal (which run on master) never reach the
 #       environment even if its tag policy were loosened;
+#       in nginx-org-rebuild.yml (dispatched on master, so the environment
+#       admits master for it): each job with `environment: release` carries
+#       needs.plan.outputs.dry_run == 'false' in its if:, and the lane's own
+#       event guard, module_tag and checkouts are pinned (see "release-env,
+#       the nginx.org lane" below);
 #   (adopt-shape) in pipeline-release-module.yml, when it has an `adopt` job:
 #       the jobs whose if: contains needs.adopt.outputs.adopted != 'true' are
 #       exactly the adoptable jobs of `release_adopt.py schema --print` (a new
@@ -1471,6 +1476,7 @@ eg_allowed_for() { # workflow file base name
     pipeline-nightly.yml) printf '%s' "schedule workflow_dispatch" ;;
     pipeline-tidy-sweep.yml) printf '%s' "workflow_dispatch" ;;
     gate-*.yml|pipeline-release-*.yml) printf '%s' "push workflow_dispatch schedule" ;;
+    nginx-org-rebuild.yml) printf '%s' "workflow_dispatch" ;;
     *) printf '%s' "" ;;
   esac
 }
@@ -1479,6 +1485,9 @@ eg_refs_for() { # workflow file base name
     pipeline-full.yml) printf '%s' "refs/heads/${EG_DEFAULT_BRANCH} refs/heads/ci-dev refs/pull/*/merge" ;;
     pipeline-nightly.yml|pipeline-tidy-sweep.yml) printf '%s' "refs/heads/${EG_DEFAULT_BRANCH}" ;;
     gate-*.yml|pipeline-release-*.yml) printf '%s' "refs/tags/* refs/heads/${EG_DEFAULT_BRANCH}" ;;
+    # The nginx.org lane: a dispatch on master only, never on a tag (rule
+    # release-env reads this entry; the lane has no fleet job).
+    nginx-org-rebuild.yml) printf '%s' "refs/heads/${EG_DEFAULT_BRANCH}" ;;
     *) printf '%s' "" ;;
   esac
 }
@@ -1634,6 +1643,100 @@ eg_unreached() { # workflow file, 1 if it is a workflow_call file (rule d pins i
     }
   ' "$1"
 }
+
+
+# --- release-env, the nginx.org lane ----------------------------------------
+# nginx-org-rebuild.yml is dispatched on master and names the module release
+# in its module_tag input, so the `release` environment admits master for it.
+# What keeps a master run from signing anything it should not is pinned here.
+# All its jobs are hosted, so the fleet event-guard form above does not apply;
+# the lane's own guard is checked instead (rule release-env):
+#   - on: is workflow_dispatch alone, and it has a module_tag input;
+#   - the event-guard job holds ALLOWED_REFS: "<eg_refs_for nginx-org-rebuild.yml>"
+#     (exact refs/heads refs, no glob, no tag) and the lines that refuse another
+#     event, an app or bot actor, another ref and a module_tag outside
+#     ^module-v[0-9]+\.[0-9]+\.[0-9]+$; it has no if: and no continue-on-error;
+#   - plan needs event-guard, and every other job needs plan;
+#   - each job with `environment: release` carries
+#     needs.plan.outputs.dry_run == 'false' in its if:;
+#   - inputs.module_tag appears only as a step env value
+#     (`MODULE_TAG: ${{ inputs.module_tag }}`), never in a run: block, and
+#     github.ref_name appears nowhere (the release is module_tag, not the
+#     run's ref);
+#   - every checkout ref: is ${{ github.sha }}, so the plan, the approval and
+#     the signing jobs run the one commit the dispatch was made at.
+nginxorg_env_if_records() { # jobs with environment: release whose if: lacks the dry-run term
+  awk -v tab="${TAB}" '
+    function flush() { if (job != "" && env_line > 0 && !has_dry) printf "%s%s%d\n", job, tab, env_line }
+    /^[[:space:]]*#/ { next }
+    /^jobs:[[:space:]]*$/ { injobs=1; next }
+    injobs && /^[^[:space:]#]/ { flush(); injobs=0; job="" }
+    injobs && /^  [^[:space:]]/ { flush(); job=$1; sub(/:$/, "", job); env_line=0; has_dry=0; next }
+    injobs && /^    environment:[[:space:]]*["\047]?release["\047]?[[:space:]]*$/ { env_line=NR }
+    injobs && /^    if:/ { if (index($0, "needs.plan.outputs.dry_run == \047false\047")) has_dry=1 }
+    END { flush() }
+  ' "$1"
+}
+for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
+  [ -n "${wf}" ] || continue
+  [ "$(basename "${wf}")" = "nginx-org-rebuild.yml" ] || continue
+  ng_refs="$(eg_refs_for nginx-org-rebuild.yml)"
+  ng_err() { err "${wf}: $* (rule release-env)"; }
+  [ "$(on_triggers "${wf}" | tr '\n' ' ')" = "workflow_dispatch " ] || ng_err "on: must be workflow_dispatch alone"
+  grep -qE '^      module_tag:[[:space:]]*$' "${wf}" || ng_err "the dispatch needs a module_tag input"
+  ng_eg="$(awk '/^(  )?#/ { next } /^  [A-Za-z0-9_-]+:[ ]*$/ { inj = ($1 == "event-guard:") } /^[^[:space:]]/ { inj = 0 } inj { print }' "${wf}")"
+  if [ -z "${ng_eg}" ]; then
+    ng_err "the lane needs the job 'event-guard'"
+  else
+    # shellcheck disable=SC2016  # the text to match carries literal ${{ ... }} and $VAR
+    for ng_line in \
+      "          ALLOWED_REFS: \"${ng_refs}\"" \
+      '          EVENT: ${{ github.event_name }}' \
+      '          REF: ${{ github.ref }}' \
+      '          ACTOR: ${{ github.actor }}' \
+      '          TRIGGERING_ACTOR: ${{ github.triggering_actor }}' \
+      '          MODULE_TAG: ${{ inputs.module_tag }}' \
+      '          set -euo pipefail' \
+      '          [ "$EVENT" = workflow_dispatch ] || { echo "::error::only a dispatch runs this lane"; exit 1; }' \
+      '          for a in "$ACTOR" "$TRIGGERING_ACTOR"; do' \
+      '            case "$a" in *"[bot]") echo "::error::a dispatch or re-run by an app or bot account ($a) is not allowed"; exit 1 ;; esac'; do
+      printf '%s\n' "${ng_eg}" | grep -qxF -- "${ng_line}" || ng_err "the event-guard job lacks the line '${ng_line#"${ng_line%%[! ]*}"}'"
+    done
+    # shellcheck disable=SC2016
+    printf '%s\n' "${ng_eg}" | grep -qE '^          \[ "\$REF" = "\$ALLOWED_REFS" \] \|\| \{ .*exit 1; \}$' \
+      || ng_err "the event-guard job must refuse any ref but ALLOWED_REFS ([ \"\$REF\" = \"\$ALLOWED_REFS\" ] || { ...; exit 1; })"
+    # shellcheck disable=SC2016
+    printf '%s\n' "${ng_eg}" | grep -qxF -e '          [[ "$MODULE_TAG" =~ ^module-v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::module_tag must be module-vX.Y.Z"; exit 1; }' \
+      || ng_err "the event-guard job must refuse a module_tag outside ^module-v[0-9]+\\.[0-9]+\\.[0-9]+\$"
+    case "${ng_refs}" in *[*?[]*|*refs/tags/*|"") ng_err "ALLOWED_REFS of the lane must be exact refs/heads refs" ;; esac
+    if printf '%s\n' "${ng_eg}" | grep -qE '^    (if|continue-on-error|"if"|'"'"'if'"'"')[[:space:]]*:'; then
+      ng_err "the event-guard job takes no if: or continue-on-error"
+    fi
+  fi
+  ng_jobs="$(job_records "${wf}")"
+  while IFS="${TAB}" read -r ng_kind ng_job _; do
+    [ "${ng_kind}" = JOB ] || continue
+    [ "${ng_job}" != event-guard ] || continue
+    ng_needs="$(printf '%s\n' "${ng_jobs}" | awk -F"${TAB}" -v j="${ng_job}" '$1=="KEY" && $2==j && $3=="needs" {print $5}' | tr -d '[],' )"
+    ng_want=plan
+    [ "${ng_job}" != plan ] || ng_want=event-guard
+    case " ${ng_needs} " in *" ${ng_want} "*) ;; *) ng_err "job '${ng_job}' must need ${ng_want}" ;; esac
+  done <<EOT
+${ng_jobs}
+EOT
+  while IFS="${TAB}" read -r ng_job ng_l; do
+    [ -n "${ng_job}" ] || continue
+    err "${wf}:${ng_l}: job '${ng_job}' names environment release but its if: lacks needs.plan.outputs.dry_run == 'false' (rule release-env)"
+  done <<EOT
+$(nginxorg_env_if_records "${wf}")
+EOT
+  ng_bad="$(grep -nE 'github\.ref_name' "${wf}" | grep -vE '^[0-9]+:[[:space:]]*#' || true)"
+  [ -z "${ng_bad}" ] || ng_err "github.ref_name is used; the module release is the validated module_tag: ${ng_bad}"
+  ng_bad="$(grep -nE 'inputs\.module_tag' "${wf}" | grep -vE '^[0-9]+:[[:space:]]*#' | grep -vE '^[0-9]+:          MODULE_TAG: \$\{\{ inputs\.module_tag \}\}$' || true)"
+  [ -z "${ng_bad}" ] || ng_err "inputs.module_tag may appear only as a step's 'MODULE_TAG: \${{ inputs.module_tag }}': ${ng_bad}"
+  ng_bad="$(grep -nE '^[[:space:]]+ref:' "${wf}" | grep -vE '^[0-9]+:[[:space:]]+ref: \$\{\{ github\.sha \}\}$' || true)"
+  [ -z "${ng_bad}" ] || ng_err "every checkout ref: must be \${{ github.sha }}: ${ng_bad}"
+done
 
 for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
   [ -n "${wf}" ] || continue

@@ -11,7 +11,7 @@
 #       Reads MODULE_TAG, NGINX_VERSION, NGINX_SHA256, LANE_REVISION and the
 #       optional PREVIOUS_NGINX_VERSION / PREVIOUS_NGINX_SHA256 from the
 #       environment, checks their grammar and prints key=value lines:
-#       version, lane_tag, lane_revision, revision_fragment.
+#       module_tag, version, lane_tag, lane_revision, revision_fragment.
 #   nginx_org_lane.sh verify-sig KEYFILE "FPR..." SIGNATURE DATA
 #       A detached signature of DATA by one of the keys in KEYFILE. KEYFILE must
 #       hold exactly the primary keys FPR... (no more, no fewer); the signature
@@ -41,6 +41,11 @@
 #       rpm's version order over the lane's version grammar: prints version,
 #       nginx, filename and sha256 as key=value lines, or nothing when the
 #       index has none.
+#   nginx_org_lane.sh previous-entry BASE
+#       The plan's entry for a cell with a published package: reads the
+#       key=value lines of previous or previous-rpm on stdin and prints one JSON
+#       object {source: "repo", version, nginx, sha256, url}, the url being
+#       BASE/filename. Refuses an input that lacks one of the four keys.
 #   nginx_org_lane.sh new-line PUBLISHED_NGINX NEW_NGINX
 #       Refuses an nginx on another stable line than the published one (a new
 #       line is a change of the leg table) and an nginx older than the published one.
@@ -49,7 +54,7 @@
 #       GITHUB_ENV: RELEASE_KEY_FPR (RELEASE-SIGNING-KEY.asc), REPO_KEY_FPR
 #       (the package repository's key, as install.sh pins it) and NGINX_SIGNERS
 #       (the keys in nginx-org-source-signers.asc). They live here, on master,
-#       next to the key files, because the workflow runs from a release tag.
+#       next to the key files, with the rest of the lane's tooling.
 #   nginx_org_lane.sh --self-test
 set -euo pipefail
 
@@ -79,6 +84,7 @@ inputs() {
     [[ "$pngx" =~ $SEMVER_RE ]] || die "previous_nginx_version must be X.Y.Z (got '$pngx')"
     [[ "$psha" =~ ^[0-9a-f]{64}$ ]] || die "previous_nginx_sha256 must be 64 lower-case hex digits"
   fi
+  echo "module_tag=${tag}"
   echo "version=${version}"
   if [ "$rev" = 0 ]; then
     echo "lane_tag=nginxorg-v${version}-ngx${ngx}"
@@ -307,6 +313,17 @@ if best:
 PY
 }
 
+previous_entry() {
+  [ $# = 1 ] || die "usage: previous-entry BASE"
+  # from_entries takes key/value (or name/value) objects; jq 1.7 no longer
+  # reads k/v.
+  jq -Rnc --arg base "$1" '
+    [inputs | select(length > 0) | capture("^(?<key>[a-z0-9_]+)=(?<value>.*)$")] | from_entries
+    | if (has("version") and has("nginx") and has("sha256") and has("filename")) then . else error("incomplete") end
+    | {source: "repo", version, nginx, sha256, url: ($base + "/" + .filename)}' \
+    || die "previous-entry: the published package's key=value lines lack version, nginx, sha256 or filename"
+}
+
 new_line() {
   [ $# = 2 ] || die "usage: new-line PUBLISHED_NGINX NEW_NGINX"
   [[ "$1" =~ $SEMVER_RE ]] && [[ "$2" =~ $SEMVER_RE ]] || die "versions must be X.Y.Z"
@@ -327,7 +344,7 @@ self_test() {
   # inputs
   local S64; S64="$(printf 'a%.0s' $(seq 64))"
   out="$(MODULE_TAG=module-v2.8.0 NGINX_VERSION=1.30.7 NGINX_SHA256="$S64" inputs)"
-  [ "$out" = "$(printf 'version=2.8.0\nlane_tag=nginxorg-v2.8.0-ngx1.30.7\nrevision_fragment=+ngx1.30.7~\nlane_revision=0')" ] \
+  [ "$out" = "$(printf 'module_tag=module-v2.8.0\nversion=2.8.0\nlane_tag=nginxorg-v2.8.0-ngx1.30.7\nrevision_fragment=+ngx1.30.7~\nlane_revision=0')" ] \
     && ok "inputs: first build" || bad "inputs: first build: $out"
   out="$(MODULE_TAG=module-v2.8.0 NGINX_VERSION=1.30.7 NGINX_SHA256="$S64" LANE_REVISION=2 inputs)"
   case "$out" in *"lane_tag=nginxorg-v2.8.0-ngx1.30.7-r2"*"revision_fragment=+ngx1.30.7.2~"*) ok "inputs: revision" ;; *) bad "inputs: revision: $out" ;; esac
@@ -386,6 +403,10 @@ EOF
     printf '\nPackage: nginx-module-pagespeed-nginxorg\nVersion: 2.8.0-r0+ngx1.30.8~trixie\nFilename: pool/main/n/nginx-module-pagespeed-nginxorg/x3.deb\nSHA256: %s\n' "$(printf 'f%.0s' $(seq 64))" >> "$t/Packages"
     out="$(previous "$t/Packages")"
     case "$out" in *"nginx=1.30.8"*) ok "previous: the next nginx outranks a revision" ;; *) bad "previous: next nginx: $out" ;; esac
+    # The plan's path for a cell with a published package: previous, then previous-entry.
+    out="$(previous "$t/Packages" | previous_entry https://packages.example/apt)"
+    [ "$out" = '{"source":"repo","version":"2.8.0-r0+ngx1.30.8~trixie","nginx":"1.30.8","sha256":"'"$(printf 'f%.0s' $(seq 64))"'","url":"https://packages.example/apt/pool/main/n/nginx-module-pagespeed-nginxorg/x3.deb"}' ] \
+      && ok "previous-entry: the entry of a published deb" || bad "previous-entry: deb: $out"
     printf 'Package: mod-pagespeed\nVersion: 1\nFilename: pool/a.deb\nSHA256: %s\n' "$S64" > "$t/none"
     [ -z "$(previous "$t/none")" ] && ok "previous: none published" || bad "previous: none published"
     printf 'Package: nginx-module-pagespeed-nginxorg\nVersion: 2.8.0-r0+ngx1.30.7~trixie\nFilename: ../../etc/passwd\nSHA256: %s\n' "$S64" > "$t/evil"
@@ -431,6 +452,9 @@ EOF
     out="$(previous_rpm "$t/p1.xml.gz")"
     [ "$out" = "$(printf 'version=2.8.0-0.ngx1.30.7.1.el9\nnginx=1.30.7\nfilename=Packages/x2.rpm\nsha256=%s' "$S3")" ] \
       && ok "previous-rpm: the revision is the newest" || bad "previous-rpm: $out"
+    out="$(previous_rpm "$t/p1.xml.gz" | previous_entry https://packages.example/yum/el9/x86_64)"
+    [ "$out" = '{"source":"repo","version":"2.8.0-0.ngx1.30.7.1.el9","nginx":"1.30.7","sha256":"'"$S3"'","url":"https://packages.example/yum/el9/x86_64/Packages/x2.rpm"}' ] \
+      && ok "previous-entry: the entry of a published rpm" || bad "previous-entry: rpm: $out"
     { cat "$t/p1.lines"; rpmpkg nginx-module-pagespeed-nginxorg 2.8.0 0.ngx1.30.8.el9 "$S1" Packages/x3.rpm; } | primary "$t/p2.xml.gz"
     case "$(previous_rpm "$t/p2.xml.gz")" in *"nginx=1.30.8"*"x3.rpm"*) ok "previous-rpm: the next nginx outranks a revision" ;; *) bad "previous-rpm: next nginx" ;; esac
     { cat "$t/p1.lines"; rpmpkg nginx-module-pagespeed-nginxorg 2.8.1 0.ngx1.30.6.el9 "$S1" Packages/x4.rpm; } | primary "$t/p3.xml.gz"
@@ -450,6 +474,19 @@ EOF
   else
     echo "skip previous-rpm: no python3 on this host"
   fi
+
+  # previous-entry, on the key=value lines previous prints for a published
+  # package (the shape of a real index entry), and on incomplete input.
+  local S5; S5="$(printf '5%.0s' $(seq 64))"
+  printf 'version=2.9.2-r1+ngx1.30.7~trixie\nnginx=1.30.7\nfilename=pool/main/n/nginx-module-pagespeed-nginxorg/nginx-module-pagespeed-nginxorg_2.9.2-r1+ngx1.30.7~trixie_amd64.deb\nsha256=%s\n' "$S5" > "$t/prev.kv"
+  out="$(previous_entry https://packages.example/apt < "$t/prev.kv")"
+  [ "$out" = '{"source":"repo","version":"2.9.2-r1+ngx1.30.7~trixie","nginx":"1.30.7","sha256":"'"$S5"'","url":"https://packages.example/apt/pool/main/n/nginx-module-pagespeed-nginxorg/nginx-module-pagespeed-nginxorg_2.9.2-r1+ngx1.30.7~trixie_amd64.deb"}' ] \
+    && ok "previous-entry: a published package" || bad "previous-entry: $out"
+  grep -v '^filename=' "$t/prev.kv" > "$t/prev.nofile"
+  refuse "previous-entry: no filename" bash "$0" previous-entry https://packages.example/apt < "$t/prev.nofile"
+  grep -v '^sha256=' "$t/prev.kv" > "$t/prev.nosha"
+  refuse "previous-entry: no sha256" bash "$0" previous-entry https://packages.example/apt < "$t/prev.nosha"
+  refuse "previous-entry: empty input" bash "$0" previous-entry https://packages.example/apt < /dev/null
 
   # index-sha
   cat > "$t/InRelease.txt" <<EOF
@@ -538,7 +575,8 @@ case "${1:-}" in
   previous) shift; previous "$@" ;;
   repomd-primary) shift; repomd_primary "$@" ;;
   previous-rpm) shift; previous_rpm "$@" ;;
+  previous-entry) shift; previous_entry "$@" ;;
   new-line) shift; new_line "$@" ;;
   --self-test) self_test ;;
-  *) echo "usage: $0 inputs|verify-sig|verify-clear|verify-release|index-sha|previous|repomd-primary|previous-rpm|new-line ... | --self-test" >&2; exit 2 ;;
+  *) echo "usage: $0 inputs|verify-sig|verify-clear|verify-release|index-sha|previous|repomd-primary|previous-rpm|previous-entry|new-line ... | --self-test" >&2; exit 2 ;;
 esac
