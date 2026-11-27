@@ -403,6 +403,7 @@ class IisProvider(conf.Provider):
         # The last request's window, per thread: a row's background step
         # sends while its next step does.
         self._sent = threading.local()
+        self.trace_offset = 0
         self.max_processes = 1
         self.live: dict = {}
         self.mode = "off"
@@ -687,10 +688,12 @@ class IisProvider(conf.Provider):
         self.mode = live.get("mode", "off")
         self.process_ports = {}
         self.purge_ports = []
-        # The request record of this row only.
-        trace = os.path.join(self.state, "trace.log")
-        if os.path.exists(trace):
-            os.unlink(trace)
+        # The request record of this row only: a worker may hold the file
+        # open, so read on from where it ends now rather than delete it.
+        try:
+            self.trace_offset = os.path.getsize(os.path.join(self.state, "trace.log"))
+        except OSError:
+            self.trace_offset = 0
         self.fragment = f"dhc-{next(self._row_seq)}-{row_id}"[:60]
         self._clear_hold()
         origin = live.get("origin", {})
@@ -996,9 +999,10 @@ class IisProvider(conf.Provider):
         # (client port, ms, pid) of every request the module recorded.
         records: List[Tuple[int, float, str]] = []
         try:
-            with open(os.path.join(self.state, "trace.log"), encoding="latin-1") as f:
-                for line in f:
-                    parts = line.split()
+            with open(os.path.join(self.state, "trace.log"), "rb") as f:
+                f.seek(self.trace_offset)
+                for raw in f:
+                    parts = raw.decode("latin-1").split()
                     if len(parts) < 3 or parts[2] != "request":
                         continue
                     for p in parts:
