@@ -60,6 +60,7 @@ lib/html/llms_txt_formatter.h|lib/html/llms_txt_formatter.cc|\
 lib/html/markdown_extractor_filter.h|lib/html/markdown_extractor_filter.cc|\
 lib/html/robots_ai_directives.h|lib/html/robots_ai_directives.cc|\
 lib/html/safe_entity_decode.h|lib/html/safe_entity_decode.cc|\
+lib/html/html5_named_entities.inc|\
 lib/html/sitemap_parser.h|lib/html/sitemap_parser.cc|\
 lib/html/subresource_collector_filter.h|lib/html/subresource_collector_filter.cc)
       return 0 ;;

@@ -84,7 +84,9 @@ this clones):
     `test/lib/html/compat_headers_test.cc` in the same change.
   - optimizer-native filters/parsers: `subresource_collector_filter`,
     `sitemap_parser`, `markdown_extractor_filter`, `robots_ai_directives`,
-    `llms_txt_formatter`, `html_metadata_extractor`, `safe_entity_decode`,
+    `llms_txt_formatter`, `html_metadata_extractor`, `safe_entity_decode`
+    (with its generated `html5_named_entities.inc`, from
+    `tools/gen-html5-entities.py`),
     `csp_inline_policy`, and the `html_fuzz.cc` harness.
   - `BUILD`, `CLAUDE.md`, `HTML_KERNEL_PIN`, `SYNCED_FILES.txt`,
     `LICENSE.apache-2.0`.

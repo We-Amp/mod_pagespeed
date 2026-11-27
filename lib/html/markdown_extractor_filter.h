@@ -127,6 +127,18 @@ class MarkdownExtractorFilter : public EmptyHtmlFilter {
   // space (trimming any inter-block whitespace first) so the item reads as one
   // citable line regardless of source formatting.
   void ListItemBlockJoin();
+  // Trim whitespace from the label of the link whose '[' is at (*o)[open]:
+  // leading whitespace moves before the link, and the return value says
+  // whether trailing whitespace was removed (it then goes after the link).
+  static bool TrimLinkText(std::string* o, std::size_t open);
+  // Record the first <time datetime> value seen into *date.
+  static void CaptureFrontMatterDate(HtmlElement* element, std::string* date);
+  // Inside <pre>: end the current line (dropping trailing blanks) so a block
+  // child of the <pre> starts on a line of its own.
+  void PreLineBreak();
+  // True when the inline <code> being closed holds more than one line and
+  // starts a block of its own, so it is emitted as a fenced code block.
+  bool CodeSpanIsBlock() const;
   // Prepend the YAML front-matter block (if any field is set) to markdown_.
   void PrependFrontMatter();
 
@@ -135,7 +147,8 @@ class MarkdownExtractorFilter : public EmptyHtmlFilter {
   std::string cell_;      // current table-cell inline buffer
   std::string code_buf_;  // current inline <code> span (for adaptive fencing)
   std::string pre_language_;  // outermost <pre data-language> label (fence tag)
-  std::string table_;         // current table accumulation
+  std::string inline_code_lang_;  // language-<x> class of the open <code>
+  std::string table_;             // current table accumulation
   std::vector<ListCtx> lists_;
   std::vector<std::string> row_cells_;
   // Front-matter (Issue F (2)): title/description/canonical from the metadata
@@ -145,6 +158,9 @@ class MarkdownExtractorFilter : public EmptyHtmlFilter {
   std::string fm_canonical_;
   const HtmlParse* parser_ = nullptr;
   std::string fm_date_;
+  // First <time datetime> in skipped chrome inside the content root (a "Last
+  // updated" footer): the front-matter date only when fm_date_ is empty.
+  std::string fm_chrome_date_;
   // Block-in-anchor (Issue F (5)): byte offset in cur_ where the open anchor's
   // link text begins, so a wrapped <h2>/<p> flattens to one '[text](href)'.
   std::size_t anchor_text_start_ = 0;
@@ -158,12 +174,16 @@ class MarkdownExtractorFilter : public EmptyHtmlFilter {
   int content_root_depth_ =
       0;                   // depth inside a <main>/<article>/role=main root
   int article_depth_ = 0;  // depth inside an <article>/role=article subtree
+  // Depth inside <main>/<article>/<section>/<aside> (or role=main/article),
+  // where a <header> is content rather than the page banner.
+  int sectioning_depth_ = 0;
   // Per open <a>: the output offset of its '[' and whether any visible text or
   // image was emitted inside it, so a link with none can be dropped at </a>
   // instead of emitting '[](href)'.
   struct OpenAnchor {
     std::size_t pos;
     bool has_text;
+    bool has_block;  // wraps block elements (a card link)
   };
   std::vector<OpenAnchor> anchor_open_pos_;
   void MarkAnchorText() {
@@ -174,6 +194,9 @@ class MarkdownExtractorFilter : public EmptyHtmlFilter {
   bool in_table_ = false;
   bool in_cell_ = false;
   bool in_inline_code_ = false;
+  // The outermost open <pre> has block children as its lines (see
+  // TidyBlockLinePre).
+  bool pre_has_block_lines_ = false;
   bool in_dt_ = false;  // inside a <dt> (definition term -> bold block)
   bool table_header_done_ = false;
   bool last_was_list_item_ = false;

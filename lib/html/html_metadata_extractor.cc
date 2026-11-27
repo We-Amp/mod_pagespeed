@@ -121,19 +121,27 @@ HtmlMetadata ExtractHtmlMetadata(std::string_view html, std::string_view url) {
   // above), THEN collapse surrounding whitespace (<title> often spans lines /
   // has indentation). Decode-before-trim so a decoded &nbsp; (folded to space)
   // is trimmed too.
-  std::string title = SafeDecodeHtmlEntities(filter.title_);
+  std::string title = SafeDecodeHtmlEntities(
+      filter.title_,
+      /*value_was_capped=*/filter.title_.size() >= kMaxFieldBytes);
   std::string_view t(title);
   TrimHtmlWhitespace(&t);
   meta.title = std::string(t);
-  std::string description = SafeDecodeHtmlEntities(filter.description_);
+  std::string description = SafeDecodeHtmlEntities(
+      filter.description_,
+      /*value_was_capped=*/filter.description_.size() >= kMaxFieldBytes);
   std::string_view d(description);
   TrimHtmlWhitespace(&d);
   meta.meta_description = std::string(d);
-  std::string robots = SafeDecodeHtmlEntities(filter.robots_);
+  std::string robots = SafeDecodeHtmlEntities(
+      filter.robots_,
+      /*value_was_capped=*/filter.robots_.size() >= kMaxFieldBytes);
   std::string_view r(robots);
   TrimHtmlWhitespace(&r);
   meta.meta_robots = std::string(r);
-  std::string canonical = SafeDecodeHtmlEntities(filter.canonical_);
+  std::string canonical = SafeDecodeHtmlEntities(
+      filter.canonical_,
+      /*value_was_capped=*/filter.canonical_.size() >= kMaxFieldBytes);
   std::string_view cn(canonical);
   TrimHtmlWhitespace(&cn);
   meta.canonical = std::string(cn);

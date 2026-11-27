@@ -55,7 +55,9 @@ namespace pagespeed {
 // Bump when the extractor or the fidelity floor changes in a way that could
 // turn a refusal into a copy.  A marker written under any
 // other value is ignored.
-inline constexpr uint32_t kHtmlMarkdownDeriverVersion = 1;
+// 2: full HTML5 reference decoding, well-formed UTF-8 output, section
+// headers kept, multi-line code fenced, escaped markup kept as text.
+inline constexpr uint32_t kHtmlMarkdownDeriverVersion = 2;
 
 // The fidelity floor: a Markdown copy whose body, after any front matter,
 // holds fewer non-whitespace bytes than this is not kept.  Such a copy is a

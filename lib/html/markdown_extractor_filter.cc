@@ -22,21 +22,19 @@ namespace net_instaweb {
 
 namespace {
 
+// ASCII whitespace only. Text reaching the collapse loop has been through
+// SafeDecodeHtmlEntities, which already folded every no-break space (decoded
+// or the literal UTF-8 C2 A0) to ' ', so no non-ASCII byte is ever treated as
+// whitespace here: doing so would split a multi-byte sequence.
 bool IsAsciiWs(char c) {
   return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' ||
-         c == '\v' ||
-         // &nbsp; decodes to a Latin-1 0xA0 (a lone, invalid UTF-8 byte): treat
-         // it as collapsible whitespace so the agent feed never ships it raw
-         // (Issue F (1) — NBSP fold).
-         static_cast<unsigned char>(c) == 0xA0;
+         c == '\v';
 }
 
-// Entity decode (SafeDecodeHtmlEntities) and the NBSP fold (FoldLatin1Nbsp) now
-// live in lib/html/safe_entity_decode.h — the single source of truth shared by
-// the body-text path here and the <meta description> path in
-// html_metadata_extractor.cc (the v2.0.27 audit found the same non-ASCII trap
-// fixed in one path but not the others). IsAsciiWs's 0xA0 fold stays here: it is
-// this filter's whitespace-collapse rule, not a decode concern.
+// Entity decode, UTF-8 repair and the NBSP fold live in
+// lib/html/safe_entity_decode.h, the single source of truth shared by the
+// body-text path here and the <meta description> path in
+// html_metadata_extractor.cc.
 
 std::string Trim(std::string_view s) {
   size_t b = 0;
@@ -116,6 +114,18 @@ bool IsContentRoot(HtmlElement* el) {
 // (Issue F (3)).
 bool IsArticleRoot(HtmlElement* el) {
   return el->keyword() == HtmlName::kArticle || RoleIs(el, "article");
+}
+
+// Sectioning content or the main content root: a <header> inside one of these
+// is that section's heading block (its title, eyebrow and intro text), not the
+// page banner, so the soft strip keeps it.
+// On a page without <main>/<article>, a template that wraps the whole body in
+// a <section> therefore keeps its banner header text (a <nav> in it is still
+// dropped); with a content root, text outside it is not emitted at all.
+bool IsSectioningScope(HtmlElement* el) {
+  const HtmlName::Keyword kw = el->keyword();
+  return kw == HtmlName::kSection || kw == HtmlName::kAside ||
+         IsArticleRoot(el) || IsContentRoot(el);
 }
 
 // Block-level keywords whose structural emission must be flattened away when the
@@ -202,6 +212,37 @@ bool HasVisibleText(std::string_view t) {
   return false;
 }
 
+// True when the '&' at t[i] begins text a Markdown renderer reads as a
+// character reference ("&lt;", "&#60;", "&#x3C;"). Such text came from the
+// page as escaped text (for example "&amp;lt;"), so its '&' is escaped to keep
+// it literal.
+bool StartsMarkdownReference(std::string_view t, std::size_t i) {
+  std::size_t j = i + 1;
+  if (j < t.size() && t[j] == '#') {
+    ++j;
+    const bool hex = j < t.size() && (t[j] == 'x' || t[j] == 'X');
+    if (hex) ++j;
+    const std::size_t start = j;
+    while (j < t.size() && j - start < 8 &&
+           ((t[j] >= '0' && t[j] <= '9') ||
+            (hex &&
+             ((t[j] >= 'a' && t[j] <= 'f') || (t[j] >= 'A' && t[j] <= 'F'))))) {
+      ++j;
+    }
+    return j > start && j < t.size() && t[j] == ';';
+  }
+  const std::size_t start = j;
+  while (j < t.size() && j - start < 33 &&
+         ((t[j] >= 'a' && t[j] <= 'z') || (t[j] >= 'A' && t[j] <= 'Z') ||
+          (t[j] >= '0' && t[j] <= '9'))) {
+    ++j;
+  }
+  // CommonMark reads only the standard's names as references ("&bogus;" is
+  // text as it stands).
+  return j > start && j < t.size() && t[j] == ';' &&
+         IsHtml5EntityName(t.substr(start, j - start));
+}
+
 std::string EscapeCell(std::string_view s) {
   std::string out;
   out.reserve(s.size());
@@ -255,22 +296,19 @@ std::string SanitizeUrl(const char* url) {
 }
 
 // Backslash-escape link/image structural chars in attacker text (alt text, etc.)
-// and fold CR/LF to a space. Also fold a decoded
-// Latin-1 NBSP (0xA0) to a space so the img-alt path never ships a lone invalid
-// UTF-8 byte (Issue F NBSP-bypass fix).
+// and fold CR/LF to a space. The caller passes text already decoded by
+// SafeDecodeHtmlEntities (well-formed UTF-8, no-break spaces folded).
 std::string EscapeLinkText(std::string_view s) {
   std::string out;
   out.reserve(s.size());
   for (char c : s) {
-    if (static_cast<unsigned char>(c) == 0xA0) {
-      out.push_back(' ');
-      continue;
-    }
     switch (c) {
       case '[':
       case ']':
       case '(':
       case ')':
+      case '<':   // decoded text, never an HTML tag or autolink
+      case '\\':  // a literal backslash, never an escape
         out.push_back('\\');
         out.push_back(c);
         break;
@@ -378,6 +416,68 @@ std::string EscapeInteriorLineMarkers(std::string_view body) {
   return out;
 }
 
+// A fenced code block around `body`, with a fence longer than any backtick run
+// in it so no content line can close the block early.
+std::string FencedBlock(std::string_view body, std::string_view lang) {
+  const int n = LongestBacktickRun(body);
+  const std::string fence(std::max(3, n + 1), '`');
+  std::string out = fence;
+  out.append(lang);
+  out.push_back('\n');
+  out.append(body);
+  out.push_back('\n');
+  out += fence;
+  return out;
+}
+
+// Tidy a <pre> whose lines are block children (a diff view renders one <div>
+// per line): drop the whitespace-only lines the source indentation leaves
+// between the children, strip trailing blanks, and remove the indentation the
+// remaining lines share.
+std::string TidyBlockLinePre(std::string_view body) {
+  std::vector<std::string_view> lines;
+  std::size_t start = 0;
+  while (start <= body.size()) {
+    std::size_t nl = body.find('\n', start);
+    if (nl == std::string_view::npos) nl = body.size();
+    std::string_view line = body.substr(start, nl - start);
+    while (!line.empty() &&
+           (line.back() == ' ' || line.back() == '\t' || line.back() == '\r')) {
+      line.remove_suffix(1);
+    }
+    if (!line.empty()) lines.push_back(line);
+    start = nl + 1;
+  }
+  std::size_t indent = std::string_view::npos;
+  for (std::string_view line : lines) {
+    std::size_t i = 0;
+    while (i < line.size() && (line[i] == ' ' || line[i] == '\t')) ++i;
+    indent = std::min(indent, i);
+  }
+  std::string out;
+  for (std::string_view line : lines) {
+    if (!out.empty()) out.push_back('\n');
+    out.append(line.substr(indent));
+  }
+  return out;
+}
+
+// Trim leading and trailing whitespace-only lines (and trailing blanks) from a
+// code block's text, keeping the indentation of its first content line.
+std::string TrimCodeLines(std::string_view s) {
+  std::size_t b = 0;
+  for (std::size_t i = 0; i < s.size(); ++i) {
+    if (s[i] == '\n') {
+      b = i + 1;
+    } else if (s[i] != ' ' && s[i] != '\t' && s[i] != '\r') {
+      break;
+    }
+  }
+  std::size_t e = s.size();
+  while (e > b && IsAsciiWs(s[e - 1])) --e;
+  return std::string(s.substr(b, e - b));
+}
+
 }  // namespace
 
 MarkdownExtractorFilter::MarkdownExtractorFilter(bool strip_soft_chrome,
@@ -392,10 +492,13 @@ void MarkdownExtractorFilter::StartDocument() {
   cell_.clear();
   code_buf_.clear();
   pre_language_.clear();
+  inline_code_lang_.clear();
+  pre_has_block_lines_ = false;
   table_.clear();
   lists_.clear();
   row_cells_.clear();
   fm_date_.clear();
+  fm_chrome_date_.clear();
   anchor_text_start_ = 0;
   blockquote_depth_ = 0;
   pre_depth_ = 0;
@@ -405,6 +508,7 @@ void MarkdownExtractorFilter::StartDocument() {
   time_depth_ = 0;
   content_root_depth_ = 0;
   article_depth_ = 0;
+  sectioning_depth_ = 0;
   anchor_depth_ = 0;
   anchor_open_pos_.clear();
   item_open_ = false;
@@ -455,17 +559,16 @@ void MarkdownExtractorFilter::AppendText(std::string_view raw_text) {
   }
   if (pre_depth_ > 0) {  // preformatted: preserve verbatim (bounded)
     std::size_t room = kMaxMarkdownBytes - o->size();
-    // The verbatim branch bypasses the whitespace pass that folds 0xA0 (NBSP)
-    // elsewhere, so a decoded &nbsp; would ship a lone invalid byte here. Fold
-    // it to a space before appending (Issue F NBSP-bypass fix).
-    std::string chunk(text.substr(0, std::min(text.size(), room)));
-    FoldLatin1Nbsp(&chunk);
-    o->append(chunk);
+    // The decoded text is well-formed UTF-8 with no-break spaces already
+    // folded, so it is appended verbatim; a cut at the cap is repaired once in
+    // EndDocument.
+    o->append(text.substr(0, std::min(text.size(), room)));
     if (text.size() > room) truncated_ = true;
     return;
   }
   bool prev_space = o->empty() || o->back() == ' ' || o->back() == '\n';
-  for (char c : text) {
+  for (std::size_t i = 0; i < text.size(); ++i) {
+    const char c = text[i];
     if (o->size() >= kMaxMarkdownBytes) {  // bound the staging buffer per char
       truncated_ = true;
       break;
@@ -475,10 +578,21 @@ void MarkdownExtractorFilter::AppendText(std::string_view raw_text) {
         o->push_back(' ');
         prev_space = true;
       }
-    } else {
-      o->push_back(c);
-      prev_space = false;
+      continue;
     }
+    // Decoded text stays text: a '<' (from "&lt;" or a literal one) is
+    // escaped so no Markdown renderer reads it as an HTML tag or autolink, and
+    // an '&' that would read as a character reference is escaped likewise. A
+    // literal backslash is always doubled, so it can never cancel one of these
+    // escapes (or a table cell's "\|"), even across text nodes.
+    // Brackets are escaped too, so link, image and reference-definition
+    // syntax written as text never forms a live link.
+    if (c == '\\' || c == '<' || c == '[' || c == ']' ||
+        (c == '&' && StartsMarkdownReference(text, i))) {
+      o->push_back('\\');
+    }
+    o->push_back(c);
+    prev_space = false;
   }
 }
 
@@ -554,10 +668,57 @@ void MarkdownExtractorFilter::AnchorBlockJoin() {
   // <a>, but only once content already follows the '[' (so the first block does
   // not get a leading joiner), and never doubling an existing separator.
   std::string* o = Out();
+  // Mark the open anchors as cards (block content), so each one ends its own
+  // block at </a> and consecutive cards stay apart.
+  for (OpenAnchor& a : anchor_open_pos_) a.has_block = true;
+  // Source whitespace between the blocks is not a separator: drop it so the
+  // joiner is applied consistently ("Title 34 filters: description").
+  while (o->size() > anchor_text_start_ && o->back() == ' ') o->pop_back();
   if (o->size() <= anchor_text_start_) return;  // nothing emitted yet
-  char back = o->back();
-  if (back == ' ' || back == ':') return;  // already separated
+  if (o->back() == ':') return;                 // already separated
   o->append(": ");
+}
+
+bool MarkdownExtractorFilter::TrimLinkText(std::string* o, std::size_t open) {
+  // Whitespace at the end of the label moves after the link.
+  bool trailing = false;
+  while (o->size() > open + 1 && IsAsciiWs(o->back())) {
+    o->pop_back();
+    trailing = true;
+  }
+  // Whitespace at the start moves before it, so "Go<a> here</a>" still reads
+  // "Go [here](...)".
+  std::size_t b = open + 1;
+  while (b < o->size() && IsAsciiWs((*o)[b])) ++b;
+  if (b > open + 1) {
+    o->erase(open + 1, b - (open + 1));
+    if (open > 0 && !IsAsciiWs((*o)[open - 1])) o->insert(open, 1, ' ');
+  }
+  return trailing;
+}
+
+void MarkdownExtractorFilter::CaptureFrontMatterDate(HtmlElement* element,
+                                                     std::string* date) {
+  if (!date->empty()) return;
+  const HtmlElement::Attribute* dt = element->FindAttribute("datetime");
+  const char* v = dt != nullptr ? dt->DecodedValueOrNull() : nullptr;
+  if (v != nullptr && *v != '\0') date->assign(v);
+}
+
+void MarkdownExtractorFilter::PreLineBreak() {
+  std::string* o = Out();
+  while (!o->empty() && (o->back() == ' ' || o->back() == '\t')) o->pop_back();
+  if (!o->empty() && o->back() != '\n') o->push_back('\n');
+}
+
+bool MarkdownExtractorFilter::CodeSpanIsBlock() const {
+  if (in_cell_ || anchor_depth_ > 0 || heading_level_ > 0 || item_open_ ||
+      blockquote_depth_ > 0 || in_dt_) {
+    return false;
+  }
+  if (HasVisibleText(cur_)) return false;  // text before it: an inline span
+  const std::string body = TrimCodeLines(code_buf_);
+  return body.find('\n') != std::string::npos;
 }
 
 void MarkdownExtractorFilter::ListItemBlockJoin() {
@@ -585,6 +746,12 @@ void MarkdownExtractorFilter::StartElement(HtmlElement* element) {
         IsHardStripByName(element)) {
       ++hard_skip_depth_;
     } else if (element->keyword() == HtmlName::kTime) {
+      // A "Last updated <time>" line in a <footer> inside <main> is page
+      // chrome; its date is the page's date only when the content itself
+      // carries none (see PrependFrontMatter).
+      if (hard_skip_depth_ == 0 && content_root_depth_ > 0) {
+        CaptureFrontMatterDate(element, &fm_chrome_date_);
+      }
       ++time_depth_;  // each <time> tracks its own counter (balanced nesting)
     } else if (strip_soft_chrome_ && IsSoftStripKeyword(element->keyword())) {
       ++soft_skip_depth_;
@@ -604,12 +771,15 @@ void MarkdownExtractorFilter::StartElement(HtmlElement* element) {
     return;
   }
   // Issue F (3): an <article>-scoped <header>/<footer> is content (blog
-  // title/date/byline), not chrome — do NOT soft-strip it. A page-level
-  // <header>/<footer>/<nav> (article_depth_ == 0) is still stripped, and <nav>
-  // is always chrome even inside an article.
+  // title/date/byline), not chrome — do NOT soft-strip it. A <header> inside
+  // <main>, <section> or <aside> is likewise that section's heading block (a
+  // docs page's H1, a landing section's H2 and intro). Only the page-level
+  // banner <header> and page or section <footer>s are stripped, and <nav> is
+  // always chrome.
   const bool article_scoped_chrome =
-      article_depth_ > 0 &&
-      (kw == HtmlName::kHeader || kw == HtmlName::kFooter);
+      (article_depth_ > 0 &&
+       (kw == HtmlName::kHeader || kw == HtmlName::kFooter)) ||
+      (sectioning_depth_ > 0 && kw == HtmlName::kHeader);
   if (strip_soft_chrome_ && IsSoftStripKeyword(kw) && !article_scoped_chrome) {
     ++soft_skip_depth_;
     return;
@@ -620,15 +790,12 @@ void MarkdownExtractorFilter::StartElement(HtmlElement* element) {
   // from outside opens the root.
   if (IsContentRoot(element)) ++content_root_depth_;
   if (IsArticleRoot(element)) ++article_depth_;
+  if (IsSectioningScope(element)) ++sectioning_depth_;
 
   // Issue F (3): capture the first <time datetime> as the front-matter date and
   // SUPPRESS its visible text (a timestamp is metadata, not citation body).
   if (kw == HtmlName::kTime) {
-    if (fm_date_.empty()) {
-      const HtmlElement::Attribute* dt = element->FindAttribute("datetime");
-      const char* v = dt != nullptr ? dt->DecodedValueOrNull() : nullptr;
-      if (v != nullptr && *v != '\0') fm_date_.assign(v);
-    }
+    CaptureFrontMatterDate(element, &fm_date_);
     ++time_depth_;  // drop the visible stamp text (Skipping covers descendants)
     return;
   }
@@ -645,6 +812,16 @@ void MarkdownExtractorFilter::StartElement(HtmlElement* element) {
   const bool is_summary = StringCaseEqual(element->name_str(), "summary");
   if (InAnchorBlock() && (IsBlockKeyword(kw) || is_summary)) {
     AnchorBlockJoin();
+    return;
+  }
+
+  // Inside <pre>, a block child (a <div> per line in a diff view, a <p>) is a
+  // line of the preformatted text, not a Markdown block: it only starts a new
+  // line, so the fence stays whole.
+  if (pre_depth_ > 0 && kw != HtmlName::kPre &&
+      (IsBlockKeyword(kw) || is_summary)) {
+    PreLineBreak();
+    pre_has_block_lines_ = true;
     return;
   }
 
@@ -707,6 +884,7 @@ void MarkdownExtractorFilter::StartElement(HtmlElement* element) {
       // The label is an ASCII token, so the decoded attribute path is safe.
       if (pre_depth_ == 0) {
         pre_language_.clear();
+        pre_has_block_lines_ = false;
         const HtmlElement::Attribute* lang =
             element->FindAttribute("data-language");
         const char* v = lang != nullptr ? lang->DecodedValueOrNull() : nullptr;
@@ -747,7 +925,15 @@ void MarkdownExtractorFilter::StartElement(HtmlElement* element) {
       break;
     // ---- inline (markers suppressed inside <pre>) ----
     case HtmlName::kBr:
-      if (pre_depth_ == 0) Out()->append("  \n");
+      // A <br> inside <pre> is a line break of the preformatted text; inside
+      // a heading it is a space, since an ATX heading is one line.
+      if (pre_depth_ > 0) {
+        Out()->append("\n");
+      } else if (heading_level_ > 0) {
+        if (!Out()->empty() && Out()->back() != ' ') Out()->push_back(' ');
+      } else {
+        Out()->append("  \n");
+      }
       break;
     case HtmlName::kStrong:
     case HtmlName::kB:
@@ -761,6 +947,8 @@ void MarkdownExtractorFilter::StartElement(HtmlElement* element) {
       if (pre_depth_ == 0) {  // start buffering an inline code span (MF-4/SF-2)
         in_inline_code_ = true;
         code_buf_.clear();
+        inline_code_lang_ =
+            LanguageFromCodeClass(element->AttributeValue(HtmlName::kClass));
       } else if (pre_language_.empty()) {
         // Hand-authored <pre><code class="language-bash"> blocks carry the fence
         // language on the <code> class, not a <pre data-language> attribute
@@ -772,7 +960,7 @@ void MarkdownExtractorFilter::StartElement(HtmlElement* element) {
     case HtmlName::kA:
       if (pre_depth_ == 0) {
         std::string* o = Out();
-        anchor_open_pos_.push_back({o->size(), false});
+        anchor_open_pos_.push_back({o->size(), false, false});
         o->append("[");
         // Issue F (5): record where the link text begins so a block element
         // wrapped in this anchor can be flattened into one '[text](href)'. Only
@@ -785,11 +973,17 @@ void MarkdownExtractorFilter::StartElement(HtmlElement* element) {
       if (pre_depth_ != 0) break;
       const char* src = element->AttributeValue(HtmlName::kSrc);
       if (src != nullptr && *src != '\0') {
-        const char* alt = element->AttributeValue(HtmlName::kAlt);
+        // Decode the alt text from its source form: the parser's own decoded
+        // value is Latin-1 and is absent for any non-ASCII alt text.
+        const HtmlElement::Attribute* alt =
+            element->FindAttribute(HtmlName::kAlt);
         std::string* o = Out();
         MarkAnchorText();
         o->append("![");
-        if (alt != nullptr) o->append(EscapeLinkText(alt));
+        if (alt != nullptr && alt->escaped_value() != nullptr) {
+          o->append(
+              EscapeLinkText(SafeDecodeHtmlEntities(alt->escaped_value())));
+        }
         o->append("](");
         o->append(SanitizeUrl(src));
         o->append(")");
@@ -818,6 +1012,30 @@ void MarkdownExtractorFilter::EndElement(HtmlElement* element) {
   // backtick fence so a backtick in the content cannot close the span early.
   if (in_inline_code_) {
     if (element->keyword() == HtmlName::kCode && pre_depth_ == 0) {
+      // A multi-line <code> that starts its own block (a command shown with
+      // white-space: pre outside any <pre>) is a code block: its line breaks
+      // are part of the command, so it becomes a fenced block instead of a
+      // span that would join the lines.
+      if (CodeSpanIsBlock()) {
+        const std::string body = TrimCodeLines(code_buf_);
+        FlushBlock();
+        AppendBlock(FencedBlock(body, inline_code_lang_));
+        code_buf_.clear();
+        in_inline_code_ = false;
+        return;
+      }
+      // An inline span is single-line: fold CR/LF to a space so a newline
+      // cannot end the paragraph and let the text after the orphaned
+      // backtick forge a heading or list.
+      for (char& c : code_buf_) {
+        if (c == '\n' || c == '\r') c = ' ';
+      }
+      // Leading and trailing whitespace is source formatting, not code.
+      code_buf_ = Trim(code_buf_);
+      if (code_buf_.empty()) {
+        in_inline_code_ = false;
+        return;
+      }
       int n = LongestBacktickRun(code_buf_);
       std::string fence(std::max(1, n + 1), '`');
       bool pad = !code_buf_.empty() &&
@@ -842,6 +1060,7 @@ void MarkdownExtractorFilter::EndElement(HtmlElement* element) {
   // close handling so a </main> still flushes its own block while "inside".
   const bool closing_content_root = IsContentRoot(element);
   const bool closing_article_root = IsArticleRoot(element);
+  const bool closing_sectioning = IsSectioningScope(element);
 
   // Content-root gate (Issue F (4)): outside a content root, suppress the
   // structural close handling too (its text was already dropped). Still close
@@ -849,6 +1068,7 @@ void MarkdownExtractorFilter::EndElement(HtmlElement* element) {
   if (OutsideContentRoot()) {
     if (closing_content_root && content_root_depth_ > 0) --content_root_depth_;
     if (closing_article_root && article_depth_ > 0) --article_depth_;
+    if (closing_sectioning && sectioning_depth_ > 0) --sectioning_depth_;
     return;
   }
 
@@ -860,6 +1080,18 @@ void MarkdownExtractorFilter::EndElement(HtmlElement* element) {
       kw != HtmlName::kA) {
     if (closing_content_root && content_root_depth_ > 0) --content_root_depth_;
     if (closing_article_root && article_depth_ > 0) --article_depth_;
+    if (closing_sectioning && sectioning_depth_ > 0) --sectioning_depth_;
+    return;
+  }
+
+  // A block child inside <pre> ends a line of the preformatted text
+  // (symmetric with StartElement); it emits no Markdown block boundary.
+  if (pre_depth_ > 0 && kw != HtmlName::kPre &&
+      (IsBlockKeyword(kw) || is_summary)) {
+    PreLineBreak();
+    if (closing_content_root && content_root_depth_ > 0) --content_root_depth_;
+    if (closing_article_root && article_depth_ > 0) --article_depth_;
+    if (closing_sectioning && sectioning_depth_ > 0) --sectioning_depth_;
     return;
   }
 
@@ -878,6 +1110,7 @@ void MarkdownExtractorFilter::EndElement(HtmlElement* element) {
   if (InListItemBlock() && IsListItemFoldKeyword(kw)) {
     if (closing_content_root && content_root_depth_ > 0) --content_root_depth_;
     if (closing_article_root && article_depth_ > 0) --article_depth_;
+    if (closing_sectioning && sectioning_depth_ > 0) --sectioning_depth_;
     return;
   }
 
@@ -925,12 +1158,11 @@ void MarkdownExtractorFilter::EndElement(HtmlElement* element) {
       if (pre_depth_ == 0) {
         lang = SanitizeFenceLanguage(pre_language_);
         pre_language_.clear();
+        if (pre_has_block_lines_) body = TidyBlockLinePre(body);
+        pre_has_block_lines_ = false;
       }
-      if (!body.empty()) {  // MF-4: fence longer than any backtick run in body
-        int n = LongestBacktickRun(body);
-        std::string fence(std::max(3, n + 1), '`');
-        AppendBlock(fence + lang + "\n" + body + "\n" + fence);
-      }
+      // MF-4: fence longer than any backtick run in body.
+      if (!body.empty()) AppendBlock(FencedBlock(body, lang));
       break;
     }
     case HtmlName::kLi:
@@ -994,6 +1226,8 @@ void MarkdownExtractorFilter::EndElement(HtmlElement* element) {
         // <i> do not count as text. aria-label is deliberately not used as text.
         // An
         // image inside the link counts as content, so image links are kept.
+        bool space_after = false;
+        bool card = false;
         if (!anchor_open_pos_.empty()) {
           const OpenAnchor open = anchor_open_pos_.back();
           anchor_open_pos_.pop_back();
@@ -1001,10 +1235,20 @@ void MarkdownExtractorFilter::EndElement(HtmlElement* element) {
             o->resize(open.pos);
             break;
           }
+          if (open.pos < o->size() && (*o)[open.pos] == '[') {
+            space_after = TrimLinkText(o, open.pos);
+          }
+          card = open.has_block;
         }
         o->append("](");
         if (href != nullptr) o->append(SanitizeUrl(href));
         o->append(")");
+        if (space_after) o->push_back(' ');
+        // A card link (an <a> wrapping blocks) is a block of its own, so the
+        // next card does not run into it.
+        if (card && anchor_depth_ == 0 && !in_cell_ && heading_level_ == 0) {
+          FlushBlock();
+        }
       }
       break;
     default:
@@ -1015,6 +1259,7 @@ void MarkdownExtractorFilter::EndElement(HtmlElement* element) {
   // closing main/article still flushed its own block while "inside" the root.
   if (closing_content_root && content_root_depth_ > 0) --content_root_depth_;
   if (closing_article_root && article_depth_ > 0) --article_depth_;
+  if (closing_sectioning && sectioning_depth_ > 0) --sectioning_depth_;
 }
 
 void MarkdownExtractorFilter::Characters(HtmlCharactersNode* characters) {
@@ -1037,15 +1282,9 @@ void MarkdownExtractorFilter::Characters(HtmlCharactersNode* characters) {
     // Issue F decoded body text in AppendText but this code-span path bypasses
     // it; decode here too via the same UTF-8-safe helper (a decoded backtick is
     // handled by LongestBacktickRun's adaptive fence at </code>).
+    // Line breaks are kept until </code>, which either emits a fenced block
+    // (a multi-line command) or folds them to spaces for an inline span.
     std::string t = SafeDecodeHtmlEntities(characters->contents());
-    // An inline <code> span is single-line by contract; fold CR/LF to a space
-    // so a decoded numeric newline ('&#10;') cannot end the paragraph and let
-    // the text after the now-orphaned backtick forge a heading/list. Mirrors the
-    // EscapeCell table-cell fold and the structure-forgery hardening the rest of
-    // the filter applies (SanitizeUrl, EscapeLeadingMarker, SanitizeFenceLanguage).
-    for (char& c : t) {
-      if (c == '\n' || c == '\r') c = ' ';
-    }
     std::size_t room = kMaxMarkdownBytes - code_buf_.size();
     if (t.size() > room) {
       code_buf_.append(t.substr(0, room));
@@ -1116,7 +1355,10 @@ void MarkdownExtractorFilter::PrependFrontMatter() {
   if (!fm_description_.empty()) {
     fm += "description: " + YamlScalar(fm_description_) + "\n";
   }
-  if (!fm_date_.empty()) fm += "date: " + YamlScalar(fm_date_) + "\n";
+  // A date from the content wins; one from chrome inside the content root is
+  // the fallback.
+  const std::string& date = fm_date_.empty() ? fm_chrome_date_ : fm_date_;
+  if (!date.empty()) fm += "date: " + YamlScalar(date) + "\n";
   if (!fm_canonical_.empty()) {
     fm += "canonical: " + YamlScalar(fm_canonical_) + "\n";
   }
@@ -1129,6 +1371,12 @@ void MarkdownExtractorFilter::EndDocument() {
   while (!markdown_.empty() && IsAsciiWs(markdown_.back()))
     markdown_.pop_back();
   PrependFrontMatter();
+  // Every piece is well-formed UTF-8 already; a cut at the output cap or a
+  // URL or date byte from a non-UTF-8 page is the remaining way to break
+  // that, so the whole copy is checked once and repaired if needed.
+  if (!IsWellFormedUtf8(markdown_)) {
+    markdown_ = ToWellFormedUtf8(markdown_, /*drop_cut_tail=*/truncated_);
+  }
 }
 
 namespace {

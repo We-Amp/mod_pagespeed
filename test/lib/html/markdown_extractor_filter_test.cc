@@ -7,6 +7,8 @@
 
 #include "lib/html/markdown_extractor_filter.h"
 
+#include <iterator>
+#include <random>
 #include <string>
 #include <string_view>
 
@@ -369,7 +371,7 @@ TEST_F(MarkdownExtractorFilterTest, GiantInlineCodeBounded) {
 // (1) Entity decode: body-text entities must be decoded so the agent reads the
 // human glyphs, not '&amp;'/'&lt;'. Decode runs BEFORE structural escaping.
 TEST_F(MarkdownExtractorFilterTest, DecodesHtmlEntities) {
-  EXPECT_EQ(Md("<p>Tom &amp; Jerry &lt;1ms&gt;</p>"), "Tom & Jerry <1ms>");
+  EXPECT_EQ(Md("<p>Tom &amp; Jerry &lt;1ms&gt;</p>"), "Tom & Jerry \\<1ms>");
 }
 
 // (1, security) Decode-then-escape preserves the structural-escape contract: a
@@ -377,9 +379,10 @@ TEST_F(MarkdownExtractorFilterTest, DecodesHtmlEntities) {
 // and must not let a decoded entity forge a markdown block at the start of a
 // paragraph. The decoded '<'/'>' are plain text in markdown (no breakout).
 TEST_F(MarkdownExtractorFilterTest, DecodedScriptStaysInertText) {
-  // The decoded text is literal '<script>alert(1)</script>' as body, not a tag.
+  // The decoded text is literal '<script>alert(1)</script>' as body, escaped
+  // so no Markdown renderer reads it as a tag.
   EXPECT_EQ(Md("<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>"),
-            "<script>alert(1)</script>");
+            "\\<script>alert(1)\\</script>");
   // A decoded leading block marker is still escaped after decode (no forged
   // heading): '&#35;' -> '#' must become '\#'.
   EXPECT_EQ(Md("<p>&#35; not a heading</p>"), "\\# not a heading");
@@ -460,27 +463,18 @@ TEST_F(MarkdownExtractorFilterTest, PreservesLiteralUtf8TextNode) {
 // contract, so the entities are exercised mid-text where no marker-escape fires.)
 TEST_F(MarkdownExtractorFilterTest, DecodesAsciiEntities) {
   EXPECT_EQ(Md("<main><p>&amp;</p></main>"), "&");
-  EXPECT_EQ(Md("<main><p>&lt;</p></main>"), "<");
-  EXPECT_EQ(Md("<main><p>a &amp; b &lt; c &gt; d</p></main>"), "a & b < c > d");
+  EXPECT_EQ(Md("<main><p>&lt;</p></main>"), "\\<");
+  EXPECT_EQ(Md("<main><p>a &amp; b &lt; c &gt; d</p></main>"),
+            "a & b \\< c > d");
 }
 
-// BLOCKER 2: a named/numeric entity that decodes to a single Latin-1 byte
-// 0x80-0xFF (&middot;=0xB7, &copy;=0xA9, &eacute;=0xE9) must NOT ship that lone
-// invalid byte. Under the raw-fallback design they stay as literal entity text;
-// either way the output must be valid UTF-8 and contain none of the raw bytes.
+// A named reference above U+007F (&middot;, &copy;, &eacute;) decodes to its
+// UTF-8 encoding, never to a lone Latin-1 byte.
 TEST_F(MarkdownExtractorFilterTest, NamedNonAsciiEntityNoInvalidByte) {
-  for (const char* html :
-       {"<main><p>a&middot;b</p></main>", "<main><p>a&copy;b</p></main>",
-        "<main><p>a&eacute;b</p></main>"}) {
-    const std::string md = Md(html);
-    EXPECT_TRUE(MarkdownIsValidUtf8(md)) << "not valid UTF-8 for: " << html;
-    EXPECT_EQ(md.find('\xB7'), std::string::npos) << "raw 0xB7 in: " << html;
-    EXPECT_EQ(md.find('\xA9'), std::string::npos) << "raw 0xA9 in: " << html;
-    EXPECT_EQ(md.find('\xE9'), std::string::npos) << "raw 0xE9 in: " << html;
-    EXPECT_FALSE(md.empty()) << "text dropped for: " << html;
-  }
-  // Documented behavior: raw-fallback leaves the original entity text intact.
-  EXPECT_EQ(Md("<main><p>a&middot;b</p></main>"), "a&middot;b");
+  EXPECT_EQ(Md("<main><p>a&middot;b</p></main>"), "a\xC2\xB7\x62");
+  EXPECT_EQ(Md("<main><p>a&copy;b</p></main>"), "a\xC2\xA9\x62");
+  EXPECT_EQ(Md("<main><p>a&eacute;b</p></main>"), "a\xC3\xA9\x62");
+  EXPECT_TRUE(MarkdownIsValidUtf8(Md("<main><p>a&eacute;b</p></main>")));
 }
 
 // NBSP must fold to an ASCII space EVERYWHERE — in normal collapsed text AND in
@@ -784,6 +778,463 @@ TEST_F(MarkdownExtractorFilterTest,
   EXPECT_EQ(md.find("secret"), std::string::npos) << md;
   EXPECT_EQ(md.find("tok123"), std::string::npos) << md;
   EXPECT_EQ(md.find("hidden note"), std::string::npos) << md;
+}
+
+// ---- <header> inside a section is content ---------------------------------
+
+// A docs or example page puts its only H1 in a <header> inside <main>. That is
+// the page's heading block, not the site banner: its eyebrow and H1 stay.
+TEST_F(MarkdownExtractorFilterTest, HeaderInsideMainKeepsH1) {
+  EXPECT_EQ(Md("<body><header><a href=\"/\">Site</a><nav>menu</nav></header>"
+               "<main><header class=\"section-header\">"
+               "<p class=\"eyebrow\">filter \xC2\xB7 CSS filters</p>"
+               "<h1 id=\"filter\">Move CSS above scripts</h1></header>"
+               "<dl><dt>Category:</dt><dd>CSS</dd></dl></main>"
+               "<footer>foot</footer></body>"),
+            "filter \xC2\xB7 CSS filters\n\n# Move CSS above scripts\n\n"
+            "**Category:**\n\nCSS");
+}
+
+// Landing-page sections carry their H2 and intro text in a <header>.
+TEST_F(MarkdownExtractorFilterTest, HeaderInsideSectionKeepsHeading) {
+  EXPECT_EQ(Md("<main><section><header class=\"section-header\">"
+               "<h2>Install. Configure. Verify.</h2><p>Three steps.</p>"
+               "</header><p>Body.</p></section></main>"),
+            "## Install. Configure. Verify.\n\nThree steps.\n\nBody.");
+  // The same without a <main>: a section's header is still content.
+  EXPECT_EQ(Md("<header>Banner</header><section><header><h2>Why</h2></header>"
+               "<p>Because.</p></section>"),
+            "## Why\n\nBecause.");
+}
+
+// The page banner <header> stays chrome, and <nav> and a section <footer>
+// are still stripped inside <main>.
+TEST_F(MarkdownExtractorFilterTest, BannerHeaderAndNavInMainStillStripped) {
+  EXPECT_EQ(Md("<header><h1>Site name</h1></header>"
+               "<main><nav>Docs menu</nav><h1>Page</h1><p>text</p>"
+               "<footer>Edit this page</footer></main>"),
+            "# Page\n\ntext");
+}
+
+// ---- code keeps its line breaks --------------------------------------------
+
+// A multi-line command in a <code> styled white-space: pre (no <pre>) is a
+// code block: joining its lines would make a different, wrong command.
+TEST_F(MarkdownExtractorFilterTest, MultiLineCodeOutsidePreIsFenced) {
+  EXPECT_EQ(Md("<main><div class=\"install-panel\">"
+               "<code class=\"install-command\">curl -fsSL "
+               "https://example.com/install.sh | sudo sh\n"
+               "sudo apt-get install pagespeed-optimizer\n"
+               "sudo apt-get install nginx-module-pagespeed</code>"
+               "<button aria-label=\"Copy\"><svg></svg></button>"
+               "</div></main>"),
+            "```\ncurl -fsSL https://example.com/install.sh | sudo sh\n"
+            "sudo apt-get install pagespeed-optimizer\n"
+            "sudo apt-get install nginx-module-pagespeed\n```");
+  // Continuation lines keep their backslash and indentation.
+  EXPECT_EQ(Md("<main><div><code>docker run --rm -p 80:80 \\\n"
+               "  --add-host=host.docker.internal:host-gateway \\\n"
+               "  ghcr.io/example/image:latest</code></div></main>"),
+            "```\ndocker run --rm -p 80:80 \\\n"
+            "  --add-host=host.docker.internal:host-gateway \\\n"
+            "  ghcr.io/example/image:latest\n```");
+  // The language class tags the fence.
+  EXPECT_EQ(Md("<div><code class=\"language-bash\">a\nb</code></div>"),
+            "```bash\na\nb\n```");
+}
+
+// A <code> inside a sentence stays an inline span; its line breaks are source
+// formatting and fold to spaces.
+TEST_F(MarkdownExtractorFilterTest, MultiLineCodeInsideSentenceStaysInline) {
+  EXPECT_EQ(Md("<p>Run <code>make\nall</code> now</p>"), "Run `make all` now");
+  EXPECT_EQ(Md("<table><tr><td><code>a\nb</code></td></tr></table>"),
+            "| `a b` |\n| --- |");
+  EXPECT_EQ(Md("<ul><li><code>a\nb</code></li></ul>"), "- `a b`");
+}
+
+// Content with backtick runs gets a longer fence, so it never closes early.
+TEST_F(MarkdownExtractorFilterTest, CodeBlockFenceOutgrowsBackticks) {
+  EXPECT_EQ(Md("<div><code>echo ```\nx</code></div>"),
+            "````\necho ```\nx\n````");
+  EXPECT_EQ(Md("<pre>a\n````\nb</pre>"), "`````\na\n````\nb\n`````");
+}
+
+TEST_F(MarkdownExtractorFilterTest, BrInsidePreIsALineBreak) {
+  EXPECT_EQ(Md("<pre>line1<br>line2<br/>line3</pre>"),
+            "```\nline1\nline2\nline3\n```");
+}
+
+// A diff view renders one <div> per line inside <pre><code>. The lines stay
+// inside one fence (escaped markup in them stays text), the indentation the
+// source formatting adds is removed, and no empty fence follows.
+TEST_F(MarkdownExtractorFilterTest, PreWithBlockLinesStaysOneFence) {
+  EXPECT_EQ(Md("<main><pre><code>\n"
+               "  <div class=\"line\">\n"
+               "      \xE2\x80\xA6 1 unchanged line \xE2\x80\xA6\n"
+               "    </div><div class=\"line\">\n"
+               "        &lt;head&gt;\n"
+               "    </div><div class=\"line del\">\n"
+               "      -     &lt;style&gt;\n"
+               "    </div><div class=\"line add\">\n"
+               "      +     &lt;link rel=stylesheet&gt;\n"
+               "    </div>\n"
+               "</code></pre><p>After.</p></main>"),
+            "```\n"
+            "\xE2\x80\xA6 1 unchanged line \xE2\x80\xA6\n"
+            "  <head>\n"
+            "-     <style>\n"
+            "+     <link rel=stylesheet>\n"
+            "```\n\nAfter.");
+  // Ordinary <pre> text keeps blank lines and indentation as written.
+  EXPECT_EQ(Md("<pre>  a\n\n  b</pre>"), "```\n  a\n\n  b\n```");
+}
+
+// ---- every HTML5 reference decodes --------------------------------------------
+
+// A text node with literal UTF-8 and references decodes every reference.
+TEST_F(MarkdownExtractorFilterTest, DecodesHtml5ReferencesNextToUtf8) {
+  EXPECT_EQ(Md("<main><p>injects critical CSS &mdash; optimized off the "
+               "request path &middot; served from cache</p></main>"),
+            "injects critical CSS \xE2\x80\x94 optimized off the request path "
+            "\xC2\xB7 served from cache");
+  EXPECT_EQ(Md("<main><p><a href=\"/download/\">Download &amp; run "
+               "\xE2\x86\x92</a></p></main>"),
+            "[Download & run \xE2\x86\x92](/download/)");
+  EXPECT_EQ(Md("<main><table><tr><th>A</th></tr><tr><td>&check;</td></tr>"
+               "</table></main>"),
+            "| A |\n| --- |\n| \xE2\x9C\x93 |");
+  EXPECT_EQ(Md("<main><p>a &bogus; b &rsquo; c</p></main>"),
+            "a &bogus; b \xE2\x80\x99 c");
+}
+
+// The front-matter title decodes the same way.
+TEST_F(MarkdownExtractorFilterTest, FrontMatterTitleDecodesReferences) {
+  EXPECT_EQ(Md("<html><head><title>Download 2.10 \xE2\x80\x94 Apache, Docker "
+               "&amp; Helm</title></head><body><p>x</p></body></html>"),
+            "---\ntitle: Download 2.10 \xE2\x80\x94 Apache, Docker & Helm\n"
+            "---\n\nx");
+}
+
+// ---- escaped text stays text -----------------------------------------------
+
+// "&lt;img&gt;" in the page is the text "<img>". In the Markdown copy it is
+// escaped so no renderer turns it into a live tag, in prose and table cells.
+TEST_F(MarkdownExtractorFilterTest, EscapedMarkupStaysTextInCells) {
+  EXPECT_EQ(Md("<main><table><tr><th>Filter</th><th>What</th></tr>"
+               "<tr><td>insert_image_dimensions</td>"
+               "<td>Adds width and height attributes to &lt;img&gt; tags</td>"
+               "</tr><tr><td>inline_import_to_link</td>"
+               "<td>Converts &lt;style&gt;@import&lt;/style&gt; to "
+               "&lt;link&gt;</td></tr></table></main>"),
+            "| Filter | What |\n| --- | --- |\n"
+            "| insert_image_dimensions | Adds width and height attributes to "
+            "\\<img> tags |\n"
+            "| inline_import_to_link | Converts \\<style>@import\\</style> to "
+            "\\<link> |");
+}
+
+TEST_F(MarkdownExtractorFilterTest, EscapedMarkupStaysTextInProse) {
+  EXPECT_EQ(Md("<main><p>Use a &lt;picture&gt; element.</p></main>"),
+            "Use a \\<picture> element.");
+  EXPECT_EQ(Md("<main><h2>The &lt;img&gt; tag</h2></main>"),
+            "## The \\<img> tag");
+  EXPECT_EQ(Md("<main><p><a href=\"/x\">&lt;b&gt; tags</a></p></main>"),
+            "[\\<b> tags](/x)");
+  EXPECT_EQ(Md("<main><p>See &lt;https://example.com/&gt;</p></main>"),
+            "See \\<https://example.com/>");
+  EXPECT_EQ(Md("<main><p><img src=\"/i\" alt=\"&lt;b&gt;\"></p></main>"),
+            "![\\<b>](/i)");
+  // Text that reads as a reference keeps its '&' literal.
+  EXPECT_EQ(Md("<main><p>Write &amp;lt; or &amp;#60; or &amp;copy;</p></main>"),
+            "Write \\&lt; or \\&#60; or \\&copy;");
+  // A plain '&' needs nothing.
+  EXPECT_EQ(Md("<main><p>AT&amp;T &amp; co</p></main>"), "AT&T & co");
+  // Code keeps its text literal: no escape inside backticks or fences.
+  EXPECT_EQ(Md("<main><p>Use <code>&lt;img&gt;</code></p></main>"),
+            "Use `<img>`");
+}
+
+namespace {
+
+// True when every `ch` in `md` is escaped: preceded by an odd number of
+// backslashes. This is how CommonMark (markdown-it, cmark-gfm) reads a
+// backslash run: pairs are literal backslashes, an odd one escapes the next
+// character. For test inputs without code spans or fences.
+bool EveryCharEscaped(std::string_view md, char ch) {
+  for (std::size_t i = 0; i < md.size(); ++i) {
+    if (md[i] != ch) continue;
+    std::size_t run = 0;
+    while (run < i && md[i - 1 - run] == '\\') ++run;
+    if (run % 2 == 0) return false;
+  }
+  return true;
+}
+
+}  // namespace
+
+// A backslash in page text is a literal backslash, so it cannot cancel the
+// escape of a following '<' or '|', even when the two come from different
+// text nodes.
+TEST_F(MarkdownExtractorFilterTest, LiteralBackslashCannotUnescapeMarkup) {
+  const std::string a =
+      Md("<main><p>a \\&lt;img src=x onerror=alert(1)&gt; b</p></main>");
+  EXPECT_EQ(a, "a \\\\\\<img src=x onerror=alert(1)> b");
+  EXPECT_TRUE(EveryCharEscaped(a, '<')) << a;
+  const std::string split =
+      Md("<main><p>a \\<span></span>&lt;b&gt;x</p></main>");
+  EXPECT_EQ(split, "a \\\\\\<b>x");
+  EXPECT_TRUE(EveryCharEscaped(split, '<')) << split;
+  const std::string h = Md("<main><h2>\\\\&lt;i&gt;</h2></main>");
+  EXPECT_TRUE(EveryCharEscaped(h, '<')) << h;
+  const std::string link =
+      Md("<main><p><a href=\"/x\">\\&lt;b&gt;</a></p></main>");
+  EXPECT_TRUE(EveryCharEscaped(link, '<')) << link;
+  const std::string alt =
+      Md("<main><p><img src=\"/i\" alt=\"\\&lt;b&gt;\"></p></main>");
+  EXPECT_EQ(alt, "![\\\\\\<b>](/i)");
+  // In a table cell a backslash before '|' must not turn the escaped pipe
+  // into a cell delimiter.
+  const std::string cell =
+      Md("<main><table><tr><td>x \\| y</td></tr></table></main>");
+  EXPECT_EQ(cell, "| x \\\\\\| y |\n| --- |");
+  EXPECT_TRUE(EveryCharEscaped(cell.substr(2, cell.find(" |\n") - 2), '|'))
+      << cell;
+  // A plain backslash in prose reads as one backslash.
+  EXPECT_EQ(Md("<main><p>C:\\path</p></main>"), "C:\\\\path");
+}
+
+// Link, image and reference-definition syntax written as page text stays
+// text: its brackets are escaped, so it cannot form a live link or image or
+// close a link label early.
+TEST_F(MarkdownExtractorFilterTest, BracketsInTextAreEscaped) {
+  EXPECT_EQ(Md("<main><p>see [click](javascript:alert(1)) and "
+               "![p](https://t.example/p.png)</p></main>"),
+            "see \\[click\\](javascript:alert(1)) and "
+            "!\\[p\\](https://t.example/p.png)");
+  EXPECT_EQ(
+      Md("<main><p><a href=\"/ok\">x](javascript:alert(1)) [y</a></p></main>"),
+      "[x\\](javascript:alert(1)) \\[y](/ok)");
+  EXPECT_EQ(Md("<main><p>[a]: https://e.example/</p></main>"),
+            "\\[a\\]: https://e.example/");
+  EXPECT_EQ(Md("<main><table><tr><td>[x](/y)</td></tr></table></main>"),
+            "| \\[x\\](/y) |\n| --- |");
+  // Code keeps its brackets.
+  EXPECT_EQ(Md("<main><p><code>a[0]</code></p></main>"), "`a[0]`");
+}
+
+// ---- link text and inline code are trimmed ----------------------------------
+
+TEST_F(MarkdownExtractorFilterTest, LinkTextIsTrimmed) {
+  EXPECT_EQ(Md("<main><p><a href=\"/download/\"> Download &amp; run </a> "
+               "<a href=\"/demo/\">\n  See the demo\n</a></p></main>"),
+            "[Download & run](/download/) [See the demo](/demo/)");
+  // The whitespace moves outside, so words stay apart.
+  EXPECT_EQ(Md("<p>Go<a href=\"/x\"> here </a>now.</p>"), "Go [here](/x) now.");
+  EXPECT_EQ(Md("<p><a href=\"/x\">a<br></a></p>"), "[a](/x)");
+  EXPECT_EQ(Md("<p><a href=\"/x\"> <img src=\"/i\" alt=\"i\"> </a></p>"),
+            "[![i](/i)](/x)");
+}
+
+TEST_F(MarkdownExtractorFilterTest, InlineCodeIsTrimmed) {
+  EXPECT_EQ(Md("<p>Set <code>\n             rewrite_images,inline_images\n"
+               "           </code> here</p>"),
+            "Set `rewrite_images,inline_images` here");
+  EXPECT_EQ(Md("<p><code>  x  </code></p>"), "`x`");
+  EXPECT_EQ(Md("<p>a<code>   </code>b</p>"), "ab");
+}
+
+// ---- headings, explicit non-content markers, card links ----------------------
+
+// An ATX heading is one line: a <br> in it is a space.
+TEST_F(MarkdownExtractorFilterTest, BrInsideHeadingKeepsOneLine) {
+  EXPECT_EQ(Md("<main><h1>Server-side image optimization:\n<br>\n"
+               "<span>WebP, AVIF, and critical CSS.</span></h1></main>"),
+            "# Server-side image optimization: WebP, AVIF, and critical CSS.");
+  EXPECT_EQ(Md("<h2>a<br>b</h2>"), "## a b");
+}
+
+// data-pagefind-ignore only keeps text out of a search index; sites set it on
+// related-links lists and other real content, so the copy keeps that text.
+TEST_F(MarkdownExtractorFilterTest, PagefindIgnoredContentIsKept) {
+  EXPECT_EQ(Md("<main><h1>Title</h1><p>Body.</p>"
+               "<div data-pagefind-ignore><h2>Related filters</h2>"
+               "<ul><li><a href=\"/a\">combine_css</a></li></ul></div></main>"),
+            "# Title\n\nBody.\n\n## Related filters\n\n- [combine_css](/a)");
+}
+
+// The date of a "Last updated" line in a footer inside <main> (chrome, so
+// left out) is still the page's date.
+TEST_F(MarkdownExtractorFilterTest, DateFromChromeInsideMainIsKept) {
+  EXPECT_EQ(Md("<html><head><title>T</title></head><body><main>"
+               "<p>Body.</p><footer>Last updated <time "
+               "datetime=\"2026-10-22\">Oct 22</time></footer>"
+               "</main></body></html>"),
+            "---\ntitle: T\ndate: 2026-10-22\n---\n\nBody.");
+  // A date in the content wins over one in chrome that comes first.
+  EXPECT_EQ(Md("<html><head><title>T</title></head><body><main>"
+               "<nav><time datetime=\"2020-01-01\">old</time></nav>"
+               "<article><h1>T</h1><time datetime=\"2026-11-01\">Nov 1"
+               "</time><p>Body.</p></article></main></body></html>"),
+            "---\ntitle: T\ndate: 2026-11-01\n---\n\n# T\n\nBody.");
+  // A page-level footer's date (outside <main>) is not taken.
+  EXPECT_EQ(Md("<html><head><title>T</title></head><body><main>"
+               "<p>Body.</p></main><footer><time datetime=\"2020-01-01\">"
+               "x</time></footer></body></html>"),
+            "---\ntitle: T\n---\n\nBody.");
+}
+
+// Card links (an <a> wrapping a heading and a description) each make one
+// link, with the heading and description joined, and stay apart.
+TEST_F(MarkdownExtractorFilterTest, CardLinksKeepSeparators) {
+  EXPECT_EQ(Md("<main><div><a href=\"/docs/image-filters/\">\n"
+               "<h3>Image filters\n<span>34 filters</span>\n</h3>\n"
+               "<p>Recompression and resizing.</p>\n</a>"
+               "<a href=\"/docs/css-filters/\">\n<h3>CSS filters\n"
+               "<span>15 filters</span>\n</h3>\n<p>Minify.</p>\n</a>"
+               "</div></main>"),
+            "[Image filters 34 filters: Recompression and resizing.]"
+            "(/docs/image-filters/)\n\n"
+            "[CSS filters 15 filters: Minify.](/docs/css-filters/)");
+  // Plain inline links in a sentence are unchanged.
+  EXPECT_EQ(Md("<p><a href=\"/a\">a</a><a href=\"/b\">b</a></p>"),
+            "[a](/a)[b](/b)");
+}
+
+// ---- output is always well-formed UTF-8 -----------------------------------
+
+// A literal no-break space (U+00A0, the two bytes C2 A0) reads as a space and
+// never leaves half of its encoding behind.
+TEST_F(MarkdownExtractorFilterTest, LiteralNbspFoldsToOneSpace) {
+  EXPECT_EQ(Md("<main><p>of at least 16\xC2\xA0KB with no Range</p></main>"),
+            "of at least 16 KB with no Range");
+  EXPECT_EQ(Md("<main><p>Debian\xC2\xA0\x31\x32/13</p></main>"),
+            "Debian 12/13");
+  EXPECT_EQ(Md("<main><p>270,659\xC2\xA0\x42</p></main>"), "270,659 B");
+  // A run of no-break spaces and ordinary spaces is one space.
+  EXPECT_EQ(Md("<main><p>a \xC2\xA0\xC2\xA0 b</p></main>"), "a b");
+  // A Latin-1 letter whose second byte is also 0xA0 is not whitespace.
+  EXPECT_EQ(Md("<main><p>\xC3\xA0 la carte</p></main>"), "\xC3\xA0 la carte");
+}
+
+TEST_F(MarkdownExtractorFilterTest, LiteralNbspInPreAndCodeStaysValid) {
+  const std::string pre = Md("<main><pre>a\xC2\xA0\x62</pre></main>");
+  EXPECT_TRUE(MarkdownIsValidUtf8(pre)) << pre;
+  EXPECT_EQ(pre, "```\na b\n```");
+  const std::string code = Md("<main><p><code>a\xC2\xA0\x62</code></p></main>");
+  EXPECT_TRUE(MarkdownIsValidUtf8(code)) << code;
+  EXPECT_EQ(code, "`a b`");
+  const std::string alt =
+      Md("<main><p><img src=\"/i.png\" alt=\"a\xC2\xA0\x62\"></p></main>");
+  EXPECT_TRUE(MarkdownIsValidUtf8(alt)) << alt;
+  EXPECT_EQ(alt, "![a b](/i.png)");
+}
+
+// Image alt text keeps its non-ASCII letters and decodes its references.
+TEST_F(MarkdownExtractorFilterTest, ImageAltKeepsUtf8) {
+  EXPECT_EQ(Md("<main><p><img src=\"/c.png\" alt=\"caf\xC3\xA9\"></p></main>"),
+            "![caf\xC3\xA9](/c.png)");
+  const std::string md =
+      Md("<main><p><img src=\"/c.png\" alt=\"a&nbsp;b\"></p></main>");
+  EXPECT_TRUE(MarkdownIsValidUtf8(md)) << md;
+  EXPECT_EQ(md, "![a b](/c.png)");
+}
+
+// Input that is not valid UTF-8 (a Latin-1 page, stray bytes) gives valid
+// UTF-8 output: each invalid sequence becomes U+FFFD, deterministically.
+TEST_F(MarkdownExtractorFilterTest, InvalidInputBytesAreReplaced) {
+  EXPECT_EQ(Md("<main><p>caf\xE9 au lait</p></main>"),
+            "caf\xEF\xBF\xBD au lait");
+  EXPECT_EQ(Md("<main><p>a\x80\x62</p></main>"), "a\xEF\xBF\xBD\x62");
+  EXPECT_EQ(Md("<main><pre>x\xFFy</pre></main>"), "```\nx\xEF\xBF\xBDy\n```");
+  EXPECT_EQ(Md("<main><p><code>q\xC2</code></p></main>"), "`q\xEF\xBF\xBD`");
+  // Bytes at the end of a text node are replaced like any others.
+  EXPECT_EQ(Md("<main><p>Caf\xE9</p></main>"), "Caf\xEF\xBF\xBD");
+}
+
+namespace {
+
+// Pieces a random page is assembled from: markup, entities, valid multi-byte
+// characters (including C2 A0 and letters whose last byte is 0xA0) and, for the
+// invalid-input property, lone and truncated bytes.
+constexpr std::string_view kValidPieces[] = {
+    "<p>",
+    "</p>",
+    "<pre>",
+    "</pre>",
+    "<code>",
+    "</code>",
+    "<h2>",
+    "</h2>",
+    "<a href=/x>",
+    "</a>",
+    "<td>",
+    "<table><tr>",
+    "</table>",
+    "<li>",
+    "<ul>",
+    "</ul>",
+    "<br>",
+    "<header>",
+    "</header>",
+    "<img src=/i alt=\"",
+    "\">",
+    "text",
+    " ",
+    "\n",
+    "&amp;",
+    "&nbsp;",
+    "&lt;b&gt;",
+    "&mdash;",
+    "&#x2014;",
+    "&#160;",
+    "&rarr;",
+    "`",
+    "\xC2\xA0",
+    "\xC3\xA0",
+    "\xE2\x80\x94",
+    "\xF0\x9F\x98\x80",
+    "caf\xC3\xA9",
+    "\xE4\xB8\xAD",
+    "#",
+    "-",
+};
+constexpr std::string_view kInvalidPieces[] = {
+    "\xA0", "\xC2", "\xE2\x80", "\xFF", "\x80", "\xED\xA0\x80", "\xC0\xAF",
+};
+
+std::string RandomPage(std::mt19937* rng, bool with_invalid) {
+  std::string html = "<html><body><main>";
+  std::uniform_int_distribution<int> len(1, 80);
+  const int n = len(*rng);
+  for (int i = 0; i < n; ++i) {
+    if (with_invalid && (*rng)() % 6 == 0) {
+      html += kInvalidPieces[(*rng)() % std::size(kInvalidPieces)];
+    } else {
+      html += kValidPieces[(*rng)() % std::size(kValidPieces)];
+    }
+  }
+  html += "</main></body></html>";
+  return html;
+}
+
+}  // namespace
+
+// Property: for any valid UTF-8 page the copy is valid UTF-8 and introduces no
+// replacement character; for any page at all the copy is valid UTF-8.
+TEST_F(MarkdownExtractorFilterTest, OutputIsAlwaysWellFormedUtf8) {
+  std::mt19937 rng(20261127);
+  for (int i = 0; i < 3000; ++i) {
+    const std::string html = RandomPage(&rng, /*with_invalid=*/false);
+    const std::string md = Md(html);
+    ASSERT_TRUE(MarkdownIsValidUtf8(md)) << "input: " << html;
+    ASSERT_EQ(md.find("\xEF\xBF\xBD"), std::string::npos) << "input: " << html;
+  }
+  for (int i = 0; i < 3000; ++i) {
+    const std::string html = RandomPage(&rng, /*with_invalid=*/true);
+    const std::string md = Md(html);
+    ASSERT_TRUE(MarkdownIsValidUtf8(md)) << "input: " << html;
+    ASSERT_EQ(md, Md(html)) << "not deterministic for: " << html;
+  }
 }
 
 }  // namespace
