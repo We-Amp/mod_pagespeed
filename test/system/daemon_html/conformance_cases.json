@@ -45166,6 +45166,91 @@
       }
     },
     {
+      "id": "m2-ajax-marker-x-requested-with-comma-list-no-read",
+      "runners": ["engine"],
+      "pending": "serve-cached-html",
+      "why": "ajax marker: refused before any read",
+      "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "agents",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": [],
+            "content_type": "text/html; charset=utf-8",
+            "store_v2": true,
+            "anonymous_recorded": true
+          },
+          {
+            "kind": "sidecar",
+            "url": "https://www.example.test/page",
+            "format": 3,
+            "policy_stamp": "5a17c0de00000001",
+            "headers": [
+              ["X-Frame-Options", "DENY"],
+              ["Cache-Control", "max-age=300"]
+            ]
+          }
+        ],
+        "verdicts": [
+          {
+            "fn": "ps_html_request_guard",
+            "reason": "request_header",
+            "header_index": 0,
+            "xfp": false
+          }
+        ],
+        "steps": [
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/html,application/xhtml+xml;q=0.9,*/*;q=0.8"],
+              "agent_class": 3,
+              "request_headers": [
+                ["X-Requested-With", "com.example.app, XMLHttpRequest"]
+              ]
+            },
+            "expect": {
+              "calls": [
+                {
+                  "fn": "ps_html_request_guard"
+                }
+              ],
+              "calls_exclude": ["ps_cache_read_best_site", "ps_cache_read_alternate_site", "ps_headers_sidecar_read", "ps_html_stored_facts_from_reads", "ps_html_serve_classify"],
+              "serve": {
+                "kind": "fall_through",
+                "reason": "request_header"
+              },
+              "decision_lines": {
+                "contains": ["\"detail\":\"X-Requested-With\""]
+              },
+              "counters": {
+                "daemon_html_refused_request_header": 1
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
       "id": "m2-ajax-marker-x-requested-with-no-store",
       "runners": ["engine"],
       "pending": "serve-cached-html",
@@ -45200,6 +45285,66 @@
               "options_enabled_and_allowed": true,
               "request_headers": [
                 ["X-Requested-With", "XMLHttpRequest"]
+              ],
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls_exclude": ["ps_cache_write_original_site", "ps_cache_write_headers_sidecar_site"],
+              "counters": {
+                "daemon_html_refused_request_header": 1
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "m2-ajax-marker-x-requested-with-comma-list-no-store",
+      "runners": ["engine"],
+      "pending": "serve-cached-html",
+      "why": "ajax marker: refused before the store",
+      "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "agents",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "verdicts": [
+          {
+            "fn": "ps_html_request_guard",
+            "reason": "request_header",
+            "header_index": 0,
+            "xfp": false
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "request_headers": [
+                ["X-Requested-With", "com.example.app, XMLHttpRequest"]
               ],
               "capture_start_ms": 1790000000000
             },
@@ -45274,6 +45419,64 @@
               "headers": [
                 ["User-Agent", "Mozilla/5.0 (compatible; GPTBot/1.2; +https://openai.com/gptbot)"],
                 ["X-Requested-With", "XMLHttpRequest"]
+              ]
+            },
+            "expect": {
+              "stored": false
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-m2-ajax-marker-x-requested-with-repeated-lines-never-hit",
+      "runners": ["live"],
+      "pending": "serve-cached-html",
+      "why": "ajax marker: such a request never hits and never stores",
+      "live": {
+        "mode": "serve-cached-html",
+        "agent_optimize": true,
+        "origin": {
+          "app": "adversarial",
+          "kind": "proxy"
+        },
+        "steps": [
+          {
+            "request": {
+              "method": "GET",
+              "path": "/fresh",
+              "headers": [
+                ["User-Agent", "Mozilla/5.0 (compatible; GPTBot/1.2; +https://openai.com/gptbot)"]
+              ]
+            },
+            "expect": {
+              "status": 200,
+              "content_type": "text/html",
+              "origin_requests_delta": 1,
+              "stored": true
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "path": "/fresh",
+              "headers": [
+                ["User-Agent", "Mozilla/5.0 (compatible; GPTBot/1.2; +https://openai.com/gptbot)"],
+                ["X-Requested-With", "com.example.app"], ["X-Requested-With", "XMLHttpRequest"]
+              ]
+            },
+            "expect": {
+              "origin_requests_delta": 1,
+              "hit": false
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "path": "/ga-page",
+              "headers": [
+                ["User-Agent", "Mozilla/5.0 (compatible; GPTBot/1.2; +https://openai.com/gptbot)"],
+                ["X-Requested-With", "com.example.app"], ["X-Requested-With", "XMLHttpRequest"]
               ]
             },
             "expect": {
