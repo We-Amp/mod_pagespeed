@@ -583,3 +583,4 @@ bool SplitStringPieceToIntegerVector(StringPiece src, StringPiece separators,
 }
 
 }  // namespace net_instaweb
+// spike: module-only change
