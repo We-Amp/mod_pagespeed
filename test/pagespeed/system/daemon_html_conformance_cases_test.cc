@@ -530,7 +530,7 @@ void CheckLive(Checker& c, const GoogleString& w, const Json::Value& l,
       if (!he.isObject()) c.Fail(sw, "headers_exact is not an object");
       for (const GoogleString& name : he.getMemberNames()) {
         c.Keys(StrCat(sw, " headers_exact ", name), he[name],
-               {"count", "value", "contains"}, {"count"});
+               {"count", "value", "contains", "tokens"}, {"count"});
         if (!he[name]["count"].isUInt()) {
           c.Fail(StrCat(sw, " headers_exact ", name), "count is not a count");
         }

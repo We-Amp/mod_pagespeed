@@ -165,7 +165,10 @@ EXPECT_KEYS = frozenset(
         "header_equals_step",
     ]
 )
-HEADER_EXPECT_KEYS = frozenset(["count", "value", "contains"])
+# `tokens`: the line is that comma-separated list, in order, names compared
+# case-insensitively and whitespace around a comma ignored (a server may join
+# list tokens with "," alone: RFC 9110 5.6.1).
+HEADER_EXPECT_KEYS = frozenset(["count", "value", "contains", "tokens"])
 MODES = frozenset(["off", "report-only", "serve-variants"])
 
 # The mode a row may run in only as a mode-audit rerun (mode_audit_rows); a
@@ -1092,6 +1095,9 @@ class RowRunner:
                     fail(f"{name}: {value!r}, expected {spec['value']!r}")
                 if "contains" in spec and spec["contains"] not in value:
                     fail(f"{name}: {value!r} does not contain {spec['contains']!r}")
+                if "tokens" in spec and [t.strip().lower() for t in value.split(",")] != [
+                        t.lower() for t in spec["tokens"]]:
+                    fail(f"{name}: {value!r}, expected the list {', '.join(spec['tokens'])}")
         if expect.get("headers_only"):
             allowed = {n.lower() for n in exact} | TRANSPORT_LINES
             for name, value in r.headers:

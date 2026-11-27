@@ -999,6 +999,15 @@ class TestCodedCopies:
         failures = run(synthetic(steps), CodedProvider({"no_restart"}))
         assert any("cannot restart the worker" in f for f in failures), failures
 
+    def test_a_vary_list_compares_by_token(self):
+        steps = copy.deepcopy(CODED_STEPS)
+        steps[2]["expect"]["headers_exact"] = {
+            "Vary": {"count": 1, "tokens": ["Accept", "Accept-Encoding"]}}
+        assert run(synthetic(steps), CodedProvider()) == []
+        steps[2]["expect"]["headers_exact"]["Vary"]["tokens"] = ["Accept-Encoding", "Accept"]
+        failures = run(synthetic(steps), CodedProvider())
+        assert any("expected the list Accept-Encoding, Accept" in x for x in failures), failures
+
     def test_decode_body(self):
         plain = Response(200, [("Content-Type", "text/markdown")], b"abc")
         assert conf.decode_body(plain) == b"abc"
