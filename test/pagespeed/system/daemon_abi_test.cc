@@ -241,9 +241,9 @@ TEST_F(DaemonAbiTest, TheSixteenConstantsAreThePublishedValues) {
     EXPECT_EQ(kPsViewportSentinel,
               (id >> kPsMaskViewportShift) & kPsMaskViewportBits);
   }
-  EXPECT_EQ(0u, (kPsHtmlServeRequestIdentityOk |
-                 kPsHtmlServeRequestEncodingNone) &
-                    1023u);
+  EXPECT_EQ(0u,
+            (kPsHtmlServeRequestIdentityOk | kPsHtmlServeRequestEncodingNone) &
+                1023u);
   EXPECT_EQ(0u, (kPsHtmlFactsGzipCopyBound | kPsHtmlFactsBrCopyBound |
                  kPsHtmlFactsGzipNotSmaller | kPsHtmlFactsBrNotSmaller) &
                     0x3FFFu);
@@ -988,8 +988,8 @@ TEST_F(HtmlServe16SetTest, TheCodingCallsReachTheLibrary) {
   ASSERT_EQ(0, abi->HtmlStoredFactsFromReadsCoded(
                    &original, &markdown, nullptr, 0, nullptr, nullptr,
                    kPsMarkdownEncodingGzip, &facts));
-  EXPECT_EQ(0u, facts.flags & (kPsHtmlFactsBrCopyBound |
-                               kPsHtmlFactsGzipCopyBound));
+  EXPECT_EQ(
+      0u, facts.flags & (kPsHtmlFactsBrCopyBound | kPsHtmlFactsGzipCopyBound));
   setenv("PS_STUB_NOT_SMALLER", "1", 1);
   ASSERT_EQ(0, abi->HtmlStoredFactsFromReadsCoded(
                    &original, &markdown, nullptr, 0, nullptr, &coded,
@@ -1007,9 +1007,9 @@ TEST_F(HtmlServe16SetTest, TheCodingCallsReachTheLibrary) {
   memset(md, 0x22, sizeof(md));
   char plain[64], gz[64], br[64], legacy[64];
   size_t a = 0, b = 0, c = 0, d = 0;
-  ASSERT_EQ(0, abi->HtmlMarkdownEtagCoded(binding, md,
-                                          kPsMarkdownEncodingIdentity, plain,
-                                          sizeof(plain), &a));
+  ASSERT_EQ(0,
+            abi->HtmlMarkdownEtagCoded(binding, md, kPsMarkdownEncodingIdentity,
+                                       plain, sizeof(plain), &a));
   ASSERT_EQ(0, abi->HtmlMarkdownEtagCoded(binding, md, kPsMarkdownEncodingGzip,
                                           gz, sizeof(gz), &b));
   ASSERT_EQ(0, abi->HtmlMarkdownEtagCoded(binding, md, kPsMarkdownEncodingBr,

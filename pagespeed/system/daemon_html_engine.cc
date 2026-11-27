@@ -2052,14 +2052,13 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
     // The entry's policy stamp is not read from the header block here, as
     // before this set: a coding never changes which entries are served.
     const int facts_rc =
-        coded_set
-            ? abi->HtmlStoredFactsFromReadsCoded(
-                  reads.original, reads.markdown, reads.withheld,
-                  sidecar_present ? 1 : 0, nullptr, coded_read, requested,
-                  &stored)
-            : abi->HtmlStoredFactsFromReads(reads.original, reads.markdown,
-                                            reads.withheld,
-                                            sidecar_present ? 1 : 0, &stored);
+        coded_set ? abi->HtmlStoredFactsFromReadsCoded(
+                        reads.original, reads.markdown, reads.withheld,
+                        sidecar_present ? 1 : 0, nullptr, coded_read, requested,
+                        &stored)
+                  : abi->HtmlStoredFactsFromReads(
+                        reads.original, reads.markdown, reads.withheld,
+                        sidecar_present ? 1 : 0, &stored);
     if (facts_rc != 0) {
       CountFallThrough(result.reason);
       return result;
@@ -2166,9 +2165,8 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
   const int coding =
       coded_set ? verdict.markdown_encoding : kPsMarkdownEncodingIdentity;
   const bool coded_body = coding != kPsMarkdownEncodingIdentity;
-  if (coded_body &&
-      (coded_read == nullptr ||
-       static_cast<uint32_t>(coding) != request.markdown_encoding)) {
+  if (coded_body && (coded_read == nullptr || static_cast<uint32_t>(coding) !=
+                                                  request.markdown_encoding)) {
     result.reason = "other";
     CountFallThrough(result.reason);
     return result;
@@ -2188,12 +2186,12 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
   char etag[kPsHtmlMarkdownEtagChars + 8] = {0};
   size_t etag_len = 0;
   const bool has_etag =
-      (coded_set ? abi->HtmlMarkdownEtagCoded(stored.binding_hash,
-                                              stored.markdown_hash, coding,
-                                              etag, sizeof(etag), &etag_len)
-                 : abi->HtmlMarkdownEtag(stored.binding_hash,
-                                         stored.markdown_hash, etag,
-                                         sizeof(etag), &etag_len)) == 0 &&
+      (coded_set
+           ? abi->HtmlMarkdownEtagCoded(stored.binding_hash,
+                                        stored.markdown_hash, coding, etag,
+                                        sizeof(etag), &etag_len)
+           : abi->HtmlMarkdownEtag(stored.binding_hash, stored.markdown_hash,
+                                   etag, sizeof(etag), &etag_len)) == 0 &&
       etag_len > 0;
   const bool not_modified =
       has_etag && facts.has_if_none_match &&
@@ -2239,8 +2237,7 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
                                 Integer64ToString(markdown_len));
     if (coded_body) {
       result.headers.emplace_back(
-          "Content-Encoding",
-          coding == kPsMarkdownEncodingBr ? "br" : "gzip");
+          "Content-Encoding", coding == kPsMarkdownEncodingBr ? "br" : "gzip");
     }
     result.headers.emplace_back("Cache-Control", "private");
     result.headers.emplace_back("Vary", vary_line);
@@ -2282,8 +2279,9 @@ void DaemonHtmlEngine::DemandCompress(const DaemonHtmlRequestFacts& facts,
                                       const GoogleString& url,
                                       const GoogleString& hostname) {
   DaemonMarkdownCompressDemands* demands =
-      deps_.compress_demands != nullptr ? deps_.compress_demands
-                                        : ProcessDaemonMarkdownCompressDemands();
+      deps_.compress_demands != nullptr
+          ? deps_.compress_demands
+          : ProcessDaemonMarkdownCompressDemands();
   if (!demands->Admit(StrCat(config_.site, "\n", url))) return;
   ModuleNotifyInput input;
   input.url = url;

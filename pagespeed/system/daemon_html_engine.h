@@ -72,8 +72,8 @@
 
 #include <atomic>
 #include <cstddef>
-#include <deque>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <map>
 #include <memory>

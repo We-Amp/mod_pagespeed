@@ -543,8 +543,8 @@ class LibraryDaemonAbi : public DaemonAbi {
       if (plain_request.struct_size >= sizeof(PsHtmlServeRequest)) {
         plain_request.markdown_encoding = 0;
       }
-      plain_request.request_flags &= ~(kPsHtmlServeRequestIdentityOk |
-                                       kPsHtmlServeRequestEncodingNone);
+      plain_request.request_flags &=
+          ~(kPsHtmlServeRequestIdentityOk | kPsHtmlServeRequestEncodingNone);
       return ServeClassifyAtVerdictSize15(&plain_request, facts, out);
     }
     // A library below 1.15 reads only the 1.14 prefix of a larger request:
@@ -556,8 +556,8 @@ class LibraryDaemonAbi : public DaemonAbi {
     if (short_request.struct_size > kPsHtmlServeRequestSize14) {
       short_request.struct_size = kPsHtmlServeRequestSize14;
     }
-    short_request.request_flags &= ~(kPsHtmlServeRequestIdentityOk |
-                                     kPsHtmlServeRequestEncodingNone);
+    short_request.request_flags &=
+        ~(kPsHtmlServeRequestIdentityOk | kPsHtmlServeRequestEncodingNone);
     PsHtmlStoredFacts short_facts = *facts;
     if (short_facts.struct_size > kPsHtmlStoredFactsSize14) {
       short_facts.struct_size = kPsHtmlStoredFactsSize14;

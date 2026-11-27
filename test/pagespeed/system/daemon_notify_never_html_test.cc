@@ -250,8 +250,8 @@ TEST_F(DaemonNotifyNeverHtmlTest, TheServeArmNeverAsksForAStoredHtmlEntry) {
   EXPECT_TRUE(recording_->notifies().empty());
 
   // The control: the same three for a stylesheet are all sent.
-  EXPECT_EQ(3, SendAllThreeServeNotifications(Request("/a/site.css"),
-                                              kPsContentCss));
+  EXPECT_EQ(
+      3, SendAllThreeServeNotifications(Request("/a/site.css"), kPsContentCss));
   EXPECT_EQ(3u, recording_->notifies().size());
 }
 

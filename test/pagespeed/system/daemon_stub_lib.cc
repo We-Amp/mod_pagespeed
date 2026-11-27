@@ -1287,8 +1287,8 @@ int ps_html_serve_classify(const StubServeRequest* request,
     }
     if (v.action == 2 &&
         ps_html_markdown_etag_coded(facts->binding_hash, facts->markdown_hash,
-                                    v.markdown_encoding, v.etag,
-                                    sizeof(v.etag), &len) == 0) {
+                                    v.markdown_encoding, v.etag, sizeof(v.etag),
+                                    &len) == 0) {
       v.not_modified =
           ps_if_none_match_matches_weak(request->if_none_match, v.etag) == 1;
     }
@@ -1810,10 +1810,12 @@ int ps_markdown_select_encoding(const char* const* lines, size_t count,
 }
 #endif  // PS_STUB_OMIT_MARKDOWN_SELECT_ENCODING
 
-int ps_html_stored_facts_from_reads_coded(
-    const void* original, const void* markdown, const void* withheld_marker,
-    int sidecar_present, const void* block, const void* coded, int coding,
-    StubStoredFacts15* out) {
+int ps_html_stored_facts_from_reads_coded(const void* original,
+                                          const void* markdown,
+                                          const void* withheld_marker,
+                                          int sidecar_present,
+                                          const void* block, const void* coded,
+                                          int coding, StubStoredFacts15* out) {
   if (coded != nullptr && coding != 1 && coding != 2) return -1;
   if (ps_html_stored_facts_from_reads_ex(original, markdown, withheld_marker,
                                          sidecar_present, block, out) != 0) {
@@ -1833,8 +1835,8 @@ int ps_html_markdown_etag_coded(const uint8_t* binding_hash,
                                 const uint8_t* markdown_hash, int coding,
                                 char* buf, size_t capacity, size_t* out_len) {
   if (coding < 0 || coding > 2) return -1;
-  const int rc =
-      ps_html_markdown_etag(binding_hash, markdown_hash, buf, capacity, out_len);
+  const int rc = ps_html_markdown_etag(binding_hash, markdown_hash, buf,
+                                       capacity, out_len);
   // Not the real hash: the coding's digit in place of the tag's last one.
   if (rc == 0 && coding != 0 && *out_len >= 2) {
     buf[*out_len - 2] = coding == 1 ? 'g' : 'b';
@@ -2391,8 +2393,8 @@ int ps_notify_worker_ex(const char* socket_path,
           ? params->agent_request
           : 0;
   const bool has_site_fields =
-      params->struct_size >= offsetof(StubNotifyParams, notify_flags) +
-                                 sizeof(params->notify_flags);
+      params->struct_size >=
+      offsetof(StubNotifyParams, notify_flags) + sizeof(params->notify_flags);
   const char* site = has_site_fields ? params->site : nullptr;
   const uint32_t flags = has_site_fields ? params->notify_flags : 0;
   if (!StubSiteIsValid(site)) {

@@ -131,8 +131,8 @@ struct HtmlServeInjection {
   GoogleString coded_etag[3] = {"", "W/\"psm-0123456789abcdeg\"",
                                 "W/\"psm-0123456789abcdeb\""};
   // ps_read_shared_config_markdown_codings.
-  int markdown_codings = (1 << kPsMarkdownEncodingGzip) |
-                         (1 << kPsMarkdownEncodingBr);
+  int markdown_codings =
+      (1 << kPsMarkdownEncodingGzip) | (1 << kPsMarkdownEncodingBr);
   // ps_html_serve_classify: the verdicts of successive calls; once used up,
   // `verdict` answers every further call.
   std::vector<PsHtmlServeVerdict> verdicts;

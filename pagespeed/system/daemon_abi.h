@@ -1477,7 +1477,8 @@ class DaemonAbi {
   // publishes none (it writes no coded copies and refuses
   // kPsNotifyFlagMarkdownCompress) or an unbound set.  Reads a file: on a
   // timer, never per request.
-  virtual int ReadSharedConfigMarkdownCodings(const char* /*cache_path*/) const {
+  virtual int ReadSharedConfigMarkdownCodings(
+      const char* /*cache_path*/) const {
     return -1;
   }
 

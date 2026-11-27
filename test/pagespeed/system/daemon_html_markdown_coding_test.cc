@@ -175,9 +175,7 @@ class DaemonHtmlMarkdownCodingTest : public testing::Test {
     abi_.mutable_injection()->verdicts = std::move(verdicts);
   }
 
-  int64 Counter(const char* name) {
-    return stats_.GetVariable(name)->Get();
-  }
+  int64 Counter(const char* name) { return stats_.GetVariable(name)->Get(); }
 
   // The _coded facts calls, as "coded-or-null/coding".
   std::vector<GoogleString> CodedFactsCalls() const {
@@ -290,8 +288,7 @@ TEST_F(DaemonHtmlMarkdownCodingTest, IdentityVaryListsAcceptEncoding) {
   Order({kPsMarkdownEncodingIdentity});
   Verdicts({ServeIn(kPsMarkdownEncodingIdentity)});
   abi_.mutable_injection()->sidecar_read_rc = kPsOk;
-  abi_.mutable_injection()->block.lines = {
-      {"Vary", "accept-encoding, Cookie"}};
+  abi_.mutable_injection()->block.lines = {{"Vary", "accept-encoding, Cookie"}};
   std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
   RecordingPort port;
   const DaemonHtmlServeResult r = engine->Serve(Request({}), &port);
@@ -405,8 +402,8 @@ TEST_F(DaemonHtmlMarkdownCodingTest, SecondCodingRead) {
       kPsHtmlFactsGzipCopyBound;
   Order({kPsMarkdownEncodingBr, kPsMarkdownEncodingGzip,
          kPsMarkdownEncodingIdentity});
-  Verdicts({ServeIn(kPsMarkdownEncodingIdentity),
-            ServeIn(kPsMarkdownEncodingGzip)});
+  Verdicts(
+      {ServeIn(kPsMarkdownEncodingIdentity), ServeIn(kPsMarkdownEncodingGzip)});
   std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
   RecordingPort port;
   const DaemonHtmlServeResult r = engine->Serve(Request({"br, gzip"}), &port);
@@ -432,8 +429,8 @@ TEST_F(DaemonHtmlMarkdownCodingTest, SecondCodingIdentityRefused) {
   abi_.mutable_injection()->coded_bits[kPsMarkdownEncodingGzip] =
       kPsHtmlFactsGzipCopyBound;
   Order({kPsMarkdownEncodingBr, kPsMarkdownEncodingGzip});
-  Verdicts({FallThrough(kNoAcceptableEncoding),
-            ServeIn(kPsMarkdownEncodingGzip)});
+  Verdicts(
+      {FallThrough(kNoAcceptableEncoding), ServeIn(kPsMarkdownEncodingGzip)});
   std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
   RecordingPort port;
   const DaemonHtmlServeResult r =
