@@ -5,8 +5,8 @@
 
 #include <memory>
 
-#include "pagespeed/kernel/base/mem_file_system.h"
-#include "pagespeed/kernel/base/mock_timer.h"
+#include "test/pagespeed/kernel/base/mem_file_system.h"
+#include "test/pagespeed/kernel/base/mock_timer.h"
 #include "pagespeed/kernel/base/null_message_handler.h"
 #include "pagespeed/kernel/base/null_mutex.h"
 #include "pagespeed/kernel/thread/thread_system.h"
