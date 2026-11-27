@@ -2353,10 +2353,22 @@ jobs:
   # documented known-find classes; only needs-triage artifacts reach the
   # findings file. It never hard-fails on findings: the tracking issue (label
   # css-fuzz-finding) is the signal. `shadow` is a manual lane.
+  #
+  # Findings are carried forward: every needs-triage crash unit is saved
+  # in a second cache (css-fuzz-open-findings-v1-*) and replayed through the
+  # classifier on the next night next to that night's new units. A finding
+  # therefore stays in the findings file, and the issue stays open, until
+  # the unit itself replays clean; a night on which the fuzzer simply does
+  # not rediscover it no longer closes the issue. When that cache is missing
+  # or holds no units (an older entry after a failed save looks the same)
+  # while a tracking issue is open, the earlier units cannot be re-verified:
+  # the lane records that (an "unverified" marker carried in the same cache)
+  # and suppresses auto-close until the issue is closed by hand.
   # ---------------------------------------------------------------------
   css-fuzz-nightly:
     permissions:
       contents: read
+      issues: read
     name: CSS fuzz nightly (libFuzzer + corpus + findings)
     needs: event-guard
     # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
@@ -2401,6 +2413,7 @@ jobs:
             echo "BIN_DIR=${RUNNER_TEMP}/css-fuzz-bin"
             echo "CORPUS_DIR=${RUNNER_TEMP}/css-fuzz-corpus"
             echo "CRASH_DIR=${RUNNER_TEMP}/css-fuzz-crashes"
+            echo "OPEN_DIR=${RUNNER_TEMP}/css-fuzz-open"
             echo "FINDINGS=${RUNNER_TEMP}/css-fuzz-findings.md"
           } >> "$GITHUB_ENV"
 
@@ -2423,6 +2436,15 @@ jobs:
           path: ${{ runner.temp }}/css-fuzz-corpus
           key: css-minify-fuzz-corpus-v1-${{ github.run_id }}
           restore-keys: css-minify-fuzz-corpus-v1-
+
+      # The needs-triage units of earlier nights (see the lane header).
+      - name: Restore open findings
+        id: open_findings
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/css-fuzz-open
+          key: css-fuzz-open-findings-v1-${{ github.run_id }}
+          restore-keys: css-fuzz-open-findings-v1-
 
       - name: Seed corpus from the harness's embedded seeds
         run: |
@@ -2460,6 +2482,25 @@ jobs:
             -print_final_stats=1
           echo "FUZZ_RC=$?" >> "$GITHUB_ENV"
 
+      # Carry the earlier nights' needs-triage units into CRASH_DIR, so the
+      # classifier replays them on tonight's binary. Its own step so the
+      # token reaches only the carry's read-only open-issue lookup, not the
+      # replay binary or the classifier. Tonight's own artifact count is
+      # taken first, for the zero-artifact check below; the carry's
+      # findings entry goes to a side file the next step folds in.
+      - name: Carry earlier findings in
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPEN_CACHE_KEY: ${{ steps.open_findings.outputs.cache-matched-key }}
+        run: |
+          set -uo pipefail
+          mkdir -p "$CRASH_DIR"
+          echo "TONIGHT_ARTIFACTS=$(find "$CRASH_DIR" -type f | wc -l | tr -d ' ')" >> "$GITHUB_ENV"
+          : > "${FINDINGS}.carry"
+          bash tools/ci/carry-css-fuzz-findings.sh in \
+            "$OPEN_DIR" "$CRASH_DIR" "${FINDINGS}.carry" "$OPEN_CACHE_KEY" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
       # Bucket crash artifacts against the documented known-find classes;
       # only needs-triage items reach the findings file. An empty file means
       # clean, and the tracking issue closes on it.
@@ -2481,7 +2522,8 @@ jobs:
           # campaign never ran (bad flag, OOM before the first unit): that
           # must open or comment the tracking issue, since an empty findings
           # file would close a live issue on a night nothing ran.
-          n_artifacts="$(find "$CRASH_DIR" -type f | wc -l | tr -d ' ')"
+          # Counted before the carried units were added (previous step).
+          n_artifacts="${TONIGHT_ARTIFACTS:-$(find "$CRASH_DIR" -type f | wc -l | tr -d ' ')}"
           if [ "${FUZZ_RC:-1}" != "0" ] && [ "$n_artifacts" = "0" ]; then
             {
               echo "### libFuzzer campaign failed (rc=${FUZZ_RC}, zero artifacts)"
@@ -2490,8 +2532,24 @@ jobs:
               echo
             } >> "$FINDINGS"
           fi
+          # The carry step's entry, if any. A missing side file means the
+          # carry did not run, so the earlier units were not replayed: fail
+          # closed and keep the issue open.
+          if [ -f "${FINDINGS}.carry" ]; then
+            cat "${FINDINGS}.carry" >> "$FINDINGS"
+          else
+            {
+              echo "### earlier findings could not be re-verified (carry step did not run)"
+              echo
+              echo "The step that replays earlier needs-triage units did not run, so this run cannot clear them. This entry suppresses auto-close for the night. See the run log."
+              echo
+            } >> "$FINDINGS"
+          fi
           bash tools/ci/classify-css-fuzz-artifacts.sh \
             "$BIN_DIR/replay" "$CRASH_DIR" "$FINDINGS" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+          bash tools/ci/carry-css-fuzz-findings.sh out \
+            "$OPEN_DIR" "$CRASH_DIR" "$FINDINGS" \
             | tee -a "$GITHUB_STEP_SUMMARY"
           if [ -s "$FINDINGS" ]; then
             cat "$FINDINGS" >> "$GITHUB_STEP_SUMMARY"
@@ -2516,6 +2574,15 @@ jobs:
         with:
           path: ${{ runner.temp }}/css-fuzz-corpus
           key: css-minify-fuzz-corpus-v1-${{ github.run_id }}
+
+      # Tonight's needs-triage units (and the unverified marker, if set),
+      # replayed by the next run before its issue can close.
+      - name: Persist open findings
+        if: always() && env.LANE_RAN == '1'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/css-fuzz-open
+          key: css-fuzz-open-findings-v1-${{ github.run_id }}-${{ github.run_attempt }}
 
       # The small input of the report job: the findings text, and a marker
       # that the lane ran so a build-stage failure cannot close the issue.
@@ -2584,7 +2651,7 @@ jobs:
             "css-fuzz-finding" \
             "CSS minifier fuzz: finding needs triage" \
             "${F}/findings.md" \
-            "Reproduce with the run's \`css-fuzz-evidence\` artifact (replay: \`bazel run -c opt --config=asan //lib/css:css_minify_fuzz -- <crash-file>\`); fix the minifier bug or record a justified known-find class in tools/ci/classify-css-fuzz-artifacts.sh. This issue auto-closes on the next triage-clean scheduled run."
+            "Reproduce with the run's \`css-fuzz-evidence\` artifact (replay: \`bazel run -c opt --config=asan //lib/css:css_minify_fuzz -- <crash-file>\`); fix the minifier bug or record a justified known-find class in tools/ci/classify-css-fuzz-artifacts.sh. Reported units are replayed on every scheduled run; this issue auto-closes once all of them replay clean and no new unit needs triage."
 
       - name: Note a missing findings artifact
         if: steps.findings.outcome != 'success'

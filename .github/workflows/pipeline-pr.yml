@@ -680,7 +680,7 @@ jobs:
           if [ "${GITHUB_EVENT_NAME}" = "pull_request" ] || [ "${GITHUB_EVENT_NAME}" = "merge_group" ]; then
             changed="${RUNNER_TEMP}/changed-files.txt"
             git diff --no-renames --name-only "${BASE}...HEAD" > "${changed}"
-            if grep -qE '^(lib/css/|test/lib/css/|tools/ci/classify-css-fuzz-artifacts\.sh$|tools/ci/shadow-css-oracle\.sh$|tools/sbom/post-findings-issue\.sh$|docker/Dockerfile$|\.github/workflows/pipeline-pr\.yml$)' "${changed}"; then
+            if grep -qE '^(lib/css/|test/lib/css/|tools/ci/classify-css-fuzz-artifacts\.sh$|tools/ci/carry-css-fuzz-findings\.sh$|tools/ci/shadow-css-oracle\.sh$|tools/sbom/post-findings-issue\.sh$|docker/Dockerfile$|\.github/workflows/pipeline-pr\.yml$)' "${changed}"; then
               css=true
             fi
             if grep -qE '^(lib/js/|test/lib/js/|tools/ci/build-js-fuzz-direct\.sh$|MODULE\.bazel$|docker/Dockerfile$|\.github/workflows/pipeline-pr\.yml$)' "${changed}"; then
@@ -2666,6 +2666,11 @@ jobs:
       # request that could touch it.
       - name: Classifier self-test
         run: bash tools/ci/classify-css-fuzz-artifacts.sh --self-test
+
+      # The carry decides when a tracking issue may close (only once the
+      # units it reported replay clean), so it is fixture-tested the same way.
+      - name: Findings carry self-test
+        run: bash tools/ci/carry-css-fuzz-findings.sh --self-test
 
       - name: Remove this job's dev image tag
         if: always()
