@@ -186,6 +186,19 @@ TEST(DaemonHtmlAjaxMarkerTest, NamesTheMarkersTheServerPortsTreatAsAjax) {
   EXPECT_EQ(nullptr,
             DaemonHtmlAjaxMarker("X-Requested-With", "com.example.app"));
   EXPECT_EQ(nullptr, DaemonHtmlAjaxMarker("X-Requested-With", ""));
+  // Repeated lines a server joined, and a list sent as one line.
+  EXPECT_STREQ("X-Requested-With",
+               DaemonHtmlAjaxMarker("X-Requested-With",
+                                    "XMLHttpRequest, XMLHttpRequest"));
+  EXPECT_STREQ("X-Requested-With",
+               DaemonHtmlAjaxMarker("X-Requested-With", "foo, xmlhttprequest"));
+  EXPECT_STREQ("X-Requested-With",
+               DaemonHtmlAjaxMarker("X-Requested-With", "XMLHttpRequest,x"));
+  EXPECT_EQ(nullptr,
+            DaemonHtmlAjaxMarker("X-Requested-With", "com.example.app, other"));
+  EXPECT_EQ(nullptr,
+            DaemonHtmlAjaxMarker("X-Requested-With", "XMLHttpRequestX"));
+  EXPECT_EQ(nullptr, DaemonHtmlAjaxMarker("X-Requested-With", " , "));
   EXPECT_STREQ("X-MicrosoftAjax",
                DaemonHtmlAjaxMarker("X-MICROSOFTAJAX", "Delta=true"));
   EXPECT_EQ(nullptr, DaemonHtmlAjaxMarker("X-MicrosoftAjax", " "));

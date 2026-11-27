@@ -157,8 +157,9 @@ struct DaemonHtmlRequestFacts {
 };
 
 // The name of the AJAX marker one request header line is, or nullptr: an
-// X-Requested-With equal to XMLHttpRequest (compared case-insensitively), or
-// an X-MicrosoftAjax or X-Prototype-Version with any non-empty value.  A
+// X-Requested-With whose comma-separated list holds XMLHttpRequest (compared
+// case-insensitively, surrounding whitespace ignored), or an X-MicrosoftAjax
+// or X-Prototype-Version with any non-empty value.  A
 // script's request for a page may get a fragment from the origin, so the
 // HTML cache neither stores the answer under the page's key nor answers the
 // request from the cache.  Each port feeds every request header line here and

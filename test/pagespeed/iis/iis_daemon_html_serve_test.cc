@@ -4,6 +4,7 @@
 #include "pagespeed/iis/iis_daemon_html_serve.h"
 
 #include <algorithm>
+#include <map>
 
 #include "test/pagespeed/kernel/base/gtest.h"
 
@@ -11,6 +12,30 @@ namespace net_instaweb {
 namespace {
 
 // ---- the one spelling of a path the HTML cache keeps on IIS
+
+// IIS holds one value per request header name, repeated lines joined with
+// commas.
+TEST(IisDaemonHtmlAjaxMarkerTest, TheThreeHeadersAreRead) {
+  std::map<GoogleString, GoogleString> headers;
+  auto lookup = [&headers](const char* name, StringPiece* value) {
+    auto it = headers.find(name);
+    if (it == headers.end()) return false;
+    *value = it->second;
+    return true;
+  };
+  EXPECT_EQ("", IisDaemonHtmlAjaxMarker(lookup));
+  headers["X-Requested-With"] = "com.example.app";
+  headers["X-MicrosoftAjax"] = "";
+  EXPECT_EQ("", IisDaemonHtmlAjaxMarker(lookup));
+  headers["X-Requested-With"] = "com.example.app,XMLHttpRequest";
+  EXPECT_EQ("X-Requested-With", IisDaemonHtmlAjaxMarker(lookup));
+  headers.erase("X-Requested-With");
+  headers["X-MicrosoftAjax"] = "Delta=true";
+  EXPECT_EQ("X-MicrosoftAjax", IisDaemonHtmlAjaxMarker(lookup));
+  headers.erase("X-MicrosoftAjax");
+  headers["X-Prototype-Version"] = "1.7.3";
+  EXPECT_EQ("X-Prototype-Version", IisDaemonHtmlAjaxMarker(lookup));
+}
 
 TEST(IisHtmlCachePathTest, PlainLowercasePathsAreCanonical) {
   for (const char* path :

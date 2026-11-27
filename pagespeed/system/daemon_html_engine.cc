@@ -474,10 +474,18 @@ class ServeReads {
 const char* DaemonHtmlAjaxMarker(StringPiece name, StringPiece value) {
   TrimWhitespace(&value);
   if (StringCaseEqual(name, "X-Requested-With")) {
-    // As RequestHeaders::IsXmlHttpRequest reads it: another value (an
-    // Android WebView sends the app's package name) is not a script.
-    return StringCaseEqual(value, "XMLHttpRequest") ? "X-Requested-With"
-                                                    : nullptr;
+    // Any element of the list: a server that joins repeated lines into one
+    // value (httpd, IIS) and a client that sends "XMLHttpRequest, x" are
+    // both read as a script, as an origin matching the token anywhere
+    // would.  Another value (an Android WebView sends the app's package
+    // name) is not a script.
+    StringPieceVector tokens;
+    SplitStringPieceToVector(value, ",", &tokens, true);
+    for (StringPiece token : tokens) {
+      TrimWhitespace(&token);
+      if (StringCaseEqual(token, "XMLHttpRequest")) return "X-Requested-With";
+    }
+    return nullptr;
   }
   if (value.empty()) return nullptr;
   if (StringCaseEqual(name, "X-MicrosoftAjax")) return "X-MicrosoftAjax";
