@@ -39,6 +39,14 @@ export const HTML_CACHE_TEXT = {
   notifyLimited: "Notifications held back (rate limit)",
   markdownServed: "Markdown answers (200)",
   markdownNotModified: "Markdown answers (304)",
+  markdownCodings: "Markdown 200s by coding",
+  markdownBr: "brotli",
+  markdownGzip: "gzip",
+  markdownIdentity: "uncompressed",
+  encodedCopies: "Compressed copies not sent",
+  encodedMissing: "missing",
+  encodedUnbound: "out of date",
+  compressDemands: "asked of the optimizer",
   storeRefusals: "Store refusals by the engine",
   fallthroughs: "Fall-throughs to the origin page, by reason",
   degraded: "Serving is not active",
@@ -120,6 +128,15 @@ export interface HtmlCacheView {
   notifyLimited: number;
   markdownServed: number;
   markdownNotModified: number;
+  /** Markdown 200s by the coding sent (C API 1.16 libraries only). */
+  markdownServedBr: number;
+  markdownServedGzip: number;
+  markdownServedIdentity: number;
+  /** Compressed copies a request preferred that were missing or out of date,
+   * and the requests to the optimizer to write them. */
+  encodedCopyMissing: number;
+  encodedCopyUnbound: number;
+  compressDemandSent: number;
   /** Store refusals the engine counts itself (budget, URL disagreement, sidecar write). */
   storeRefusals: HtmlCacheReason[];
   /** Requests that fell through to the origin page, by reason; largest first. */
@@ -247,6 +264,12 @@ export function htmlCacheView(
     notifyLimited: count(stats, "daemon_html_notify_limited"),
     markdownServed,
     markdownNotModified,
+    markdownServedBr: count(stats, "daemon_markdown_served_br"),
+    markdownServedGzip: count(stats, "daemon_markdown_served_gzip"),
+    markdownServedIdentity: count(stats, "daemon_markdown_served_identity"),
+    encodedCopyMissing: count(stats, "daemon_markdown_encoded_copy_missing"),
+    encodedCopyUnbound: count(stats, "daemon_markdown_encoded_copy_unbound"),
+    compressDemandSent: count(stats, "daemon_markdown_compress_demand_sent"),
     storeRefusals,
     fallthroughs,
     modeInferred: mode === null && effective !== null,

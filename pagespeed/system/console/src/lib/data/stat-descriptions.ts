@@ -145,6 +145,20 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
     "The optimizer library said to serve Markdown to a request that did not ask for it; nothing was sent and the request fell through. Must stay at zero.",
   daemon_markdown_transport_conflict:
     "A Markdown answer still carried a Content-Encoding or Content-Range header (a compression or range filter ignored the module's no-compress mark). Must stay at zero.",
+  daemon_markdown_served_br:
+    "Markdown answers (200) sent as the brotli copy the optimizer stored, for a request that accepts br. Needs an optimizer library with C API 1.16.",
+  daemon_markdown_served_gzip:
+    "Markdown answers (200) sent as the gzip copy the optimizer stored, for a request that accepts gzip. Needs an optimizer library with C API 1.16.",
+  daemon_markdown_served_identity:
+    "Markdown answers (200) sent uncompressed: the request accepts no compression, or prefers none, or no compressed copy was ready. Needs an optimizer library with C API 1.16.",
+  daemon_markdown_encoded_copy_missing:
+    "Markdown requests that preferred a compressed copy the optimizer has not stored (yet, or any more); the uncompressed copy or the next coding was used instead.",
+  daemon_markdown_encoded_copy_unbound:
+    "Markdown requests that preferred a compressed copy made from an earlier version of the Markdown copy; it is never sent, and the uncompressed copy or the next coding was used instead.",
+  daemon_markdown_compress_demand_sent:
+    "Requests to the optimizer to write the compressed copies of a page's Markdown copy, sent at most once per page per server process after a compressed copy was missing or out of date.",
+  daemon_markdown_fallthrough_no_acceptable_encoding:
+    "Markdown requests that fell through to the origin page because they accept no coding the Markdown copy is stored in (for example identity;q=0 with no compressed copy ready).",
   daemon_markdown_fallthrough_fresh:
     "Expected to stay at zero. Fresh is the reason the optimizer gives with a serve answer; this counter exists so every serve reason has one. A count means the library said fresh without serving the Markdown copy.",
   daemon_markdown_fallthrough_mode:

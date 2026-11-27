@@ -88,6 +88,12 @@
           <li>{text.restoreSkipped}: {formatCount(view.restoreSkipped)}</li>
           <li>{text.notifySent}: {formatCount(view.notifySent)}; {text.notifyLimited}: {formatCount(view.notifyLimited)}</li>
           <li>{text.markdownServed}: {formatCount(view.markdownServed)}; {text.markdownNotModified}: {formatCount(view.markdownNotModified)}</li>
+          {#if view.markdownServedBr + view.markdownServedGzip + view.markdownServedIdentity > 0}
+            <li>{text.markdownCodings}: {text.markdownBr} {formatCount(view.markdownServedBr)}; {text.markdownGzip} {formatCount(view.markdownServedGzip)}; {text.markdownIdentity} {formatCount(view.markdownServedIdentity)}</li>
+          {/if}
+          {#if view.encodedCopyMissing + view.encodedCopyUnbound + view.compressDemandSent > 0}
+            <li>{text.encodedCopies}: {text.encodedMissing} {formatCount(view.encodedCopyMissing)}; {text.encodedUnbound} {formatCount(view.encodedCopyUnbound)}; {text.compressDemands} {formatCount(view.compressDemandSent)}</li>
+          {/if}
         </ul>
         {#if view.storeRefusals.length > 0}
           <table aria-label={text.storeRefusals}>

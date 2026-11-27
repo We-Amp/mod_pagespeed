@@ -945,11 +945,13 @@ struct StubServeVerdict {
 #endif
 };
 
+#ifdef PS_STUB_HTML_SERVE_16
 // The 1.16 request's coding word (the 1.15 reserved one) and its bits.
 constexpr size_t kServeRequestCodingOffset = 76;
 constexpr uint32_t kServeRequestIdentityOk = 1024u;
 constexpr uint32_t kServeRequestEncodingNone = 2048u;
 constexpr size_t kServeVerdictSize16 = 72;
+#endif
 
 // A stored sidecar, and also the block a read hands out (a malloc'd copy).
 struct StubSidecar {
@@ -1759,11 +1761,11 @@ int ps_markdown_select_encoding(const char* const* lines, size_t count,
     const char* line = lines[l];
     if (line == nullptr) continue;
     const char* p = line;
-    while (*p != ' ') {
+    while (*p != '\0') {
       while (*p == ' ' || *p == ',') ++p;
-      if (*p == ' ') break;
+      if (*p == '\0') break;
       const char* end = p;
-      while (*end != ' ' && *end != ',') ++end;
+      while (*end != '\0' && *end != ',') ++end;
       const char* semi = p;
       while (semi < end && *semi != ';') ++semi;
       const char* name_end = semi;

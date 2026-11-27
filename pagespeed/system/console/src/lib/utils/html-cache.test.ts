@@ -89,6 +89,32 @@ describe("serve-variants", () => {
     expect(htmlCacheView({}, "serve-variants").mode).toBe("serve-variants");
   });
 
+  it("splits the Markdown 200s by coding and counts the compressed copies not sent", () => {
+    const view = htmlCacheView(
+      {
+        daemon_markdown_served: 6,
+        daemon_markdown_served_br: 3,
+        daemon_markdown_served_gzip: 2,
+        daemon_markdown_served_identity: 1,
+        daemon_markdown_encoded_copy_missing: 4,
+        daemon_markdown_encoded_copy_unbound: 1,
+        daemon_markdown_compress_demand_sent: 2,
+        daemon_markdown_fallthrough_no_acceptable_encoding: 5,
+      },
+      "serve-variants",
+    );
+    expect(view.markdownServedBr).toBe(3);
+    expect(view.markdownServedGzip).toBe(2);
+    expect(view.markdownServedIdentity).toBe(1);
+    expect(view.encodedCopyMissing).toBe(4);
+    expect(view.encodedCopyUnbound).toBe(1);
+    expect(view.compressDemandSent).toBe(2);
+    expect(view.fallthroughs).toEqual([{ name: "no_acceptable_encoding", count: 5 }]);
+    // An older library counts none of them: all read as zero.
+    const old = htmlCacheView({ daemon_markdown_served: 6 }, "serve-variants");
+    expect(old.markdownServedBr + old.markdownServedGzip + old.markdownServedIdentity).toBe(0);
+  });
+
   it("counts stored, served and fall-through, largest first", () => {
     const view = htmlCacheView(
       {
@@ -187,13 +213,17 @@ describe("serve-variants", () => {
       "purge_race_refused", "removed", "removed_on_refusal", "restore_skipped", "epoch_write_failed",
       "purge_remove_failed", "serve_unavailable", "notify_sent", "notify_limited",
     ].map((n) => `daemon_html_${n}`);
-    const markdown = ["served", "not_modified", "served_without_preference", "transport_conflict"].map(
+    const markdown = [
+      "served", "not_modified", "served_without_preference", "transport_conflict", "served_br", "served_gzip",
+      "served_identity", "encoded_copy_missing", "encoded_copy_unbound", "compress_demand_sent",
+    ].map(
       (n) => `daemon_markdown_${n}`,
     );
     const reasons = [
       "fresh", "mode", "auth_request", "cookie_request", "client_no_cache", "needs_validation", "stale",
       "headers_not_reproducible", "sidecar_missing", "purged", "absent", "binding_stale", "parent_stale",
-      "method", "range", "cors", "no_transform", "withheld", "skew", "sidecar_unpaired", "url_disagree", "request_header", "other",
+      "method", "range", "cors", "no_transform", "withheld", "skew", "no_acceptable_encoding", "sidecar_unpaired", "url_disagree",
+      "request_header", "other",
     ].map((n) => `daemon_markdown_fallthrough_${n}`);
     for (const name of [...engine, ...markdown, ...reasons]) {
       expect(statDescriptionSource(name), name).toBe("exact");
