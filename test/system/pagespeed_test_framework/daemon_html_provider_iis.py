@@ -392,6 +392,7 @@ class IisProvider(conf.Provider):
         self._auth_locations: Set[str] = set()
         self.processes: Dict[str, int] = {}
         self.plain_port: Optional[int] = None
+        self._hold_requested = False
         self.max_processes = 1
         self.live: dict = {}
         self.mode = "off"
@@ -661,7 +662,8 @@ class IisProvider(conf.Provider):
         return int(r.body.strip())
 
     def _clear_hold(self) -> None:
-        for name in ("hold-next", "held", "commit.hold"):
+        self._hold_requested = False
+        for name in ("hold-next", "held", "commit.hold", "holds.log"):
             path = os.path.join(self.state, name)
             if os.path.exists(path):
                 os.unlink(path)
@@ -764,36 +766,48 @@ class IisProvider(conf.Provider):
             raise conf.ProviderUnsupported(f"statistics: {r.status}")
         return parse_statistics(r.body.decode("utf-8", "replace"))
 
+    def _held_pid(self) -> Optional[int]:
+        """The worker holding this row's held request, once it started."""
+        try:
+            with open(os.path.join(self.state, "holds.log"), encoding="ascii") as f:
+                starts = [l.split() for l in f if l.startswith("start ")]
+        except OSError:
+            return None
+        return int(starts[-1][1]) if starts else None
+
+    def _stats_pid(self) -> int:
+        """The one worker whose statistics the row reads: the one holding
+        its held request when it has one (a commit is counted where it
+        runs), else the one serving now. IIS keeps statistics per worker,
+        so a read from any other compares two processes' numbers."""
+        if self._hold_requested:
+            deadline = time.monotonic() + 15
+            while time.monotonic() < deadline:
+                pid = self._held_pid()
+                if pid is not None:
+                    return pid
+                time.sleep(0.05)
+            raise conf.ProviderUnsupported("the held request never reached the origin")
+        if self.max_processes != 1:
+            raise conf.ProviderUnsupported("statistics in a web garden need a held request")
+        c = self._connection(tls=True)
+        try:
+            return self._origin_pid(conn=c)
+        finally:
+            c.close()
+
     def _stats(self) -> Dict[str, int]:
-        """The module's statistics summed over the pool's worker processes:
-        each process keeps its own."""
-        total: Dict[str, int] = {}
-        wanted = set(self._pids())
-        read: Set[int] = set()
-        # New connections go to the workers that serve; a worker that takes
-        # none (draining after a recycle) has no request of this row.
+        pid = self._stats_pid()
         for _ in range(PIN_ATTEMPTS):
-            if read >= wanted or len(read) >= self.max_processes:
-                break
             c = self._connection(tls=True)
             try:
-                pid = self._origin_pid(conn=c)
-                if pid in read:
-                    continue
-                for name, value in self._stats_of(c).items():
-                    total[name] = total.get(name, 0) + value
-                read.add(pid)
+                if self._origin_pid(conn=c) == pid:
+                    return self._stats_of(c)
             except (OSError, http.client.HTTPException):
                 pass
             finally:
                 c.close()
-        if not read:
-            raise conf.ProviderUnsupported("no worker answered the statistics")
-        skipped = wanted - read
-        if skipped:
-            print(f"dhc: statistics of workers {sorted(read)}; not answering: "
-                  f"{sorted(skipped)}", flush=True)
-        return total
+        raise conf.ProviderUnsupported(f"no connection reached worker {pid}")
 
     def commits(self) -> Tuple[int, int]:
         s = self._stats()
@@ -888,6 +902,7 @@ class IisProvider(conf.Provider):
             f.write(body.encode("utf-8"))
 
     def hold_origin(self) -> None:
+        self._hold_requested = True
         open(os.path.join(self.state, "held"), "w").close()
         open(os.path.join(self.state, "hold-next"), "w").close()
 

@@ -222,6 +222,13 @@ namespace net_instaweb {
 			return (n > 0 && n < MAX_PATH) ? std::string(buffer, n) : std::string();
 		}();
 		if (trace_file.empty()) return;
+		static std::atomic<bool> announced(false);
+		if (!announced.exchange(true)) {
+			message_handler()->Message(kError,
+				"PAGESPEED_TEST_HTML_TRACE_FILE is set: the HTML cache writes a "
+				"test trace of every decision to %s. Test equipment; unset it.",
+				trace_file.c_str());
+		}
 		const int64 index =
 			statistics()->GetVariable(PurgeContext::kPurgeIndex)->Get();
 		const bool knows_purge =

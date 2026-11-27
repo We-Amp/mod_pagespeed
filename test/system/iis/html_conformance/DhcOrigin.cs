@@ -70,6 +70,13 @@ public class DhcOrigin : IHttpHandler
         {
             string held = Path.Combine(State, "held");
             DateTime start = DateTime.UtcNow;
+            lock (Lock)
+            {
+                // The worker that holds the request: the provider reads its
+                // statistics for the row.
+                File.AppendAllText(Path.Combine(State, "holds.log"),
+                    "start " + Process.GetCurrentProcess().Id + " " + ctx.Request.RawUrl + "\n");
+            }
             DateTime until = start.AddSeconds(120);
             while (File.Exists(held) && DateTime.UtcNow < until) Thread.Sleep(20);
             lock (Lock)
