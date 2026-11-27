@@ -705,6 +705,21 @@ pagespeed_cc_test(
     ],
 )
 
+# The agent class for the HTML cache serve scope: the shared vectors, the
+# signature verdicts, the counters and the once-per-request slot.
+pagespeed_cc_test(
+    name = "daemon_html_agent_class_test",
+    srcs = ["daemon_html_agent_class_test.cc"],
+    shard_count = 1,
+    deps = [
+        "//net/instaweb/rewriter",
+        "//pagespeed/kernel/http:known_agent_table",
+        "//pagespeed/kernel/util",
+        "//pagespeed/system:daemon_html_agent_class",
+        "//test/pagespeed/kernel/http:agent_vectors",
+    ],
+)
+
 # Every notification the in-place arms send, through the one builder: never
 # HTML, flags exactly from-module, never an agent request, never the llms.txt
 # mask, always the request's site.

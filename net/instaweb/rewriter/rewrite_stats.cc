@@ -317,6 +317,14 @@ const char* const RewriteStats::kDaemonHtmlEngineCounters[] = {
     "daemon_markdown_not_modified",
     "daemon_markdown_served_without_preference",
     "daemon_markdown_transport_conflict",
+    // The agent class of each classified request (daemon_html_agent_class.h):
+    // c1, c3 and c4 partition them; c1_not_ready and signature_failed are
+    // parts of c3 and c4.
+    "daemon_html_agent_class_c1",
+    "daemon_html_agent_class_c3",
+    "daemon_html_agent_class_c4",
+    "daemon_html_agent_class_c1_not_ready",
+    "daemon_html_agent_class_signature_failed",
     nullptr,
 };
 

@@ -29,6 +29,7 @@
 #define NGX_WEBBOTAUTH_HANDLER_H_
 
 #include "ngx_pagespeed.h"  // ngx_http types + str helpers (+ LOG_* undef dance)
+#include "pagespeed/system/daemon_html_agent_class.h"
 
 namespace net_instaweb {
 
@@ -76,6 +77,12 @@ ngx_int_t ps_x_verified_bot_variable(ngx_http_request_t* r,
 // the request path. Callers must additionally check the
 // WebBotAuthBotDetection option before acting on the answer.
 bool ps_webbotauth_signature_verified(ngx_http_request_t* r);
+
+// What the verifier says about `r`'s client request for its agent class
+// (pagespeed/system/daemon_html_agent_class.h): none when WebBotAuth is off
+// for the server, not ready when it is on but the preaccess handler stored
+// no verdict for the request (yet), else the stored verdict's reading.
+DaemonHtmlAgentSignature ps_webbotauth_agent_signature(ngx_http_request_t* r);
 
 // Registers the opt-in telemetry counters (verified/signed-agent requests +
 // non-web-bot-auth "other signature" requests). Called from

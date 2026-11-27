@@ -79,6 +79,7 @@
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/system/daemon_html_agent_class.h"
 #include "pagespeed/system/daemon_html_purge_observer.h"
 #include "pagespeed/system/serve_host_names.h"
 
@@ -146,7 +147,10 @@ struct DaemonHtmlRequestFacts {
   int64 capture_start_ms = 0;
   // options->enabled() and options->IsAllowed(url) for this request.
   bool options_enabled_and_allowed = false;
-  GoogleString agent_class;  // Not used yet; empty.
+  // The request's agent class (daemon_html_agent_class.h): 0 unknown, 1 a
+  // signed agent, 3 a known agent's User-Agent token; 2 is never produced.
+  // The port computes it once per client request.  Not sent yet.
+  int agent_class = 0;
 };
 
 // What the engine asks the port to do with one request.
@@ -494,6 +498,11 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
   // Whether the engine stores and serves now.
   bool serving() const;
   const Config& config() const { return config_; }
+  // The agent class counters, resolved once for this engine's statistics;
+  // the port counts each request's class with them.
+  const DaemonHtmlAgentClassCounters& agent_class_counters() const {
+    return agent_class_counters_;
+  }
 
   void set_test_hooks(TestHooks* hooks) { test_hooks_ = hooks; }
   DaemonHtmlPurgeOracle* oracle() { return &oracle_; }
@@ -561,6 +570,7 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
   Deps deps_;
   DaemonHtmlPurgeOracle oracle_;
   std::unique_ptr<Counters> counters_;
+  const DaemonHtmlAgentClassCounters agent_class_counters_;
   std::shared_ptr<DaemonHtmlDecisionLog> log_;
   TestHooks* test_hooks_ = nullptr;
 

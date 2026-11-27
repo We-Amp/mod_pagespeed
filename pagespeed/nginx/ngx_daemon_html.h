@@ -27,6 +27,7 @@
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/thread/queued_worker_pool.h"
+#include "pagespeed/system/daemon_html_agent_class.h"
 #include "pagespeed/system/daemon_html_engine.h"
 
 namespace net_instaweb {
@@ -89,6 +90,16 @@ class NgxDaemonHtmlRunner : public DaemonHtmlBlockingRunner {
 
 // One request header line as the port reads it.
 using NgxHeaderLine = std::pair<StringPiece, StringPiece>;
+
+// What the Web Bot Auth verifier says about a request when its agent class
+// is computed (pagespeed/system/daemon_html_agent_class.h).  `enabled`:
+// WebBotAuth is on for the server.  `verdict`: the $x_verified_bot value the
+// verifier stored for the client request, null when it stored none yet.
+// "signed-agent" and a value ending in `verified_bot_suffix` are verified;
+// "unknown" (signature material that did not verify) failed; "human" (no
+// web-bot-auth signature) is none.
+DaemonHtmlAgentSignature NgxDaemonHtmlAgentSignature(
+    bool enabled, const StringPiece* verdict, StringPiece verified_bot_suffix);
 
 // The request-side facts that come from the request's own header lines, in
 // order, every line counted: Authorization or Proxy-Authorization, Cookie or

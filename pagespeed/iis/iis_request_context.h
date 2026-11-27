@@ -150,6 +150,12 @@ public:
 	const ClientConditionalStash& client_conditionals() const { return client_conditionals_; }
 	void set_client_conditionals(const ClientConditionalStash& stash) { client_conditionals_ = stash; }
 
+	// The request's agent class (pagespeed/system/daemon_html_agent_class.h),
+	// computed and set when this context is created, for a site whose HTML
+	// cache is on; a child request finds this context.
+	int agent_class() const { return agent_class_; }
+	void set_agent_class(int agent_class) { agent_class_ = agent_class; }
+
 	// DaemonHtmlCache serve-variants: the Markdown answer the main
 	// registration kept for the final-view registration to send
 	// (iis_daemon_html_serve.h).  Taken once.
@@ -197,6 +203,7 @@ private:
 	int64 created_ms_;
 	std::unique_ptr<IisDaemonHtmlCapture> daemon_html_capture_;
 	ClientConditionalStash client_conditionals_;
+	int agent_class_ = 0;
 	std::unique_ptr<IisMarkdownAnswer> markdown_answer_;
 	bool daemon_html_commit_started_ = false;
 	GoogleString daemon_html_trace_url_;

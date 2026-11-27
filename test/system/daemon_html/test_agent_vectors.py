@@ -11,6 +11,7 @@ it; otherwise that cross-check is skipped with a note."""
 
 import json
 import os
+import string
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -36,8 +37,13 @@ def load(path=VECTORS):
     return tokens, vectors
 
 
+# ASCII-only case folding, as the rule says: str.lower() would also fold
+# non-ASCII letters (U+212A KELVIN SIGN to "k") and change lengths.
+ASCII_LOWER = str.maketrans(string.ascii_uppercase, string.ascii_lowercase)
+
+
 def matches(user_agent, token):
-    ua, t = user_agent.lower(), token.lower()
+    ua, t = user_agent.translate(ASCII_LOWER), token.translate(ASCII_LOWER)
     i = ua.find(t)
     while i != -1:
         j = i + len(t)
@@ -92,6 +98,8 @@ class AgentVectorsTest(unittest.TestCase):
         self.assertFalse(matches("ChatGPT  Agent", "ChatGPT Agent"))
         self.assertTrue(matches("x;ChatGPT Agent/2", "ChatGPT Agent"))
         self.assertFalse(matches("bigsurxai", "bigsur.ai"))
+        self.assertFalse(matches("\u212aimiBot/1.0", "KimiBot"))
+        self.assertTrue(matches("kIMIbOT/1.0", "KimiBot"))
 
     def test_table_cross_check(self):
         path = os.environ.get("KNOWN_AGENT_TABLE")

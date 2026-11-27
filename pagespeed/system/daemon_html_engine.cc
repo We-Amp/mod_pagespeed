@@ -781,7 +781,8 @@ DaemonHtmlEngine::DaemonHtmlEngine(Config config, Deps deps)
     : config_(std::move(config)),
       deps_(std::move(deps)),
       oracle_(deps_.purge_source, deps_.timer),
-      counters_(new Counters(deps_.statistics)) {
+      counters_(new Counters(deps_.statistics)),
+      agent_class_counters_(deps_.statistics) {
   if (!deps_.log_dir.empty()) {
     log_ = DaemonHtmlDecisionLog::ForLogDir(deps_.log_dir);
   }

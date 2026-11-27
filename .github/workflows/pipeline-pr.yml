@@ -363,6 +363,37 @@ jobs:
           python3 tools/ci/check_optimizer_pin_pair.py "$PIN" \
             "${RUNNER_TEMP}/optimizer-test-pin-MODULE.bazel" bazel/repositories.bzl
 
+      # The compiled-in known-agent table is a snapshot of the optimizer's
+      # agent list at its own pin; it must be exactly what the generator
+      # writes from that file. A branch without the table has nothing to check.
+      - name: Known-agent table matches its pinned agent list
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          PIN=test/system/known-agent-table-pin.json
+          INC=pagespeed/kernel/http/known_agent_table.inc
+          if [ ! -f "$INC" ] || [ ! -f "$PIN" ]; then
+            echo "No known-agent table on this branch: nothing to check."
+            exit 0
+          fi
+          # A branch that predates a tool takes it from master (docs/ci/pipelines.md;
+          # canonical copy of this block: the changelog self-tests step).
+          h=tools/ci/with-default-branch-tool.sh
+          if [ ! -f "$h" ]; then
+            git fetch --quiet --depth=1 origin master
+            h="${RUNNER_TEMP}/with-default-branch-tool.sh"
+            git show "FETCH_HEAD:tools/ci/with-default-branch-tool.sh" > "$h"
+          fi
+          gen="$(bash "$h" tools/gen_known_agent_table.py)"
+          python3 -I "$gen" --self-test
+          # The pin and the snapshot's header agree before anything is fetched.
+          python3 -I "$gen" check-pin "$PIN" "$INC"
+          read -r COMMIT FILE SHA < <(python3 -I -c "import json,sys;p=json.load(open(sys.argv[1]));print(p['optimizer_commit'],p['path'],p['sha256'])" "$PIN")
+          bash tools/ci/fetch_retry.sh \
+            "https://raw.githubusercontent.com/We-Amp/pagespeed-optimizer/${COMMIT}/${FILE}" \
+            "${RUNNER_TEMP}/known-agent-table.json" "$SHA"
+          python3 -I "$gen" check "$PIN" "${RUNNER_TEMP}/known-agent-table.json" "$INC"
+
       - name: Changelog fragment tools - self-tests
         if: ${{ !cancelled() }}
         run: |

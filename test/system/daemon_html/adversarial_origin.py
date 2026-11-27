@@ -78,6 +78,7 @@ import html
 import json
 import re
 import secrets
+import string
 import sys
 import threading
 import time
@@ -102,6 +103,7 @@ UA_VARIANT_TOKENS = ("GPTBot", "ClaudeBot", "PerplexityBot", "CCBot",
                      "Bytespider", "OAI-SearchBot", "ChatGPT-User",
                      "Claude-User", "Amazonbot", "Applebot")
 _BOUNDARY = " ();/"
+_ASCII_LOWER = str.maketrans(string.ascii_uppercase, string.ascii_lowercase)
 
 VALIDATOR_ETAG = 'W/"v1-validators"'
 VALIDATOR_LAST_MODIFIED = "Mon, 02 Mar 2026 10:00:00 GMT"
@@ -142,8 +144,9 @@ def parse_counter(body):
 
 def token_matches(user_agent, token):
     """Case-insensitive whole-token (or phrase) match on token boundaries."""
-    ua = user_agent.lower()
-    t = token.lower()
+    # ASCII-only case folding: str.lower() also folds non-ASCII letters.
+    ua = user_agent.translate(_ASCII_LOWER)
+    t = token.translate(_ASCII_LOWER)
     start = ua.find(t)
     while start != -1:
         end = start + len(t)

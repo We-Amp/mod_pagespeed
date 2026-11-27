@@ -75,6 +75,8 @@ cc_library(
         ":ngx_daemon_record_completion",
         "//pagespeed/kernel/base:pagespeed_base",
         "//pagespeed/kernel/thread",
+        "//pagespeed/kernel/webbotauth:webbotauth_core",
+        "//pagespeed/system:daemon_html_agent_class",
         "//pagespeed/system:daemon_html_engine",
         "//pagespeed/system:module_entity_tags",
     ],
@@ -292,6 +294,15 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
+# The Web Bot Auth handler, read by
+# test/pagespeed/nginx/ngx_daemon_html_agent_class_test.cc to pin that the
+# HTML cache's agent class reads the stored verdict and never recomputes it.
+filegroup(
+    name = "ngx_webbotauth_handler_src",
+    srcs = ["ngx_webbotauth_handler.cc"],
+    visibility = ["//visibility:public"],
+)
+
 # The in-place recorder seam is behaviour-free -- the same object, built at
 # the same point with the same arguments, now through the shared gate -- so
 # there is nothing to execute, and linking the port into a test is
@@ -402,6 +413,7 @@ cc_library(
         "//pagespeed/system",
         "//pagespeed/system:curl_fetcher",
         "//pagespeed/system:daemon_adapter",
+        "//pagespeed/system:daemon_html_agent_class",
         "//pagespeed/system:daemon_html_engine",
         "//pagespeed/system:daemon_html_purge_source",
         "//pagespeed/system:daemon_serve_arm",
@@ -581,6 +593,7 @@ cc_library(
         "//pagespeed/system",
         "//pagespeed/system:curl_fetcher",
         "//pagespeed/system:daemon_adapter",
+        "//pagespeed/system:daemon_html_agent_class",
         "//pagespeed/system:daemon_html_engine",
         "//pagespeed/system:daemon_html_purge_source",
         "//pagespeed/system:daemon_serve_arm",

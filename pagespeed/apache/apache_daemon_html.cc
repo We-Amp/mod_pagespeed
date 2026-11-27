@@ -5,6 +5,7 @@
 
 #include <chrono>
 #include <cstdlib>
+#include <new>
 #include <thread>
 
 #include "net/instaweb/rewriter/public/option_context.h"
@@ -16,6 +17,7 @@
 #include "pagespeed/apache/instaweb_context.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/http/http_names.h"
+#include "pagespeed/system/daemon_html_agent_class.h"
 #include "pagespeed/system/site_cache_fragment.h"
 // httpd after the module's own headers (see apache_httpd_includes.h).
 #include "apr_strings.h"    // NOLINT
@@ -155,6 +157,61 @@ bool ApacheDaemonHtmlMainRequest(const request_rec* r) {
   return r->main == nullptr && r->prev == nullptr;
 }
 
+namespace {
+
+// The pool user-data key of the agent class.  A pool's user data is not
+// reachable from a client.
+const char kAgentClassKey[] = "mod_pagespeed_daemon_html_agent_class";
+
+// The request the client sent (apache_conditional_stash.cc).
+const request_rec* ClientRequest(const request_rec* r) {
+  while (r->main != nullptr || r->prev != nullptr) {
+    r = r->main != nullptr ? r->main : r->prev;
+  }
+  return r;
+}
+
+}  // namespace
+
+const DaemonHtmlAgentClassCounters* ApacheDaemonHtmlAgentClassCounters(
+    ApacheServerContext* context) {
+  if (context == nullptr || context->global_config()->daemon_html_cache() ==
+                                RewriteOptions::kDaemonHtmlCacheOff) {
+    return nullptr;
+  }
+  DaemonHtmlEngine* engine = context->daemon_html_engine();
+  return engine == nullptr ? nullptr : &engine->agent_class_counters();
+}
+
+int ApacheDaemonHtmlAgentClass(request_rec* r,
+                               const DaemonHtmlAgentClassCounters* counters) {
+  if (r == nullptr || counters == nullptr) {
+    return kDaemonHtmlAgentClassUnknown;
+  }
+  const request_rec* client = ClientRequest(r);
+  apr_pool_t* pool = client->pool;
+  void* data = nullptr;
+  if (apr_pool_userdata_get(&data, kAgentClassKey, pool) == APR_SUCCESS &&
+      data != nullptr) {
+    return static_cast<const DaemonHtmlAgentClassSlot*>(data)->agent_class();
+  }
+  // The client request's first User-Agent line, as every other reader of
+  // it takes it.
+  const char* user_agent =
+      client->headers_in == nullptr
+          ? nullptr
+          : apr_table_get(client->headers_in, HttpAttributes::kUserAgent);
+  void* memory = apr_palloc(pool, sizeof(DaemonHtmlAgentClassSlot));
+  if (memory == nullptr) return kDaemonHtmlAgentClassUnknown;
+  // Trivially destructible: the pool's own release frees it.
+  DaemonHtmlAgentClassSlot* slot = new (memory) DaemonHtmlAgentClassSlot();
+  const int agent_class =
+      slot->Resolve(user_agent == nullptr ? "" : user_agent,
+                    DaemonHtmlAgentSignature::kNone, counters);
+  apr_pool_userdata_setn(slot, kAgentClassKey, apr_pool_cleanup_null, pool);
+  return agent_class;
+}
+
 void FillApacheDaemonHtmlRequestFacts(request_rec* r,
                                       ApacheServerContext* context,
                                       const RewriteOptions* options,
@@ -207,6 +264,8 @@ void FillApacheDaemonHtmlRequestFacts(request_rec* r,
   facts->has_range = Has(in, "Range");
   facts->has_if_range = Has(in, "If-Range");
   facts->has_origin = Has(in, HttpAttributes::kOrigin);
+  facts->agent_class = ApacheDaemonHtmlAgentClass(
+      r, ApacheDaemonHtmlAgentClassCounters(context));
   // When the request entered httpd, so never later than the origin's fetch.
   facts->capture_start_ms = apr_time_as_msec(r->request_time);
   if (options != nullptr) {

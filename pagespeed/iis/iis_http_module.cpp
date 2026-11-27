@@ -942,6 +942,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		// The conditionals as they arrived (the begin-request notification
 		// may have removed a module tag from the request since).
 		CopyClientConditionals(inner->client_conditionals(), facts);
+		facts->agent_class = inner->agent_class();
 		facts->has_if_match = request->GetHeader(HttpHeaderIfMatch) != nullptr;
 		facts->has_if_unmodified_since =
 			request->GetHeader(HttpHeaderIfUnmodifiedSince) != nullptr;
@@ -1445,6 +1446,27 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		// The client's conditionals as they arrived, for the HTML cache: this
 		// module object took them at the begin-request notification.
 		ctx->GetInnerContext()->set_client_conditionals(client_conditionals_);
+		// The agent class, classified and counted once per request: only here,
+		// where the request's one context is created (a child request finds
+		// its parent's), and only for a site whose HTML cache is on, so no
+		// other request pays for the scan.  The User-Agent value as IIS holds
+		// it (HTTP.sys may have joined repeated lines with ", ", which is not
+		// a token boundary).  IIS has no signature verifier here.
+		{
+			IisInnerRequestContext* inner = ctx->GetInnerContext();
+			IisServerContext* sc = inner->server_context();
+			DaemonHtmlEngine* engine = sc == nullptr ? nullptr :
+				sc->daemon_html_engine(inner->process_context()->site_id());
+			if (engine != nullptr) {
+				USHORT ua_length = 0;
+				PCSTR ua = pHttpContext->GetRequest()->GetHeader(HttpHeaderUserAgent, &ua_length);
+				const DaemonHtmlAgentClass agent_class = ClassifyDaemonHtmlAgent(
+					ua == nullptr ? StringPiece() : StringPiece(ua, ua_length),
+					DaemonHtmlAgentSignature::kNone);
+				inner->set_agent_class(agent_class.agent_class);
+				CountDaemonHtmlAgentClass(agent_class, &engine->agent_class_counters());
+			}
+		}
 		bool is_resource = ctx->GetInnerContext()->is_resource();
 		// TODO(oschaaf): 1.9-> is_resource arg not used?!
 		auto response_category = ps_route_request(pHttpContext, ctx, is_resource);

@@ -27,6 +27,7 @@
 #include <string_view>
 #include <vector>
 
+#include "ngx_daemon_html.h"
 #include "ngx_rewrite_options.h"
 #include "ngx_server_context.h"
 #include "pagespeed/kernel/base/file_system.h"
@@ -961,6 +962,30 @@ bool ps_webbotauth_signature_verified(ngx_http_request_t* r) {
   const StringPiece signed_agent_token(
       webbotauth::VerdictToken(webbotauth::Verdict::kSignedAgent));
   return value == signed_agent_token || value.ends_with(kVerifiedBotSuffix);
+}
+
+DaemonHtmlAgentSignature ps_webbotauth_agent_signature(ngx_http_request_t* r) {
+  if (r == nullptr) {
+    return DaemonHtmlAgentSignature::kNone;
+  }
+  // The same switch the preaccess handler reads: off, or a context that
+  // cannot verify, means there is no verifier for this request.
+  NgxServerContext* server_context = ps_get_server_context(r);
+  const bool enabled =
+      server_context != nullptr && server_context->config() != nullptr &&
+      server_context->initialized() && server_context->config()->web_bot_auth();
+  StringPiece value;
+  const StringPiece* verdict = nullptr;
+  if (enabled && g_xvb_var_index != NGX_ERROR) {
+    // The verdict computed once for the client transaction, on the main
+    // request; never recomputed here.
+    const ngx_http_variable_value_t* mv = &r->main->variables[g_xvb_var_index];
+    if (mv->valid && !mv->not_found && mv->data != nullptr) {
+      value = StringPiece(reinterpret_cast<const char*>(mv->data), mv->len);
+      verdict = &value;
+    }
+  }
+  return NgxDaemonHtmlAgentSignature(enabled, verdict, kVerifiedBotSuffix);
 }
 
 void ps_webbotauth_counter_map(const GoogleString& path) {

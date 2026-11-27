@@ -2797,6 +2797,47 @@ DaemonHtmlEngine* ps_daemon_html_engine(ngx_http_request_t* r) {
   return cfg_s->server_context->daemon_html_engine();
 }
 
+// The agent class of the client request (daemon_html_agent_class.h) lives in
+// a cleanup of the request pool, as the conditional stash does: an internal
+// redirect keeps the pool (it clears the module contexts) and a subrequest
+// shares it, so the class is computed and counted once per client request.
+void ps_daemon_html_agent_class_cleanup(void* data) {
+  static_cast<DaemonHtmlAgentClassSlot*>(data)->~DaemonHtmlAgentClassSlot();
+}
+
+// The class, computed on the first call for the client request: the phase
+// handler calls it first, after the Web Bot Auth handler of the same phase
+// (same-phase handlers run in reverse registration order), so a signature
+// verdict is ready unless that handler did not run for this request.  A
+// server block without an HTML cache engine computes and keeps nothing (0).
+int ps_daemon_html_agent_class(ngx_http_request_t* r) {
+  ngx_http_request_t* main = r->main;
+  for (ngx_pool_cleanup_t* c = main->pool->cleanup; c != nullptr; c = c->next) {
+    if (c->handler == ps_daemon_html_agent_class_cleanup) {
+      return static_cast<const DaemonHtmlAgentClassSlot*>(c->data)
+          ->agent_class();
+    }
+  }
+  DaemonHtmlEngine* engine = ps_daemon_html_engine(main);
+  if (engine == nullptr) {
+    return kDaemonHtmlAgentClassUnknown;
+  }
+  ngx_pool_cleanup_t* cln =
+      ngx_pool_cleanup_add(main->pool, sizeof(DaemonHtmlAgentClassSlot));
+  if (cln == nullptr) {
+    return kDaemonHtmlAgentClassUnknown;
+  }
+  auto* slot = new (cln->data) DaemonHtmlAgentClassSlot();
+  cln->handler = ps_daemon_html_agent_class_cleanup;
+  // The first User-Agent line, as nginx keeps it.
+  const StringPiece user_agent =
+      main->headers_in.user_agent == nullptr
+          ? StringPiece()
+          : str_to_string_piece(main->headers_in.user_agent->value);
+  return slot->Resolve(user_agent, ps_webbotauth_agent_signature(main),
+                       &engine->agent_class_counters());
+}
+
 // The request as the HTML cache engine reads it.  `url` is the URL this
 // module parsed from the request line, before any option or forwarded-proto
 // change: the URL agreement compares it with the server's own reading.
@@ -2852,6 +2893,7 @@ void ps_daemon_html_request_facts(ngx_http_request_t* r,
   }
   facts->capture_start_ms =
       static_cast<int64>(r->start_sec) * Timer::kSecondMs + r->start_msec;
+  facts->agent_class = ps_daemon_html_agent_class(r);
 }
 
 // Takes the store view: the origin's lines at the first header filter, for
@@ -5928,6 +5970,12 @@ ngx_int_t ps_phase_handler(ngx_http_request_t* r,
                  "pagespeed phase: %ui", r->phase_handler);
 
   r->write_event_handler = ngx_http_request_empty_handler;
+
+  // The HTML cache's agent class, once per client request, here in the
+  // module's PRECONTENT (PREACCESS before nginx 1.13.4) slot.
+  if (r == r->main) {
+    ps_daemon_html_agent_class(r);
+  }
 
   ngx_int_t rc = ps_content_handler(r);
   // Warning: this requires ps_content_handler to always return NGX_DECLINED

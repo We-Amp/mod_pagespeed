@@ -72,3 +72,14 @@ cc_library(
         "@libpsl//:libpsl",
     ],
 )
+
+# The known AI agent table (a build-time snapshot, known_agent_table.inc,
+# written by tools/gen_known_agent_table.py) and its User-Agent matcher.
+cc_library(
+    name = "known_agent_table",
+    srcs = ["known_agent_table.cc"],
+    hdrs = ["known_agent_table.h"],
+    textual_hdrs = ["known_agent_table.inc"],
+    visibility = ["//visibility:public"],
+    deps = ["//pagespeed/kernel/base:pagespeed_base"],
+)

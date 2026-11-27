@@ -1515,6 +1515,10 @@ int pagespeed_modify_request(request_rec* r) {
     return APACHE_OK;
   }
   ApacheTreatSelfFetchAsRemote(r);
+  // The agent class, once per client request: an internal redirect runs this
+  // hook again and finds the first pass's.  Only where the HTML cache is on.
+  ApacheDaemonHtmlAgentClass(
+      r, ApacheDaemonHtmlAgentClassCounters(server_context));
   return APACHE_OK;
 }
 
