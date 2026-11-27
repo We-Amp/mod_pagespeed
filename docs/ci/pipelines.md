@@ -1192,8 +1192,9 @@ pull request (the callers pin `@master`). To exercise it before merge:
    based on the current `master`, so it carries the queue and event guards.
 2. Dispatch the `CI (ci-dev)` workflow (`ci-dev.yml`) from the Actions tab or
    with `gh workflow run ci-dev.yml --ref ci-dev`. It calls `pipeline-pr.yml@ci-dev`.
-   Use `--ref ci-dev`: the event guard of the full-tier pipeline accepts
-   a dispatch only on `master` or `ci-dev`. To run the full tier as well,
+   Use `--ref ci-dev` (in the Actions tab, pick the `ci-dev` branch): both
+   jobs of `ci-dev.yml` run only when `github.ref` is `refs/heads/ci-dev`, and
+   are skipped on any other ref. To run the full tier as well,
    set the `full` input: `gh workflow run ci-dev.yml --ref ci-dev -f full=true`
    (or tick `full` in the Actions tab). The `full` job then calls
    `pipeline-full.yml@ci-dev`.

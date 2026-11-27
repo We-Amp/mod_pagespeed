@@ -116,7 +116,8 @@ expect_bad bad-slsa-secret 'rule g'
 # env-tag-ref: a job of the release environment refuses a branch ref in its if:.
 expect_good good-env-tag-ref
 expect_good good-env-tag-ref-nginxorg
-for d in module-no-ref module-no-tag mapping expression other-workflow nginxorg-unguarded or always; do
+for d in module-no-ref module-no-tag mapping expression other-workflow nginxorg-unguarded or always \
+  case case-quoted defaults custom-shell negated nginxorg-defaults nginxorg-pin-elsewhere; do
   expect_bad "bad-env-tag-ref-${d}" 'rule env-tag-ref'
 done
 expect_bad bad-write-call-job 'rule f'

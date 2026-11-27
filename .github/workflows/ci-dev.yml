@@ -22,7 +22,11 @@ concurrency:
 permissions: {}
 
 jobs:
+  # Both jobs run only on a dispatch from the ci-dev branch
+  # (`gh workflow run ci-dev.yml --ref ci-dev`, docs/ci/pipelines.md), so the
+  # pipelines @ci-dev never run under another ref's name.
   pr:
+    if: ${{ github.ref == 'refs/heads/ci-dev' }}
     # The called pipeline requests pull-requests: read for the release-note
     # gate, contents: write for its lock-push job alone (pushes a
     # regenerated MODULE.bazel.lock to a same-repository PR branch; it never
@@ -41,7 +45,7 @@ jobs:
   # branch; actions: read is for its path filter (reads the push runs of the
   # default branch), and a called workflow cannot exceed what its caller grants.
   full:
-    if: ${{ inputs.full }}
+    if: ${{ inputs.full && github.ref == 'refs/heads/ci-dev' }}
     permissions:
       actions: read
       contents: read
