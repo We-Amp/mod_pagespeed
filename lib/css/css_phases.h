@@ -169,6 +169,17 @@ bool RestorePreservedComments(std::string_view input,
   return true;
 }
 
+// True iff text[pos] is ESCAPE CONTENT: preceded by an odd-length run
+// of backslashes, so it is part of an identifier, never a syntactic
+// character.  The single escape predicate for the property-name scans
+// (AtCustomPropertyColon here, IsValueGroupBrace in css_minify.cc), so
+// every phase agrees on what a custom-property name contains.
+bool IsEscapeContentAt(std::string_view text, size_t pos) {
+  size_t slashes = 0;
+  while (pos > slashes && text[pos - 1 - slashes] == '\\') ++slashes;
+  return slashes % 2 == 1;
+}
+
 // True if a ':' about to be emitted sits in a declaration's property
 // position and the property name starts with "--" (a CSS custom
 // property).  Custom-property values are opaque token streams whose
@@ -197,15 +208,8 @@ bool RestorePreservedComments(std::string_view input,
 // decimal rule rewrote `a{--\ \>:0.}` to `a{--\ \>:.}` — valid-CSS
 // served-value corruption, found by the token-oracle nightly).
 bool AtCustomPropertyColon(const std::string& r) {
-  // True iff r[pos] is preceded by an odd-length run of backslashes
-  // (i.e. it is escape content, not a syntactic character).
-  auto is_escaped = [&r](size_t pos) {
-    size_t slashes = 0;
-    while (pos > slashes && r[pos - 1 - slashes] == '\\') ++slashes;
-    return slashes % 2 == 1;
-  };
   size_t e = r.size();
-  while (e > 0 && r[e - 1] == ' ' && !is_escaped(e - 1)) --e;
+  while (e > 0 && r[e - 1] == ' ' && !IsEscapeContentAt(r, e - 1)) --e;
   size_t s = e;
   while (s > 0) {
     char c = r[s - 1];
@@ -223,12 +227,12 @@ bool AtCustomPropertyColon(const std::string& r) {
     // the name, and the NEXT pass saw a custom property from the
     // start — a kept-then-dropped value-leading space broke
     // minify∘minify = minify.
-    if (!is_escaped(s - 1) && c == ' ') {
+    if (!IsEscapeContentAt(r, s - 1) && c == ' ') {
       size_t s2 = s;
       while (s2 > 0 && r[s2 - 1] == ' ') --s2;
       if (s2 == 0) break;
       const char before = r[s2 - 1];
-      const bool boundary = !is_escaped(s2 - 1) &&
+      const bool boundary = !IsEscapeContentAt(r, s2 - 1) &&
                             (before == '{' || before == ';' || before == '}');
       if (boundary) break;
       const bool removable = CanRemoveSpaceAfter(before) ||
@@ -237,7 +241,7 @@ bool AtCustomPropertyColon(const std::string& r) {
       s = s2;
       continue;
     }
-    if (!is_escaped(s - 1) &&
+    if (!IsEscapeContentAt(r, s - 1) &&
         (c == '{' || c == '}' || c == ';' || c == ':' || c == ',' || c == '(' ||
          c == ')' || c == '\'' || c == '"' || c == '+' || c == '>' ||
          c == '~' || c == '!' || c == '*' || c == '/')) {
@@ -246,7 +250,7 @@ bool AtCustomPropertyColon(const std::string& r) {
     --s;
   }
   if (e - s < 2 || r[s] != '-' || r[s + 1] != '-') return false;
-  while (s > 0 && r[s - 1] == ' ' && !is_escaped(s - 1)) --s;
+  while (s > 0 && r[s - 1] == ' ' && !IsEscapeContentAt(r, s - 1)) --s;
   return s == 0 || r[s - 1] == '{' || r[s - 1] == ';' || r[s - 1] == '}';
 }
 

@@ -100,9 +100,17 @@ bool IsValueGroupBrace(const std::string& emitted, size_t seg_begin,
   // (":hover", "::before") — unambiguous CSS Nesting, never a value
   // group (review on PR-E).
   if (name_begin == seg_colon) return false;
+  // An escaped char is name content whatever it is ("--\>p" is a valid
+  // custom-property name).  Without the escape check, such a name
+  // scanned as not-a-declaration and the value's brace group was
+  // collapsed as a nested block, rewriting the opaque value.  Uses the
+  // same escape predicate as AtCustomPropertyColon.
   for (size_t k = name_begin; k < seg_colon; ++k) {
     char sc = emitted[k];
-    if (!IsNameChar(sc) && sc != '\\' && !IsCssWhitespace(sc)) return false;
+    if (!IsNameChar(sc) && sc != '\\' && !IsCssWhitespace(sc) &&
+        !IsEscapeContentAt(emitted, k)) {
+      return false;
+    }
   }
   if (top_level && emitted.compare(name_begin, 2, "--") != 0) return false;
   return true;

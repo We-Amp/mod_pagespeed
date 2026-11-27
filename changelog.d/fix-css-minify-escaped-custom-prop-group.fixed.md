@@ -1,0 +1,1 @@
+Fixed: CSS minification no longer rewrites the value of a custom property whose name contains an escaped character. A `{...}` group in such a value was minified as if it were a nested rule block, which could drop empty declarations or merge longhands inside the value; the value is now kept as written, like any other custom-property value.

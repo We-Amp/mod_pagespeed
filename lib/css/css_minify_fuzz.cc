@@ -114,9 +114,13 @@ namespace {
 // Valid-CSS-biased seed set (audit PR-C §4.4/§5): url tokens with
 // ';{}' content, custom values with braces/parens/decimals, escaped
 // idents, and an @layer/:where Tailwind-v4-style snippet (per
-// lib/css/CLAUDE.md's testing advice).  Replayed through BOTH oracles
-// at the start of every deterministic main() run; also usable as the
-// libFuzzer seed corpus (write to a corpus dir and pass it).
+// lib/css/CLAUDE.md's testing advice).  It also holds regression
+// artifacts from fixed fuzz findings, some of them garbage-input (stray
+// escapes, tabs, CR, unbalanced brackets) rather than valid CSS, so the
+// replay floor keeps checking the exact inputs that once failed.
+// Replayed through BOTH oracles at the start of every deterministic
+// main() run; also usable as the libFuzzer seed corpus (write to a
+// corpus dir and pass it).
 const char* const kValidCssSeeds[] = {
     "a{background:url(x;}y)}",
     // Parenthesized: adjacent literals in an array initializer trip
@@ -170,6 +174,19 @@ const char* const kValidCssSeeds[] = {
     // property; the rule block's empty-declaration trim is sanctioned.
     "2[/ro;--y:t){;m0}",
     "[;--a:b]{;c}",
+    // #954 (and the earlier auto-closed #848, #882, #907): a custom
+    // property whose name holds an escaped char keeps its value's brace
+    // group verbatim — Phase 5 must not collapse it as a nested block.
+    "--\\--\\>\t--\\-p:>----{;]}",
+    "--\\--\\>\t--\\-p:>--{ax:-;a;b:;}-----x",
+    "--\\--\\>\t--\\-p:>--{ax4-;a;b;}---'q];",
+    "--T--\\~--\\---\\,p:>-\\>\t--\\,p:>-{;'d'}rd",
+    "--\\--\\>\t--\\-p:>--{ax:-;a;b;}--;a;\r\"a-x",
+    "--\\--\\>\t--\\-p:>--{;b;}--ccccccccccc\t--\\-p:>--{;b;\\-",
+    ":rpt{--x0\\:: { ;;}}",
+    "--\\>:c{;d-}0-0/5.!0",
+    "a-0:\\\\\\\\\\\t\\\r~; --\\\t\\&:{5;;}((",
+    "a{--\\>p:{;b;}}",
     // #582: preserved comments (/*!, @license, @preserve) survive
     // byte-for-byte through the sentinel round trip; ordinary comments
     // still strip.
