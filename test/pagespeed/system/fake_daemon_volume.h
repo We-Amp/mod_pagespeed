@@ -38,12 +38,17 @@ struct FakeVolumeEntry {
   GoogleString origin_ct = "text/html; charset=utf-8";
   bool has_hash = false;
   uint8_t hash[kPsHtmlHashBytes] = {};
+  // A withheld marker's reason (kPsHtmlWithheld*).
+  int withheld_reason = kPsHtmlWithheldBelowFloor;
 };
 
 struct FakeVolumeSidecar {
   std::vector<std::pair<GoogleString, GoogleString>> lines;
   bool has_hash = false;
   uint8_t hash[kPsHtmlHashBytes] = {};
+  // The header block format: 3 carries the policy stamp (C API 1.15).
+  int format = 2;
+  uint64_t policy_stamp = 0;
 };
 
 class FakeDaemonVolume : public DaemonAbi {
@@ -266,6 +271,11 @@ class FakeDaemonVolume : public DaemonAbi {
     if (params->origin_html_hash != nullptr) {
       s.has_hash = true;
       memcpy(s.hash, params->origin_html_hash, kPsHtmlHashBytes);
+    }
+    if (params->struct_size >= sizeof(PsSidecarWriteParams) &&
+        (params->write_flags & kPsSidecarWritePolicyBlock) != 0) {
+      s.format = 3;
+      s.policy_stamp = params->policy_stamp;
     }
     if (!IsPath(params->url)) return kPsErrInvalidArg;
     sidecars_[Key(params->site, params->url, params->hostname,
