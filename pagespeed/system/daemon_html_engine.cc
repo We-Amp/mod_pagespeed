@@ -628,6 +628,8 @@ struct DaemonHtmlEngine::Counters {
         epoch_write_failed(s->GetVariable("daemon_html_epoch_write_failed")),
         purge_remove_failed(s->GetVariable("daemon_html_purge_remove_failed")),
         serve_unavailable(s->GetVariable("daemon_html_serve_unavailable")),
+        serve_cached_html_unavailable(
+            s->GetVariable("daemon_html_serve_cached_html_unavailable")),
         notify_sent(s->GetVariable("daemon_html_notify_sent")),
         notify_limited(s->GetVariable("daemon_html_notify_limited")),
         markdown_served(s->GetVariable("daemon_markdown_served")),
@@ -672,6 +674,7 @@ struct DaemonHtmlEngine::Counters {
   Variable* epoch_write_failed;
   Variable* purge_remove_failed;
   Variable* serve_unavailable;
+  Variable* serve_cached_html_unavailable;
   Variable* notify_sent;
   Variable* notify_limited;
   Variable* markdown_served;
@@ -832,6 +835,13 @@ bool DaemonHtmlEngine::serving() const {
   return set_bound_ && worker_markdown_ && worker_agent_entitled_;
 }
 
+DaemonHtmlMode DaemonHtmlEngine::effective_mode() const {
+  if (config_.mode != DaemonHtmlMode::kServeCachedHtml) return config_.mode;
+  std::lock_guard<std::mutex> lock(mutex_);
+  return set15_bound_ ? DaemonHtmlMode::kServeCachedHtml
+                      : DaemonHtmlMode::kServeVariants;
+}
+
 void DaemonHtmlEngine::CacheKey(const DaemonHtmlRequestFacts& facts,
                                 GoogleString* url, GoogleString* hostname) {
   GoogleString host;
@@ -861,6 +871,7 @@ void DaemonHtmlEngine::CacheKey(const DaemonHtmlRequestFacts& facts,
 void DaemonHtmlEngine::ReadConditions(bool log_change) {
   const DaemonAbi* abi = deps_.substrate.abi;
   const bool set = abi != nullptr && abi->HasHtmlServeSet();
+  ReadServe15Condition(log_change);
   bool markdown = false;
   bool entitled = false;
   GoogleString reason;
@@ -920,6 +931,74 @@ void DaemonHtmlEngine::ReadConditions(bool log_change) {
           reason.c_str());
     }
   }
+}
+
+void DaemonHtmlEngine::ReadServe15Condition(bool log_change) {
+  const DaemonAbi* abi = deps_.substrate.abi;
+  const bool set15 = abi != nullptr && abi->HasHtmlServe15Set();
+  const GoogleString reason =
+      set15 ? GoogleString()
+      : abi == nullptr
+          ? GoogleString("no optimizer library is loaded")
+          : abi->HtmlServe15SetUnavailableReason();
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (set15 != set15_bound_ || reason != set15_reason_) {
+      set15_logged_ = false;
+    }
+    set15_bound_ = set15;
+    set15_reason_ = reason;
+  }
+  if (log_change) NoteServe15Unavailable();
+}
+
+void DaemonHtmlEngine::NoteServe15Unavailable() {
+  const DaemonAbi* abi = deps_.substrate.abi;
+  // Only a configuration that stores and serves is affected; a library
+  // without the 1.14 set is reported by the serving conditions instead.
+  if (config_.mode < DaemonHtmlMode::kServeVariants || abi == nullptr ||
+      !abi->HasHtmlServeSet()) {
+    return;
+  }
+  // serve-variants with the credentialed policy at its defaults runs exactly
+  // as it did before 1.15: nothing the operator set goes unapplied.
+  if (config_.mode == DaemonHtmlMode::kServeVariants &&
+      config_.credentialed == kPsHtmlCredentialedAnonymousOnly &&
+      config_.ignore_cookies && config_.ignore_cookie.empty()) {
+    return;
+  }
+  GoogleString reason;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (set15_bound_ || set15_logged_) return;
+    set15_logged_ = true;
+    reason = set15_reason_;
+  }
+  if (deps_.handler == nullptr) return;
+  if (config_.mode == DaemonHtmlMode::kServeCachedHtml) {
+    deps_.handler->Message(
+        kWarning,
+        "DaemonHtmlCache serve-cached-html is unavailable (%s); running "
+        "serve-variants, which serves the Markdown copies of stored pages "
+        "only, with the earlier cookie rule and no check of the stored "
+        "entry's record",
+        reason.c_str());
+  } else {
+    deps_.handler->Message(
+        kWarning,
+        "DaemonHtmlCache: %s; serve-variants keeps the earlier cookie rule (a "
+        "page the origin marks public is stored and served for a request "
+        "with a cookie), and DaemonHtmlCacheCredentialed, "
+        "DaemonHtmlCacheIgnoreCookies and DaemonHtmlCacheIgnoreCookie have no "
+        "effect",
+        reason.c_str());
+  }
+}
+
+const char* DaemonHtmlEngine::ServeModeName() const {
+  return effective_mode() == DaemonHtmlMode::kServeCachedHtml
+             ? "serve-cached-html"
+             : "serve-variants";
 }
 
 void DaemonHtmlEngine::NoteUnavailable() {
@@ -1131,6 +1210,11 @@ std::unique_ptr<DaemonHtmlRecording> DaemonHtmlEngine::StartRecording(
   const bool serve_mode =
       config_.mode >= DaemonHtmlMode::kServeVariants && config_.agent_optimize;
   bool may_store = false;
+  if (serve_mode && config_.mode == DaemonHtmlMode::kServeCachedHtml &&
+      effective_mode() != DaemonHtmlMode::kServeCachedHtml) {
+    counters_->serve_cached_html_unavailable->Add(1);
+  }
+  if (serve_mode) NoteServe15Unavailable();
   if (serve_mode) {
     if (serving() && Cache() != nullptr) {
       // Without a port there is nowhere to run the store's blocking work:
@@ -1167,7 +1251,7 @@ std::unique_ptr<DaemonHtmlRecording> DaemonHtmlEngine::StartRecording(
     counters_->refused_request_header->Add(1);
     if (deps_.substrate.abi->VersionMinor() >= kRequestHeaderReasonMinor) {
       LogServeSide("refuse", "request_header", facts.host, facts.path, 0, 0, 0,
-                   nullptr, -1, may_store ? "serve-variants" : "report-only");
+                   nullptr, -1, may_store ? ServeModeName() : "report-only");
     }
     return nullptr;
   }
@@ -1194,6 +1278,12 @@ bool DaemonHtmlEngine::Classify(const DaemonHtmlRecording& r,
   if (f.has_cookie) request_flags |= kStoreRequestHasCookie;
   if (f.has_cache_control && HasDirective(f.cache_control, "no-store")) {
     request_flags |= kStoreRequestNoStore;
+  }
+  // The explicit-public policy exists only from 1.15; an older library
+  // applies its own earlier cookie rule and is not told.
+  if (config_.credentialed == kPsHtmlCredentialedExplicitPublic &&
+      abi->HasHtmlServe15Set()) {
+    request_flags |= kPsHtmlStoreRequestExplicitPublic;
   }
   int reason = 0;
   char detail[160] = {0};
@@ -1304,7 +1394,7 @@ void DaemonHtmlEngine::Report(const DaemonHtmlRecording& r,
       {"ts_ms", Integer64ToString(now_ms)},
       {"host", DaemonHtmlIsLogHost(f.host) ? f.host : GoogleString()},
       {"path", path},
-      {"mode", serve_line ? "serve-variants" : "report-only"},
+      {"mode", serve_line ? ServeModeName() : "report-only"},
       {"action", action},
       {"reason", reason_code},
       {"status", IntegerToString(r.status_)},
@@ -1338,7 +1428,7 @@ void DaemonHtmlEngine::LogServeSide(
       {"ts_ms", Integer64ToString(now_ms)},
       {"host", DaemonHtmlIsLogHost(host) ? host : GoogleString()},
       {"path", log_path},
-      {"mode", mode},
+      {"mode", mode != nullptr ? mode : ServeModeName()},
       {"action", action},
       {"reason", reason},
       {"status", status > 0 ? IntegerToString(status) : GoogleString()},
@@ -1379,8 +1469,10 @@ void DaemonHtmlEngine::FinishRecording(DaemonHtmlRecording* r, bool aborted) {
   const DaemonHtmlHeaderLines final_view =
       BuildView(r->origin_, baseline, final_point, r->module_, true);
 
-  const int mode =
-      r->may_store_ ? kPsHtmlCacheServeVariants : kPsHtmlCacheReportOnly;
+  const int mode = !r->may_store_ ? kPsHtmlCacheReportOnly
+                   : effective_mode() == DaemonHtmlMode::kServeCachedHtml
+                       ? kPsHtmlCacheServeCachedHtml
+                       : kPsHtmlCacheServeVariants;
   // A report reads whether the body ended; a store needs it whole (an
   // aborted response was never classified for one).
   const bool body_complete = r->may_store_ || (r->body_ended_ && !aborted);
@@ -1559,7 +1651,7 @@ void DaemonHtmlEngine::Commit(const DaemonHtmlRequestFacts& facts,
     values.push_back(value.c_str());
   }
   PsSidecarWriteParams sidecar = {};
-  sidecar.struct_size = sizeof(sidecar);
+  sidecar.struct_size = SidecarWriteParamsSize(*abi);
   const GoogleString volume_url = VolumeUrl(url);
   sidecar.url = volume_url.c_str();
   sidecar.hostname = hostname.c_str();
@@ -1778,7 +1870,7 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
     sidecar_present = true;
   }
   PsHtmlStoredFacts stored = {};
-  stored.struct_size = sizeof(stored);
+  stored.struct_size = HtmlStoredFactsSize(*abi);
   if (abi->HtmlStoredFactsFromReads(reads.original, reads.markdown,
                                     reads.withheld, sidecar_present ? 1 : 0,
                                     &stored) != 0) {
@@ -1802,9 +1894,26 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
   if (facts.has_range) request_flags |= kPsHtmlServeRequestHasRange;
   if (facts.has_if_range) request_flags |= kPsHtmlServeRequestHasIfRange;
   if (facts.has_origin) request_flags |= kPsHtmlServeRequestHasOrigin;
+  const bool cached_html =
+      effective_mode() == DaemonHtmlMode::kServeCachedHtml;
+  if (abi->HasHtmlServe15Set()) {
+    if (config_.credentialed == kPsHtmlCredentialedExplicitPublic) {
+      request_flags |= kPsHtmlServeRequestExplicitPublic;
+    }
+    if (cached_html) {
+      // Never a validation step here: a not-fresh entry falls through.
+      request_flags |= kPsHtmlServeRequestFreshOnly;
+      if (facts.has_if_none_match || facts.has_if_modified_since ||
+          facts.has_if_match || facts.has_if_unmodified_since) {
+        request_flags |= kPsHtmlServeRequestConditional;
+      }
+    }
+  }
   PsHtmlServeRequest request = {};
-  request.struct_size = sizeof(request);
-  request.mode = kPsHtmlCacheServeVariants;
+  request.struct_size = HtmlServeRequestSize(*abi);
+  // effective_mode() is serve-cached-html only with the 1.15 set bound.
+  request.mode =
+      cached_html ? kPsHtmlCacheServeCachedHtml : kPsHtmlCacheServeVariants;
   request.method = facts.method.c_str();
   request.accept = CStrOrNull(has_accept, accept);
   request.cache_control =
@@ -1814,6 +1923,10 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
       CStrOrNull(facts.has_if_none_match, facts.if_none_match);
   request.request_flags = request_flags;
   request.now_seconds = static_cast<uint32_t>(now_s);
+  request.serve_scope = config_.serve_scope;
+  request.agent_class = facts.agent_class;
+  request.html_max_lifetime_s = config_.max_age_s;
+  request.policy_stamp = config_.policy_stamp;
   PsHtmlServeVerdict verdict = {};
   verdict.struct_size = sizeof(verdict);
   if (abi->HtmlServeClassify(&request, &stored, &verdict) != 0) {
@@ -2026,6 +2139,40 @@ void DaemonHtmlEngine::OnAdminPurge(StringPiece url, bool global, int64 now_ms,
     counters_->purge_remove_failed->Add(1);
     done(false, "the HTML cache's stored copy could not be removed");
   });
+}
+
+DaemonHtmlMode DaemonHtmlModeFor(RewriteOptions::DaemonHtmlCacheMode mode) {
+  switch (mode) {
+    case RewriteOptions::kDaemonHtmlCacheOff:
+      return DaemonHtmlMode::kOff;
+    case RewriteOptions::kDaemonHtmlCacheReportOnly:
+      return DaemonHtmlMode::kReportOnly;
+    case RewriteOptions::kDaemonHtmlCacheServeVariants:
+      return DaemonHtmlMode::kServeVariants;
+    case RewriteOptions::kDaemonHtmlCacheServeCachedHtml:
+      return DaemonHtmlMode::kServeCachedHtml;
+  }
+  return DaemonHtmlMode::kOff;
+}
+
+void FillDaemonHtmlServeSettings(const RewriteOptions& options,
+                                 DaemonHtmlEngine::Config* config) {
+  config->serve_scope = options.daemon_html_cache_serve_scope() ==
+                                RewriteOptions::kDaemonHtmlCacheServeScopeAll
+                            ? kPsHtmlServeScopeAll
+                            : kPsHtmlServeScopeAgents;
+  config->max_age_s = static_cast<uint32_t>(options.daemon_html_cache_max_age_s());
+  config->credentialed =
+      options.daemon_html_cache_credentialed() ==
+              RewriteOptions::kDaemonHtmlCacheCredentialedExplicitPublic
+          ? kPsHtmlCredentialedExplicitPublic
+          : kPsHtmlCredentialedAnonymousOnly;
+  config->ignore_cookies = options.daemon_html_cache_ignore_cookies();
+  config->ignore_cookie.clear();
+  StringPieceVector names;
+  SplitStringPieceToVector(options.daemon_html_cache_ignore_cookie(), " ",
+                           &names, true);
+  for (StringPiece name : names) config->ignore_cookie.push_back(name.as_string());
 }
 
 std::unique_ptr<DaemonHtmlEngine> NewDaemonHtmlEngineForPort(

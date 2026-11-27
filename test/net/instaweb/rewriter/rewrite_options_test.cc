@@ -1167,27 +1167,20 @@ TEST_F(RewriteOptionsTest, DaemonHtmlCacheOption) {
   EXPECT_EQ(signature_before, options_.signature());
 }
 
-// The mode a later release adds is accepted with a warning as serve-variants
-// (the Markdown-only part of it), not refused, so a configuration written for
-// that release keeps loading and keeps serving the Markdown copies; on every
-// path a port's configuration takes.
-TEST_F(RewriteOptionsTest, DaemonHtmlCacheServeCachedHtmlRunsAsServeVariants) {
+// serve-cached-html is a mode of its own, on every path a port's
+// configuration takes, with no warning; it sorts after serve-variants, so
+// everything that accepts serve-variants accepts it.
+TEST_F(RewriteOptionsTest, DaemonHtmlCacheServeCachedHtmlIsAMode) {
   GoogleString msg;
   MockMessageHandler handler(new NullMutex);
   EXPECT_EQ(RewriteOptions::kOptionOk,
             options_.ParseAndSetOptionFromName1(
                 "DaemonHtmlCache", "serve-cached-html", &msg, &handler));
-  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeCachedHtml,
             options_.daemon_html_cache());
-  EXPECT_EQ(1, handler.MessagesOfType(kWarning));
-  EXPECT_EQ(1, handler.TotalMessages());
-  EXPECT_NE(GoogleString::npos,
-            RewriteOptions::LaterReleaseOptionWarning("DaemonHtmlCache",
-                                                      "serve-cached-html")
-                .find("it runs as serve-variants, which serves the Markdown "
-                      "copies of stored pages only"));
-  EXPECT_EQ("", RewriteOptions::LaterReleaseOptionWarning("DaemonHtmlCache",
-                                                          "serve-variants"));
+  EXPECT_EQ(0, handler.TotalMessages());
+  EXPECT_GT(RewriteOptions::kDaemonHtmlCacheServeCachedHtml,
+            RewriteOptions::kDaemonHtmlCacheServeVariants);
 
   ASSERT_EQ(RewriteOptions::kOptionOk,
             options_.ParseAndSetOptionFromName1("DaemonHtmlCache",
@@ -1196,56 +1189,55 @@ TEST_F(RewriteOptionsTest, DaemonHtmlCacheServeCachedHtmlRunsAsServeVariants) {
             options_.ParseAndSetOptionFromNameWithScope(
                 "DaemonHtmlCache", "Serve-Cached-HTML",
                 RewriteOptions::kProcessScopeStrict, &msg, &handler));
-  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeCachedHtml,
             options_.daemon_html_cache());
-  EXPECT_EQ(2, handler.MessagesOfType(kWarning));
-  // serve-variants itself, and the other modes, do not warn.
   ASSERT_EQ(RewriteOptions::kOptionOk,
             options_.ParseAndSetOptionFromName1(
                 "DaemonHtmlCache", "serve-variants", &msg, &handler));
-  EXPECT_EQ(2, handler.MessagesOfType(kWarning));
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
+            options_.daemon_html_cache());
 
-  // With no handler the caller gets the warning as the message.
-  msg.clear();
-  ASSERT_EQ(RewriteOptions::kOptionOk,
-            options_.ParseAndSetOptionFromName1("DaemonHtmlCache", "off", &msg,
-                                                &handler));
+  // With no handler the caller gets no message either.
   msg.clear();
   EXPECT_EQ(RewriteOptions::kOptionOk,
             options_.ParseAndSetOptionFromName1(
                 "DaemonHtmlCache", "serve-cached-html", &msg, nullptr));
-  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeCachedHtml,
             options_.daemon_html_cache());
-  EXPECT_NE(GoogleString::npos, msg.find("serve-cached-html' is not available"))
-      << msg;
+  EXPECT_EQ("", msg);
 
   // Below the option's scope, the scope error stands.
   EXPECT_NE(RewriteOptions::kOptionOk,
             options_.ParseAndSetOptionFromNameWithScope(
                 "DaemonHtmlCache", "serve-cached-html",
                 RewriteOptions::kDirectoryScope, &msg, &handler));
-  EXPECT_EQ(2, handler.MessagesOfType(kWarning));
+  // An unknown mode is still a configuration error.
+  EXPECT_EQ(RewriteOptions::kOptionValueInvalid,
+            options_.ParseAndSetOptionFromName1(
+                "DaemonHtmlCache", "serve-everything", &msg, &handler));
+  EXPECT_EQ(0, handler.MessagesOfType(kWarning));
 
-  // The handler-less setter maps it the same way.
+  // The handler-less setter, and the value's own spelling.
   ASSERT_EQ(RewriteOptions::kOptionOk,
             options_.ParseAndSetOptionFromName1("DaemonHtmlCache",
                                                 "report-only", &msg, &handler));
   EXPECT_EQ(
       RewriteOptions::kOptionOk,
       options_.SetOptionFromName("DaemonHtmlCache", "serve-cached-html", &msg));
-  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeCachedHtml,
             options_.daemon_html_cache());
-  // The configuration dump names what runs.
   EXPECT_NE(GoogleString::npos,
-            options_.OptionsToString().find("serve-variants"));
-  EXPECT_EQ(GoogleString::npos,
             options_.OptionsToString().find("serve-cached-html"));
+  RewriteOptions::DaemonHtmlCacheMode mode;
+  ASSERT_TRUE(RewriteOptions::ParseFromString("serve-cached-html", &mode));
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeCachedHtml, mode);
 }
 
-// The settings of the serve-cached-html mode a later release adds parse and
-// are kept, with one warning each that they take effect with that mode; an
-// invalid value is a configuration error, as it is in that release.
-TEST_F(RewriteOptionsTest, DaemonHtmlCacheLaterReleaseSettingsParseInert) {
+// The settings of serve-cached-html and the credentialed policy parse and are
+// kept, with no warning; an invalid value is a configuration error.  The
+// values are exactly the ones the earlier release accepts inert, so a
+// configuration that loads here also loads there.
+TEST_F(RewriteOptionsTest, DaemonHtmlCacheServeSettingsParse) {
   EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeScopeAgents,
             options_.daemon_html_cache_serve_scope());
   EXPECT_EQ(3600, options_.daemon_html_cache_max_age_s());
@@ -1260,29 +1252,17 @@ TEST_F(RewriteOptionsTest, DaemonHtmlCacheLaterReleaseSettingsParseInert) {
   }();
 
   MockMessageHandler handler(new NullMutex);
-  int warnings = 0;
-  // Each accepted line warns once, naming the setting.
   auto set = [&](const char* name, const char* value) {
     GoogleString msg;
     RewriteOptions::OptionSettingResult result =
         options_.ParseAndSetOptionFromName1(name, value, &msg, &handler);
     if (result == RewriteOptions::kOptionOk) {
-      ++warnings;
-      EXPECT_EQ(warnings, handler.MessagesOfType(kWarning)) << name;
-      EXPECT_NE(GoogleString::npos,
-                RewriteOptions::LaterReleaseOptionWarning(name, value)
-                    .find(StrCat("'", name,
-                                 "' takes effect with DaemonHtmlCache "
-                                 "serve-cached-html")))
-          << name;
-      // Without a handler, the caller gets the warning as the message.
+      EXPECT_EQ(0, handler.MessagesOfType(kWarning)) << name;
       GoogleString alone;
       RewriteOptions copy(&thread_system_);
       EXPECT_EQ(RewriteOptions::kOptionOk,
                 copy.ParseAndSetOptionFromName1(name, value, &alone, nullptr));
-      EXPECT_EQ(RewriteOptions::LaterReleaseOptionWarning(name, value), alone);
-    } else {
-      EXPECT_EQ(warnings, handler.MessagesOfType(kWarning)) << name;
+      EXPECT_EQ("", alone) << name;
     }
     return result;
   };
@@ -1350,7 +1330,8 @@ TEST_F(RewriteOptionsTest, DaemonHtmlCacheLaterReleaseSettingsParseInert) {
                 &msg, &handler));
   EXPECT_EQ(300, options_.daemon_html_cache_max_age_s());
 
-  // Inert: nothing they change re-keys cached work.
+  // They change what is served from the HTML cache, never what the rewriter
+  // produces: nothing they change re-keys cached work.
   options_.ComputeSignature();
   EXPECT_EQ(signature_before, options_.signature());
 }

@@ -137,19 +137,30 @@ TEST_F(DaemonAbiTest, TheWriteParametersCarryTheContentHash) {
 }
 
 TEST_F(DaemonAbiTest, TheServeSetLayoutsAreThePublishedOnes) {
-  EXPECT_EQ(48u, sizeof(PsSidecarWriteParams));
+  EXPECT_EQ(64u, sizeof(PsSidecarWriteParams));
   EXPECT_EQ(8u, offsetof(PsSidecarWriteParams, url));
   EXPECT_EQ(32u, offsetof(PsSidecarWriteParams, site));
   EXPECT_EQ(40u, offsetof(PsSidecarWriteParams, origin_html_hash));
+  EXPECT_EQ(48u, offsetof(PsSidecarWriteParams, policy_stamp));
+  EXPECT_EQ(56u, offsetof(PsSidecarWriteParams, write_flags));
+  EXPECT_EQ(48u, kPsSidecarWriteParamsSize13);
 
-  EXPECT_EQ(64u, sizeof(PsHtmlServeRequest));
+  EXPECT_EQ(88u, sizeof(PsHtmlServeRequest));
   EXPECT_EQ(8u, offsetof(PsHtmlServeRequest, mode));
   EXPECT_EQ(16u, offsetof(PsHtmlServeRequest, method));
   EXPECT_EQ(48u, offsetof(PsHtmlServeRequest, if_none_match));
   EXPECT_EQ(56u, offsetof(PsHtmlServeRequest, request_flags));
   EXPECT_EQ(60u, offsetof(PsHtmlServeRequest, now_seconds));
+  EXPECT_EQ(64u, offsetof(PsHtmlServeRequest, serve_scope));
+  EXPECT_EQ(68u, offsetof(PsHtmlServeRequest, agent_class));
+  EXPECT_EQ(72u, offsetof(PsHtmlServeRequest, html_max_lifetime_s));
+  EXPECT_EQ(76u, offsetof(PsHtmlServeRequest, reserved));
+  EXPECT_EQ(80u, offsetof(PsHtmlServeRequest, policy_stamp));
+  EXPECT_EQ(64u, kPsHtmlServeRequestSize14);
 
-  EXPECT_EQ(96u, sizeof(PsHtmlStoredFacts));
+  EXPECT_EQ(104u, sizeof(PsHtmlStoredFacts));
+  EXPECT_EQ(96u, offsetof(PsHtmlStoredFacts, entry_policy_stamp));
+  EXPECT_EQ(96u, kPsHtmlStoredFactsSize14);
   EXPECT_EQ(8u, offsetof(PsHtmlStoredFacts, flags));
   EXPECT_EQ(24u, offsetof(PsHtmlStoredFacts, render_ttl_s));
   EXPECT_EQ(28u, offsetof(PsHtmlStoredFacts, withheld_reason));
@@ -161,6 +172,50 @@ TEST_F(DaemonAbiTest, TheServeSetLayoutsAreThePublishedOnes) {
   EXPECT_EQ(28u, offsetof(PsHtmlServeVerdict, not_modified));
   EXPECT_EQ(32u, offsetof(PsHtmlServeVerdict, etag));
   EXPECT_EQ(kPsHtmlMarkdownEtagChars + 8, sizeof(PsHtmlServeVerdict::etag));
+
+  // The request policy's results.
+  EXPECT_EQ(24u, sizeof(PsHtmlRequestGuard));
+  EXPECT_EQ(8u, offsetof(PsHtmlRequestGuard, reason));
+  EXPECT_EQ(12u, offsetof(PsHtmlRequestGuard, header_index));
+  EXPECT_EQ(16u, offsetof(PsHtmlRequestGuard, xfp));
+  EXPECT_EQ(24u, sizeof(PsHtmlCookieSpan));
+  EXPECT_EQ(48u, sizeof(PsHtmlCookieClass));
+  EXPECT_EQ(8u, offsetof(PsHtmlCookieClass, cookie_class));
+  EXPECT_EQ(12u, offsetof(PsHtmlCookieClass, malformed));
+  EXPECT_EQ(16u, offsetof(PsHtmlCookieClass, first_blocking));
+  EXPECT_EQ(40u, offsetof(PsHtmlCookieClass, ignorable_count));
+}
+
+TEST_F(DaemonAbiTest, TheFifteenConstantsAreThePublishedValues) {
+  EXPECT_EQ(15, kHtmlServe15SetMinor);
+  EXPECT_EQ(0x40, kPsFlagAnonymousRecorded);
+  EXPECT_EQ(0x80, kPsFlagHtmlStoreV2);
+  EXPECT_EQ(16u, kPsHtmlStoreRequestExplicitPublic);
+  EXPECT_EQ(64u, kPsHtmlStoreFlagRequestAnonymous);
+  EXPECT_EQ(64u, kPsHtmlServeRequestFreshOnly);
+  EXPECT_EQ(128u, kPsHtmlServeRequestHtmlFallback);
+  EXPECT_EQ(256u, kPsHtmlServeRequestConditional);
+  EXPECT_EQ(512u, kPsHtmlServeRequestExplicitPublic);
+  EXPECT_EQ(0, kPsHtmlServeScopeAgents);
+  EXPECT_EQ(1, kPsHtmlServeScopeAll);
+  EXPECT_EQ(3, kPsHtmlAgentClassMax);
+  EXPECT_EQ(0x1000u, kPsHtmlFactsStoreV2);
+  EXPECT_EQ(0x2000u, kPsHtmlFactsAnonymousRecorded);
+  EXPECT_EQ(1u, kPsSidecarWritePolicyBlock);
+  EXPECT_EQ(1, kPsHtmlGuardRequestHeader);
+  EXPECT_EQ(2, kPsHtmlGuardPath);
+  EXPECT_EQ(2, kPsHtmlCookiesBlocking);
+  EXPECT_EQ(1, kPsHtmlCookieListVersion);
+  EXPECT_EQ(1, kPsHtmlCredentialedExplicitPublic);
+  EXPECT_EQ(3, kPsHtmlCacheServeCachedHtml);
+  // The new request bits do not overlap the 1.14 ones, nor the new facts
+  // bits the 1.14 facts.
+  EXPECT_EQ(0u, (kPsHtmlServeRequestFreshOnly | kPsHtmlServeRequestHtmlFallback |
+                 kPsHtmlServeRequestConditional |
+                 kPsHtmlServeRequestExplicitPublic) &
+                    63u);
+  EXPECT_EQ(0u,
+            (kPsHtmlFactsStoreV2 | kPsHtmlFactsAnonymousRecorded) & 0xFFFu);
 }
 
 TEST_F(DaemonAbiTest, TheServeSetConstantsAreThePublishedValues) {
@@ -248,6 +303,42 @@ class HtmlServeSetTest : public DaemonAbiTest {
     EXPECT_EQ(-1, abi.ReadSharedConfigHtmlMode("/unused"));
     EXPECT_EQ(-1, abi.ReadSharedConfigAgentEntitled("/unused"));
     EXPECT_EQ(0, abi.WantsAgentMarkdown("text/markdown"));
+    ExpectUnbound15Answers(abi);
+  }
+
+  // No call into an unbound 1.15 set reaches anything.
+  void ExpectUnbound15Answers(const DaemonAbi& abi) {
+    EXPECT_FALSE(abi.HasHtmlServe15Set());
+    EXPECT_FALSE(abi.HtmlServe15SetUnavailableReason().empty());
+    PsHtmlRequestGuard guard = {};
+    guard.struct_size = sizeof(guard);
+    guard.reason = 77;
+    const char* names[] = {"X-Forwarded-Host"};
+    const char* values[] = {"evil.example"};
+    EXPECT_EQ(-1, abi.HtmlRequestGuard("/a;b", names, values, 1, "http",
+                                       &guard));
+    EXPECT_EQ(77, guard.reason);
+    const char* lines[] = {"sid=1"};
+    PsHtmlCookieClass cookies = {};
+    cookies.struct_size = sizeof(cookies);
+    EXPECT_EQ(-1, abi.HtmlClassifyCookies(lines, 1, 1, nullptr, 0, nullptr, 0,
+                                          &cookies));
+    int warning = 0;
+    EXPECT_EQ(-1, abi.HtmlIgnoreCookieGuard("_my_ab", &warning));
+    uint64_t stamp = 5;
+    EXPECT_EQ(-1, abi.HtmlPolicyStamp(0, 1, 1, nullptr, 0, &stamp));
+    EXPECT_EQ(5u, stamp);
+    EXPECT_EQ(0, abi.HtmlUnsafeMethodInvalidates("POST", 200));
+    int block = 0;
+    EXPECT_EQ(-1, abi.HeaderBlockPolicyStamp(&block, &stamp));
+    PsHtmlStoredFacts facts = {};
+    facts.struct_size = sizeof(facts);
+    EXPECT_EQ(-1, abi.HtmlStoredFactsFromReadsEx(nullptr, nullptr, nullptr, 0,
+                                                 nullptr, &facts));
+    // Every struct goes out at the size a 1.14 library knows.
+    EXPECT_EQ(kPsHtmlServeRequestSize14, HtmlServeRequestSize(abi));
+    EXPECT_EQ(kPsHtmlStoredFactsSize14, HtmlStoredFactsSize(abi));
+    EXPECT_EQ(kPsSidecarWriteParamsSize13, SidecarWriteParamsSize(abi));
   }
 
   static constexpr char kSite[] =
@@ -263,6 +354,8 @@ TEST_F(HtmlServeSetTest, AFourteenLibraryWithTheWholeSetBindsIt) {
   EXPECT_STREQ("fresh", abi->HtmlServeReasonName(0));
   EXPECT_STREQ("skew", abi->HtmlServeReasonName(18));
   EXPECT_EQ(nullptr, abi->HtmlServeReasonName(19));
+  // A 1.14 library: the 1.15 set is not there.
+  EXPECT_FALSE(abi->HasHtmlServe15Set());
   EXPECT_EQ(1, abi->WantsAgentMarkdown("text/markdown, text/html;q=0.9"));
   EXPECT_EQ(0, abi->WantsAgentMarkdown("text/html"));
   EXPECT_EQ(kPsHtmlModeMarkdownStatic, abi->ReadSharedConfigHtmlMode("/c"));
@@ -419,6 +512,305 @@ TEST_F(HtmlServeSetTest, ALibraryWithoutTheSetStillLoads) {
   EXPECT_FALSE(abi->HasHtmlServeSet());
   EXPECT_FALSE(abi->HtmlServeSetUnavailableReason().empty());
   ExpectUnboundAnswers(*abi);
+}
+
+// --- The C API 1.15 set, bound optionally on top of the 1.14 one ---------
+
+class HtmlServe15SetTest : public HtmlServeSetTest {
+ protected:
+  void SetUp() override {
+    HtmlServeSetTest::SetUp();
+    unsetenv("PS_STUB_ECHO_SIZES");
+    unsetenv("PS_STUB_POLICY_STAMP");
+  }
+  void TearDown() override {
+    unsetenv("PS_STUB_ECHO_SIZES");
+    unsetenv("PS_STUB_POLICY_STAMP");
+    HtmlServeSetTest::TearDown();
+  }
+
+  // A serve-classify call with the sizes this build knows, echoing the
+  // sizes the library was handed (PS_STUB_ECHO_SIZES).
+  int Classify(const DaemonAbi& abi, int mode, size_t* request_size,
+               size_t* facts_size, GoogleString* reason) {
+    setenv("PS_STUB_ECHO_SIZES", "1", 1);
+    PsHtmlServeRequest request = {};
+    request.struct_size = sizeof(request);
+    request.mode = mode;
+    request.method = "GET";
+    request.serve_scope = kPsHtmlServeScopeAll;
+    request.agent_class = 3;
+    request.html_max_lifetime_s = 60;
+    request.policy_stamp = 9;
+    PsHtmlStoredFacts facts = {};
+    facts.struct_size = sizeof(facts);
+    PsHtmlServeVerdict verdict = {};
+    verdict.struct_size = sizeof(verdict);
+    const int rc = abi.HtmlServeClassify(&request, &facts, &verdict);
+    // The caller's own structs are left as it stamped them.
+    EXPECT_EQ(sizeof(PsHtmlServeRequest), request.struct_size);
+    EXPECT_EQ(sizeof(PsHtmlStoredFacts), facts.struct_size);
+    *request_size = verdict.age_s;
+    *facts_size = static_cast<size_t>(verdict.not_modified);
+    const char* name = abi.HtmlServeReasonName(verdict.reason);
+    *reason = name == nullptr ? "" : name;
+    return rc;
+  }
+};
+
+TEST_F(HtmlServe15SetTest, AFifteenLibraryBindsBothSets) {
+  std::unique_ptr<DaemonAbi> abi =
+      Load("15", "libdaemon_stub_html_serve_15.so");
+  ASSERT_TRUE(abi != nullptr) << error_;
+  EXPECT_TRUE(abi->HasHtmlServeSet());
+  EXPECT_TRUE(abi->HasHtmlServe15Set());
+  EXPECT_EQ("", abi->HtmlServe15SetUnavailableReason());
+  EXPECT_EQ(sizeof(PsHtmlServeRequest), HtmlServeRequestSize(*abi));
+  EXPECT_EQ(sizeof(PsHtmlStoredFacts), HtmlStoredFactsSize(*abi));
+  EXPECT_EQ(sizeof(PsSidecarWriteParams), SidecarWriteParamsSize(*abi));
+  // The 1.15 reasons are the library's names.
+  EXPECT_STREQ("scope", abi->HtmlServeReasonName(19));
+  EXPECT_STREQ("request_header", abi->HtmlServeReasonName(25));
+  EXPECT_STREQ("path", abi->HtmlServeReasonName(26));
+  EXPECT_EQ(nullptr, abi->HtmlServeReasonName(27));
+}
+
+// The request guard reaches the library and its three answers come back:
+// a path refusal, a refused header by index, and an X-Forwarded-Proto
+// mismatch with its flag.
+TEST_F(HtmlServe15SetTest, TheRequestGuardReachesTheLibrary) {
+  std::unique_ptr<DaemonAbi> abi =
+      Load("15", "libdaemon_stub_html_serve_15.so");
+  ASSERT_TRUE(abi != nullptr) << error_;
+  ASSERT_TRUE(abi->HasHtmlServe15Set());
+  const char* names[] = {"Accept", "X-Forwarded-Proto", "X-Forwarded-Host"};
+  const char* values[] = {"text/html", "http", "evil.example"};
+  PsHtmlRequestGuard guard = {};
+  guard.struct_size = sizeof(guard);
+  ASSERT_EQ(0, abi->HtmlRequestGuard("/a;b?c", names, values, 3, "http",
+                                     &guard));
+  EXPECT_EQ(kPsHtmlGuardPath, guard.reason);
+  EXPECT_EQ(-1, guard.header_index);
+  ASSERT_EQ(0,
+            abi->HtmlRequestGuard("/a?c;d", names, values, 3, "http", &guard));
+  EXPECT_EQ(kPsHtmlGuardRequestHeader, guard.reason);
+  EXPECT_EQ(2, guard.header_index);
+  EXPECT_EQ(0, guard.xfp);
+  ASSERT_EQ(0,
+            abi->HtmlRequestGuard("/a", names, values, 2, "https", &guard));
+  EXPECT_EQ(kPsHtmlGuardRequestHeader, guard.reason);
+  EXPECT_EQ(1, guard.header_index);
+  EXPECT_EQ(1, guard.xfp);
+  ASSERT_EQ(0, abi->HtmlRequestGuard("/a", names, values, 2, "http", &guard));
+  EXPECT_EQ(kPsHtmlGuardNone, guard.reason);
+  // The library's argument checks stand: a short struct, a NULL path.
+  PsHtmlRequestGuard short_guard = {};
+  short_guard.struct_size = 8;
+  EXPECT_EQ(-1, abi->HtmlRequestGuard("/a", names, values, 2, "http",
+                                      &short_guard));
+  EXPECT_EQ(-1,
+            abi->HtmlRequestGuard(nullptr, names, values, 2, "http", &guard));
+}
+
+TEST_F(HtmlServe15SetTest, TheRequestPolicyCallsReachTheLibrary) {
+  std::unique_ptr<DaemonAbi> abi =
+      Load("15", "libdaemon_stub_html_serve_15.so");
+  ASSERT_TRUE(abi != nullptr) << error_;
+  ASSERT_TRUE(abi->HasHtmlServe15Set());
+
+  const char* lines[] = {"_ga=GA1.2.3; _gid=GA1.4", "sid=abc"};
+  PsHtmlCookieSpan values[4];
+  PsHtmlCookieClass cookies = {};
+  cookies.struct_size = sizeof(cookies);
+  ASSERT_EQ(0, abi->HtmlClassifyCookies(lines, 1, 1, nullptr, 0, values, 4,
+                                        &cookies));
+  EXPECT_EQ(kPsHtmlCookiesIgnorableOnly, cookies.cookie_class);
+  EXPECT_EQ(2u, cookies.ignorable_count);
+  EXPECT_EQ(4u, values[0].offset);
+  ASSERT_EQ(0, abi->HtmlClassifyCookies(lines, 2, 1, nullptr, 0, values, 4,
+                                        &cookies));
+  EXPECT_EQ(kPsHtmlCookiesBlocking, cookies.cookie_class);
+  EXPECT_EQ(1u, cookies.first_blocking.line);
+  EXPECT_EQ(3u, cookies.first_blocking.length);  // "sid", never its value
+
+  int warning = -1;
+  EXPECT_EQ(1, abi->HtmlIgnoreCookieGuard("_my_ab", &warning));
+  EXPECT_EQ(0, warning);
+  EXPECT_EQ(1, abi->HtmlIgnoreCookieGuard("_my*", &warning));
+  EXPECT_EQ(1, warning);
+  EXPECT_EQ(0, abi->HtmlIgnoreCookieGuard("*", &warning));
+  EXPECT_EQ(-1, abi->HtmlIgnoreCookieGuard(nullptr, &warning));
+
+  uint64_t a = 0;
+  uint64_t b = 0;
+  const char* additions[] = {"_my_ab"};
+  ASSERT_EQ(0, abi->HtmlPolicyStamp(kPsHtmlCredentialedAnonymousOnly, 1,
+                                    kPsHtmlCookieListVersion, additions, 1,
+                                    &a));
+  ASSERT_EQ(0, abi->HtmlPolicyStamp(kPsHtmlCredentialedExplicitPublic, 1,
+                                    kPsHtmlCookieListVersion, additions, 1,
+                                    &b));
+  EXPECT_NE(0u, a);
+  EXPECT_NE(a, b);
+  EXPECT_EQ(-1, abi->HtmlPolicyStamp(7, 1, 1, nullptr, 0, &a));
+
+  EXPECT_EQ(1, abi->HtmlUnsafeMethodInvalidates("POST", 200));
+  EXPECT_EQ(1, abi->HtmlUnsafeMethodInvalidates("post", 303));
+  EXPECT_EQ(1, abi->HtmlUnsafeMethodInvalidates(nullptr, 204));
+  EXPECT_EQ(0, abi->HtmlUnsafeMethodInvalidates("POST", 404));
+  EXPECT_EQ(0, abi->HtmlUnsafeMethodInvalidates("GET", 200));
+}
+
+// The block's stamp and the facts call that reads it.
+TEST_F(HtmlServe15SetTest, TheEntryStampReachesTheFacts) {
+  std::unique_ptr<DaemonAbi> abi =
+      Load("15", "libdaemon_stub_html_serve_15.so");
+  ASSERT_TRUE(abi != nullptr) << error_;
+  ASSERT_TRUE(abi->HasHtmlServe15Set());
+  setenv("PS_STUB_POLICY_STAMP", "4242", 1);
+  int block = 0;
+  uint64_t stamp = 0;
+  EXPECT_EQ(1, abi->HeaderBlockPolicyStamp(&block, &stamp));
+  EXPECT_EQ(4242u, stamp);
+  EXPECT_EQ(-1, abi->HeaderBlockPolicyStamp(nullptr, &stamp));
+  int original = 0;
+  PsHtmlStoredFacts facts = {};
+  facts.struct_size = sizeof(facts);
+  ASSERT_EQ(0, abi->HtmlStoredFactsFromReadsEx(&original, nullptr, nullptr, 1,
+                                               &block, &facts));
+  EXPECT_NE(0u, facts.flags & kPsHtmlFactsPresent);
+  EXPECT_EQ(4242u, facts.entry_policy_stamp);
+  ASSERT_EQ(0, abi->HtmlStoredFactsFromReadsEx(&original, nullptr, nullptr, 0,
+                                               nullptr, &facts));
+  EXPECT_EQ(0u, facts.entry_policy_stamp);
+}
+
+// A 1.15 library is sent the 1.15 sizes, and answers serve-cached-html.
+TEST_F(HtmlServe15SetTest, AFifteenLibraryIsSentTheFifteenSizes) {
+  std::unique_ptr<DaemonAbi> abi =
+      Load("15", "libdaemon_stub_html_serve_15.so");
+  ASSERT_TRUE(abi != nullptr) << error_;
+  size_t request_size = 0;
+  size_t facts_size = 0;
+  GoogleString reason;
+  ASSERT_EQ(0, Classify(*abi, kPsHtmlCacheServeCachedHtml, &request_size,
+                        &facts_size, &reason));
+  EXPECT_EQ(sizeof(PsHtmlServeRequest), request_size);
+  EXPECT_EQ(sizeof(PsHtmlStoredFacts), facts_size);
+  EXPECT_EQ("absent", reason);  // not `scope`: the 1.15 fields were read
+}
+
+// The library refuses serve-cached-html for a request of the 1.14 size: the
+// fail-safe zeros (scope agents, class unknown).
+TEST_F(HtmlServe15SetTest, AFifteenLibraryRefusesAFourteenSizeCachedHtml) {
+  std::unique_ptr<DaemonAbi> abi =
+      Load("15", "libdaemon_stub_html_serve_15.so");
+  ASSERT_TRUE(abi != nullptr) << error_;
+  PsHtmlServeRequest request = {};
+  request.struct_size = kPsHtmlServeRequestSize14;
+  request.mode = kPsHtmlCacheServeCachedHtml;
+  request.method = "GET";
+  PsHtmlStoredFacts facts = {};
+  facts.struct_size = kPsHtmlStoredFactsSize14;
+  PsHtmlServeVerdict verdict = {};
+  verdict.struct_size = sizeof(verdict);
+  ASSERT_EQ(0, abi->HtmlServeClassify(&request, &facts, &verdict));
+  EXPECT_STREQ("scope", abi->HtmlServeReasonName(verdict.reason));
+}
+
+// The same library reporting 1.14: the 1.14 set binds, the 1.15 one does
+// not, the binding sends nothing past the 1.14 sizes whatever the caller
+// stamped, and never the serve-cached-html mode.
+TEST_F(HtmlServe15SetTest, AFourteenLibraryIsSentOnlyTheFourteenShape) {
+  std::unique_ptr<DaemonAbi> abi =
+      Load("14", "libdaemon_stub_html_serve_15.so");
+  ASSERT_TRUE(abi != nullptr) << error_;
+  EXPECT_TRUE(abi->HasHtmlServeSet());
+  const GoogleString reason15 = abi->HtmlServe15SetUnavailableReason();
+  EXPECT_NE(GoogleString::npos, reason15.find("reports C API 1.14")) << reason15;
+  EXPECT_NE(GoogleString::npos, reason15.find("1.15")) << reason15;
+  ExpectUnbound15Answers(*abi);
+
+  size_t request_size = 0;
+  size_t facts_size = 0;
+  GoogleString reason;
+  ASSERT_EQ(0, Classify(*abi, kPsHtmlCacheServeVariants, &request_size,
+                        &facts_size, &reason));
+  EXPECT_EQ(kPsHtmlServeRequestSize14, request_size);
+  EXPECT_EQ(kPsHtmlStoredFactsSize14, facts_size);
+  // Never serve-cached-html: refused before it reaches the library.
+  EXPECT_EQ(-1, Classify(*abi, kPsHtmlCacheServeCachedHtml, &request_size,
+                         &facts_size, &reason));
+
+  // The facts are read at the 1.14 size and handed back at the caller's,
+  // with no entry stamp.
+  int original = 0;
+  PsHtmlStoredFacts facts = {};
+  facts.struct_size = sizeof(facts);
+  facts.entry_policy_stamp = 77;
+  ASSERT_EQ(0, abi->HtmlStoredFactsFromReads(&original, nullptr, nullptr, 0,
+                                             &facts));
+  EXPECT_EQ(sizeof(PsHtmlStoredFacts), facts.struct_size);
+  EXPECT_NE(0u, facts.flags & kPsHtmlFactsPresent);
+  EXPECT_EQ(0u, facts.entry_policy_stamp);
+
+  // The sidecar parameters go out at the 1.13 size, and a format the
+  // library cannot write is refused rather than written as an older one.
+  void* cache = nullptr;
+  alignas(
+      std::max_align_t) unsigned char config_storage[kCacheConfigProbeBytes];
+  PsCacheConfig* config = reinterpret_cast<PsCacheConfig*>(config_storage);
+  abi->CacheConfigInit(config);
+  ASSERT_EQ(kPsOk, abi->CacheOpen(config, &cache));
+  uint8_t hash[kPsHtmlHashBytes];
+  memset(hash, 0xCD, sizeof(hash));
+  PsSidecarWriteParams sidecar = {};
+  sidecar.struct_size = sizeof(sidecar);
+  sidecar.url = "http://b.example/p";
+  sidecar.hostname = "b.example";
+  sidecar.scheme = "http";
+  sidecar.site = kSite;
+  sidecar.origin_html_hash = hash;
+  sidecar.write_flags = kPsSidecarWritePolicyBlock;
+  const char* names[] = {"Content-Language"};
+  const char* values[] = {"en"};
+  int verdict = -1;
+  int stored = -1;
+  EXPECT_EQ(kPsErrInvalidArg,
+            abi->CacheWriteHeadersSidecarSite(cache, &sidecar, names, values,
+                                              1, &verdict, &stored));
+  sidecar.write_flags = 0;
+  EXPECT_EQ(kPsOk, abi->CacheWriteHeadersSidecarSite(
+                       cache, &sidecar, names, values, 1, &verdict, &stored));
+  EXPECT_EQ(sizeof(PsSidecarWriteParams), sidecar.struct_size);
+  abi->CacheClose(cache);
+}
+
+TEST_F(HtmlServe15SetTest, OneMissingFifteenSymbolLeavesOnlyTheFourteenSet) {
+  std::unique_ptr<DaemonAbi> abi =
+      Load("15", "libdaemon_stub_html_serve_15_partial.so");
+  ASSERT_TRUE(abi != nullptr) << error_;
+  EXPECT_TRUE(abi->HasHtmlServeSet());
+  const GoogleString reason = abi->HtmlServe15SetUnavailableReason();
+  EXPECT_NE(GoogleString::npos, reason.find("ps_html_request_guard")) << reason;
+  ExpectUnbound15Answers(*abi);
+}
+
+// A library that reports 1.15 but exports none of its set: the 1.14 set
+// still binds.
+TEST_F(HtmlServe15SetTest, AFifteenLibraryWithoutTheSetKeepsTheFourteenSet) {
+  std::unique_ptr<DaemonAbi> abi = Load("15", "libdaemon_stub_html_serve.so");
+  ASSERT_TRUE(abi != nullptr) << error_;
+  EXPECT_TRUE(abi->HasHtmlServeSet());
+  ExpectUnbound15Answers(*abi);
+}
+
+// Without the 1.14 set there is no 1.15 set either.
+TEST_F(HtmlServe15SetTest, NoFourteenSetMeansNoFifteenSet) {
+  std::unique_ptr<DaemonAbi> abi = Load("13", "libdaemon_stub_html_serve_15.so");
+  ASSERT_TRUE(abi != nullptr) << error_;
+  EXPECT_FALSE(abi->HasHtmlServeSet());
+  ExpectUnbound15Answers(*abi);
 }
 
 }  // namespace

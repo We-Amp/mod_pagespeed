@@ -13,5 +13,5 @@
     "install/debian/optimizer-pin.json. Set PAGESPEED_OPTIMIZER_PIN to that",
     "file to run the lanes against the released optimizer instead."
   ],
-  "optimizer_commit": "2d1d3ba9865faa29fd330369832c9995f24a2bdb"
+  "optimizer_commit": "be4169a8a27ae71b7df3ec61100ac9985c00cee8"
 }

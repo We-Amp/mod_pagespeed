@@ -12,6 +12,10 @@ daemon_html_conformance.PROVIDER_PORTS must ship the module
 `make_provider(server_config) -> Provider`; a missing one fails the lane.
 A lane outside that set skips every row until its provider lands.
 
+The mode audit (test_live_row_mode_audit) runs every serve-variants row that
+asks for a Markdown copy again in serve-cached-html, which must answer it the
+same way (daemon_html_conformance.mode_audit_rows).
+
 Skips (enforced by test/system/conftest.py once the lane provides the
 daemon_html_conformance fixture): the Apache lane collects only the rows
 whose `ports` include it (the others are reported deselected) and fails the
@@ -70,6 +74,22 @@ def test_live_row(provider, row):
     # What each window step saw, for the terminal summary (conftest).
     for w in runner.windows:
         conf.WINDOW_LOG.append(dict(w, row=row["id"]))
+    assert failures == [], "\n".join(failures)
+
+
+# The mode audit: the serve-variants Markdown rows again with DaemonHtmlCache
+# serve-cached-html. Outside the table's own accounting (conftest counts
+# test_live_row only); a row for another port is skipped here as there.
+AUDIT_ROWS = conf.mode_audit_rows(ROWS)
+
+
+@pytest.mark.parametrize("row", AUDIT_ROWS, ids=[r["id"] for r in AUDIT_ROWS])
+def test_live_row_mode_audit(provider, row):
+    reason = conf.skip_reason(row, provider.port)
+    if reason is not None:
+        pytest.skip(reason)
+    runner = conf.RowRunner(provider, row, CASES["bodies"])
+    failures = runner.run()
     assert failures == [], "\n".join(failures)
 
 

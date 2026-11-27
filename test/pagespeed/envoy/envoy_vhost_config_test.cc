@@ -109,9 +109,8 @@ TEST_F(EnvoyVHostConfigTest, KnownCustomOptionIsSet) {
   EXPECT_EQ(0, rec.Count("Failed"));
 }
 
-// DaemonHtmlCache takes serve-variants on this server too; serve-cached-html,
-// the mode a later release adds, is accepted with a warning as
-// serve-variants.  (The mode itself is inert here: http_filter_test.)
+// DaemonHtmlCache takes serve-variants and serve-cached-html on this server
+// too, with no warning.  (The mode itself is inert here: http_filter_test.)
 TEST_F(EnvoyVHostConfigTest, DaemonHtmlCacheModesParse) {
   RecordingHandler rec;
   EnvoyRewriteOptions options(&thread_system_);
@@ -124,15 +123,15 @@ TEST_F(EnvoyVHostConfigTest, DaemonHtmlCacheModesParse) {
                                      "report-only", &rec));
   EXPECT_TRUE(ApplyVHostCustomOption(&options, "example.com", "DaemonHtmlCache",
                                      "serve-cached-html", &rec));
-  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeCachedHtml,
             options.daemon_html_cache());
-  EXPECT_EQ(1, rec.Count("it runs as serve-variants"));
+  EXPECT_EQ(0, rec.Count("runs as serve-variants"));
   EXPECT_EQ(0, rec.Count("Failed"));
 }
 
-// The settings of the serve-cached-html mode are accepted on this server, each
-// with one warning, and change nothing; an invalid value is refused with the
-// generic warning.
+// The settings of the serve-cached-html mode are accepted on this server, with
+// no warning of their own; an invalid value is refused with the generic
+// warning.
 TEST_F(EnvoyVHostConfigTest, DaemonHtmlCacheLaterReleaseSettingsParse) {
   const struct {
     const char* name;
@@ -164,10 +163,10 @@ TEST_F(EnvoyVHostConfigTest, DaemonHtmlCacheLaterReleaseSettingsParse) {
     EXPECT_EQ(line.valid, ApplyVHostCustomOption(&options, "example.com",
                                                  line.name, line.value, &rec))
         << line.name << " " << line.value;
-    warnings += rec.Count("takes effect with DaemonHtmlCache serve-cached-html");
+    warnings += rec.Count("takes effect with");
     failures += rec.Count("Failed to set option");
   }
-  EXPECT_EQ(10, warnings);
+  EXPECT_EQ(0, warnings);
   EXPECT_EQ(5, failures);
   EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeScopeAll,
             options.daemon_html_cache_serve_scope());
@@ -176,12 +175,12 @@ TEST_F(EnvoyVHostConfigTest, DaemonHtmlCacheLaterReleaseSettingsParse) {
             options.daemon_html_cache_credentialed());
   EXPECT_FALSE(options.daemon_html_cache_ignore_cookies());
   EXPECT_EQ("_my_ab _my_prefix*", options.daemon_html_cache_ignore_cookie());
-  // Nothing reads them: the mode stays as it was.
+  // Setting them does not set the mode.
   EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheOff, options.daemon_html_cache());
 }
 
-// One custom option for every value and form of the later release's
-// directives that this release must accept, and the values just outside them
+// One custom option for every value and form of the serve-cached-html
+// directives that this release accepts, and the values just outside them
 // that it must refuse (logged, and the vhost keeps loading).  On this server
 // DaemonHtmlCacheIgnoreCookie is a comma-separated list, each element checked
 // as one name.
@@ -224,10 +223,10 @@ TEST_F(EnvoyVHostConfigTest, DaemonHtmlCacheLaterReleaseValueTable) {
     EXPECT_EQ(c.loads, ApplyVHostCustomOption(&options, "example.com", c.key,
                                               c.value, &rec))
         << c.key << " " << c.value;
-    const int later =
-        rec.Count("takes effect with DaemonHtmlCache serve-cached-html") +
-        rec.Count("it runs as serve-variants");
-    EXPECT_EQ(c.loads ? 1 : 0, later) << c.key << " " << c.value;
+    // Accepted with effect: no warning of its own.
+    EXPECT_EQ(0, rec.Count("takes effect with") +
+                     rec.Count("runs as serve-variants"))
+        << c.key << " " << c.value;
     EXPECT_EQ(c.loads ? 0 : 1, rec.Count("Failed to set option"))
         << c.key << " " << c.value;
   }

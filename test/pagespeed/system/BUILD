@@ -487,6 +487,60 @@ cc_binary(
     win_def_file = "daemon_stub_html_serve_partial.def",
 )
 
+# The HTML serve set and the C API 1.15 set (serving cached HTML, the request
+# policy). The 1.15 set is bound only when the reported minor is 15 or later,
+# so the same library stands for a 1.14 and a 1.15 peer.
+cc_binary(
+    name = "libdaemon_stub_html_serve_15.so",
+    testonly = True,
+    srcs = ["daemon_stub_lib.cc"],
+    defines = [
+        "PS_STUB_HTML_POLICY",
+        "PS_STUB_HTML_SERVE",
+        "PS_STUB_HTML_SERVE_15",
+    ],
+    linkopts = select({
+        "@platforms//os:linux": ["-nostdlib++"],
+        "//conditions:default": [],
+    }),
+    linkshared = True,
+    linkstatic = True,
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//visibility:public"],
+    win_def_file = "daemon_stub_html_serve_15.def",
+)
+
+# The 1.15 set less ps_html_request_guard, while reporting 1.15: the 1.14 set
+# is bound and none of the 1.15 one is.
+cc_binary(
+    name = "libdaemon_stub_html_serve_15_partial.so",
+    testonly = True,
+    srcs = ["daemon_stub_lib.cc"],
+    defines = [
+        "PS_STUB_HTML_POLICY",
+        "PS_STUB_HTML_SERVE",
+        "PS_STUB_HTML_SERVE_15",
+        "PS_STUB_OMIT_REQUEST_GUARD",
+    ],
+    linkopts = select({
+        "@platforms//os:linux": ["-nostdlib++"],
+        "//conditions:default": [],
+    }),
+    linkshared = True,
+    linkstatic = True,
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//visibility:public"],
+    win_def_file = "daemon_stub_html_serve_15_partial.def",
+)
+
 # A daemon package from before the per-failure explanation was published. Like
 # the two flavours above this entry point is bound OPTIONALLY, so this library
 # must still load and still work; without it "an older library is unaffected"
@@ -551,6 +605,8 @@ pagespeed_cc_test(
     data = [
         ":libdaemon_stub.so",
         ":libdaemon_stub_html_serve.so",
+        ":libdaemon_stub_html_serve_15.so",
+        ":libdaemon_stub_html_serve_15_partial.so",
         ":libdaemon_stub_html_serve_partial.so",
         ":libdaemon_stub_no_site.so",
     ],

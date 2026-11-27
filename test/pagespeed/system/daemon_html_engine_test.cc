@@ -15,8 +15,10 @@
 
 #include "net/instaweb/rewriter/public/rewrite_stats.h"
 #include "openssl/sha.h"
+#include "pagespeed/kernel/base/null_message_handler.h"
 #include "pagespeed/kernel/base/null_mutex.h"
 #include "pagespeed/kernel/base/string.h"
+#include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/cache/purge_set.h"
 #include "pagespeed/kernel/util/platform.h"
@@ -232,13 +234,16 @@ class StoreAbi : public InjectedVerdictDaemonAbi {
     verdicts_.push_back({action, reason});
   }
 
-  int HtmlStoreClassify(int, const char*, const char*, uint32_t, int,
-                        const char* const*, const char* const*, size_t,
-                        uint64_t, int, const char*, size_t, uint64_t, uint32_t,
-                        int* out_reason, uint32_t* out_lifetime_s,
+  int HtmlStoreClassify(int mode, const char*, const char*,
+                        uint32_t request_flags, int, const char* const*,
+                        const char* const*, size_t, uint64_t, int, const char*,
+                        size_t, uint64_t, uint32_t, int* out_reason,
+                        uint32_t* out_lifetime_s,
                         uint32_t* out_flags, uint16_t* out_cc_flags,
                         int* out_sidecar, char* detail, size_t capacity,
                         size_t* out_detail_len) const override {
+    store_modes.push_back(mode);
+    store_request_flags.push_back(request_flags);
     std::pair<int, const char*> v = {kPsHtmlStoreActionRefuse, "mode"};
     if (!verdicts_.empty()) {
       v = verdicts_.front();
@@ -263,6 +268,10 @@ class StoreAbi : public InjectedVerdictDaemonAbi {
                ? kReasons[reason]
                : nullptr;
   }
+
+  // The mode and request flags of every store classification, in order.
+  mutable std::vector<int> store_modes;
+  mutable std::vector<uint32_t> store_request_flags;
 
  private:
   static constexpr const char* kReasons[] = {"none", "mode", "private"};
@@ -328,6 +337,14 @@ class DaemonHtmlEngineTest : public testing::Test {
     rec->NoteStoreHeaders(at_store);
     rec->AddBody(kBody, sizeof(kBody) - 1);
     rec->Finish(false);
+  }
+
+  // Everything the handler was given, as one string.
+  GoogleString Logged() {
+    GoogleString out;
+    StringWriter writer(&out);
+    handler_.Dump(&writer);
+    return out;
   }
 
   int CallsOf(const char* fn) const {
@@ -804,6 +821,246 @@ TEST_F(DaemonHtmlEngineTest, AReplacedVolumeGetsTheEpochAgain) {
   handle = &replacement;
   engine.OnPurgePollTick();
   EXPECT_EQ(2, CallsOf("ps_cache_write_site_purge_epoch"));
+}
+
+// --- serve-cached-html and the 1.15 set -------------------------------
+
+// The 1.15 fields of a sidecar write, by the struct size the engine stamped
+// (the first argument the fake records).
+GoogleString SidecarWriteSize(const InjectedVerdictDaemonAbi& abi) {
+  for (const InjectedHtmlCall& c : abi.html_calls()) {
+    if (c.fn == "ps_cache_write_headers_sidecar_site" && !c.args.empty()) {
+      return c.args[0];
+    }
+  }
+  return "";
+}
+
+// Without the 1.15 set, serve-cached-html runs as serve-variants: the library
+// is sent mode 2 and every struct at its 1.14 size, each HTML response counts
+// daemon_html_serve_cached_html_unavailable, and one warning says why.
+TEST_F(DaemonHtmlEngineTest, ServeCachedHtmlRunsAsServeVariantsBelowFifteen) {
+  config_.mode = DaemonHtmlMode::kServeCachedHtml;
+  abi_.mutable_injection()->unavailable_reason_15 =
+      "the optimizer library reports C API 1.14";
+  std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
+  EXPECT_EQ(DaemonHtmlMode::kServeVariants, engine->effective_mode());
+  EXPECT_TRUE(engine->serving());
+  InlinePort port;
+  DaemonHtmlRequestFacts facts = MarkdownRequest();
+  facts.agent_class = 3;
+  engine->Serve(facts, &port);
+  ASSERT_EQ(1u, abi_.serve_requests().size());
+  EXPECT_EQ(kPsHtmlCacheServeVariants, abi_.serve_requests()[0].mode);
+  EXPECT_EQ(kPsHtmlServeRequestSize14, abi_.serve_requests()[0].struct_size);
+  EXPECT_EQ(0u, abi_.serve_requests()[0].request_flags &
+                    kPsHtmlServeRequestFreshOnly);
+  ASSERT_EQ(1u, abi_.serve_facts().size());
+  EXPECT_EQ(kPsHtmlStoredFactsSize14, abi_.serve_facts()[0].struct_size);
+
+  abi_.Queue(kPsHtmlStoreActionStore, "none");
+  abi_.Queue(kPsHtmlStoreActionStore, "none");
+  Capture(engine.get(), &port, kOrigin, kOrigin, MarkdownRequest());
+  EXPECT_EQ(1, stats_.GetVariable("daemon_html_serve_cached_html_unavailable")
+                   ->Get());
+  ASSERT_FALSE(abi_.store_modes.empty());
+  EXPECT_EQ(kPsHtmlCacheServeVariants, abi_.store_modes[0]);
+  EXPECT_EQ(IntegerToString(static_cast<int>(kPsSidecarWriteParamsSize13)),
+            SidecarWriteSize(abi_));
+  EXPECT_EQ(1, handler_.MessagesOfType(kWarning));
+  EXPECT_NE(GoogleString::npos,
+            Logged().find("serve-cached-html is unavailable"));
+  EXPECT_NE(GoogleString::npos, Logged().find("C API 1.14"));
+  // Once per state: the next response counts, and logs nothing more.
+  Capture(engine.get(), &port, kOrigin, kOrigin, MarkdownRequest());
+  engine->OnPurgePollTick();
+  EXPECT_EQ(2, stats_.GetVariable("daemon_html_serve_cached_html_unavailable")
+                   ->Get());
+  EXPECT_EQ(1, handler_.MessagesOfType(kWarning));
+
+  // A library that gains the set (a restart of the optimizer) is read on the
+  // next tick.
+  abi_.mutable_injection()->has_set_15 = true;
+  engine->OnPurgePollTick();
+  EXPECT_EQ(DaemonHtmlMode::kServeCachedHtml, engine->effective_mode());
+}
+
+// With the 1.15 set, serve-cached-html sends mode 3 with the 1.15 request:
+// the scope, the agent class, the cap, the stamp, always fresh-only, the
+// conditional bit for a request that arrived with a validator, and the
+// explicit-public bit; the structs at their 1.15 sizes.
+TEST_F(DaemonHtmlEngineTest, ServeCachedHtmlSendsTheFifteenRequest) {
+  config_.mode = DaemonHtmlMode::kServeCachedHtml;
+  config_.serve_scope = kPsHtmlServeScopeAll;
+  config_.max_age_s = 120;
+  config_.credentialed = kPsHtmlCredentialedExplicitPublic;
+  config_.policy_stamp = 0x77;
+  abi_.mutable_injection()->has_set_15 = true;
+  std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
+  EXPECT_EQ(DaemonHtmlMode::kServeCachedHtml, engine->effective_mode());
+  InlinePort port;
+  DaemonHtmlRequestFacts facts = MarkdownRequest();
+  facts.agent_class = 3;
+  facts.has_if_modified_since = true;
+  facts.if_modified_since = "Mon, 01 Jan 2024 00:00:00 GMT";
+  engine->Serve(facts, &port);
+  ASSERT_EQ(1u, abi_.serve_requests().size());
+  const RecordedServeRequest& r = abi_.serve_requests()[0];
+  EXPECT_EQ(kPsHtmlCacheServeCachedHtml, r.mode);
+  EXPECT_EQ(sizeof(PsHtmlServeRequest), r.struct_size);
+  EXPECT_EQ(kPsHtmlServeRequestFreshOnly | kPsHtmlServeRequestConditional |
+                kPsHtmlServeRequestExplicitPublic,
+            r.request_flags & (kPsHtmlServeRequestFreshOnly |
+                               kPsHtmlServeRequestConditional |
+                               kPsHtmlServeRequestExplicitPublic |
+                               kPsHtmlServeRequestHtmlFallback));
+  EXPECT_EQ(kPsHtmlServeScopeAll, r.serve_scope);
+  EXPECT_EQ(3, r.agent_class);
+  EXPECT_EQ(120u, r.html_max_lifetime_s);
+  EXPECT_EQ(0x77u, r.policy_stamp);
+  ASSERT_EQ(1u, abi_.serve_facts().size());
+  EXPECT_EQ(sizeof(PsHtmlStoredFacts), abi_.serve_facts()[0].struct_size);
+
+  // No validator: no conditional bit; fresh-only stays.
+  engine->Serve(MarkdownRequest(), &port);
+  ASSERT_EQ(2u, abi_.serve_requests().size());
+  EXPECT_EQ(0u, abi_.serve_requests()[1].request_flags &
+                    kPsHtmlServeRequestConditional);
+  EXPECT_NE(0u, abi_.serve_requests()[1].request_flags &
+                    kPsHtmlServeRequestFreshOnly);
+
+  // A verdict to serve the stored HTML falls through: that answer is not
+  // built yet, and Markdown is the only body this engine emits.
+  abi_.mutable_injection()->verdict.action = kPsHtmlServeActionServeHtml;
+  EXPECT_EQ(DaemonHtmlServeResult::kFallThrough,
+            engine->Serve(MarkdownRequest(), &port).kind);
+
+  // The store side: mode 3, the explicit-public bit, the 1.15 sidecar size.
+  abi_.Queue(kPsHtmlStoreActionStore, "none");
+  abi_.Queue(kPsHtmlStoreActionStore, "none");
+  Capture(engine.get(), &port, kOrigin, kOrigin, MarkdownRequest());
+  ASSERT_FALSE(abi_.store_modes.empty());
+  EXPECT_EQ(kPsHtmlCacheServeCachedHtml, abi_.store_modes[0]);
+  EXPECT_NE(0u, abi_.store_request_flags[0] &
+                    kPsHtmlStoreRequestExplicitPublic);
+  EXPECT_EQ(IntegerToString(static_cast<int>(sizeof(PsSidecarWriteParams))),
+            SidecarWriteSize(abi_));
+  EXPECT_EQ(0, stats_.GetVariable("daemon_html_serve_cached_html_unavailable")
+                   ->Get());
+  EXPECT_EQ(0, handler_.MessagesOfType(kWarning));
+}
+
+// serve-variants on a 1.15 library: mode 2 at the full size, never
+// fresh-only, and the explicit-public bit only when configured.
+TEST_F(DaemonHtmlEngineTest, ServeVariantsOnAFifteenLibrarySendsModeTwo) {
+  abi_.mutable_injection()->has_set_15 = true;
+  std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
+  EXPECT_EQ(DaemonHtmlMode::kServeVariants, engine->effective_mode());
+  InlinePort port;
+  DaemonHtmlRequestFacts facts = MarkdownRequest();
+  facts.has_if_none_match = true;
+  facts.if_none_match = "\"x\"";
+  engine->Serve(facts, &port);
+  ASSERT_EQ(1u, abi_.serve_requests().size());
+  const RecordedServeRequest& r = abi_.serve_requests()[0];
+  EXPECT_EQ(kPsHtmlCacheServeVariants, r.mode);
+  EXPECT_EQ(sizeof(PsHtmlServeRequest), r.struct_size);
+  EXPECT_EQ(0u, r.request_flags & (kPsHtmlServeRequestFreshOnly |
+                                   kPsHtmlServeRequestConditional |
+                                   kPsHtmlServeRequestExplicitPublic));
+  abi_.Queue(kPsHtmlStoreActionStore, "none");
+  abi_.Queue(kPsHtmlStoreActionStore, "none");
+  Capture(engine.get(), &port, kOrigin, kOrigin, MarkdownRequest());
+  ASSERT_FALSE(abi_.store_modes.empty());
+  EXPECT_EQ(kPsHtmlCacheServeVariants, abi_.store_modes[0]);
+  EXPECT_EQ(0u, abi_.store_request_flags[0] &
+                    kPsHtmlStoreRequestExplicitPublic);
+}
+
+// serve-variants on a 1.14 library keeps the earlier cookie rule.  That is
+// worth a warning only when the operator set a credentialed-policy setting
+// that then has no effect.
+TEST_F(DaemonHtmlEngineTest, ServeVariantsBelowFifteenWarnsOnlyForUnappliedPolicy) {
+  {
+    std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
+    InlinePort port;
+    Capture(engine.get(), &port, kOrigin, kOrigin, MarkdownRequest());
+    engine->OnPurgePollTick();
+    EXPECT_EQ(0, handler_.MessagesOfType(kWarning));
+  }
+  config_.credentialed = kPsHtmlCredentialedExplicitPublic;
+  std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
+  InlinePort port;
+  Capture(engine.get(), &port, kOrigin, kOrigin, MarkdownRequest());
+  engine->OnPurgePollTick();
+  EXPECT_EQ(1, handler_.MessagesOfType(kWarning));
+  EXPECT_NE(GoogleString::npos,
+            Logged().find("DaemonHtmlCacheCredentialed"));
+  // The 1.14 library is never told explicit-public.
+  ASSERT_FALSE(abi_.store_request_flags.empty());
+  for (uint32_t flags : abi_.store_request_flags) {
+    EXPECT_EQ(0u, flags & kPsHtmlStoreRequestExplicitPublic);
+  }
+  EXPECT_EQ(0, stats_.GetVariable("daemon_html_serve_cached_html_unavailable")
+                   ->Get());
+}
+
+TEST(DaemonHtmlModeTest, EveryOptionModeMapsAndOnlyLaterModesServe) {
+  EXPECT_EQ(DaemonHtmlMode::kOff,
+            DaemonHtmlModeFor(RewriteOptions::kDaemonHtmlCacheOff));
+  EXPECT_EQ(DaemonHtmlMode::kReportOnly,
+            DaemonHtmlModeFor(RewriteOptions::kDaemonHtmlCacheReportOnly));
+  EXPECT_EQ(DaemonHtmlMode::kServeVariants,
+            DaemonHtmlModeFor(RewriteOptions::kDaemonHtmlCacheServeVariants));
+  EXPECT_EQ(
+      DaemonHtmlMode::kServeCachedHtml,
+      DaemonHtmlModeFor(RewriteOptions::kDaemonHtmlCacheServeCachedHtml));
+  EXPECT_FALSE(DaemonHtmlCacheServes(RewriteOptions::kDaemonHtmlCacheOff));
+  EXPECT_FALSE(
+      DaemonHtmlCacheServes(RewriteOptions::kDaemonHtmlCacheReportOnly));
+  EXPECT_TRUE(
+      DaemonHtmlCacheServes(RewriteOptions::kDaemonHtmlCacheServeVariants));
+  EXPECT_TRUE(
+      DaemonHtmlCacheServes(RewriteOptions::kDaemonHtmlCacheServeCachedHtml));
+}
+
+TEST(DaemonHtmlModeTest, TheServeSettingsReachTheEngineConfig) {
+  RewriteOptions::Initialize();
+  {
+    std::unique_ptr<ThreadSystem> threads(Platform::CreateThreadSystem());
+    RewriteOptions options(threads.get());
+    DaemonHtmlEngine::Config config;
+    FillDaemonHtmlServeSettings(options, &config);
+    EXPECT_EQ(kPsHtmlServeScopeAgents, config.serve_scope);
+    EXPECT_EQ(3600u, config.max_age_s);
+    EXPECT_EQ(kPsHtmlCredentialedAnonymousOnly, config.credentialed);
+    EXPECT_TRUE(config.ignore_cookies);
+    EXPECT_TRUE(config.ignore_cookie.empty());
+
+    GoogleString msg;
+    NullMessageHandler handler;
+    for (const auto& [name, value] :
+         std::vector<std::pair<const char*, const char*>>{
+             {"DaemonHtmlCacheServeScope", "all"},
+             {"DaemonHtmlCacheMaxAge", "0"},
+             {"DaemonHtmlCacheCredentialed", "explicit-public"},
+             {"DaemonHtmlCacheIgnoreCookies", "off"},
+             {"DaemonHtmlCacheIgnoreCookie", "_my_ab"},
+             {"DaemonHtmlCacheIgnoreCookie", "_my_pref*"}}) {
+      ASSERT_EQ(RewriteOptions::kOptionOk,
+                options.ParseAndSetOptionFromName1(name, value, &msg,
+                                                   &handler))
+          << name;
+    }
+    FillDaemonHtmlServeSettings(options, &config);
+    EXPECT_EQ(kPsHtmlServeScopeAll, config.serve_scope);
+    EXPECT_EQ(0u, config.max_age_s);
+    EXPECT_EQ(kPsHtmlCredentialedExplicitPublic, config.credentialed);
+    EXPECT_FALSE(config.ignore_cookies);
+    EXPECT_EQ(std::vector<GoogleString>({"_my_ab", "_my_pref*"}),
+              config.ignore_cookie);
+  }
+  RewriteOptions::Terminate();
 }
 
 }  // namespace

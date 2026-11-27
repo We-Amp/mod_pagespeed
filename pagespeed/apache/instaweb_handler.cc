@@ -669,8 +669,7 @@ int FindMarkdownAccept(void* rec, const char* /*key*/, const char* value) {
 
 bool InstawebHandler::ServeDaemonHtmlMarkdown() {
   const ApacheConfig* config = server_context_->global_config();
-  if (config->daemon_html_cache() !=
-          RewriteOptions::kDaemonHtmlCacheServeVariants ||
+  if (!DaemonHtmlCacheServes(config->daemon_html_cache()) ||
       !config->agent_optimize() || !ApacheDaemonHtmlMainRequest(request_)) {
     return false;
   }

@@ -312,6 +312,9 @@ const char* const RewriteStats::kDaemonHtmlEngineCounters[] = {
     "daemon_html_epoch_write_failed",
     "daemon_html_purge_remove_failed",
     "daemon_html_serve_unavailable",
+    // HTML responses in the serve-cached-html mode while the library lacks
+    // C API 1.15, so the mode runs as serve-variants.
+    "daemon_html_serve_cached_html_unavailable",
     "daemon_html_notify_sent",
     "daemon_html_notify_limited",
     "daemon_markdown_served",

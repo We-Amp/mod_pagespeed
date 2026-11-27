@@ -724,6 +724,21 @@ static_assert(sizeof(PsCacheControlInput) == 40,
 // The minor that publishes the whole set.
 inline constexpr int kHtmlServeSetMinor = 14;
 
+// The 1.15 serve set: serving cached HTML (the serve scope, agent class,
+// freshness cap, fresh-only and the policy stamp in the request; the entry
+// record and its stamp in the facts; header block format 3), and the request
+// policy (the request guard, cookie classification, the ignore-list guard,
+// the policy stamp and the unsafe-method predicate).
+//
+// BOUND OPTIONALLY, AS ONE SET, AND ONLY ON TOP OF THE 1.14 SET.  A library
+// below 1.15 reads only the 1.14 prefix of a larger request and applies the
+// earlier cookie rule, so this module never sends it the serve-cached-html
+// mode and never relies on the credentialed policy, the entry check or the
+// request guard there: without the set the HTML cache runs serve-variants with
+// the 1.14 rules, and every struct of the serve set goes out at its 1.14
+// size (see the size constants below).
+inline constexpr int kHtmlServe15SetMinor = 15;
+
 // Sentinel-shaped alternate ids the HTML cache reads by exact id.  The
 // content-hash record (0x3C) and the Markdown copy (0x7C) are the
 // optimizer's; the withheld marker (0xCC, published at 1.13) is its record
@@ -738,6 +753,12 @@ inline constexpr uint8_t kPsSentinelMarkdownWithheld = 0xCC;
 // non-empty sidecar was stored and a serve must replay it or fall through.
 inline constexpr uint8_t kPsFlagHeadersClassified = 0x10;
 inline constexpr uint8_t kPsFlagHeadersSidecarRequired = 0x20;
+// Published at 1.15, set by ps_html_store_write_params only: an HTML original
+// recorded under the credentialed policy (STORE_V2), and recorded from an
+// anonymous request (ANONYMOUS_RECORDED, which counts on an HTML original only
+// together with STORE_V2).
+inline constexpr uint8_t kPsFlagAnonymousRecorded = 0x40;
+inline constexpr uint8_t kPsFlagHtmlStoreV2 = 0x80;
 
 // What HeaderBlockPairing answers.
 inline constexpr int kPsSidecarUnpaired = 0;
@@ -756,6 +777,12 @@ inline constexpr int kPsHtmlStoreActionStoreNoNotify = 2;
 inline constexpr int kPsHtmlStoreActionWouldStore = 3;
 inline constexpr int kPsHtmlStoreActionWouldStoreNoNotify = 4;
 
+// ps_html_store_classify: the explicit-public policy bit of `request_flags`
+// (1.15), and the out-flag saying the request was anonymous (1.15), which
+// ps_html_store_write_params records on the entry.
+inline constexpr uint32_t kPsHtmlStoreRequestExplicitPublic = 16u;
+inline constexpr uint32_t kPsHtmlStoreFlagRequestAnonymous = 64u;
+
 // ps_html_serve_classify's actions.  VALIDATE is returned only in the
 // serve-cached-html mode; a caller with no validation step falls through.
 inline constexpr int kPsHtmlServeActionFallThrough = 0;
@@ -770,6 +797,17 @@ inline constexpr uint32_t kPsHtmlServeRequestHasCookie = 4u;
 inline constexpr uint32_t kPsHtmlServeRequestHasRange = 8u;
 inline constexpr uint32_t kPsHtmlServeRequestHasIfRange = 16u;
 inline constexpr uint32_t kPsHtmlServeRequestHasOrigin = 32u;
+// 1.15, read only from a request of the 1.15 size.
+inline constexpr uint32_t kPsHtmlServeRequestFreshOnly = 64u;
+inline constexpr uint32_t kPsHtmlServeRequestHtmlFallback = 128u;
+inline constexpr uint32_t kPsHtmlServeRequestConditional = 256u;
+inline constexpr uint32_t kPsHtmlServeRequestExplicitPublic = 512u;
+
+// PsHtmlServeRequest::serve_scope (1.15); any other value reads as agents.
+inline constexpr int kPsHtmlServeScopeAgents = 0;
+inline constexpr int kPsHtmlServeScopeAll = 1;
+// The highest PsHtmlServeRequest::agent_class; a larger one reads as 0.
+inline constexpr int kPsHtmlAgentClassMax = 3;
 
 // PsHtmlStoredFacts::flags.  PURGED is the caller's to set; nothing the
 // library reads can know it.
@@ -785,6 +823,9 @@ inline constexpr uint32_t kPsHtmlFactsVariantPresent = 0x100u;
 inline constexpr uint32_t kPsHtmlFactsBindingLive = 0x200u;
 inline constexpr uint32_t kPsHtmlFactsNoTransform = 0x400u;
 inline constexpr uint32_t kPsHtmlFactsWithheld = 0x800u;
+// 1.15: the entry carries kPsFlagHtmlStoreV2 / kPsFlagAnonymousRecorded.
+inline constexpr uint32_t kPsHtmlFactsStoreV2 = 0x1000u;
+inline constexpr uint32_t kPsHtmlFactsAnonymousRecorded = 0x2000u;
 
 // PsHtmlStoredFacts::withheld_reason, with kPsHtmlFactsWithheld.
 inline constexpr int kPsHtmlWithheldBelowFloor = 1;
@@ -808,11 +849,37 @@ inline constexpr int kPsHtmlModeMarkdownStatic = 1;
 inline constexpr int kPsHtmlModeMarkdownRendered = 2;
 inline constexpr int kPsHtmlModeFull = 3;
 
+// PsSidecarWriteParams::write_flags (1.15): store header block format 3,
+// which carries the policy stamp and the Cache-Control and Expires lines.
+inline constexpr uint32_t kPsSidecarWritePolicyBlock = 1u;
+
+// What ps_html_request_guard reports (1.15).
+inline constexpr int kPsHtmlGuardNone = 0;
+inline constexpr int kPsHtmlGuardRequestHeader = 1;
+inline constexpr int kPsHtmlGuardPath = 2;
+
+// What ps_html_classify_cookies reports (1.15), and the built-in ignore
+// list's version, an input to the policy stamp.
+inline constexpr int kPsHtmlCookiesNone = 0;
+inline constexpr int kPsHtmlCookiesIgnorableOnly = 1;
+inline constexpr int kPsHtmlCookiesBlocking = 2;
+inline constexpr int kPsHtmlCookieListVersion = 1;
+
+// The operator's credentialed policy (ps_html_policy_stamp, 1.15).
+inline constexpr int kPsHtmlCredentialedAnonymousOnly = 0;
+inline constexpr int kPsHtmlCredentialedExplicitPublic = 1;
+
 // Layout-compatible mirrors of the set's parameter structs, under the same
 // rules as the ones above: copied field for field, never tidied, and
 // struct_size stamped by this module (the peer has no initializer for them).
 // A request or facts struct smaller than its 1.14 size is a malformed call to
 // the peer; the verdict is written only as far as its struct_size reaches.
+//
+// The 1.15 fields are appended.  A caller stamps struct_size with
+// HtmlServeRequestSize, HtmlStoredFactsSize or SidecarWriteParamsSize (after
+// DaemonAbi below): the full size only for a library that binds the 1.15
+// set, and the 1.14 size (1.13 for the sidecar parameters) for every other,
+// which then reads none of the appended fields.
 struct PsSidecarWriteParams {
   size_t struct_size;
   const char* url;
@@ -822,6 +889,10 @@ struct PsSidecarWriteParams {
   // The stamp of the durable original this block belongs to, or nullptr for
   // an unpaired block.  Never 32 zero bytes: the peer refuses them.
   const uint8_t* origin_html_hash;
+  // 1.15, read only with kPsSidecarWritePolicyBlock: the policy stamp.
+  uint64_t policy_stamp;
+  // 1.15: kPsSidecarWrite* bits; the peer refuses an unknown one.
+  uint32_t write_flags;
 };
 
 struct PsHtmlServeRequest {
@@ -836,6 +907,12 @@ struct PsHtmlServeRequest {
   const char* if_none_match;
   uint32_t request_flags;
   uint32_t now_seconds;
+  // 1.15.
+  int serve_scope;                // kPsHtmlServeScope*
+  int agent_class;                // 0 unknown, 1 to kPsHtmlAgentClassMax
+  uint32_t html_max_lifetime_s;   // 0 = no cap; only shortens the lifetime
+  uint32_t reserved;              // zero
+  uint64_t policy_stamp;          // 0 = none
 };
 
 struct PsHtmlStoredFacts {
@@ -848,7 +925,37 @@ struct PsHtmlStoredFacts {
   int withheld_reason;
   uint8_t binding_hash[kPsHtmlHashBytes];
   uint8_t markdown_hash[kPsHtmlHashBytes];
+  // 1.15: the stamp the entry's header block carries; 0 = none.
+  uint64_t entry_policy_stamp;
 };
+
+// The request policy's results (1.15), stamped by this module.
+struct PsHtmlRequestGuard {
+  size_t struct_size;
+  int reason;        // kPsHtmlGuard*
+  int header_index;  // the refused line in the caller's arrays, or -1
+  int xfp;           // 1 for an X-Forwarded-Proto that is not the keyed scheme
+};
+
+// A byte range in one of the caller's Cookie lines.
+struct PsHtmlCookieSpan {
+  size_t line;
+  size_t offset;
+  size_t length;
+};
+
+struct PsHtmlCookieClass {
+  size_t struct_size;
+  int cookie_class;  // kPsHtmlCookies*
+  int malformed;     // blocking because a pair did not parse: log "malformed"
+  PsHtmlCookieSpan first_blocking;  // the first blocking cookie's NAME
+  size_t ignorable_count;
+};
+
+// The sizes a library below 1.15 knows: what this module sends it.
+inline constexpr size_t kPsSidecarWriteParamsSize13 = 48;
+inline constexpr size_t kPsHtmlServeRequestSize14 = 64;
+inline constexpr size_t kPsHtmlStoredFactsSize14 = 96;
 
 struct PsHtmlServeVerdict {
   size_t struct_size;
@@ -862,22 +969,43 @@ struct PsHtmlServeVerdict {
 };
 
 #if defined(__LP64__) || defined(_LP64) || defined(_WIN64)
-static_assert(sizeof(PsSidecarWriteParams) == 48,
+static_assert(sizeof(PsSidecarWriteParams) == 64,
               "the sidecar write parameter layout no longer matches the "
               "published one");
 static_assert(offsetof(PsSidecarWriteParams, origin_html_hash) == 40,
               "the sidecar's pairing hash is not where the peer reads it");
-static_assert(sizeof(PsHtmlServeRequest) == 64,
+static_assert(offsetof(PsSidecarWriteParams, policy_stamp) ==
+                  kPsSidecarWriteParamsSize13,
+              "the 1.15 sidecar fields must start where the 1.13 size ends");
+static_assert(offsetof(PsSidecarWriteParams, write_flags) == 56,
+              "the sidecar write parameter layout no longer matches the "
+              "published one");
+static_assert(sizeof(PsHtmlServeRequest) == 88,
               "the serve request layout no longer matches the published one; "
               "a request short of it is a malformed call to the peer");
 static_assert(offsetof(PsHtmlServeRequest, if_none_match) == 48,
               "the serve request layout no longer matches the published one");
 static_assert(offsetof(PsHtmlServeRequest, now_seconds) == 60,
               "the serve request layout no longer matches the published one");
-static_assert(sizeof(PsHtmlStoredFacts) == 96,
+static_assert(offsetof(PsHtmlServeRequest, serve_scope) ==
+                  kPsHtmlServeRequestSize14,
+              "the 1.15 request fields must start where the 1.14 size ends");
+static_assert(offsetof(PsHtmlServeRequest, policy_stamp) == 80,
+              "the serve request layout no longer matches the published one");
+static_assert(sizeof(PsHtmlStoredFacts) == 104,
               "the stored-facts layout no longer matches the published one");
 static_assert(offsetof(PsHtmlStoredFacts, binding_hash) == 32,
               "the stored-facts layout no longer matches the published one");
+static_assert(offsetof(PsHtmlStoredFacts, entry_policy_stamp) ==
+                  kPsHtmlStoredFactsSize14,
+              "the 1.15 facts field must start where the 1.14 size ends");
+static_assert(sizeof(PsHtmlRequestGuard) == 24,
+              "the request guard layout no longer matches the published one");
+static_assert(sizeof(PsHtmlCookieSpan) == 24,
+              "the cookie span layout no longer matches the published one");
+static_assert(sizeof(PsHtmlCookieClass) == 48 &&
+                  offsetof(PsHtmlCookieClass, first_blocking) == 16,
+              "the cookie class layout no longer matches the published one");
 static_assert(sizeof(PsHtmlServeVerdict) == 64,
               "the serve verdict layout no longer matches the published one");
 static_assert(offsetof(PsHtmlServeVerdict, etag) == 32,
@@ -1145,6 +1273,86 @@ class DaemonAbi {
   // ps_wants_agent_markdown: 1 when `accept` (every line joined with ", ")
   // ranks text/markdown at least as high as text/html, else 0.
   virtual int WantsAgentMarkdown(const char* /*accept*/) const { return 0; }
+
+  // ---------------------------------------------------------------------
+  // The 1.15 serve set (see kHtmlServe15SetMinor).
+  //
+  // True only when HasHtmlServeSet() is, the library reports minor
+  // kHtmlServe15SetMinor or later, AND it exports every entry point below.
+  // When false none of them is bound and each answers its fail-closed value
+  // without reaching the library (-1, or 0 for the predicate).  Then, too,
+  // the binding never sends the serve-cached-html mode
+  // (HtmlServeClassify answers -1 for it) and sends every struct of the
+  // serve set at its 1.14 size, whatever size the caller stamped.
+  virtual bool HasHtmlServe15Set() const { return false; }
+
+  // Why HasHtmlServe15Set() is false, as one clause for an operator's log.
+  // Empty when the set is bound.
+  virtual GoogleString HtmlServe15SetUnavailableReason() const {
+    return "the optimizer library binding does not provide C API 1.15";
+  }
+
+  // ps_html_request_guard: 0 with *out written up to out->struct_size (the
+  // caller stamps it), -1 for a malformed call or an unbound set.
+  virtual int HtmlRequestGuard(const char* /*raw_path*/,
+                               const char* const* /*names*/,
+                               const char* const* /*values*/, size_t /*count*/,
+                               const char* /*keyed_scheme*/,
+                               PsHtmlRequestGuard* /*out*/) const {
+    return -1;
+  }
+
+  // ps_html_classify_cookies: 0 with *out written, -1 otherwise.
+  virtual int HtmlClassifyCookies(const char* const* /*lines*/,
+                                  size_t /*line_count*/, int /*ignore_builtin*/,
+                                  const char* const* /*additions*/,
+                                  size_t /*addition_count*/,
+                                  PsHtmlCookieSpan* /*ignorable_values*/,
+                                  size_t /*ignorable_capacity*/,
+                                  PsHtmlCookieClass* /*out*/) const {
+    return -1;
+  }
+
+  // ps_html_ignore_cookie_guard: 1 accepted, 0 refused, -1 for a NULL
+  // addition or an unbound set.
+  virtual int HtmlIgnoreCookieGuard(const char* /*addition*/,
+                                    int* /*out_warning*/) const {
+    return -1;
+  }
+
+  // ps_html_policy_stamp: 0 with *out set, -1 otherwise.
+  virtual int HtmlPolicyStamp(int /*credentialed*/, int /*ignore_builtin*/,
+                              uint32_t /*list_version*/,
+                              const char* const* /*additions*/,
+                              size_t /*addition_count*/,
+                              uint64_t* /*out*/) const {
+    return -1;
+  }
+
+  // ps_html_unsafe_method_invalidates: 1 when the response invalidates the
+  // stored page, else 0 (also for an unbound set).
+  virtual int HtmlUnsafeMethodInvalidates(const char* /*method*/,
+                                          int /*status*/) const {
+    return 0;
+  }
+
+  // ps_header_block_policy_stamp: 1 with *out set, 0 with *out = 0 for an
+  // earlier format, -1 for a NULL argument or an unbound set.
+  virtual int HeaderBlockPolicyStamp(const void* /*block*/,
+                                     uint64_t* /*out*/) const {
+    return -1;
+  }
+
+  // ps_html_stored_facts_from_reads_ex: as HtmlStoredFactsFromReads, with
+  // entry_policy_stamp read from `block` (nullptr when there was none).
+  virtual int HtmlStoredFactsFromReadsEx(const void* /*original*/,
+                                         const void* /*markdown*/,
+                                         const void* /*withheld_marker*/,
+                                         int /*sidecar_present*/,
+                                         const void* /*block*/,
+                                         PsHtmlStoredFacts* /*out*/) const {
+    return -1;
+  }
 
   // Returns kPsOk and stores an opaque cache handle in *out_cache, or an
   // error code.  A successful open must be matched with CacheClose.
@@ -1429,6 +1637,22 @@ class DaemonAbi {
  protected:
   DaemonAbi();
 };
+
+// The struct_size a caller stamps on a serve-set struct for `abi`: the size
+// this build knows when the library binds the 1.15 set, and otherwise the
+// size a 1.14 library knows, so no field it cannot read is ever sent to it.
+inline size_t HtmlServeRequestSize(const DaemonAbi& abi) {
+  return abi.HasHtmlServe15Set() ? sizeof(PsHtmlServeRequest)
+                                 : kPsHtmlServeRequestSize14;
+}
+inline size_t HtmlStoredFactsSize(const DaemonAbi& abi) {
+  return abi.HasHtmlServe15Set() ? sizeof(PsHtmlStoredFacts)
+                                 : kPsHtmlStoredFactsSize14;
+}
+inline size_t SidecarWriteParamsSize(const DaemonAbi& abi) {
+  return abi.HasHtmlServe15Set() ? sizeof(PsSidecarWriteParams)
+                                 : kPsSidecarWriteParamsSize13;
+}
 
 // The soname the daemon package installs.  Resolved through the dynamic
 // loader's normal search path, so an operator who installs the daemon

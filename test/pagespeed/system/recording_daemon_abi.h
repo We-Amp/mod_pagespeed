@@ -362,6 +362,57 @@ class RecordingDaemonAbi : public DaemonAbi {
     return Count(), inner_->WantsAgentMarkdown(accept);
   }
 
+  // The 1.15 set, forwarded like everything else.
+  bool HasHtmlServe15Set() const override {
+    return Count(), inner_->HasHtmlServe15Set();
+  }
+  GoogleString HtmlServe15SetUnavailableReason() const override {
+    return Count(), inner_->HtmlServe15SetUnavailableReason();
+  }
+  int HtmlRequestGuard(const char* raw_path, const char* const* names,
+                       const char* const* values, size_t count,
+                       const char* keyed_scheme,
+                       PsHtmlRequestGuard* out) const override {
+    return Count(), inner_->HtmlRequestGuard(raw_path, names, values, count,
+                                             keyed_scheme, out);
+  }
+  int HtmlClassifyCookies(const char* const* lines, size_t line_count,
+                          int ignore_builtin, const char* const* additions,
+                          size_t addition_count, PsHtmlCookieSpan* values,
+                          size_t capacity,
+                          PsHtmlCookieClass* out) const override {
+    return Count(), inner_->HtmlClassifyCookies(lines, line_count,
+                                                ignore_builtin, additions,
+                                                addition_count, values,
+                                                capacity, out);
+  }
+  int HtmlIgnoreCookieGuard(const char* addition,
+                            int* out_warning) const override {
+    return Count(), inner_->HtmlIgnoreCookieGuard(addition, out_warning);
+  }
+  int HtmlPolicyStamp(int credentialed, int ignore_builtin,
+                      uint32_t list_version, const char* const* additions,
+                      size_t addition_count, uint64_t* out) const override {
+    return Count(), inner_->HtmlPolicyStamp(credentialed, ignore_builtin,
+                                            list_version, additions,
+                                            addition_count, out);
+  }
+  int HtmlUnsafeMethodInvalidates(const char* method,
+                                  int status) const override {
+    return Count(), inner_->HtmlUnsafeMethodInvalidates(method, status);
+  }
+  int HeaderBlockPolicyStamp(const void* block, uint64_t* out) const override {
+    return Count(), inner_->HeaderBlockPolicyStamp(block, out);
+  }
+  int HtmlStoredFactsFromReadsEx(const void* original, const void* markdown,
+                                 const void* withheld, int sidecar_present,
+                                 const void* block,
+                                 PsHtmlStoredFacts* out) const override {
+    return Count(), inner_->HtmlStoredFactsFromReadsEx(
+                        original, markdown, withheld, sidecar_present, block,
+                        out);
+  }
+
  private:
   void Count() const { ++calls_; }
   void Site(const char* site) const {

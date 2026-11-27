@@ -316,13 +316,6 @@ class ConfigurationFile:public ReferenceCounter
 									mh->Message(kWarning, "pagespeed %s is deprecated and has no effect; please remove it from your configuration", scope_directive.as_string().c_str());
 								} else if (r != RewriteOptions::kOptionOk) {
 									mh->Message(kWarning, "Failed to set option [%s]: %s", option.c_str(), msg.c_str());
-								} else {
-									// A setting a later release gives an effect: say what it does
-									// here, as the "pagespeed" line form does.
-									const GoogleString later = RewriteOptions::LaterReleaseOptionWarning(scope_directive, svalue);
-									if (!later.empty()) {
-										mh->Message(kWarning, "%s", later.c_str());
-									}
 								}
 							}
 						}

@@ -90,22 +90,6 @@ DaemonReader* NgxServerContext::NewDaemonReader() {
                              message_handler());
 }
 
-namespace {
-
-DaemonHtmlMode DaemonHtmlModeFor(RewriteOptions::DaemonHtmlCacheMode mode) {
-  switch (mode) {
-    case RewriteOptions::kDaemonHtmlCacheOff:
-      return DaemonHtmlMode::kOff;
-    case RewriteOptions::kDaemonHtmlCacheReportOnly:
-      return DaemonHtmlMode::kReportOnly;
-    case RewriteOptions::kDaemonHtmlCacheServeVariants:
-      return DaemonHtmlMode::kServeVariants;
-  }
-  return DaemonHtmlMode::kOff;
-}
-
-}  // namespace
-
 void NgxServerContext::InitDaemonHtmlEngine(
     const ConfiguredHostNames& host_names,
     std::vector<GoogleString> epoch_sites, DaemonHtmlBlockingRunner* runner,
@@ -131,6 +115,7 @@ void NgxServerContext::InitDaemonHtmlEngine(
     config.mode = DaemonHtmlModeFor(options->daemon_html_cache());
     config.max_bytes = options->daemon_html_max_bytes();
     config.agent_optimize = options->agent_optimize();
+    FillDaemonHtmlServeSettings(*options, &config);
     config.host_names = host_names;
     config.site = SiteIdFromServerFragment(options->cache_fragment());
     config.epoch_sites = std::move(epoch_sites);

@@ -128,10 +128,8 @@ TEST_F(ApacheConfigTest, SetFromHtaccessSurvivesMergeAndClone) {
   EXPECT_TRUE(clone->set_from_htaccess());
 }
 
-// DaemonHtmlCache: serve-variants parses; serve-cached-html, the mode a later
-// release adds, is accepted with a warning and runs as serve-variants, so a
-// configuration written for that release keeps loading and keeps serving
-// the Markdown copies.
+// DaemonHtmlCache: every mode parses, serve-cached-html included, with no
+// warning.
 TEST_F(ApacheConfigTest, DaemonHtmlCacheModesParse) {
   GoogleString msg;
   MockMessageHandler handler(new NullMutex);
@@ -152,17 +150,16 @@ TEST_F(ApacheConfigTest, DaemonHtmlCacheModesParse) {
   EXPECT_EQ(RewriteOptions::kOptionOk,
             config_.ParseAndSetOptionFromName1(
                 "DaemonHtmlCache", "serve-cached-html", &msg, &handler));
-  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeCachedHtml,
             config_.daemon_html_cache());
-  EXPECT_EQ(1, handler.MessagesOfType(kWarning));
+  EXPECT_EQ(0, handler.MessagesOfType(kWarning));
   EXPECT_EQ(RewriteOptions::kOptionValueInvalid,
             config_.ParseAndSetOptionFromName1("DaemonHtmlCache", "serve", &msg,
                                                &handler));
 }
 
 // The settings of the serve-cached-html mode load on this server, every value
-// of each, with one warning each and no effect; an invalid value fails the
-// configuration.
+// of each, with no warning; an invalid value fails the configuration.
 TEST_F(ApacheConfigTest, DaemonHtmlCacheLaterReleaseSettingsParse) {
   struct Line {
     const char* name;
@@ -198,7 +195,6 @@ TEST_F(ApacheConfigTest, DaemonHtmlCacheLaterReleaseSettingsParse) {
               config_.ParseAndSetOptionFromName1(line.name, line.value, &msg,
                                                  &handler))
         << line.name << " " << line.value;
-    if (line.valid) ++warnings;
     EXPECT_EQ(warnings, handler.MessagesOfType(kWarning))
         << line.name << " " << line.value;
   }

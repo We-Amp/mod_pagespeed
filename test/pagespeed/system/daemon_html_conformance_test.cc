@@ -174,9 +174,13 @@ uint32_t StoreFlagsOf(const Json::Value& names) {
 // "exact" expectation covers the whole struct.  A field added to either
 // struct must be recorded in ConformanceAbi::HtmlServeClassify before these
 // sizes are updated; otherwise exact matching silently stops covering it.
-static_assert(sizeof(PsHtmlServeRequest) == 64,
+//
+// The 1.15 fields are recorded only from a struct of the 1.15 size: a struct
+// of the 1.14 size (what the engine sends a 1.14 library) carries none, and a
+// row's exact expectation for it is exactly the 1.14 fields.
+static_assert(sizeof(PsHtmlServeRequest) == 88,
               "record the new PsHtmlServeRequest field, then update this size");
-static_assert(sizeof(PsHtmlStoredFacts) == 96,
+static_assert(sizeof(PsHtmlStoredFacts) == 104,
               "record the new PsHtmlStoredFacts field, then update this size");
 
 // Every library function the runner records.  A row naming any other in
@@ -473,6 +477,14 @@ class ConformanceAbi : public InjectedVerdictDaemonAbi {
               kPsHtmlServeRequestHasCookie | kPsHtmlServeRequestHasRange |
               kPsHtmlServeRequestHasIfRange | kPsHtmlServeRequestHasOrigin);
     c.args["request.now_seconds"] = request->now_seconds;
+    if (request->struct_size >= sizeof(PsHtmlServeRequest)) {
+      c.args["request.serve_scope"] = request->serve_scope;
+      c.args["request.agent_class"] = request->agent_class;
+      c.args["request.html_max_lifetime_s"] = request->html_max_lifetime_s;
+      c.args["request.reserved"] = request->reserved;
+      c.args["request.policy_stamp"] =
+          static_cast<Json::UInt64>(request->policy_stamp);
+    }
     const uint32_t s = facts->flags;
     uint32_t known = 0;
     auto bit = [&](const char* name, uint32_t mask) {
@@ -501,6 +513,10 @@ class ConformanceAbi : public InjectedVerdictDaemonAbi {
     c.args["stored.withheld_reason"] = facts->withheld_reason;
     c.args["stored.binding_hash"] = HashName(facts->binding_hash);
     c.args["stored.markdown_hash"] = HashName(facts->markdown_hash);
+    if (facts->struct_size >= sizeof(PsHtmlStoredFacts)) {
+      c.args["stored.entry_policy_stamp"] =
+          static_cast<Json::UInt64>(facts->entry_policy_stamp);
+    }
     calls_.push_back(c);
     if (stub_ != nullptr) return stub_->HtmlServeClassify(request, facts, out);
     Json::Value v = Pop("ps_html_serve_classify");
@@ -578,11 +594,13 @@ class ConformanceAbi : public InjectedVerdictDaemonAbi {
       return stub_->HtmlStoredFactsFromReads(original, markdown, withheld,
                                              sidecar_present, out);
     }
-    if (out == nullptr || out->struct_size < sizeof(PsHtmlStoredFacts)) {
+    if (out == nullptr || out->struct_size < kPsHtmlStoredFactsSize14) {
       return -1;
     }
+    // Written as far as the caller's struct reaches, its size kept.
+    const size_t out_size = out->struct_size;
     PsHtmlStoredFacts f = {};
-    f.struct_size = sizeof(f);
+    f.struct_size = out_size;
     const auto* o = static_cast<const FakeVolumeEntry*>(original);
     const auto* m = static_cast<const FakeVolumeEntry*>(markdown);
     if (o != nullptr) {
@@ -606,7 +624,7 @@ class ConformanceAbi : public InjectedVerdictDaemonAbi {
                memcmp(o->hash, m->hash, kPsHtmlHashBytes) == 0) {
       f.flags |= kPsHtmlFactsBindingLive;
     }
-    *out = f;
+    memcpy(out, &f, out_size < sizeof(f) ? out_size : sizeof(f));
     return 0;
   }
 

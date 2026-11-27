@@ -894,12 +894,13 @@ const ProcessContext& ProcessContextForBinary() {
   return kProcessContextEnvironment->context();
 }
 
-// The directives of the serve-cached-html mode a later release adds, one line
-// for every value and form that release accepts, and the lines just outside
-// it.  Every `loads` line is accepted, with a warning, so that a
-// configuration written for that release keeps loading here (a package
-// rollback must not stop the server); that release accepts no form outside
-// this list.  Every other line is a configuration error, as it is there.
+// The directives of the serve-cached-html mode, one line for every value and
+// form this release accepts, and the lines just outside them.  Every `loads`
+// line is accepted with effect and no warning; every other line is a
+// configuration error.  The table is the same one the earlier release that
+// accepts these directives inert checks (each `loads` line loads there with a
+// warning), so a configuration that loads here also loads after a package
+// rollback to it; this release accepts no form outside this list.
 // DaemonHtmlCacheIgnoreCookie takes one name or prefix per line.
 struct LaterReleaseLine {
   const char* line;  // without the ModPagespeed prefix
@@ -1156,10 +1157,9 @@ TEST_F(LegacyConfigCompatTest, NginxDirectivesKeepLoading) {
   });
 }
 
-// The later release's directives load in an http and a server block, each
-// with one warning; a location block refuses them, as it refuses
-// DaemonHtmlCache.
-TEST_F(LegacyConfigCompatTest, NginxLaterReleaseDirectivesLoadInert) {
+// The serve-cached-html directives load in an http and a server block, with
+// no warning; a location block refuses them, as it refuses DaemonHtmlCache.
+TEST_F(LegacyConfigCompatTest, NginxServeCachedHtmlDirectivesLoad) {
   const NgxTables tables = ReadNgxTables();
   std::unique_ptr<OptionParsingFactory> factory = NewFactory();
   RecordingHandler handler;
@@ -1173,11 +1173,11 @@ TEST_F(LegacyConfigCompatTest, NginxLaterReleaseDirectivesLoadInert) {
       d.scope = scope;
       const Result result =
           ApplyNginx(d, tables, &options, factory.get(), &handler);
-      EXPECT_EQ(c.loads ? Outcome::kAcceptedWithWarning : Outcome::kRefused,
+      EXPECT_EQ(c.loads ? Outcome::kAccepted : Outcome::kRefused,
                 result.outcome)
           << c.line << " [" << result.message << "]";
       if (c.loads) {
-        EXPECT_EQ(1, handler.warnings()) << c.line;
+        EXPECT_EQ(0, handler.warnings()) << c.line;
       }
     }
     d.scope = RewriteOptions::kDirectoryScope;
@@ -1185,9 +1185,8 @@ TEST_F(LegacyConfigCompatTest, NginxLaterReleaseDirectivesLoadInert) {
               ApplyNginx(d, tables, &options, factory.get(), &handler).outcome)
         << c.line << " in a location block";
   }
-  // The mode runs as serve-variants; the settings are kept and change
-  // nothing.
-  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
+  // The mode is serve-cached-html, and the settings are kept.
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeCachedHtml,
             options.daemon_html_cache());
   EXPECT_EQ(86400, options.daemon_html_cache_max_age_s());
   EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeScopeAll,
@@ -1236,10 +1235,10 @@ TEST_F(LegacyConfigCompatTest, ApacheRefusalsAreSeen) {
   }
 }
 
-// The later release's directives are commands httpd knows, and load in the
-// main server configuration and in a <VirtualHost>, each with one warning;
+// The serve-cached-html directives are commands httpd knows, and load in the
+// main server configuration and in a <VirtualHost>, with no warning;
 // <Directory> refuses them, as it refuses DaemonHtmlCache.
-TEST_F(LegacyConfigCompatTest, ApacheLaterReleaseDirectivesLoadInert) {
+TEST_F(LegacyConfigCompatTest, ApacheServeCachedHtmlDirectivesLoad) {
   const GoogleString mod_instaweb = ReadSource(kModInstawebCc);
   std::unique_ptr<OptionParsingFactory> factory = NewFactory();
   RecordingHandler handler;
@@ -1253,11 +1252,11 @@ TEST_F(LegacyConfigCompatTest, ApacheLaterReleaseDirectivesLoadInert) {
          {ApacheWhere::kServerConfig, ApacheWhere::kVirtualHost}) {
       const Result result =
           ApplyApache(d, mod_instaweb, &config, factory.get(), &handler, where);
-      EXPECT_EQ(c.loads ? Outcome::kAcceptedWithWarning : Outcome::kRefused,
+      EXPECT_EQ(c.loads ? Outcome::kAccepted : Outcome::kRefused,
                 result.outcome)
           << line << " [" << result.message << "]";
       if (c.loads) {
-        EXPECT_EQ(1, handler.warnings()) << line;
+        EXPECT_EQ(0, handler.warnings()) << line;
       }
     }
     EXPECT_EQ(Outcome::kRefused,
@@ -1266,7 +1265,7 @@ TEST_F(LegacyConfigCompatTest, ApacheLaterReleaseDirectivesLoadInert) {
                   .outcome)
         << line << " in <Directory>";
   }
-  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeCachedHtml,
             config.daemon_html_cache());
   EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheCredentialedExplicitPublic,
             config.daemon_html_cache_credentialed());

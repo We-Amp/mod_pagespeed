@@ -381,6 +381,35 @@ struct HtmlServeSetFns {
   WantsAgentMarkdownFn wants_agent_markdown = nullptr;
 };
 
+// The 1.15 serve set.
+using HtmlRequestGuardFn = int (*)(const char*, const char* const*,
+                                   const char* const*, size_t, const char*,
+                                   PsHtmlRequestGuard*);
+using HtmlClassifyCookiesFn = int (*)(const char* const*, size_t, int,
+                                      const char* const*, size_t,
+                                      PsHtmlCookieSpan*, size_t,
+                                      PsHtmlCookieClass*);
+using HtmlIgnoreCookieGuardFn = int (*)(const char*, int*);
+using HtmlPolicyStampFn = int (*)(int, int, uint32_t, const char* const*,
+                                  size_t, uint64_t*);
+using HtmlUnsafeMethodInvalidatesFn = int (*)(const char*, int);
+using HeaderBlockPolicyStampFn = int (*)(const void*, uint64_t*);
+using HtmlStoredFactsFromReadsExFn = int (*)(const void*, const void*,
+                                             const void*, int, const void*,
+                                             PsHtmlStoredFacts*);
+
+// The resolved 1.15 set.  Filled as a whole or left empty: see
+// LibraryDaemonAbi::BindHtmlServe15Set.
+struct HtmlServe15SetFns {
+  HeaderBlockPolicyStampFn header_block_policy_stamp = nullptr;
+  HtmlStoredFactsFromReadsExFn stored_facts_from_reads_ex = nullptr;
+  HtmlRequestGuardFn request_guard = nullptr;
+  HtmlClassifyCookiesFn classify_cookies = nullptr;
+  HtmlIgnoreCookieGuardFn ignore_cookie_guard = nullptr;
+  HtmlPolicyStampFn policy_stamp = nullptr;
+  HtmlUnsafeMethodInvalidatesFn unsafe_method_invalidates = nullptr;
+};
+
 class LibraryDaemonAbi : public DaemonAbi {
  public:
   explicit LibraryDaemonAbi(void* handle) : handle_(handle) {}
@@ -479,7 +508,23 @@ class LibraryDaemonAbi : public DaemonAbi {
                         const PsHtmlStoredFacts* facts,
                         PsHtmlServeVerdict* out) const override {
     if (!HasHtmlServeSet()) return -1;
-    return html_serve_.serve_classify(request, facts, out);
+    if (HasHtmlServe15Set() || request == nullptr || facts == nullptr) {
+      return html_serve_.serve_classify(request, facts, out);
+    }
+    // A library below 1.15 reads only the 1.14 prefix of a larger request:
+    // it would serve HTML in serve-cached-html with no scope, no cap and no
+    // fresh-only.  That mode is never sent to it, and nothing past the 1.14
+    // sizes is either, whatever the caller stamped.
+    if (request->mode == kPsHtmlCacheServeCachedHtml) return -1;
+    PsHtmlServeRequest short_request = *request;
+    if (short_request.struct_size > kPsHtmlServeRequestSize14) {
+      short_request.struct_size = kPsHtmlServeRequestSize14;
+    }
+    PsHtmlStoredFacts short_facts = *facts;
+    if (short_facts.struct_size > kPsHtmlStoredFactsSize14) {
+      short_facts.struct_size = kPsHtmlStoredFactsSize14;
+    }
+    return html_serve_.serve_classify(&short_request, &short_facts, out);
   }
 
   const char* HtmlServeReasonName(int reason) const override {
@@ -505,8 +550,84 @@ class LibraryDaemonAbi : public DaemonAbi {
                                const void* withheld_marker, int sidecar_present,
                                PsHtmlStoredFacts* out) const override {
     if (!HasHtmlServeSet()) return -1;
-    return html_serve_.stored_facts_from_reads(
+    if (HasHtmlServe15Set() || out == nullptr ||
+        out->struct_size <= kPsHtmlStoredFactsSize14) {
+      return html_serve_.stored_facts_from_reads(
+          original, markdown, withheld_marker, sidecar_present, out);
+    }
+    // An older library is told the size it knows; the rest reads as zero.
+    const size_t size = out->struct_size;
+    out->struct_size = kPsHtmlStoredFactsSize14;
+    const int rc = html_serve_.stored_facts_from_reads(
         original, markdown, withheld_marker, sidecar_present, out);
+    out->struct_size = size;
+    out->entry_policy_stamp = 0;
+    return rc;
+  }
+
+  bool HasHtmlServe15Set() const override {
+    return html_serve15_.request_guard != nullptr;
+  }
+
+  GoogleString HtmlServe15SetUnavailableReason() const override {
+    return html_serve15_unavailable_;
+  }
+
+  int HtmlRequestGuard(const char* raw_path, const char* const* names,
+                       const char* const* values, size_t count,
+                       const char* keyed_scheme,
+                       PsHtmlRequestGuard* out) const override {
+    if (!HasHtmlServe15Set()) return -1;
+    return html_serve15_.request_guard(raw_path, names, values, count,
+                                       keyed_scheme, out);
+  }
+
+  int HtmlClassifyCookies(const char* const* lines, size_t line_count,
+                          int ignore_builtin, const char* const* additions,
+                          size_t addition_count,
+                          PsHtmlCookieSpan* ignorable_values,
+                          size_t ignorable_capacity,
+                          PsHtmlCookieClass* out) const override {
+    if (!HasHtmlServe15Set()) return -1;
+    return html_serve15_.classify_cookies(lines, line_count, ignore_builtin,
+                                          additions, addition_count,
+                                          ignorable_values, ignorable_capacity,
+                                          out);
+  }
+
+  int HtmlIgnoreCookieGuard(const char* addition,
+                            int* out_warning) const override {
+    if (!HasHtmlServe15Set()) return -1;
+    return html_serve15_.ignore_cookie_guard(addition, out_warning);
+  }
+
+  int HtmlPolicyStamp(int credentialed, int ignore_builtin,
+                      uint32_t list_version, const char* const* additions,
+                      size_t addition_count, uint64_t* out) const override {
+    if (!HasHtmlServe15Set()) return -1;
+    return html_serve15_.policy_stamp(credentialed, ignore_builtin,
+                                      list_version, additions, addition_count,
+                                      out);
+  }
+
+  int HtmlUnsafeMethodInvalidates(const char* method,
+                                  int status) const override {
+    if (!HasHtmlServe15Set()) return 0;
+    return html_serve15_.unsafe_method_invalidates(method, status);
+  }
+
+  int HeaderBlockPolicyStamp(const void* block, uint64_t* out) const override {
+    if (!HasHtmlServe15Set()) return -1;
+    return html_serve15_.header_block_policy_stamp(block, out);
+  }
+
+  int HtmlStoredFactsFromReadsEx(const void* original, const void* markdown,
+                                 const void* withheld_marker,
+                                 int sidecar_present, const void* block,
+                                 PsHtmlStoredFacts* out) const override {
+    if (!HasHtmlServe15Set()) return -1;
+    return html_serve15_.stored_facts_from_reads_ex(
+        original, markdown, withheld_marker, sidecar_present, block, out);
   }
 
   int HtmlMarkdownEtag(const uint8_t* binding_hash,
@@ -530,8 +651,18 @@ class LibraryDaemonAbi : public DaemonAbi {
                                    int* out_verdict,
                                    int* out_stored) const override {
     if (!HasHtmlServeSet()) return kPsErrInvalidArg;
+    if (HasHtmlServe15Set() || params == nullptr ||
+        params->struct_size <= kPsSidecarWriteParamsSize13) {
+      return html_serve_.write_headers_sidecar_site(
+          cache, params, names, values, count, out_verdict, out_stored);
+    }
+    // A format the library cannot write is refused rather than written as
+    // an earlier one; otherwise it is told the size it knows.
+    if (params->write_flags != 0) return kPsErrInvalidArg;
+    PsSidecarWriteParams short_params = *params;
+    short_params.struct_size = kPsSidecarWriteParamsSize13;
     return html_serve_.write_headers_sidecar_site(
-        cache, params, names, values, count, out_verdict, out_stored);
+        cache, &short_params, names, values, count, out_verdict, out_stored);
   }
 
   int HeadersSidecarRead(void* cache, const char* url, const char* hostname,
@@ -1029,6 +1160,44 @@ class LibraryDaemonAbi : public DaemonAbi {
     }
     html_serve_ = fns;
     html_serve_unavailable_.clear();
+    BindHtmlServe15Set();
+  }
+
+  // The 1.15 set, ALL OR NOTHING and only on top of a bound 1.14 set, under
+  // the same rules: a library that reports an older minor does not promise
+  // the 1.15 behaviour even when it exports the symbols.
+  void BindHtmlServe15Set() {
+    const int minor = version_minor_();
+    if (minor < kHtmlServe15SetMinor) {
+      html_serve15_unavailable_ = StrCat(
+          "the optimizer library reports C API ",
+          IntegerToString(version_major_()), ".", IntegerToString(minor),
+          "; serving cached HTML and the credentialed policy need ",
+          IntegerToString(kRequiredAbiMajor), ".",
+          IntegerToString(kHtmlServe15SetMinor), " or a later minor");
+      return;
+    }
+    HtmlServe15SetFns fns;
+    GoogleString missing;
+    const bool bound =
+        Bind("ps_header_block_policy_stamp", &fns.header_block_policy_stamp,
+             &missing) &&
+        Bind("ps_html_stored_facts_from_reads_ex",
+             &fns.stored_facts_from_reads_ex, &missing) &&
+        Bind("ps_html_request_guard", &fns.request_guard, &missing) &&
+        Bind("ps_html_classify_cookies", &fns.classify_cookies, &missing) &&
+        Bind("ps_html_ignore_cookie_guard", &fns.ignore_cookie_guard,
+             &missing) &&
+        Bind("ps_html_policy_stamp", &fns.policy_stamp, &missing) &&
+        Bind("ps_html_unsafe_method_invalidates",
+             &fns.unsafe_method_invalidates, &missing);
+    if (!bound) {
+      html_serve15_unavailable_ =
+          StrCat(missing, "; the C API 1.15 set is not used");
+      return;
+    }
+    html_serve15_ = fns;
+    html_serve15_unavailable_.clear();
   }
 
  private:
@@ -1060,6 +1229,9 @@ class LibraryDaemonAbi : public DaemonAbi {
   HtmlStoreReasonNameFn html_store_reason_name_ = nullptr;
   HtmlServeSetFns html_serve_;
   GoogleString html_serve_unavailable_ = "the HTML serve set was not bound";
+  HtmlServe15SetFns html_serve15_;
+  GoogleString html_serve15_unavailable_ =
+      "the HTML serve set was not bound, so neither is the C API 1.15 set";
   WriteParamsInitSizedFn write_params_init_sized_ = nullptr;
   NotifyParamsInitSizedFn notify_params_init_sized_ = nullptr;
   CacheWriteOriginalSiteFn cache_write_original_site_ = nullptr;
