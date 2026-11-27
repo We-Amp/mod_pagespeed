@@ -1430,3 +1430,4 @@ int main(int argc, char* argv[]) {  // NOLINT(bugprone-exception-escape)
   }
   return WorkerMain(argc, argv);
 }
+// spike: daemon-only change
