@@ -60,8 +60,8 @@ bool ApplyIgnoreCookieList(EnvoyRewriteOptions* options,
       return false;
     }
   }
-  handler->Message(kInfo, "VHost %s: Set option %s = %s",
-                   host_pattern.c_str(), key.c_str(), value.c_str());
+  handler->Message(kInfo, "VHost %s: Set option %s = %s", host_pattern.c_str(),
+                   key.c_str(), value.c_str());
   return true;
 }
 
