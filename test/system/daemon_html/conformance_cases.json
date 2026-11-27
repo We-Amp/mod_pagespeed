@@ -48233,7 +48233,6 @@
       "id": "live-md-enc-br",
       "runners": ["live"],
       "why": "RFC 9110 8.4: markdown copy sent br-coded as stored",
-      "ports": ["apache", "nginx"],
       "live": {
         "mode": "serve-variants",
         "agent_optimize": true,
@@ -48294,7 +48293,6 @@
       "id": "live-md-enc-gzip",
       "runners": ["live"],
       "why": "RFC 9110 8.4: markdown copy sent gzip-coded as stored",
-      "ports": ["apache", "nginx"],
       "live": {
         "mode": "serve-variants",
         "agent_optimize": true,
@@ -48355,7 +48353,6 @@
       "id": "live-md-enc-identity",
       "runners": ["live"],
       "why": "RFC 9110 12.5.5: Vary lists Accept-Encoding on the plain copy",
-      "ports": ["apache", "nginx"],
       "live": {
         "mode": "serve-variants",
         "agent_optimize": true,
@@ -48395,7 +48392,6 @@
       "id": "live-md-enc-q-order",
       "runners": ["live"],
       "why": "RFC 9110 12.5.3: the coding with the highest q",
-      "ports": ["apache", "nginx"],
       "live": {
         "mode": "serve-variants",
         "agent_optimize": true,
@@ -48455,7 +48451,6 @@
       "id": "live-md-enc-identity-refused",
       "runners": ["live"],
       "why": "RFC 9110 12.5.3: identity;q=0 and no coding: origin answers",
-      "ports": ["apache", "nginx"],
       "live": {
         "mode": "serve-variants",
         "agent_optimize": true,
@@ -48503,7 +48498,6 @@
       "id": "live-md-enc-no-double-compression",
       "runners": ["live"],
       "why": "markdown: a coded copy is never compressed again",
-      "ports": ["apache", "nginx"],
       "live": {
         "mode": "serve-variants",
         "agent_optimize": true,
@@ -48679,7 +48673,6 @@
       "id": "live-md-enc-head",
       "runners": ["live"],
       "why": "RFC 9110 9.3.2: HEAD gets the coded headers and no body",
-      "ports": ["apache", "nginx"],
       "live": {
         "mode": "serve-variants",
         "agent_optimize": true,
@@ -48760,7 +48753,6 @@
       "id": "live-md-enc-inm-304",
       "runners": ["live"],
       "why": "RFC 9110 13.1.2: a 304 only for the coding's own tag",
-      "ports": ["apache", "nginx"],
       "live": {
         "mode": "serve-variants",
         "agent_optimize": true,
@@ -48850,7 +48842,6 @@
       "id": "live-md-enc-range-origin",
       "runners": ["live"],
       "why": "RFC 9110 14.2: a range request is never answered from a copy",
-      "ports": ["apache", "nginx"],
       "live": {
         "mode": "serve-variants",
         "agent_optimize": true,

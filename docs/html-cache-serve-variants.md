@@ -134,15 +134,29 @@ The response carries exactly: `Content-Type: text/markdown; charset=utf-8`,
 `Content-Length`, `Cache-Control: private`, one `Vary` line (`Accept`, plus any
 `Vary` tokens the origin sent), `X-Robots-Tag: noindex`, `Age` and a weak
 `ETag`, besides the server's own transport lines (`Date`, `Server` and the
-like). A matching `If-None-Match` gets a `304` with `ETag`, `Cache-Control` and
-`Vary`.
+like), and `Content-Encoding` when a compressed copy is sent (below). A
+matching `If-None-Match` gets a `304` with `ETag`, `Cache-Control` and `Vary`.
 
 Consequences to plan for:
 
 - Headers your configuration adds to every response, including
   `Strict-Transport-Security` and `X-Content-Type-Options`, are not applied to
   the Markdown copy. Set them at a stage in front of the server.
-- The Markdown copy is never compressed in this release.
+- With an optimizer library that publishes C API 1.16 the optimizer stores a
+  brotli and a gzip copy of each Markdown copy beside the plain one, and a
+  request is answered with the one its `Accept-Encoding` prefers (q-values
+  honoured; a coding the request ranks below the plain copy is not used). The
+  answer then carries `Content-Encoding: br` or `gzip`, the coded length and an
+  entity tag of that coding, so a `304` is given only for the tag of the coding
+  asked for. The copies are compressed once by the optimizer, never per
+  request, and the server's own compression never compresses them again. A
+  request that accepts no coding the copy is stored in (`identity;q=0` with no
+  coded copy ready) goes to the origin. A page stored before the optimizer
+  wrote coded copies gets them after its first Markdown request (asked once
+  per page per server process). With an older library the copy is never
+  compressed.
+- Every Markdown answer's `Vary` line lists `Accept-Encoding` after `Accept`
+  when the library publishes C API 1.16, the plain copy's too.
 - With `AgentOptimize on` and `serve-variants`, every rewritten HTML response
   carries `Vary: Accept`, on Apache and on nginx. An HTML `304` does not, and on
   Apache neither does an HTML `HEAD` answer; a cache keeps the `Vary` of the
@@ -232,7 +246,9 @@ All are on the statistics page and in the admin console's HTML cache panel.
 | `daemon_html_serve_unavailable` | HTML responses seen while the library or worker does not allow serving. |
 | `daemon_html_notify_sent`, `daemon_html_notify_limited` | Requests to the worker to derive a copy, and ones skipped by the rate limit. |
 | `daemon_markdown_served`, `daemon_markdown_not_modified` | Markdown `200` and `304` answers. |
-| `daemon_markdown_fallthrough_<reason>` | Requests that preferred Markdown and got HTML, by reason (for example `absent`, `stale`, `withheld`, `url_disagree`, `request_header`). |
+| `daemon_markdown_served_br`, `daemon_markdown_served_gzip`, `daemon_markdown_served_identity` | Markdown `200` answers by the coding sent (C API 1.16 libraries). |
+| `daemon_markdown_encoded_copy_missing`, `daemon_markdown_encoded_copy_unbound`, `daemon_markdown_compress_demand_sent` | Compressed copies a request preferred that were not stored yet or were made from an earlier copy, and the requests to the optimizer to write them. |
+| `daemon_markdown_fallthrough_<reason>` | Requests that preferred Markdown and got HTML, by reason (for example `absent`, `stale`, `withheld`, `url_disagree`, `request_header`, `no_acceptable_encoding`). |
 | `daemon_html_sidecar_write_failed`, `daemon_html_epoch_write_failed`, `daemon_html_purge_remove_failed` | Failures to investigate. |
 | `daemon_markdown_served_without_preference`, `daemon_markdown_transport_conflict` | Should stay 0. |
 

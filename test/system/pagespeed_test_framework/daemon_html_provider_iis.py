@@ -78,6 +78,8 @@ PIN_ATTEMPTS = 40
 # The C API's exact-id alternates (pagespeed/system/daemon_abi.h).
 ORIGINAL_ID = 0x0C
 MARKDOWN_ID = 0x7C
+# The brotli and the gzip copy of the Markdown copy.
+CODED_IDS = {"br": 0xDC, "gzip": 0xEC}
 WITHHELD_ID = 0xCC
 FACTS_PRESENT = 0x1
 FACTS_BINDING_LIVE = 0x200
@@ -307,6 +309,26 @@ class _Volume:
                 return conf.StoredEntry(lifetime, sidecar)
             finally:
                 self._free(original)
+        finally:
+            self.close()
+
+    def coded_ready(self, key, codings) -> bool:
+        """Whether each named coded copy of the key's Markdown copy is stored
+        with bytes (an entry without bytes records "not smaller")."""
+        self._open()
+        try:
+            for coding in codings:
+                read = self._read(key, CODED_IDS[coding])
+                if read is None:
+                    return False
+                try:
+                    data, size = ctypes.c_void_p(), ctypes.c_size_t(0)
+                    if self.lib.ps_read_content(read, ctypes.byref(data),
+                                                ctypes.byref(size)) != 0 or size.value == 0:
+                        return False
+                finally:
+                    self._free(read)
+            return True
         finally:
             self.close()
 
@@ -909,6 +931,9 @@ class IisProvider(conf.Provider):
 
     def markdown_ready(self, path: str, host: Optional[str]) -> bool:
         return self.volume.markdown_ready(self._key(path, host))
+
+    def coded_ready(self, path: str, host: Optional[str], codings: List[str]) -> bool:
+        return self.volume.coded_ready(self._key(path, host), codings)
 
     def _purge_connection(self, tls: bool) -> Optional[http.client.HTTPConnection]:
         """In a row that names processes, the purge goes to process "a" (the
