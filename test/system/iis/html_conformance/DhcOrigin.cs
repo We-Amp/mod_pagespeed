@@ -75,15 +75,16 @@ public class DhcOrigin : IHttpHandler
                 // The worker that holds the request: the provider reads its
                 // statistics for the row.
                 File.AppendAllText(Path.Combine(State, "holds.log"),
-                    "start " + Process.GetCurrentProcess().Id + " " + ctx.Request.RawUrl + "\n");
+                    "start " + Process.GetCurrentProcess().Id + " " + ctx.Request.HttpMethod + " " +
+                    ctx.Request.RawUrl + "\n");
             }
             DateTime until = start.AddSeconds(120);
             while (File.Exists(held) && DateTime.UtcNow < until) Thread.Sleep(20);
             lock (Lock)
             {
                 File.AppendAllText(Path.Combine(State, "holds.log"),
-                    Process.GetCurrentProcess().Id + " " + ctx.Request.RawUrl + " held_ms=" +
-                    (int)(DateTime.UtcNow - start).TotalMilliseconds + "\n");
+                    "end " + Process.GetCurrentProcess().Id + " " + ctx.Request.HttpMethod + " " +
+                    ctx.Request.RawUrl + " held_ms=" + (int)(DateTime.UtcNow - start).TotalMilliseconds + "\n");
             }
         }
 

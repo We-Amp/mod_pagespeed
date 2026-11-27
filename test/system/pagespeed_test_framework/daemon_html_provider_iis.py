@@ -393,6 +393,11 @@ class IisProvider(conf.Provider):
         self.processes: Dict[str, int] = {}
         self.plain_port: Optional[int] = None
         self._hold_requested = False
+        # Client ports of the connections each named process and each purge
+        # was sent on, for process_ids().
+        self.process_ports: Dict[str, Set[int]] = {}
+        self.purge_ports: Set[int] = set()
+        self.last_port = 0
         self.max_processes = 1
         self.live: dict = {}
         self.mode = "off"
@@ -675,6 +680,8 @@ class IisProvider(conf.Provider):
             raise conf.ProviderUnsupported("worker state per row is not implemented")
         self.live = live
         self.mode = live.get("mode", "off")
+        self.process_ports = {}
+        self.purge_ports = set()
         self.fragment = f"dhc-{next(self._row_seq)}-{row_id}"[:60]
         self._clear_hold()
         origin = live.get("origin", {})
@@ -722,6 +729,9 @@ class IisProvider(conf.Provider):
         # row's path is that one byte (http.client would refuse it).
         c._encode_request = lambda request: request.encode("latin-1")
         try:
+            if c.sock is None:
+                c.connect()
+            self.last_port = c.sock.getsockname()[1]
             c.putrequest(method, path, skip_host=True, skip_accept_encoding=True)
             c.putheader("Host", host)
             for name, value in headers:
@@ -756,7 +766,9 @@ class IisProvider(conf.Provider):
             return self._send(method, path, host or ROW_HOST, headers)
         c = self._pinned_connection(process)
         try:
-            return self._send(method, path, host or ROW_HOST, headers, conn=c)
+            r = self._send(method, path, host or ROW_HOST, headers, conn=c)
+            self.process_ports.setdefault(process, set()).add(self.last_port)
+            return r
         finally:
             c.close()
 
@@ -859,10 +871,23 @@ class IisProvider(conf.Provider):
     def markdown_ready(self, path: str, host: Optional[str]) -> bool:
         return self.volume.markdown_ready(self._key(path, host))
 
-    def _admin_post(self, target: str) -> None:
+    def _purge_connection(self, tls: bool) -> Optional[http.client.HTTPConnection]:
+        """In a row that names processes, the purge goes to process "a" (the
+        one holding the race's request), never to the one a window step
+        watches. Elsewhere any connection."""
+        if "a" not in self.processes:
+            return None
+        if not tls:
+            # Pinned connections are https; a purge over http goes to any.
+            return None
+        return self._pinned_connection("a")
+
+    def _admin_post(self, target: str,
+                    conn: Optional[http.client.HTTPConnection] = None) -> None:
         r = self._send("POST", target, ROW_HOST,
                        [("X-Requested-With", "XMLHttpRequest"), ("Content-Length", "0")],
-                       tls=False)
+                       tls=conn is not None, conn=conn)
+        self.purge_ports.add(self.last_port)
         if r.status != 200:
             raise conf.ProviderUnsupported(f"POST {target}: {r.status} {r.body[:200]!r}")
 
@@ -876,18 +901,29 @@ class IisProvider(conf.Provider):
         else:
             absolute = f"https://{ROW_HOST}{url}"
             tls, host, path = True, ROW_HOST, url
-        if form == "PURGE":
-            r = self._send("PURGE", path, host, [], tls=tls)
-            if r.status != 200:
-                raise conf.ProviderUnsupported(f"PURGE {url}: {r.status} {r.body[:200]!r}")
-        elif form == "query":
-            self._admin_post(f"{ADMIN_PATH}/cache?purge={quote(absolute, safe='')}")
-        else:
-            raise conf.ProviderUnsupported(f"purge form {form!r}")
+        conn = self._purge_connection(tls and self._port_of(host) is None)
+        try:
+            if form == "PURGE":
+                r = self._send("PURGE", path, host, [], tls=tls, conn=conn)
+                self.purge_ports.add(self.last_port)
+                if r.status != 200:
+                    raise conf.ProviderUnsupported(f"PURGE {url}: {r.status} {r.body[:200]!r}")
+            elif form == "query":
+                self._admin_post(f"{ADMIN_PATH}/cache?purge={quote(absolute, safe='')}", conn)
+            else:
+                raise conf.ProviderUnsupported(f"purge form {form!r}")
+        finally:
+            if conn is not None:
+                conn.close()
 
     def purge_global(self, via: str) -> None:
         if via == "admin":
-            self._admin_post(f"{GLOBAL_ADMIN_PATH}/cache?purge=*")
+            conn = self._purge_connection(False)
+            try:
+                self._admin_post(f"{GLOBAL_ADMIN_PATH}/cache?purge=*", conn)
+            finally:
+                if conn is not None:
+                    conn.close()
         elif via == "flush_file":
             path = os.path.join(self.flush_cache_dir, "cache.flush")
             with open(path, "a"):
@@ -900,6 +936,45 @@ class IisProvider(conf.Provider):
     def set_origin_body(self, body: str) -> None:
         with open(os.path.join(self.state, "origin.body"), "wb") as f:
             f.write(body.encode("utf-8"))
+
+    def held_requests(self) -> List[Tuple[str, str]]:
+        held: List[Tuple[str, str]] = []
+        try:
+            with open(os.path.join(self.state, "holds.log"), encoding="latin-1") as f:
+                for line in f:
+                    parts = line.split()
+                    if len(parts) >= 4 and parts[0] == "start":
+                        held.append((parts[2], parts[3]))
+                    elif len(parts) >= 4 and parts[0] == "end" and (parts[2], parts[3]) in held:
+                        held.remove((parts[2], parts[3]))
+        except OSError:
+            pass
+        return held
+
+    def process_ids(self) -> Dict[str, Set[str]]:
+        """The worker pid the module's own request record (the rig's decision
+        trace) names for each client connection a named process's requests
+        and the purges were sent on."""
+        self.settle()
+        by_port: Dict[int, Set[str]] = {}
+        try:
+            with open(os.path.join(self.state, "trace.log"), encoding="latin-1") as f:
+                for line in f:
+                    parts = line.split()
+                    if len(parts) < 3 or parts[2] != "request":
+                        continue
+                    for p in parts:
+                        if p.startswith("client_port="):
+                            by_port.setdefault(int(p.split("=", 1)[1]), set()).add(parts[0])
+        except OSError:
+            raise conf.ProviderUnsupported("no request record (the pool's trace file)")
+        out: Dict[str, Set[str]] = {}
+        for name, ports in self.process_ports.items():
+            out[name] = set().union(*(by_port.get(p, set()) for p in ports))
+        purge = set().union(*(by_port.get(p, set()) for p in self.purge_ports)) if self.purge_ports else set()
+        if purge:
+            out["purge"] = purge
+        return out
 
     def hold_origin(self) -> None:
         self._hold_requested = True

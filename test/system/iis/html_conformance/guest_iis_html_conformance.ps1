@@ -81,6 +81,12 @@ function Setup {
     Copy-Item "$Bin\DhcOrigin.cs" "$Root\site\App_Code\DhcOrigin.cs" -Force
     if ($rewrite) { Set-Content -LiteralPath "$Root\url-rewrite.txt" -Value "1" -Encoding ASCII }
     & icacls.exe $Root /grant "IIS_IUSRS:(OI)(CI)M" | Out-Null
+    # A full dump of any worker process that crashes during the run.
+    $dumpKey = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\w3wp.exe'
+    New-Item -Force $dumpKey | Out-Null
+    New-ItemProperty -Force $dumpKey -Name DumpFolder -PropertyType ExpandString -Value "$Root\dumps" | Out-Null
+    New-ItemProperty -Force $dumpKey -Name DumpType -PropertyType DWord -Value 2 | Out-Null
+    New-Item -ItemType Directory -Force "$Root\dumps" | Out-Null
 
     $cert = New-SelfSignedCertificate -DnsName "www.example.test" -CertStoreLocation "Cert:\LocalMachine\My"
     Set-Content -LiteralPath "$Root\cert.txt" -Value $cert.Thumbprint -Encoding ASCII
@@ -144,6 +150,7 @@ function Run {
 }
 
 function Teardown {
+    Write-Output ("TEARDOWN | worker crash dumps | {0}" -f @(Get-ChildItem "$Root\dumps" -ErrorAction SilentlyContinue).Count)
     & $appcmd restore backup $Backup | Out-Null
     & $appcmd delete backup $Backup | Out-Null
     & netsh http delete sslcert ipport=0.0.0.0:443 | Out-Null

@@ -1477,6 +1477,15 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		pHttpContext->GetModuleContextContainer()->SetModuleContext(ctx, module_creator_->module_id());
 
 		auto server_context = innerContext->server_context();
+		if (IisServerContext::daemon_html_trace_on()) {
+			// Test equipment: which worker took which client connection, for
+			// a test that names server processes.
+			const PSOCKADDR_IN remote =
+				(PSOCKADDR_IN)pHttpContext->GetRequest()->GetRemoteAddress();
+			server_context->TraceDaemonHtml("request", innerContext->url(),
+				StrCat("method=", pHttpContext->GetRequest()->GetHttpMethod(),
+					" client_port=", IntegerToString(remote == nullptr ? 0 : ntohs(remote->sin_port))));
+		}
 		// If null, that means use global options.
 		net_instaweb::RewriteOptions* tmp = nullptr;
 		std::unique_ptr<RequestHeaders> request_headers(new RequestHeaders);
