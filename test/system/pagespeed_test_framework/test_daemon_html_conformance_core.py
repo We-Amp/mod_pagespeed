@@ -80,6 +80,8 @@ class FakeProvider(Provider):
         # Commits of answered requests not yet applied (late_commit).
         self.pending: List[str] = []
         self.paths: List[str] = []
+        self.holding: List[tuple] = []
+        self.ids: Dict[str, set] = {}
         applied = {"mode", "agent_optimize", "worker"}
         applied |= {f"origin.{k}" for k in ORIGIN_KEYS}
         applied |= {"header_add"}
@@ -102,6 +104,11 @@ class FakeProvider(Provider):
         assert all(isinstance(h, tuple) and len(h) == 2 for h in headers), headers
         self.paths.append(path)
         self.calls.append(f"request {method} {path}")
+        pid = {"a": "101", "b": "102"}.get(process, "100")
+        if process == "b" and "same_process" in self.defects:
+            pid = "101"
+        if process is not None:
+            self.ids.setdefault(process, set()).add(pid)
         accept = ", ".join(v for n, v in headers if n.lower() == "accept")
         inm = [v for n, v in headers if n.lower() == "if-none-match"]
         if self._serving() and "text/markdown" in accept and path in self.markdown:
@@ -119,7 +126,11 @@ class FakeProvider(Provider):
         if self.held is not None:
             held, self.held = self.held, None
             done = self.held_done
+            if "never_holds" not in self.defects:
+                self.holding.append((method, path))
             held.wait(timeout=30)
+            if (method, path) in self.holding:
+                self.holding.remove((method, path))
         lines = list(self.origin_headers) + list(self.vhost_add)
         if self._serving() and "no_vary_accept" not in self.defects:
             lines.append(("Vary", "Accept"))
@@ -191,6 +202,15 @@ class FakeProvider(Provider):
         self.calls.append("markdown_ready")
         return path in self.markdown and "never_ready" not in self.defects
 
+    def held_requests(self):
+        return list(self.holding)
+
+    def process_ids(self):
+        out = {k: set(v) for k, v in self.ids.items()}
+        if self.calls and any(c.startswith("purge") for c in self.calls):
+            out["purge"] = {"102" if "purge_on_b" in self.defects else "100"}
+        return out
+
     def purge_url(self, url, form) -> None:
         if "no_purge" in self.defects:
             raise ProviderUnsupported("this lane cannot purge")
@@ -247,6 +267,7 @@ def synthetic(steps, mode="serve-variants", **live) -> dict:
 
 
 GET_PAGE = {"method": "GET", "path": "/page", "headers": []}
+WAIT_HELD = {"wait_origin_held": {"method": "GET", "path": "/page", "timeout_s": 5}}
 GET_MD = {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]}
 
 
@@ -365,7 +386,7 @@ class TestOps:
             [
                 {"request": GET_PAGE, "pre": [{"hold_origin": {}}], "background": True,
                  "expect": {"status": 200, "content_type": "text/html"}},
-                {"request": GET_PAGE, "pre": [{"release_origin": {}}], "expect": {"status": 200}},
+                {"request": GET_PAGE, "pre": [WAIT_HELD, {"release_origin": {}}], "expect": {"status": 200}},
             ]
         )
         provider = FakeProvider()
@@ -377,7 +398,7 @@ class TestOps:
             [
                 {"request": GET_PAGE, "pre": [{"hold_origin": {}}], "background": True,
                  "expect": {"status": 500}},
-                {"request": GET_PAGE, "pre": [{"release_origin": {}}], "expect": {"status": 200}},
+                {"request": GET_PAGE, "pre": [WAIT_HELD, {"release_origin": {}}], "expect": {"status": 200}},
             ]
         )
         assert run(row) == ["synthetic step 0: status 200, expected 500"]
@@ -460,7 +481,7 @@ class TestStepCounters:
             [
                 {"request": GET_PAGE, "pre": [{"hold_origin": {}}], "background": True,
                  "expect": {"status": 200}},
-                {"request": GET_MD, "pre": [{"release_origin": {}}],
+                {"request": GET_MD, "pre": [WAIT_HELD, {"release_origin": {}}],
                  "expect": {"counter_delta": {"daemon_html_stored": 1}}},
             ]
         )
@@ -622,6 +643,86 @@ class TestWindow:
                 if "window" in step:
                     assert step["window"]["stale_max_s"] == poll, row["id"]
                     assert step["process"] == "b", row["id"]
+
+
+class TestHeldOrigin:
+    def _row(self):
+        return synthetic([
+            {"request": GET_PAGE, "pre": [{"hold_origin": {}}], "background": True,
+             "expect": {"status": 200}},
+            {"request": GET_MD, "pre": [WAIT_HELD, {"purge_url": {"url": "/page"}},
+                                        {"release_origin": {}}],
+             "expect": {"status": 200}},
+        ])
+
+    def test_the_purge_waits_for_the_held_request(self):
+        provider = FakeProvider()
+        assert run(self._row(), provider) == []
+        # The held GET reached the origin before the purge went out.
+        assert provider.calls.index("request GET /page") < provider.calls.index(
+            "purge_url /page PURGE")
+
+    def test_an_origin_that_never_holds_fails_at_the_deadline(self):
+        clock = FakeClock()
+        failures = run(self._row(), FakeProvider({"never_holds"}), clock)
+        assert "synthetic step 1: the origin never held GET /page within 5 s" in failures, failures
+        assert clock.now >= 5
+
+    @pytest.mark.parametrize("pre", [
+        [{"purge_url": {"url": "/page"}}, {"release_origin": {}}],
+        [{"purge_url": {"url": "/page"}}, WAIT_HELD, {"release_origin": {}}],
+        [{"release_origin": {}}, WAIT_HELD],
+    ])
+    def test_a_release_without_a_wait_first_is_invalid(self, pre):
+        row = self._row()
+        row["live"]["steps"][1]["pre"] = pre
+        errors = conf.validate_row(row, BODIES)
+        assert any("without waiting for the held request first" in e for e in errors), errors
+
+
+class TestProcesses:
+    def _row(self):
+        return window_row()
+
+    def test_distinct_processes_pass(self):
+        clock = FakeClock()
+        assert run(self._row(), LaggingProvider(clock, lag_s=1.0), clock) == []
+
+    def test_one_process_behind_two_names_fails(self):
+        clock = FakeClock()
+        row = self._row()
+        row["live"]["steps"][0]["process"] = "a"
+        failures = run(row, LaggingProvider(clock, lag_s=1.0, defects={"same_process"}), clock)
+        assert failures == ["synthetic: processes a and b are the same server process (101)"], failures
+
+    def test_a_purge_answered_by_the_watched_process_fails(self):
+        clock = FakeClock()
+        failures = run(self._row(), LaggingProvider(clock, lag_s=1.0, defects={"purge_on_b"}), clock)
+        assert failures == ["synthetic: the purge was answered by the watched process b (['102'])"], failures
+
+    def test_a_name_answered_by_two_processes_fails(self):
+        class Drifting(LaggingProvider):
+            def process_ids(self):
+                out = super().process_ids()
+                out["b"] = {"102", "103"}
+                return out
+
+        clock = FakeClock()
+        failures = run(self._row(), Drifting(clock, lag_s=1.0), clock)
+        assert failures == ["synthetic: process b was answered by 2 server processes "
+                            "['102', '103'], expected exactly one"], failures
+
+    def test_a_transport_error_in_a_window_is_a_clear_failure(self):
+        class Resetting(LaggingProvider):
+            def request(self, method, path, host, headers, process=None):
+                if self.purged_at is not None and process == "b":
+                    raise ConnectionResetError("reset")
+                return super().request(method, path, host, headers, process)
+
+        clock = FakeClock()
+        failures = run(self._row(), Resetting(clock, lag_s=1.0), clock)
+        assert failures == ["synthetic step 2: the request sent 0.00 s after the purge failed "
+                            "in transport: ConnectionResetError('reset')"], failures
 
 
 class TestLaneSkips:

@@ -1277,7 +1277,8 @@ class TestConformanceSkipGate:
         from pagespeed_test_framework import daemon_html_conformance as conf
         return conf.live_rows(conf.load_cases())
 
-    def _run(self, tmp_path, server_type, skip=(), fixtures="daemon_html_conformance"):
+    def _run(self, tmp_path, server_type, skip=(), fixtures="daemon_html_conformance",
+             args=(), mode="0", partial=False):
         import os
         import subprocess
         import conftest
@@ -1288,12 +1289,15 @@ class TestConformanceSkipGate:
             "PYTHONPATH": here + os.pathsep + env.get("PYTHONPATH", ""),
             "PAGESPEED_SERVER_TYPE": server_type,
             "PAGESPEED_LANE_FIXTURES": fixtures,
-            "PAGESPEED_DAEMON_LANE": "0",
+            "PAGESPEED_DAEMON_LANE": mode,
             "DHC_TEST_SKIP": ",".join(skip),
         })
+        env.pop("PAGESPEED_DHC_PARTIAL", None)
+        if partial:
+            env["PAGESPEED_DHC_PARTIAL"] = "1"
         r = subprocess.run(
             [sys.executable, "-m", "pytest", "-p", "conftest", "-q", "-p", "no:cacheprovider",
-             str(tmp_path / "test_daemon_html_conformance.py")],
+             str(tmp_path / "test_daemon_html_conformance.py"), *args],
             cwd=str(tmp_path), env=env, capture_output=True, text=True, timeout=120)
         return r.returncode, r.stdout + r.stderr
 
@@ -1307,6 +1311,7 @@ class TestConformanceSkipGate:
         import conftest
         assert conftest.conformance_skips_enforced("stats_log,daemon_html_conformance", "0")
         assert conftest.conformance_skips_enforced("", "require")
+        assert conftest.conformance_skips_enforced("", "1")
         assert not conftest.conformance_skips_enforced("stats_log", "0")
 
     def test_apache_deselects_other_ports_and_skips_nothing(self, tmp_path):
@@ -1328,6 +1333,27 @@ class TestConformanceSkipGate:
         row = next(r["id"] for r in self._rows() if "ports" not in r)
         code, out = self._run(tmp_path, "apache", skip=[row], fixtures="stats_log")
         assert code == 0, out
+
+    def test_a_selection_that_leaves_rows_out_fails(self, tmp_path):
+        rows = self._rows()
+        kept = [r for r in rows if "apache" in r.get("ports", ["apache"])]
+        code, out = self._run(tmp_path, "apache", args=["-k", "window"])
+        assert code == 1, out
+        assert f"of the {len(kept)} rows the apache lane keeps ran" in out, out
+
+    def test_a_deliberate_partial_run_is_allowed(self, tmp_path):
+        code, out = self._run(tmp_path, "nginx", args=["-k", "window"], partial=True)
+        assert code == 0, out
+
+    def test_an_unknown_server_type_is_an_error(self, tmp_path):
+        code, out = self._run(tmp_path, "apach")
+        assert code == 4, out
+        assert "PAGESPEED_SERVER_TYPE='apach' is not one of" in out, out
+
+    def test_a_daemon_lane_without_the_fixture_is_an_error(self, tmp_path):
+        code, out = self._run(tmp_path, "apache", fixtures="stats_log", mode="1")
+        assert code == 4, out
+        assert "does not advertise daemon_html_conformance" in out, out
 
     def test_nginx_may_skip_a_row_for_other_ports_only(self, tmp_path):
         rows = self._rows()

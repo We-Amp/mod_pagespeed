@@ -125,6 +125,7 @@ OPS = frozenset(
         "hold_origin",
         "release_origin",
         "set_mode",
+        "wait_origin_held",
     ]
 )
 EXPECT_KEYS = frozenset(
@@ -289,6 +290,21 @@ class Provider(abc.ABC):
         """Switch the row's virtual host to another DaemonHtmlCache mode, the
         other knobs unchanged."""
 
+    @abc.abstractmethod
+    def held_requests(self) -> List[Tuple[str, str]]:
+        """(method, path) of every origin response held now: its request
+        reached the origin, its headers are out and its body waits for
+        release_origin."""
+
+    @abc.abstractmethod
+    def process_ids(self) -> Dict[str, Set[str]]:
+        """Which server process answered the row's requests since setup, as
+        the server itself records it (for example the pid in its access
+        log): {process name: ids} for every name a request was sent with,
+        and "purge": ids of the processes that answered the row's purges.
+        Called after the row's last step; a provider waits for the server's
+        record of every answered request first."""
+
 
 def load_cases(path: str = CASES_PATH) -> dict:
     with open(path, encoding="utf-8") as f:
@@ -441,6 +457,24 @@ def validate_row(row: dict, bodies: Dict[str, str]) -> List[str]:
                 errors.append(f"{rid}: {where} origin_set body_ref")
             if name == "set_mode" and op[name].get("mode") not in MODES:
                 errors.append(f"{rid}: {where} set_mode mode")
+            if name == "wait_origin_held" and (
+                not isinstance(op[name], dict)
+                or set(op[name]) != {"method", "path", "timeout_s"}
+            ):
+                errors.append(f"{rid}: {where} wait_origin_held names method, path and timeout_s")
+        names = [next(iter(op)) for op in step.get("pre", []) if isinstance(op, dict) and len(op) == 1]
+        if "release_origin" in names:
+            # The purge must race a request the origin really holds: wait
+            # for it before any purge and before the release.
+            first_purge = min([i for i, n in enumerate(names) if n in PURGE_OPS] or [len(names)])
+            release = names.index("release_origin")
+            if "wait_origin_held" not in names or names.index("wait_origin_held") > min(
+                first_purge, release
+            ):
+                errors.append(
+                    f"{rid}: {where} releases the origin without waiting for the held "
+                    "request first (wait_origin_held before any purge and the release)"
+                )
         expect = step.get("expect", {})
         unknown(f"{where} expect", expect, EXPECT_KEYS)
         if step.get("background"):
@@ -606,6 +640,10 @@ class RowRunner:
                 for bg in pending:
                     self._join(bg)
                 pending = []
+            for bg in pending:
+                self._join(bg)
+            pending = []
+            self._check_processes()
         finally:
             for bg in pending:
                 self._join(bg)
@@ -662,6 +700,56 @@ class RowRunner:
             elif name == "set_mode":
                 self.mode = arg["mode"]
                 self.provider.set_mode(arg["mode"])
+            elif name == "wait_origin_held":
+                self._wait_origin_held(index, arg)
+
+    def _wait_origin_held(self, index: int, arg: dict) -> None:
+        want = (arg["method"], arg["path"])
+        timeout = float(arg["timeout_s"])
+        deadline = self.clock() + timeout
+        while True:
+            if want in self.provider.held_requests():
+                return
+            if self.clock() >= deadline:
+                self._fail(index, f"the origin never held {want[0]} {want[1]} "
+                                  f"within {timeout:g} s")
+                return
+            self.sleep(min(self.poll_s, 0.05))
+
+    def _check_processes(self) -> None:
+        """A row that names processes ran on distinct server processes, and
+        a window's purges were answered by a process it does not watch."""
+        steps = self.live["steps"]
+        named = sorted({s["process"] for s in steps if s.get("process")})
+        if not named:
+            return
+        rid = self.row["id"]
+        try:
+            ids = self.provider.process_ids()
+        except ProviderUnsupported as e:
+            self.failures.append(f"{rid}: provider cannot tell its server processes apart: {e}")
+            return
+        seen: Dict[str, str] = {}
+        for name in named:
+            got = ids.get(name, set())
+            if len(got) != 1:
+                self.failures.append(
+                    f"{rid}: process {name} was answered by {len(got)} server "
+                    f"processes {sorted(got)}, expected exactly one")
+                continue
+            pid = next(iter(got))
+            if pid in seen:
+                self.failures.append(
+                    f"{rid}: processes {seen[pid]} and {name} are the same server process ({pid})")
+            seen[pid] = name
+        for name in sorted({s["process"] for s in steps if "window" in s}):
+            purges = ids.get("purge", set())
+            if not purges:
+                self.failures.append(f"{rid}: no server process recorded for the purge")
+            elif purges & ids.get(name, set()):
+                self.failures.append(
+                    f"{rid}: the purge was answered by the watched process {name} "
+                    f"({sorted(purges & ids.get(name, set()))})")
 
     def _wait_markdown(self, index: int, request: dict, arg: dict) -> None:
         timeout = float(arg.get("timeout_s", 30))
@@ -715,7 +803,12 @@ class RowRunner:
         self.windows.append(record)
         while True:
             sent = self.clock() - start
-            r = self._send(step)
+            try:
+                r = self._send(step)
+            except (OSError, http.client.HTTPException) as e:
+                self._fail(index, (f"the request sent {sent:.2f} s after the purge "
+                                   f"failed in transport: {e!r}"))
+                return
             stale = r.status == 200 and any(
                 media_type(v) == stale_type for v in r.lines("Content-Type"))
             if stale:

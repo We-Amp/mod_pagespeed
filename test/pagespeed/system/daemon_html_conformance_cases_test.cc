@@ -84,7 +84,7 @@ const StringSet kLiveWindowKeys = {"stale_max_s", "margin_s", "observe_s",
 const StringSet kLiveRequestKeys = {"method", "path", "host", "headers"};
 const StringSet kLiveOps = {"purge_url",      "purge_global", "wait_markdown",
                             "sleep_s",        "origin_set",   "hold_origin",
-                            "release_origin", "set_mode"};
+                            "release_origin", "set_mode",     "wait_origin_held"};
 const StringSet kLiveExpectKeys = {"status",         "content_type",
                                    "headers_exact",  "headers_absent",
                                    "stored",         "stored_lifetime_s",
