@@ -24,7 +24,10 @@
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/null_message_handler.h"
+#include "pagespeed/system/daemon_abi.h"
+#include "pagespeed/system/daemon_html_engine.h"
 #include "pagespeed/system/optimization_thread_policy.h"
+#include "test/pagespeed/system/recording_daemon_abi.h"
 #include "pagespeed/kernel/base/string_util.h"
 
 // Forward declarations of test helpers (defined in iis_configuration.cpp).
@@ -1443,6 +1446,65 @@ TEST_F(IisConfigurationTest, DeprecatedOptionNameWarnsAsDeprecated) {
                    "pagespeed DistributedRewriteServers is deprecated"));
   EXPECT_EQ(0, recorder.CountContaining("NoSuchOptionAtAll is deprecated"));
   EXPECT_GE(recorder.CountContaining("NoSuchOptionAtAll"), 1);
+}
+
+// A library with C API 1.15 whose ignore-list guard refuses session cookie
+// names: only the configuration-load entry points answer.
+class PolicyGuardAbi : public net_instaweb::RecordingDaemonAbi {
+ public:
+  PolicyGuardAbi() : RecordingDaemonAbi(nullptr) {}
+  bool HasHtmlServe15Set() const override { return true; }
+  int HtmlIgnoreCookieGuard(const char* addition,
+                            int* out_warning) const override {
+    if (out_warning != nullptr) *out_warning = 0;
+    return std::string(addition) == "PHPSESSID" ? 0 : 1;
+  }
+  int HtmlPolicyStamp(int, int, uint32_t, const char* const*, size_t,
+                      uint64_t* out) const override {
+    *out = 0x5A5A;
+    return 0;
+  }
+};
+
+// A DaemonHtmlCacheIgnoreCookie addition the optimizer library refuses, read
+// from pagespeed.config: the site's configuration step (the one the IIS
+// server context runs before it creates the HTML cache engine) logs an error
+// naming it, which the event log carries, and the site neither stores nor
+// serves (report-only).  A narrow addition is applied and stamped.
+TEST_F(IisConfigurationTest, DaemonHtmlCacheRefusedIgnoreCookieFailsTheSite) {
+  for (const bool refused : {true, false}) {
+    RecordingMessageHandler recorder;
+    ConfigurationFile* cf = CreateTestConfigFile(
+        std::string("pagespeed DaemonHtmlCache serve-variants\n"
+                    "pagespeed AgentOptimize on\n"
+                    "pagespeed DaemonHtmlCacheIgnoreCookie ") +
+            (refused ? "PHPSESSID" : "utm_src") + "\n",
+        &recorder, global_config_, nullptr);
+    std::map<std::string, std::string> input;
+    input["config"] = "base";
+    IisRewriteOptions rwo(nullptr);
+    TestConfigFileGetConfig(cf, input, rwo);
+    TestConfigFileRelease(cf);
+    ASSERT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
+              rwo.daemon_html_cache());
+
+    net_instaweb::DaemonHtmlEngine::Config config;
+    config.mode = net_instaweb::DaemonHtmlModeFor(rwo.daemon_html_cache());
+    net_instaweb::FillDaemonHtmlServeSettings(rwo, &config);
+    PolicyGuardAbi abi;
+    const bool applied = net_instaweb::ApplyDaemonHtmlPolicySettingsForPort(
+        &abi, &config, &recorder);
+    EXPECT_EQ(!refused, applied);
+    if (refused) {
+      EXPECT_EQ(net_instaweb::DaemonHtmlMode::kReportOnly, config.mode);
+      EXPECT_EQ(1, recorder.CountContaining(
+                       "DaemonHtmlCacheIgnoreCookie PHPSESSID is refused"));
+    } else {
+      EXPECT_EQ(net_instaweb::DaemonHtmlMode::kServeVariants, config.mode);
+      EXPECT_EQ(0x5A5Au, config.policy_stamp);
+      EXPECT_EQ(0, recorder.CountContaining("is refused"));
+    }
+  }
 }
 
 }  // namespace
