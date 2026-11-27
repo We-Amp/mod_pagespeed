@@ -1,3 +1,4 @@
 third_party/zlib_alias_module
 test/browser/node_modules
 tools/js/node_modules
+optimizer

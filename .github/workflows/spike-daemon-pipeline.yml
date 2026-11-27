@@ -1,0 +1,111 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# Experiment, not for merging: the hosted build-and-test job of the
+# optimizer's pull request pipeline, run from the optimizer/ subdirectory.
+# Differences from the original job: every run step defaults to
+# working-directory optimizer, the step that ran before the checkout is gone
+# (the directory does not exist yet), and the Bazel cache steps are gone
+# (this run is a cold build, so its duration is an upper bound).
+
+name: spike-daemon-pipeline
+
+on:
+  workflow_call:
+
+permissions: {}
+
+jobs:
+  build-and-test:
+    permissions:
+      contents: read
+    name: Build daemon & unit-test slice (ubuntu)
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: optimizer
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The daemon linkopts hard-require clang's libc++ (-nostdlib++ -lc++
+      # -lc++abi -lunwind); libc++-18 (the ubuntu image default) lacks
+      # std::atomic_ref, which Cyclone requires (added in libc++-19). No
+      # unversioned libunwind-dev: it conflicts with the versioned
+      # libunwind-20-dev that libc++abi-20-dev pulls. gperf (lib/html
+      # genrules), and for the libaom cmake_build repo rule cmake + make +
+      # a `cc` on PATH (build-essential's gcc) + perl (RTCD headers) +
+      # nasm (x86 SIMD).
+      - name: Install clang-20 + libc++-20 toolchain
+        env:
+          UBUNTU_MIRROR: ${{ vars.UBUNTU_MIRROR }}
+        run: |
+          retry() { "$@" && return 0; for d in 30 90 180; do echo "WARN: '$*' failed; retrying in ${d}s" >&2; sleep "$d"; "$@" && return 0; done; echo "ERROR: '$*' failed after 4 attempts" >&2; return 1; }
+          bash tools/ci/fetch_retry.sh https://apt.llvm.org/llvm-snapshot.gpg.key "${RUNNER_TEMP}/llvm-snapshot.gpg.key"
+          # Trust only the pinned key (the one https://apt.llvm.org/ publishes),
+          # scoped to this source with signed-by.
+          LLVM_APT_KEY_FPR=6084F3CF814B57C1CF12EFD515CF4D18AF4F7421
+          gnupg_home="$(mktemp -d)"
+          GNUPGHOME="${gnupg_home}" gpg --batch --quiet --import "${RUNNER_TEMP}/llvm-snapshot.gpg.key"
+          GNUPGHOME="${gnupg_home}" gpg --batch --with-colons --list-keys "${LLVM_APT_KEY_FPR}" 2>/dev/null \
+            | awk -F: -v fpr="${LLVM_APT_KEY_FPR}" '$1=="fpr" && $10==fpr { ok=1 } END { exit !ok }' \
+            || { echo "ERROR: the apt.llvm.org key file does not hold the pinned key ${LLVM_APT_KEY_FPR}" >&2; exit 1; }
+          GNUPGHOME="${gnupg_home}" gpg --batch --export "${LLVM_APT_KEY_FPR}" \
+            | sudo tee /usr/share/keyrings/llvm-snapshot.gpg >/dev/null
+          [ -s /usr/share/keyrings/llvm-snapshot.gpg ] || exit 1
+          rm -rf "${gnupg_home}"
+          echo "deb [signed-by=/usr/share/keyrings/llvm-snapshot.gpg] http://apt.llvm.org/noble/ llvm-toolchain-noble-20 main" \
+            | sudo tee /etc/apt/sources.list.d/llvm-toolchain-noble-20.list
+          APT_RETRY_ATTEMPTS=4 APT_RETRY_DELAY='30 90 180' bash tools/ci/apt-robust.sh update
+          retry sudo apt-get install -y --no-install-recommends \
+            clang-20 libc++-20-dev libc++abi-20-dev \
+            build-essential gperf cmake perl nasm
+
+      - name: Install bazelisk
+        run: sudo npm install -g @bazel/bazelisk@1.28.1
+
+      - name: Build the optimizer daemon
+        env:
+          CC: clang-20
+          CXX: clang++-20
+        run: >
+          bazel build --config=libc++
+          "--repository_cache=$HOME/.cache/bazel-repo"
+          //src/worker:factory_worker
+
+      # Slice rationale in ci.yml's header. --flaky_test_attempts=2 mirrors
+      # the fleet's test:ci config (.bazelrc): Bazel re-runs ONLY tests that
+      # fail, marks them FLAKY when the retry passes, and STILL fails the leg
+      # when a test fails every attempt -- it does not mask deterministic
+      # breakage. Needed here because the suite carries known
+      # slowdown-sensitive timing tests.
+      - name: Run unit-test slice
+        env:
+          CC: clang-20
+          CXX: clang++-20
+        run: >
+          bazel test --config=libc++
+          --flaky_test_attempts=2
+          "--repository_cache=$HOME/.cache/bazel-repo"
+          //test/lib/base:all
+          //test/lib/cache:all
+          //test/src/worker:serve_stats_test
+          //test/src/worker:config_file_test
+          //test/src/worker:shared_config_test
+          //test/src/worker:cache_dir_test
+          //test/src/worker:config_persister_test
+          //test/src/worker:http_server_test
+          //test/src/worker:api_handlers_test
+          //test/src/worker:worker_api_test
+          //test/src/worker:url_registry_test
+          //test/src/worker:text_compressor_test
+          //test/src/worker:static_file_handler_test
+          //test/src/worker:syscall_filter_test
+          //test/src/worker:host_aliases_test
+          //test/src/worker:llms_txt_builder_test
+          //test/src/worker:html_scanner_test
+          //test/src/worker:websocket_test
+          //test/src/worker:json_output_test
+          //test/src/worker:cache_handlers_test
+          //test/src/worker:capture_handlers_test

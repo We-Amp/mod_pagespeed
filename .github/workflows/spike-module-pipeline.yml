@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# Experiment, not for merging: a stand-in for the module's pull request
+# pipeline. It does not build the module. It checks the one thing the second
+# workspace changes for the first: the module workspace does not load
+# packages from optimizer/.
+
+name: spike-module-pipeline
+
+on:
+  workflow_call:
+
+permissions: {}
+
+jobs:
+  workspace-boundary:
+    name: Module workspace ignores optimizer/
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: optimizer is listed in .bazelignore
+        run: grep -qxF optimizer .bazelignore
+
+      - name: Install bazelisk
+        run: sudo npm install -g @bazel/bazelisk@1.28.1
+
+      # Informational: a failure here (for example a dependency fetch) does
+      # not fail the job. The log shows the package counts.
+      - name: Package listing of the module workspace
+        continue-on-error: true
+        timeout-minutes: 20
+        run: |
+          set -euo pipefail
+          bazel query --keep_going --output=package '//...' > "${RUNNER_TEMP}/packages.txt" || echo "query exit code: $?"
+          echo "packages: $(wc -l < "${RUNNER_TEMP}/packages.txt")"
+          echo "packages under optimizer/: $(grep -c '^optimizer\(/\|$\)' "${RUNNER_TEMP}/packages.txt" || true)"
+          [ -s "${RUNNER_TEMP}/packages.txt" ]
+          ! grep -q '^optimizer\(/\|$\)' "${RUNNER_TEMP}/packages.txt"

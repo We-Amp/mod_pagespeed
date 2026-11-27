@@ -1,0 +1,115 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# Experiment, not for merging: CI routing for two Bazel workspaces in one
+# repository (the module at the root, the optimizer daemon under optimizer/).
+# One caller, one product scope job, one pipeline per product, one gate.
+#
+# It runs on pushes to spike/colocate-case-* only. The diff base is the merge
+# base with spike/colocate-base, which stands in for pull_request.base.sha
+# and merge_group.base_sha of the real caller. The pipelines are called by
+# relative path because they exist on this branch only; the real caller pins
+# them to the default branch.
+
+name: Spike colocate
+
+on:
+  push:
+    branches: ['spike/colocate-case-*']
+
+concurrency:
+  group: spike-colocate-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  scope:
+    name: Detect product scope
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      module: ${{ steps.scope.outputs.module }}
+      daemon: ${{ steps.scope.outputs.daemon }}
+      website: ${{ steps.scope.outputs.website }}
+    steps:
+      # fetch-depth: 0 so the diff can reach the base commit.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Classify the change
+        id: scope
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "+refs/heads/spike/colocate-base:refs/remotes/origin/spike/colocate-base"
+          base="$(git merge-base origin/spike/colocate-base HEAD)"
+          # The classifier is read from the base, never from the tree under test.
+          git show "origin/spike/colocate-base:tools/ci/product_scope.sh" > "${RUNNER_TEMP}/product_scope.sh"
+          out="${RUNNER_TEMP}/product-scope.txt"
+          if bash "${RUNNER_TEMP}/product_scope.sh" "${base}" > "${out}" &&
+            [ "$(grep -cxE '(module|daemon|website)=(true|false)' "${out}")" = 3 ] && [ "$(wc -l < "${out}")" -eq 3 ]; then
+            :
+          else
+            echo "::warning::product scope undecided; running everything"
+            printf 'module=true\ndaemon=true\nwebsite=true\n' > "${out}"
+          fi
+          cat "${out}" >> "$GITHUB_OUTPUT"
+          git diff --no-renames --name-only "${base}...HEAD"
+
+  module:
+    needs: scope
+    if: needs.scope.outputs.module == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/spike-module-pipeline.yml
+
+  daemon:
+    needs: scope
+    if: needs.scope.outputs.daemon == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/spike-daemon-pipeline.yml
+
+  # Placeholder for the website gate, which the optimizer pipeline calls as a
+  # nested reusable workflow today.
+  website:
+    name: Website (placeholder)
+    needs: scope
+    if: needs.scope.outputs.website == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: The site sources are where the gate would build them
+        working-directory: optimizer/website
+        run: test -f package.json && test -f astro.config.mjs
+
+  # The aggregate gate. A pipeline skipped by the product scope counts as
+  # success; the scope job itself must have succeeded, because a failed scope
+  # job skips every pipeline.
+  gate:
+    permissions: {}
+    name: CI gate (spike)
+    needs: [scope, module, daemon, website]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: The scope job succeeded and every pipeline succeeded or was skipped
+        env:
+          SCOPE: ${{ needs.scope.result }}
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "scope: ${SCOPE}"
+          echo "job results: ${RESULTS}"
+          [ "${SCOPE}" = success ] || { echo "::error::the scope job finished with '${SCOPE}'"; exit 1; }
+          for r in ${RESULTS}; do
+            case "${r}" in
+              success|skipped) ;;
+              *) echo "::error::a job finished with '${r}'"; exit 1 ;;
+            esac
+          done
