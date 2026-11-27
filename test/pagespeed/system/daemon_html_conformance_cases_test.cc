@@ -97,21 +97,14 @@ const StringSet kLiveOps = {
     "purge_url",      "purge_global", "wait_markdown",
     "sleep_s",        "origin_set",   "hold_origin",
     "release_origin", "set_mode",     "wait_origin_held"};
-const StringSet kLiveExpectKeys = {"status",
-                                   "content_type",
-                                   "headers_exact",
-                                   "headers_absent",
-                                   "stored",
-                                   "stored_lifetime_s",
-                                   "sidecar_absent",
-                                   "body_ref",
-                                   "body_bytes",
-                                   "body_contains",
+const StringSet kLiveExpectKeys = {"status",         "content_type",
+                                   "headers_exact",  "headers_absent",
+                                   "stored",         "stored_lifetime_s",
+                                   "sidecar_absent", "body_ref",
+                                   "body_bytes",     "body_contains",
                                    "length_matches_body",
-                                   "origin_saw",
-                                   "origin_saw_absent",
-                                   "counter_delta",
-                                   "differential",
+                                   "origin_saw",     "origin_saw_absent",
+                                   "counter_delta",  "differential",
                                    "headers_only"};
 
 // The one pending value, and what a pending row may add to the sets above.
@@ -313,6 +306,15 @@ void CheckEngine(Checker& c, const GoogleString& w, const Json::Value& e,
   if (e.isMember("library")) {
     c.Keys(w + " library", e["library"],
            For(kEngineAdditions, kLibraryKeys, kLibraryKeysM2), {});
+  }
+  // A row of the cached-HTML settings states its library's minor: the 1.15
+  // rules and the earlier ones differ, so it is never implied.
+  bool names_setting = e["config"]["mode"].asString() == "serve-cached-html";
+  for (const GoogleString& key : kConfigKeysM2) {
+    names_setting = names_setting || e["config"].isMember(key);
+  }
+  if (names_setting && !e["library"]["minor"].isIntegral()) {
+    c.Fail(w, "names a cached-HTML setting but no library minor");
   }
   if (e.isMember("volume")) {
     const Json::Value& vol = e["volume"];
@@ -700,6 +702,7 @@ TEST(DaemonHtmlConformanceCasesTest, OnlyPendingRowsUseTheServeCachedHtmlKeys) {
 
   Json::Value engine(Json::objectValue);
   engine["config"]["mode"] = "serve-cached-html";
+  engine["library"]["minor"] = 15;
   engine["verdicts"] = Json::Value(Json::arrayValue);
   Json::Value unsafe(Json::objectValue);
   unsafe["kind"] = "unsafe";

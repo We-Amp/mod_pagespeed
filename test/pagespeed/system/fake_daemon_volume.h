@@ -70,9 +70,7 @@ class FakeDaemonVolume : public DaemonAbi {
   }
   // The volume takes a URL path ("/..."), never a full URL: a call with
   // anything else is refused, as a misuse.
-  static bool IsPath(const char* url) {
-    return url != nullptr && url[0] == '/';
-  }
+  static bool IsPath(const char* url) { return url != nullptr && url[0] == '/'; }
   static GoogleString Key(const char* site, const char* url,
                           const char* hostname, const char* scheme) {
     return Key(site, EntryUrl(url, hostname, scheme).c_str());

@@ -16,6 +16,7 @@
 // Each row is its own test case, named after its id.
 
 #include <algorithm>
+#include <concepts>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -64,6 +65,21 @@ namespace {
 const char kCasesPath[] = "/test/system/daemon_html/conformance_cases.json";
 const int64 kStartMs = 1790000000000LL;
 const char kDefaultHost[] = "www.example.test";
+
+// ---- How the runner reports what it cannot do.
+//
+// A failure of a row is one of three kinds, told apart by its prefix, so a
+// pending row is held to "fails on behaviour, or on an entry point or
+// counter the serve path is pinned to add" (EveryPendingRowRunsAndStillFails):
+//   kRunnerError      the runner cannot run the row as written (an unknown
+//                     key, name or value): never allowed;
+//   kEntryPointAbsent an entry point of kServePathEntryPoints the engine does
+//                     not declare yet;
+//   kCounterAbsent    a counter of kServePathCounters not registered yet.
+// Every other failure is the engine's behaviour.
+const char kRunnerError[] = "RUNNER: ";
+const char kEntryPointAbsent[] = "ENTRY POINT NOT DECLARED YET: ";
+const char kCounterAbsent[] = "COUNTER NOT REGISTERED YET: ";
 
 GoogleString Hex(const uint8_t* bytes, size_t n) {
   static const char kDigits[] = "0123456789abcdef";
@@ -161,7 +177,7 @@ uint32_t StoreFlagsOf(const Json::Value& names) {
         known = true;
       }
     }
-    EXPECT_TRUE(known) << "unknown store flag " << n.asString();
+    EXPECT_TRUE(known) << kRunnerError << "unknown store flag " << n.asString();
   }
   return out;
 }
@@ -177,7 +193,8 @@ int WithheldReasonOf(const Json::Value& name) {
   for (const auto& [n, reason] : kReasons) {
     if (name.asString() == n) return reason;
   }
-  ADD_FAILURE() << "unknown withheld reason " << name.asString();
+  ADD_FAILURE() << kRunnerError << "unknown withheld reason "
+                << name.asString();
   return kPsHtmlWithheldBelowFloor;
 }
 
@@ -194,7 +211,8 @@ uint64_t StampOf(const Json::Value& v) {
     } else if (c >= 'a' && c <= 'f') {
       out |= static_cast<uint64_t>(c - 'a' + 10);
     } else {
-      ADD_FAILURE() << "stamp " << s << " is not lower-case hex";
+      ADD_FAILURE() << kRunnerError << "stamp " << s
+                    << " is not lower-case hex";
     }
   }
   return out;
@@ -211,9 +229,9 @@ GoogleString StampName(uint64_t stamp) {
 // The stamp the fake's ps_html_policy_stamp returns when a row names none.
 const char kDefaultPolicyStamp[] = "5a17c0de00000001";
 
-// A config naming any setting of the cached-HTML serve path describes a
-// 1.15 library unless its library says otherwise; every other row keeps the
-// 1.14 library the earlier rows were written against.
+// Whether a config names any setting of the cached-HTML serve path; such a
+// row must state its library's minor (RunnerShape).  Without one a row runs
+// on the 1.14 library the earlier rows were written against.
 bool NamesServeCachedHtmlSettings(const Json::Value& config) {
   for (const char* key : {"serve_scope", "max_age_s", "credentialed",
                           "ignore_cookies", "ignore_cookie", "policy_stamp"}) {
@@ -254,6 +272,110 @@ const char* const kRecordedFns[] = {
     "ps_read_shared_config_agent_entitled", "ps_read_shared_config_html_mode",
     "ps_wants_agent_markdown", "ps_write_close"};
 
+// The argument names each recorded call carries, so a row can name only
+// what the recorder writes (RunnerShape), and the recorder writes only these
+// (checked after every step).  headers_include and headers_exclude match the
+// call's header lines.
+const std::map<GoogleString, std::set<GoogleString>>& RecordedArgs() {
+  static const auto* args = new std::map<GoogleString, std::set<GoogleString>>{
+      {"ps_cache_read_alternate_site", {"url", "alternate"}},
+      {"ps_cache_read_best_site", {}},
+      {"ps_cache_read_site_purge_epoch", {"site"}},
+      {"ps_cache_remove_site", {"url", "site"}},
+      {"ps_cache_write_headers_sidecar_site",
+       {"url", "site", "paired", "format", "policy_stamp", "headers_include",
+        "headers_exclude"}},
+      {"ps_cache_write_original_site",
+       {"url", "hostname", "site", "inserted_at_s", "lifetime_s", "hashed"}},
+      {"ps_cache_write_site_purge_epoch", {"site", "epoch_s"}},
+      {"ps_header_block_pairing", {}},
+      {"ps_header_block_policy_stamp", {}},
+      {"ps_headers_sidecar_read", {"url"}},
+      {"ps_html_classify_cookies",
+       {"cookie_lines", "ignore_builtin", "additions", "capacity"}},
+      {"ps_html_ignore_cookie_guard", {"addition"}},
+      {"ps_html_markdown_etag", {"binding_hash", "markdown_hash"}},
+      {"ps_html_policy_stamp",
+       {"credentialed", "ignore_builtin", "list_version", "additions"}},
+      {"ps_html_request_guard",
+       {"raw_path", "keyed_scheme", "header_names", "header_values",
+        "headers_include", "headers_exclude"}},
+      {"ps_html_serve_classify",
+       {"request.struct_size",
+        "request.mode",
+        "request.method",
+        "request.accept",
+        "request.cache_control",
+        "request.pragma",
+        "request.if_none_match",
+        "request.authorization",
+        "request.authenticated_user",
+        "request.cookie",
+        "request.range",
+        "request.if_range",
+        "request.origin",
+        "request.now_seconds",
+        "request.serve_scope",
+        "request.agent_class",
+        "request.html_max_lifetime_s",
+        "request.reserved",
+        "request.policy_stamp",
+        "request.fresh_only",
+        "request.html_fallback",
+        "request.conditional",
+        "request.explicit_public",
+        "request.flags_unknown",
+        "stored.struct_size",
+        "stored.present",
+        "stored.needs_validation",
+        "stored.explicit_shared",
+        "stored.headers_not_reproducible",
+        "stored.sidecar_required",
+        "stored.sidecar_present",
+        "stored.purged",
+        "stored.validated_this_request",
+        "stored.variant_present",
+        "stored.binding_live",
+        "stored.no_transform",
+        "stored.withheld",
+        "stored.store_v2",
+        "stored.anonymous_recorded",
+        "stored.flags_unknown",
+        "stored.stored_at",
+        "stored.age_at_store",
+        "stored.lifetime_s",
+        "stored.render_ttl_s",
+        "stored.withheld_reason",
+        "stored.binding_hash",
+        "stored.markdown_hash",
+        "stored.entry_policy_stamp"}},
+      {"ps_html_store_classify",
+       {"view", "mode", "method", "url_path", "status", "request.authorization",
+        "request.authenticated_user", "request.cookie", "request.no_store",
+        "request.explicit_public", "request.flags_unknown", "body_bytes",
+        "body_complete", "max_body_bytes", "now_seconds", "headers_include",
+        "headers_exclude"}},
+      {"ps_html_store_write_params",
+       {"action", "lifetime_s", "capture_start_ms", "sidecar_stored",
+        "store_flags", "store_flags.request_anonymous", "cc_flags", "age"}},
+      {"ps_html_stored_facts_from_reads",
+       {"original", "markdown", "withheld", "sidecar_present", "block"}},
+      {"ps_html_unsafe_method_invalidates", {"method", "status"}},
+      {"ps_if_none_match_matches_weak", {"if_none_match", "etag"}},
+      {"ps_notify_worker_ex",
+       {"url", "agent_request", "content_type", "notify_flags"}},
+      {"ps_read_shared_config_agent_entitled", {}},
+      {"ps_read_shared_config_html_mode", {}},
+      {"ps_wants_agent_markdown", {"accept"}},
+      {"ps_write_close", {}}};
+  return *args;
+}
+
+// The FakePort calls a row may name.
+const char* const kPortCalls[] = {"ClearAndEmitAllowlisted", "MarkNoCompress",
+                                  "EmitAsOrigin", "RemoveClientConditionals",
+                                  "RunBlocking"};
+
 bool IsRecordedFn(const GoogleString& fn) {
   for (const char* f : kRecordedFns) {
     if (fn == f) return true;
@@ -271,38 +393,130 @@ struct Call {
 // ---- The engine entry points the cached-HTML serve path adds.
 //
 // The rows of that path are written before the engine has every entry point
-// they drive.  Each one below is looked up at compile time: once the engine
-// declares it, the runner calls it; until then a row that needs it fails
-// with a message that names it, and nothing else changes.  The names and
-// signatures are the interface the serve path is built to:
-//
-//   DaemonHtmlRequestFacts::served_from_cache  bool, the port's mark that
-//                                              this request was answered
-//                                              from the cache
-//   DaemonHtmlRequestFacts::request_headers    every request header line,
-//                                              name and value, unfiltered
-//   DaemonHtmlRequestFacts::raw_path           the path as received
-//   DaemonHtmlRequestFacts::cookie_lines       every Cookie line's value
-//   DaemonHtmlEngine::OnUnsafeRequest(facts, status, location lines,
-//       content-location lines, port)          an unsafe method's response
-//   DaemonHtmlEngine::ApplyPolicySettings(abi, &config, &error)
-//                                              static, at configuration
-//                                              load: guards the ignore-list
-//                                              additions and computes
-//                                              config.policy_stamp; false
-//                                              with an error naming the
-//                                              refused addition
-//   DaemonHtmlEngine::set_credential_skip_disabled_for_testing(bool)
-//                                              turns off the request
-//                                              credential skip before any
-//                                              read (test only)
-//
-// An unsafe-method fence is read back through DaemonHtmlPurgeOracle::Purged,
-// which answers for every fence the serve path checks.
+// they drive.  Each one is looked up at compile time twice: by its full
+// signature, which the runner calls once declared, and by name alone, so a
+// declaration with another signature is a runner error that says so, never
+// "not declared yet".  The set still undeclared is pinned
+// (ServePathEntryPointsStillUndeclared).
+struct ServePathEntryPoint {
+  const char* name;
+  const char* signature;
+};
+const ServePathEntryPoint kServePathEntryPoints[] = {
+    {"served_from_cache",
+     "bool DaemonHtmlRequestFacts::served_from_cache (the port's mark that "
+     "the cache answered this request)"},
+    {"request_headers",
+     "DaemonHtmlHeaderLines DaemonHtmlRequestFacts::request_headers (every "
+     "request header line, unfiltered)"},
+    {"raw_path", "GoogleString DaemonHtmlRequestFacts::raw_path (as received)"},
+    {"cookie_lines",
+     "std::vector<GoogleString> DaemonHtmlRequestFacts::cookie_lines (every "
+     "Cookie line's value)"},
+    {"internal",
+     "bool DaemonHtmlRequestFacts::internal (a subrequest or internal "
+     "redirect, which the engine never evaluates)"},
+    {"OnUnsafeRequest",
+     "void DaemonHtmlEngine::OnUnsafeRequest(const DaemonHtmlRequestFacts&, "
+     "int status, const std::vector<GoogleString>& location, const "
+     "std::vector<GoogleString>& content_location, DaemonHtmlPort*)"},
+    {"ApplyPolicySettings",
+     "static bool DaemonHtmlEngine::ApplyPolicySettings(const DaemonAbi&, "
+     "Config*, GoogleString* error) (configuration load: guards the "
+     "ignore-list additions, computes config->policy_stamp)"},
+    {"set_credential_skip_disabled_for_testing",
+     "void DaemonHtmlEngine::set_credential_skip_disabled_for_testing(bool)"},
+};
+
+const char* EntryPointSignature(StringPiece name) {
+  for (const ServePathEntryPoint& e : kServePathEntryPoints) {
+    if (name == e.name) return e.signature;
+  }
+  return nullptr;
+}
+
+// Full-signature and name-only probes.
+template <typename F>
+constexpr bool kSetsServedFromCache =
+    requires(F f, bool v) { f.served_from_cache = v; };
+template <typename F>
+constexpr bool kNamesServedFromCache = requires { &F::served_from_cache; };
+template <typename F>
+constexpr bool kSetsRequestHeaders =
+    requires(F f, DaemonHtmlHeaderLines v) { f.request_headers = v; };
+template <typename F>
+constexpr bool kNamesRequestHeaders = requires { &F::request_headers; };
+template <typename F>
+constexpr bool kSetsRawPath = requires(F f, GoogleString v) { f.raw_path = v; };
+template <typename F>
+constexpr bool kNamesRawPath = requires { &F::raw_path; };
+template <typename F>
+constexpr bool kSetsCookieLines =
+    requires(F f, std::vector<GoogleString> v) { f.cookie_lines = v; };
+template <typename F>
+constexpr bool kNamesCookieLines = requires { &F::cookie_lines; };
+template <typename F>
+constexpr bool kSetsInternal = requires(F f, bool v) { f.internal = v; };
+template <typename F>
+constexpr bool kNamesInternal = requires { &F::internal; };
+template <typename E>
+constexpr bool kCallsOnUnsafeRequest = requires(
+    E e, const DaemonHtmlRequestFacts& f, const std::vector<GoogleString>& l,
+    DaemonHtmlPort* p) { e.OnUnsafeRequest(f, 200, l, l, p); };
+template <typename E>
+constexpr bool kNamesOnUnsafeRequest = requires { &E::OnUnsafeRequest; };
+template <typename E>
+constexpr bool kCallsApplyPolicySettings =
+    requires(const DaemonAbi& abi, typename E::Config* c, GoogleString* err) {
+      { E::ApplyPolicySettings(abi, c, err) } -> std::convertible_to<bool>;
+    };
+template <typename E>
+constexpr bool kNamesApplyPolicySettings =
+    requires { &E::ApplyPolicySettings; };
+template <typename E>
+constexpr bool kCallsDisableCredentialSkip =
+    requires(E e) { e.set_credential_skip_disabled_for_testing(true); };
+template <typename E>
+constexpr bool kNamesDisableCredentialSkip =
+    requires { &E::set_credential_skip_disabled_for_testing; };
+
+// Whether F and E declare each entry point: by full signature, and by name.
+struct EntryPointState {
+  bool callable;
+  bool named;
+};
+template <typename F, typename E>
+std::map<GoogleString, EntryPointState> EntryPointStates() {
+  return {
+      {"served_from_cache",
+       {kSetsServedFromCache<F>, kNamesServedFromCache<F>}},
+      {"request_headers", {kSetsRequestHeaders<F>, kNamesRequestHeaders<F>}},
+      {"raw_path", {kSetsRawPath<F>, kNamesRawPath<F>}},
+      {"cookie_lines", {kSetsCookieLines<F>, kNamesCookieLines<F>}},
+      {"internal", {kSetsInternal<F>, kNamesInternal<F>}},
+      {"OnUnsafeRequest", {kCallsOnUnsafeRequest<E>, kNamesOnUnsafeRequest<E>}},
+      {"ApplyPolicySettings",
+       {kCallsApplyPolicySettings<E>, kNamesApplyPolicySettings<E>}},
+      {"set_credential_skip_disabled_for_testing",
+       {kCallsDisableCredentialSkip<E>, kNamesDisableCredentialSkip<E>}},
+  };
+}
+
+// Reports an entry point a row needs that cannot be called: not declared
+// yet, or declared with another signature (a runner error).
+void EntryPointMissing(const char* name, bool named) {
+  if (named) {
+    ADD_FAILURE() << kRunnerError << name
+                  << " is declared with a signature the runner does not "
+                  << "call; expected: " << EntryPointSignature(name);
+  } else {
+    ADD_FAILURE() << kEntryPointAbsent << name;
+  }
+}
 
 template <typename F>
 bool SetServedFromCache(F* f, bool value) {
-  if constexpr (requires { f->served_from_cache = value; }) {
+  if constexpr (kSetsServedFromCache<F>) {
     f->served_from_cache = value;
     return true;
   }
@@ -311,7 +525,7 @@ bool SetServedFromCache(F* f, bool value) {
 
 template <typename F>
 bool SetRequestHeaders(F* f, const DaemonHtmlHeaderLines& lines) {
-  if constexpr (requires { f->request_headers = lines; }) {
+  if constexpr (kSetsRequestHeaders<F>) {
     f->request_headers = lines;
     return true;
   }
@@ -320,7 +534,7 @@ bool SetRequestHeaders(F* f, const DaemonHtmlHeaderLines& lines) {
 
 template <typename F>
 bool SetRawPath(F* f, const GoogleString& raw_path, bool given) {
-  if constexpr (requires { f->raw_path = raw_path; }) {
+  if constexpr (kSetsRawPath<F>) {
     f->raw_path = raw_path;
     return true;
   }
@@ -329,11 +543,20 @@ bool SetRawPath(F* f, const GoogleString& raw_path, bool given) {
 
 template <typename F>
 bool SetCookieLines(F* f, const std::vector<GoogleString>& lines) {
-  if constexpr (requires { f->cookie_lines = lines; }) {
+  if constexpr (kSetsCookieLines<F>) {
     f->cookie_lines = lines;
     return true;
   }
   return lines.empty();
+}
+
+template <typename F>
+bool SetInternal(F* f, bool value) {
+  if constexpr (kSetsInternal<F>) {
+    f->internal = value;
+    return true;
+  }
+  return !value;
 }
 
 template <typename E>
@@ -341,10 +564,7 @@ bool CallOnUnsafeRequest(E* engine, const DaemonHtmlRequestFacts& facts,
                          int status, const std::vector<GoogleString>& location,
                          const std::vector<GoogleString>& content_location,
                          DaemonHtmlPort* port) {
-  if constexpr (requires {
-                  engine->OnUnsafeRequest(facts, status, location,
-                                          content_location, port);
-                }) {
+  if constexpr (kCallsOnUnsafeRequest<E>) {
     engine->OnUnsafeRequest(facts, status, location, content_location, port);
     return true;
   }
@@ -355,7 +575,7 @@ bool CallOnUnsafeRequest(E* engine, const DaemonHtmlRequestFacts& facts,
 template <typename E>
 int CallApplyPolicySettings(const DaemonAbi& abi, typename E::Config* config,
                             GoogleString* error) {
-  if constexpr (requires { E::ApplyPolicySettings(abi, config, error); }) {
+  if constexpr (kCallsApplyPolicySettings<E>) {
     return E::ApplyPolicySettings(abi, config, error) ? 1 : 0;
   }
   return -1;
@@ -363,13 +583,62 @@ int CallApplyPolicySettings(const DaemonAbi& abi, typename E::Config* config,
 
 template <typename E>
 bool DisableCredentialSkip(E* engine) {
-  if constexpr (requires {
-                  engine->set_credential_skip_disabled_for_testing(true);
-                }) {
+  if constexpr (kCallsDisableCredentialSkip<E>) {
     engine->set_credential_skip_disabled_for_testing(true);
     return true;
   }
   return false;
+}
+
+// The engine's own types, as the rows drive them.
+bool NamedOnEngine(const char* name) {
+  return EntryPointStates<DaemonHtmlRequestFacts, DaemonHtmlEngine>()
+      .at(name)
+      .named;
+}
+
+// ---- Counters the serve path registers, named by its design; a row may
+// name one before it is registered (kCounterAbsent).  Any other name a row
+// gives must be registered.
+const char* const kServePathCounters[] = {
+    "daemon_html_agent_html_requests",
+    "daemon_html_fallthrough_capped",
+    "daemon_html_fallthrough_conditional",
+    "daemon_html_fallthrough_credentialed",
+    "daemon_html_fallthrough_legacy_entry",
+    "daemon_html_fallthrough_path",
+    "daemon_html_fallthrough_policy_mismatch",
+    "daemon_html_fallthrough_scope",
+    "daemon_html_fresh_body_changed",
+    "daemon_html_hit_forbidden_header",
+    "daemon_html_hit_recorded",
+    "daemon_html_invalidate_failed",
+    "daemon_html_invalidated_unsafe",
+    "daemon_html_refused_auth",
+    "daemon_html_refused_cookie_echo",
+    "daemon_html_refused_cookie_request",
+    "daemon_html_refused_path",
+    "daemon_html_served_credentialed_refused",
+    "daemon_html_served_html",
+    "daemon_html_served_html_c1",
+    "daemon_html_served_html_c3",
+    "daemon_html_served_html_markdown_preference",
+    "daemon_html_served_html_unclassed",
+    "daemon_html_shadow_sampled",
+    "daemon_html_unexpected_validate",
+    "daemon_html_upgrade_restores",
+    "daemon_html_would_serve_body_differs",
+    "daemon_html_would_serve_html",
+};
+
+bool IsServePathCounter(const GoogleString& name) {
+  for (const char* c : kServePathCounters) {
+    if (name == c) return true;
+  }
+  // daemon_html_would_fallthrough_<reason>, for every serve reason.
+  const GoogleString prefix = "daemon_html_would_fallthrough_";
+  return HasPrefixString(name, prefix) &&
+         IndexOf(kServeReasons, name.substr(prefix.size())) >= 0;
 }
 
 class CountingHandler : public MessageHandler {
@@ -1138,7 +1407,7 @@ class ConformanceAbi : public InjectedVerdictDaemonAbi {
                   : reason == "path"         ? kPsHtmlGuardPath
                                              : kPsHtmlGuardNone;
     EXPECT_TRUE(reason == "none" || out->reason != kPsHtmlGuardNone)
-        << "unknown guard reason " << reason;
+        << kRunnerError << "unknown guard reason " << reason;
     out->header_index = want.get("header_index", -1).asInt();
     out->xfp = want.get("xfp", false).asBool() ? 1 : 0;
     return 0;
@@ -1181,7 +1450,7 @@ class ConformanceAbi : public InjectedVerdictDaemonAbi {
                         : cls == "ignorable_only" ? kPsHtmlCookiesIgnorableOnly
                                                   : kPsHtmlCookiesNone;
     EXPECT_TRUE(cls == "none" || out->cookie_class != kPsHtmlCookiesNone)
-        << "unknown cookie class " << cls;
+        << kRunnerError << "unknown cookie class " << cls;
     out->malformed = want.get("malformed", false).asBool() ? 1 : 0;
     out->first_blocking = PsHtmlCookieSpan{0, 0, 0};
     if (out->cookie_class == kPsHtmlCookiesBlocking) {
@@ -1454,8 +1723,7 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
         stub_abi != nullptr ? Json::Value(Json::arrayValue)
                             : engine_body_["verdicts"],
         engine_body_["library"], &site_names_, BodyHashNames(),
-        NamesServeCachedHtmlSettings(config) ? kHtmlServe15SetMinor
-                                             : kHtmlServeSetMinor,
+        kHtmlServeSetMinor,  // a row of the 1.15 settings states its own
         StampOf(config.get("policy_stamp", kDefaultPolicyStamp)));
     abi_->set_on_remove([this](const GoogleString& url) {
       // Whether the request target was fenced when its removal began.
@@ -1743,8 +2011,9 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
   void DisableCredentialSkipOrFail() {
     credential_skip_disabled_ = true;
     if (!DisableCredentialSkip(engine_.get())) {
-      ADD_FAILURE() << "the engine has no "
-                    << "set_credential_skip_disabled_for_testing yet";
+      EntryPointMissing(
+          "set_credential_skip_disabled_for_testing",
+          NamedOnEngine("set_credential_skip_disabled_for_testing"));
     }
   }
 
@@ -1844,7 +2113,7 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
       response["status"] = arg["status"];
       RunUnsafe(request, response);
     } else {
-      ADD_FAILURE() << "unknown op " << name;
+      ADD_FAILURE() << kRunnerError << "unknown op " << name;
     }
   }
 
@@ -1863,7 +2132,8 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
   // from user_agent and signature through the port's slot).
   DaemonHtmlRequestFacts Facts(const Json::Value& r) {
     for (const GoogleString& key : r.getMemberNames()) {
-      EXPECT_EQ(1u, RequestKeys().count(key)) << "unknown request key " << key;
+      EXPECT_EQ(1u, RequestKeys().count(key))
+          << kRunnerError << "unknown request key " << key;
     }
     DaemonHtmlRequestFacts f = BaseFacts(r);
     f.has_authorization =
@@ -1877,7 +2147,8 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
     }
     const GoogleString both = HeaderNamedUnderBothKeys(r);
     EXPECT_TRUE(both.empty())
-        << both << " is named under both headers and request_headers";
+        << kRunnerError << both
+        << " is named under both headers and request_headers";
     for (const auto& [name, value] : lines) {
       const char* marker = DaemonHtmlAjaxMarker(name, value);
       if (marker != nullptr && f.ajax_marker.empty()) f.ajax_marker = marker;
@@ -1885,11 +2156,11 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
     // Rows of the earlier serve path give `headers` for the AJAX marker
     // alone; only a row that names request_headers needs the facts field.
     if (!SetRequestHeaders(&f, lines) && r.isMember("request_headers")) {
-      ADD_FAILURE() << "the request facts have no request_headers yet";
+      EntryPointMissing("request_headers", NamedOnEngine("request_headers"));
     }
     if (!SetRawPath(&f, r.get("raw_path", "").asString(),
                     r.isMember("raw_path"))) {
-      ADD_FAILURE() << "the request facts have no raw_path yet";
+      EntryPointMissing("raw_path", NamedOnEngine("raw_path"));
     }
     std::vector<GoogleString> cookie_lines;
     for (const Json::Value& line : r["cookie_lines"]) {
@@ -1897,10 +2168,16 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
     }
     f.has_cookie = f.has_cookie || !cookie_lines.empty();
     if (!SetCookieLines(&f, cookie_lines)) {
-      ADD_FAILURE() << "the request facts have no cookie_lines yet";
+      EntryPointMissing("cookie_lines", NamedOnEngine("cookie_lines"));
+    }
+    // An internal request is handed to the engine, marked, and the engine
+    // must decline it itself.
+    if (!SetInternal(&f, r.get("internal", false).asBool())) {
+      EntryPointMissing("internal", NamedOnEngine("internal"));
     }
     if (!SetServedFromCache(&f, r.get("served_from_cache", false).asBool())) {
-      ADD_FAILURE() << "the request facts have no served_from_cache yet";
+      EntryPointMissing("served_from_cache",
+                        NamedOnEngine("served_from_cache"));
     }
     if (r.isMember("agent_class")) {
       f.agent_class = r["agent_class"].asInt();
@@ -1922,7 +2199,7 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
         : sig == "failed"    ? DaemonHtmlAgentSignature::kFailed
                              : DaemonHtmlAgentSignature::kNone;
     EXPECT_TRUE(sig.empty() || signature != DaemonHtmlAgentSignature::kNone)
-        << "unknown signature " << sig;
+        << kRunnerError << "unknown signature " << sig;
     const GoogleString ua = r.get("user_agent", "").asString();
     DaemonHtmlAgentClassSlot slot;
     slot.Resolve(ua, signature, &engine_->agent_class_counters());
@@ -2036,17 +2313,15 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
     for (const Json::Value& op : step["pre"]) RunOp(op);
     const GoogleString kind = step["kind"].asString();
     const Json::Value& request = step["request"];
-    // A port evaluates main, non-internal requests only: an internal one
-    // never reaches the engine.
-    const bool internal = request.get("internal", false).asBool();
+    step_request_ = request;
     const int repeat = step.get("repeat", 1).asInt();
     EXPECT_GE(repeat, 1) << "repeat";
     for (int i = 0; i < repeat; ++i) {
       if (kind == "capture") {
-        if (!internal) RunCapture(request, step["response"]);
+        RunCapture(request, step["response"]);
       } else if (kind == "serve" || kind == "emit_fails") {
         port_.as_origin_ok = kind == "serve";
-        if (!internal) serve_ = engine_->Serve(Facts(request), &port_);
+        serve_ = engine_->Serve(Facts(request), &port_);
       } else if (kind == "begin_recording") {
         // The recording start a port makes at its capture point.
         std::unique_ptr<DaemonHtmlRecording> rec =
@@ -2077,6 +2352,20 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
                    c.fn == "ps_cache_write_original_site";
           }));
     }
+    // The recorder writes only the names RecordedArgs lists.
+    for (const Call& c : calls) {
+      auto it = RecordedArgs().find(c.fn);
+      if (it == RecordedArgs().end()) {
+        ADD_FAILURE() << kRunnerError << c.fn << " has no RecordedArgs entry";
+        continue;
+      }
+      for (const GoogleString& key : c.args.getMemberNames()) {
+        if (it->second.count(key) == 0) {
+          ADD_FAILURE() << kRunnerError << c.fn << " records " << key
+                        << ", which RecordedArgs does not list";
+        }
+      }
+    }
     const std::vector<GoogleString> decision_lines(
         abi_->decision_lines().begin() + decision_lines_before,
         abi_->decision_lines().end());
@@ -2105,7 +2394,7 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
           url, global, Now(),
           [this](bool ok, const GoogleString&) { admin_ok_ = ok; });
     } else {
-      ADD_FAILURE() << "unknown step kind " << kind;
+      ADD_FAILURE() << kRunnerError << "unknown step kind " << kind;
     }
   }
 
@@ -2127,7 +2416,7 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
                              response.get("status", 0).asInt(),
                              LinesOf(response["location"]),
                              LinesOf(response["content_location"]), &port_)) {
-      ADD_FAILURE() << "the engine has no OnUnsafeRequest yet";
+      EntryPointMissing("OnUnsafeRequest", NamedOnEngine("OnUnsafeRequest"));
       return false;
     }
     return true;
@@ -2431,7 +2720,11 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
       const std::map<GoogleString, int64> after = Counters(expect["counters"]);
       for (const GoogleString& name : expect["counters"].getMemberNames()) {
         if (after.count(name) == 0) {
-          ADD_FAILURE() << "unknown counter " << name;
+          if (IsServePathCounter(name)) {
+            ADD_FAILURE() << kCounterAbsent << name;
+          } else {
+            ADD_FAILURE() << kRunnerError << "unknown counter " << name;
+          }
           continue;
         }
         EXPECT_EQ(expect["counters"][name].asInt64(),
@@ -2586,7 +2879,8 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
     }
     if (expect.isMember("config_error")) {
       if (policy_settings_ < 0) {
-        ADD_FAILURE() << "the engine has no ApplyPolicySettings yet";
+        EntryPointMissing("ApplyPolicySettings",
+                          NamedOnEngine("ApplyPolicySettings"));
       } else if (expect["config_error"].isNull()) {
         EXPECT_EQ(1, policy_settings_) << config_error_;
       } else {
@@ -2632,15 +2926,32 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
           << "classifications";
     }
     if (expect.isMember("agent_vectors")) {
-      // Every shared vector through the port's slot, as a request would.
+      // Every shared vector as the step's request: classified through the
+      // port's slot, then served, and the class the engine passes the
+      // library is the vector's.
       const AgentVectors vectors = LoadAgentVectors();
       EXPECT_FALSE(vectors.vectors.empty());
       for (const AgentVector& v : vectors.vectors) {
-        DaemonHtmlAgentClassSlot slot;
-        EXPECT_EQ(v.expected_class,
-                  slot.Resolve(v.user_agent, DaemonHtmlAgentSignature::kNone,
-                               &engine_->agent_class_counters()))
+        Json::Value r = step_request_;
+        r.removeMember("agent_class");
+        r["user_agent"] = v.user_agent;
+        const size_t before_calls = abi_->calls().size();
+        const DaemonHtmlRequestFacts facts = Facts(r);
+        EXPECT_EQ(v.expected_class, facts.agent_class)
             << "vector line " << v.line << ": " << v.user_agent;
+        engine_->Serve(facts, &port_);
+        int passed = -1;
+        for (size_t i = before_calls; i < abi_->calls().size(); ++i) {
+          const Call& c = abi_->calls()[i];
+          if (c.fn == "ps_html_serve_classify" &&
+              c.args.isMember("request.agent_class")) {
+            passed = c.args["request.agent_class"].asInt();
+            break;
+          }
+        }
+        EXPECT_EQ(v.expected_class, passed)
+            << "the class passed to ps_html_serve_classify, vector line "
+            << v.line << ": " << v.user_agent;
       }
     }
   }
@@ -2694,6 +3005,7 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
   std::optional<bool> fence_at_remove_;
   std::vector<GoogleString> unsafe_targets_;
   int fence_map_size_max_ = 0;
+  Json::Value step_request_;
 };
 
 bool NamesEngine(const Json::Value& row) {
@@ -2744,6 +3056,12 @@ class RunnerShape {
           {"anonymous-only", "explicit-public"});
     Keys("library", e["library"],
          {"minor", "set_bound", "html_mode", "agent_entitled", "missing"});
+    // A row of the cached-HTML settings states its library: the 1.15 rules
+    // and the earlier ones differ, so the minor is never implied.
+    if (NamesServeCachedHtmlSettings(e["config"]) &&
+        !e["library"]["minor"].isIntegral()) {
+      Fail("library: a row that names a cached-HTML setting sets minor");
+    }
     for (const Json::Value& v : e["volume"]) Volume(v);
     for (const Json::Value& v : e["verdicts"]) Verdict(v);
     for (const Json::Value& step : e["steps"]) Step(step);
@@ -2903,6 +3221,42 @@ class RunnerShape {
     }
     for (const Json::Value& call : ex["calls"]) {
       Keys("call", call, {"fn", "args", "exact"});
+      const GoogleString fn = call["fn"].asString();
+      auto it = RecordedArgs().find(fn);
+      if (it == RecordedArgs().end()) {
+        Fail(StrCat("calls: ", fn, " is never recorded"));
+        continue;
+      }
+      const Json::Value& args = call["args"];
+      for (const GoogleString& key :
+           args.isObject() ? args.getMemberNames() : Json::Value::Members()) {
+        if (it->second.count(key) == 0) {
+          Fail(StrCat("calls: ", fn, " never records '", key, "'"));
+        }
+      }
+    }
+    for (const Json::Value& fn : ex["calls_exclude"]) {
+      if (RecordedArgs().count(fn.asString()) == 0) {
+        Fail(StrCat("calls_exclude: ", fn.asString(), " is never recorded"));
+      }
+    }
+    for (const char* key : {"port_calls", "port_calls_exclude"}) {
+      for (const Json::Value& name : ex[key]) {
+        if (std::find(std::begin(kPortCalls), std::end(kPortCalls),
+                      name.asString()) == std::end(kPortCalls)) {
+          Fail(StrCat(key, ": the port has no ", name.asString()));
+        }
+      }
+    }
+    const Json::Value& counters = ex["counters"];
+    for (const GoogleString& name : counters.isObject()
+                                        ? counters.getMemberNames()
+                                        : Json::Value::Members()) {
+      if (!IsRegisteredCounter(name) && !IsServePathCounter(name)) {
+        Fail(StrCat("counters: ", name,
+                    " is neither registered nor a counter the serve path "
+                    "adds (kServePathCounters)"));
+      }
     }
     for (const Json::Value& stored : ex["stored"]) {
       Keys("stored", stored,
@@ -2920,6 +3274,19 @@ class RunnerShape {
          exact.isObject() ? exact.getMemberNames() : Json::Value::Members()) {
       Keys(StrCat("headers_exact ", name), exact[name], {"count", "value"});
     }
+  }
+
+  // A counter the engine registers today.
+  static bool IsRegisteredCounter(const GoogleString& name) {
+    for (const char* const* c = RewriteStats::kDaemonHtmlEngineCounters;
+         *c != nullptr; ++c) {
+      if (name == *c) return true;
+    }
+    for (const char* const* r = RewriteStats::kDaemonMarkdownFallthroughReasons;
+         *r != nullptr; ++r) {
+      if (name == StrCat("daemon_markdown_fallthrough_", *r)) return true;
+    }
+    return false;
   }
 
   // The request keys EngineRowRunner reads (defined after it).
@@ -2975,19 +3342,25 @@ int RegisterRows() {
 
 const int kRegisteredRows = RegisterRows();
 
-// Every pending row is read in full and run to its end, and still fails:
-// the runner reads every key it uses (a key it did not read would assert
-// nothing once the row is un-pended), and a row that already passes must
-// lose its marker, so a failing row cannot hide behind one.  The failures
-// themselves are the support the row waits for and are not reported here;
-// run the row on its own (kRunPendingRowsEnv) to see them.
+// Every pending row is read in full and run to its end, and still fails for
+// an allowed reason only: (a) the engine's behaviour (an expectation), or
+// (b) an entry point of kServePathEntryPoints not declared yet, or a counter
+// of kServePathCounters not registered yet.  A runner error (a key, name or
+// value the runner cannot run, kRunnerError) fails this check, and so does a
+// pending row that already passes: its marker must go, so a failing row
+// cannot hide behind one.  The failures themselves are the support the row
+// waits for and are not reported here; run the row on its own
+// (kRunPendingRowsEnv) to see them.
 TEST(DaemonHtmlEngineRowsMeta, EveryPendingRowRunsAndStillFails) {
   int pending = 0;
-  int failing = 0;
+  int behaviour_rows = 0;    // at least one behaviour failure
+  int declaration_rows = 0;  // only entry point or counter failures
+  std::map<GoogleString, int> waiting_on;  // rows per entry point or counter
   for (const Json::Value& row : Cases()["rows"]) {
     if (!IsPendingEngineRow(row)) continue;
     ++pending;
-    SCOPED_TRACE(row["id"].asString());
+    const GoogleString id = row["id"].asString();
+    SCOPED_TRACE(id);
     const std::vector<GoogleString> shape = RunnerShape().Errors(row);
     for (const GoogleString& e : shape) ADD_FAILURE() << e;
     if (!shape.empty()) continue;
@@ -3007,18 +3380,80 @@ TEST(DaemonHtmlEngineRowsMeta, EveryPendingRowRunsAndStillFails) {
     }
     if (!thrown.empty()) {
       // A value of the wrong type: the runner cannot read the row.
-      ADD_FAILURE() << row["id"].asString() << ": " << thrown;
+      ADD_FAILURE() << id << ": " << thrown;
       continue;
     }
-    if (results.size() > 0) {
-      ++failing;
+    bool behaviour = false;
+    bool declaration = false;
+    std::set<GoogleString> names;
+    for (int i = 0; i < results.size(); ++i) {
+      const GoogleString message = results.GetTestPartResult(i).message();
+      size_t at = message.find(kRunnerError);
+      if (at != GoogleString::npos) {
+        ADD_FAILURE() << id << ": " << message.substr(at);
+        continue;
+      }
+      bool declared_later = false;
+      for (const char* prefix : {kEntryPointAbsent, kCounterAbsent}) {
+        at = message.find(prefix);
+        if (at == GoogleString::npos) continue;
+        declared_later = true;
+        GoogleString name = message.substr(at + strlen(prefix));
+        name = name.substr(0, name.find_first_of(" \n"));
+        names.insert(name);
+      }
+      if (declared_later) {
+        declaration = true;
+      } else {
+        behaviour = true;
+      }
+    }
+    for (const GoogleString& name : names) ++waiting_on[name];
+    if (behaviour) {
+      ++behaviour_rows;
+    } else if (declaration) {
+      ++declaration_rows;
     } else {
-      ADD_FAILURE() << row["id"].asString()
-                    << " passes: remove its pending marker";
+      ADD_FAILURE() << id << " passes: remove its pending marker";
     }
   }
-  EXPECT_EQ(pending, failing);
-  std::printf("pending engine rows: %d run, %d still fail\n", pending, failing);
+  EXPECT_EQ(pending, behaviour_rows + declaration_rows);
+  std::printf(
+      "pending engine rows: %d run, %d still fail (%d on behaviour, %d only "
+      "on an entry point or counter not added yet)\n",
+      pending, behaviour_rows + declaration_rows, behaviour_rows,
+      declaration_rows);
+  for (const auto& [name, rows] : waiting_on) {
+    std::printf("  waiting on %s: %d rows\n", name.c_str(), rows);
+  }
+}
+
+// The entry points the engine does not declare yet, pinned: declaring one
+// changes this set in the same change, and a declaration whose signature the
+// runner cannot call fails here instead of reading as "not declared yet".
+TEST(DaemonHtmlEngineRowsMeta, ServePathEntryPointsStillUndeclared) {
+  const std::set<GoogleString> kExpectedUndeclared = {
+      "served_from_cache",
+      "request_headers",
+      "raw_path",
+      "cookie_lines",
+      "internal",
+      "OnUnsafeRequest",
+      "ApplyPolicySettings",
+      "set_credential_skip_disabled_for_testing"};
+  std::set<GoogleString> undeclared;
+  for (const auto& [name, state] :
+       EntryPointStates<DaemonHtmlRequestFacts, DaemonHtmlEngine>()) {
+    EXPECT_NE(nullptr, EntryPointSignature(name)) << name;
+    EXPECT_FALSE(state.named && !state.callable)
+        << name << " is declared with a signature the runner does not call; "
+        << "expected: " << EntryPointSignature(name);
+    if (!state.named) undeclared.insert(name);
+  }
+  EXPECT_EQ(kExpectedUndeclared, undeclared);
+  EXPECT_EQ(
+      std::size(kServePathEntryPoints),
+      (EntryPointStates<DaemonHtmlRequestFacts, DaemonHtmlEngine>().size()));
 }
 
 // The serve path's entry points are called once declared, and reported
@@ -3029,6 +3464,7 @@ TEST(DaemonHtmlEngineRowsMeta, ServePathEntryPointsAreUsedOnceDeclared) {
     DaemonHtmlHeaderLines request_headers;
     GoogleString raw_path;
     std::vector<GoogleString> cookie_lines;
+    bool internal = false;
   };
   struct Undeclared {};
   struct Engine {
@@ -3061,6 +3497,19 @@ TEST(DaemonHtmlEngineRowsMeta, ServePathEntryPointsAreUsedOnceDeclared) {
   EXPECT_EQ("/a;b", d.raw_path);
   EXPECT_TRUE(SetCookieLines(&d, {"a=b"}));
   EXPECT_EQ(1u, d.cookie_lines.size());
+  EXPECT_TRUE(SetInternal(&d, true));
+  EXPECT_TRUE(d.internal);
+  EXPECT_FALSE(
+      (EntryPointStates<Undeclared, OldEngine>().at("internal").named));
+  EXPECT_TRUE((EntryPointStates<Declared, Engine>().at("internal").callable));
+  // Declared by name with another signature: named, not callable.
+  struct Drifted {
+    int cookie_lines = 0;
+  };
+  EXPECT_TRUE(
+      (EntryPointStates<Drifted, OldEngine>().at("cookie_lines").named));
+  EXPECT_FALSE(
+      (EntryPointStates<Drifted, OldEngine>().at("cookie_lines").callable));
   Undeclared u;
   EXPECT_FALSE(SetServedFromCache(&u, true));
   EXPECT_TRUE(SetServedFromCache(&u, false));  // nothing to tell
@@ -3071,8 +3520,8 @@ TEST(DaemonHtmlEngineRowsMeta, ServePathEntryPointsAreUsedOnceDeclared) {
 
   FakeDaemonVolume volume;
   Engine e;
-  EXPECT_TRUE(CallOnUnsafeRequest(&e, DaemonHtmlRequestFacts(), 303, {}, {},
-                                  nullptr));
+  EXPECT_TRUE(
+      CallOnUnsafeRequest(&e, DaemonHtmlRequestFacts(), 303, {}, {}, nullptr));
   EXPECT_EQ(303, e.unsafe_status);
   Engine::Config config;
   GoogleString error;
@@ -3101,8 +3550,8 @@ TEST(DaemonHtmlEngineRowsMeta, EveryEngineRowIsRegistered) {
   EXPECT_EQ(engine_rows, kRegisteredRows);
   // Pinned, so a row cannot leave the run unnoticed: marking a row pending,
   // or adding one, changes these in the same change.
-  EXPECT_EQ(238, kRegisteredRows);
-  EXPECT_EQ(210, pending_rows);
+  EXPECT_EQ(239, kRegisteredRows);
+  EXPECT_EQ(216, pending_rows);
   std::printf("engine rows: %d registered, %d pending\n", kRegisteredRows,
               pending_rows);
 }

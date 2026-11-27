@@ -114,8 +114,8 @@
     "vhost stamp the fake's ps_html_policy_stamp returns; absent =",
     "5a17c0de00000001), and the mode serve-cached-html; library adds missing",
     "(1.15 symbols left unbound). A row whose config names any of these settings",
-    "or that mode runs on a library of minor 15 unless its library says",
-    "otherwise; every other row, on minor 14. Volume original adds",
+    "or that mode states its library minor (14 or 15); a row without a minor",
+    "runs on minor 14. Volume original adds",
     "content_type, store_v2 and anonymous_recorded; sidecar adds format (3) and",
     "policy_stamp, the ONE source",
     "of an entry's stamp (absent = none). DEFAULTS: an original without store_v2",
@@ -19702,6 +19702,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -19803,6 +19806,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -19876,6 +19882,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -19957,6 +19966,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -20053,6 +20065,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -20130,6 +20145,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -20198,8 +20216,7 @@
               },
               "port_calls": ["EmitAsOrigin"],
               "counters": {
-                "daemon_html_served_html": 0,
-                "daemon_html_emit_failed": 1
+                "daemon_html_served_html": 0
               }
             }
           },
@@ -20257,6 +20274,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -20392,6 +20412,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -20489,6 +20512,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -20553,6 +20579,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [],
         "steps": [
           {
@@ -20591,6 +20620,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -20688,6 +20720,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -20783,6 +20818,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -20880,6 +20918,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -20975,6 +21016,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -21072,6 +21116,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -21167,6 +21214,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -21264,6 +21314,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -21359,6 +21412,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -21456,6 +21512,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -21551,6 +21610,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -21648,6 +21710,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -21730,6 +21795,402 @@
       }
     },
     {
+      "id": "m2-second-classify-after-stale",
+      "runners": ["engine"],
+      "pending": "serve-cached-html",
+      "why": "html fallback: one second classify after the Markdown reason stale",
+      "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "agents",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": [],
+            "content_type": "text/html; charset=utf-8",
+            "store_v2": true,
+            "anonymous_recorded": true
+          },
+          {
+            "kind": "sidecar",
+            "url": "https://www.example.test/page",
+            "format": 3,
+            "policy_stamp": "5a17c0de00000001",
+            "headers": [
+              ["X-Frame-Options", "DENY"],
+              ["Cache-Control", "max-age=300"]
+            ]
+          }
+        ],
+        "verdicts": [
+          {
+            "fn": "ps_html_serve_classify",
+            "action": "fall_through",
+            "reason": "stale",
+            "wants_markdown": true
+          },
+          {
+            "fn": "ps_html_serve_classify",
+            "action": "fall_through",
+            "reason": "stale",
+            "wants_markdown": false
+          }
+        ],
+        "steps": [
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/markdown"],
+              "agent_class": 0
+            },
+            "expect": {
+              "calls": [
+                {
+                  "fn": "ps_html_serve_classify",
+                  "args": {
+                    "request.mode": 3,
+                    "request.accept": "text/markdown",
+                    "request.html_fallback": false
+                  }
+                },
+                {
+                  "fn": "ps_html_serve_classify",
+                  "args": {
+                    "request.mode": 3,
+                    "request.accept": "text/markdown",
+                    "request.html_fallback": true,
+                    "request.agent_class": 0
+                  }
+                }
+              ],
+              "classify_calls": 2,
+              "serve": {
+                "kind": "fall_through",
+                "reason": "stale"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "m2-second-classify-after-needs-validation",
+      "runners": ["engine"],
+      "pending": "serve-cached-html",
+      "why": "html fallback: one second classify after the Markdown reason needs_validation",
+      "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "agents",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": [],
+            "content_type": "text/html; charset=utf-8",
+            "store_v2": true,
+            "anonymous_recorded": true
+          },
+          {
+            "kind": "sidecar",
+            "url": "https://www.example.test/page",
+            "format": 3,
+            "policy_stamp": "5a17c0de00000001",
+            "headers": [
+              ["X-Frame-Options", "DENY"],
+              ["Cache-Control", "max-age=300"]
+            ]
+          }
+        ],
+        "verdicts": [
+          {
+            "fn": "ps_html_serve_classify",
+            "action": "fall_through",
+            "reason": "needs_validation",
+            "wants_markdown": true
+          },
+          {
+            "fn": "ps_html_serve_classify",
+            "action": "fall_through",
+            "reason": "needs_validation",
+            "wants_markdown": false
+          }
+        ],
+        "steps": [
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/markdown"],
+              "agent_class": 0
+            },
+            "expect": {
+              "calls": [
+                {
+                  "fn": "ps_html_serve_classify",
+                  "args": {
+                    "request.mode": 3,
+                    "request.accept": "text/markdown",
+                    "request.html_fallback": false
+                  }
+                },
+                {
+                  "fn": "ps_html_serve_classify",
+                  "args": {
+                    "request.mode": 3,
+                    "request.accept": "text/markdown",
+                    "request.html_fallback": true,
+                    "request.agent_class": 0
+                  }
+                }
+              ],
+              "classify_calls": 2,
+              "serve": {
+                "kind": "fall_through",
+                "reason": "needs_validation"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "m2-second-classify-after-sidecar-missing",
+      "runners": ["engine"],
+      "pending": "serve-cached-html",
+      "why": "html fallback: one second classify after the Markdown reason sidecar_missing",
+      "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "agents",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": [],
+            "content_type": "text/html; charset=utf-8",
+            "store_v2": true,
+            "anonymous_recorded": true
+          },
+          {
+            "kind": "sidecar",
+            "url": "https://www.example.test/page",
+            "format": 3,
+            "policy_stamp": "5a17c0de00000001",
+            "headers": [
+              ["X-Frame-Options", "DENY"],
+              ["Cache-Control", "max-age=300"]
+            ]
+          }
+        ],
+        "verdicts": [
+          {
+            "fn": "ps_html_serve_classify",
+            "action": "fall_through",
+            "reason": "sidecar_missing",
+            "wants_markdown": true
+          },
+          {
+            "fn": "ps_html_serve_classify",
+            "action": "fall_through",
+            "reason": "sidecar_missing",
+            "wants_markdown": false
+          }
+        ],
+        "steps": [
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/markdown"],
+              "agent_class": 0
+            },
+            "expect": {
+              "calls": [
+                {
+                  "fn": "ps_html_serve_classify",
+                  "args": {
+                    "request.mode": 3,
+                    "request.accept": "text/markdown",
+                    "request.html_fallback": false
+                  }
+                },
+                {
+                  "fn": "ps_html_serve_classify",
+                  "args": {
+                    "request.mode": 3,
+                    "request.accept": "text/markdown",
+                    "request.html_fallback": true,
+                    "request.agent_class": 0
+                  }
+                }
+              ],
+              "classify_calls": 2,
+              "serve": {
+                "kind": "fall_through",
+                "reason": "sidecar_missing"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "m2-second-classify-after-cors",
+      "runners": ["engine"],
+      "pending": "serve-cached-html",
+      "why": "html fallback: one second classify after the Markdown reason cors",
+      "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "agents",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": [],
+            "content_type": "text/html; charset=utf-8",
+            "store_v2": true,
+            "anonymous_recorded": true
+          },
+          {
+            "kind": "sidecar",
+            "url": "https://www.example.test/page",
+            "format": 3,
+            "policy_stamp": "5a17c0de00000001",
+            "headers": [
+              ["X-Frame-Options", "DENY"],
+              ["Cache-Control", "max-age=300"]
+            ]
+          }
+        ],
+        "verdicts": [
+          {
+            "fn": "ps_html_serve_classify",
+            "action": "fall_through",
+            "reason": "cors",
+            "wants_markdown": true
+          },
+          {
+            "fn": "ps_html_serve_classify",
+            "action": "fall_through",
+            "reason": "cors",
+            "wants_markdown": false
+          }
+        ],
+        "steps": [
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/markdown"],
+              "agent_class": 0
+            },
+            "expect": {
+              "calls": [
+                {
+                  "fn": "ps_html_serve_classify",
+                  "args": {
+                    "request.mode": 3,
+                    "request.accept": "text/markdown",
+                    "request.html_fallback": false
+                  }
+                },
+                {
+                  "fn": "ps_html_serve_classify",
+                  "args": {
+                    "request.mode": 3,
+                    "request.accept": "text/markdown",
+                    "request.html_fallback": true,
+                    "request.agent_class": 0
+                  }
+                }
+              ],
+              "classify_calls": 2,
+              "serve": {
+                "kind": "fall_through",
+                "reason": "cors"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
       "id": "m2-second-classify-verdict-is-the-library-s",
       "runners": ["engine"],
       "pending": "serve-cached-html",
@@ -21743,6 +22204,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -21849,6 +22313,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -21929,6 +22396,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -21998,6 +22468,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -22096,6 +22569,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -22171,6 +22647,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -22255,6 +22734,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -22337,6 +22819,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -22421,6 +22906,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -22503,6 +22991,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -22587,6 +23078,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -22669,6 +23163,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -22753,6 +23250,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -22831,6 +23331,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -22911,6 +23414,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -22989,6 +23495,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -23069,6 +23578,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -23148,6 +23660,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -23223,6 +23738,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -23292,6 +23810,9 @@
         "config": {
           "mode": "serve-cached-html",
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -23367,6 +23888,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -23449,6 +23973,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -23515,6 +24042,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -23590,6 +24120,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -23672,6 +24205,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -23743,6 +24279,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -23830,6 +24369,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -23901,6 +24443,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -24018,6 +24563,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -24134,6 +24682,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -24206,6 +24757,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -24282,6 +24836,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -24357,6 +24914,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -24431,6 +24991,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -24513,6 +25076,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -24592,6 +25158,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -24673,6 +25242,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -24752,6 +25324,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -24843,6 +25418,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -24931,6 +25509,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -25021,6 +25602,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -25094,6 +25678,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -25169,6 +25756,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -25242,6 +25832,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -25325,6 +25918,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -25614,6 +26210,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -25756,6 +26355,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -25830,6 +26432,18 @@
       "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "all",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_store_classify",
@@ -25937,16 +26551,7 @@
               }
             ]
           }
-        ],
-        "config": {
-          "mode": "serve-cached-html",
-          "serve_scope": "all",
-          "max_age_s": 60,
-          "credentialed": "anonymous-only",
-          "ignore_cookies": true,
-          "ignore_cookie": [],
-          "policy_stamp": "5a17c0de00000001"
-        }
+        ]
       }
     },
     {
@@ -25955,6 +26560,18 @@
       "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "all",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_store_classify",
@@ -26067,16 +26684,7 @@
               }
             ]
           }
-        ],
-        "config": {
-          "mode": "serve-cached-html",
-          "serve_scope": "all",
-          "max_age_s": 60,
-          "credentialed": "anonymous-only",
-          "ignore_cookies": true,
-          "ignore_cookie": [],
-          "policy_stamp": "5a17c0de00000001"
-        }
+        ]
       }
     },
     {
@@ -26085,6 +26693,18 @@
       "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "all",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_store_classify",
@@ -26192,16 +26812,7 @@
               }
             ]
           }
-        ],
-        "config": {
-          "mode": "serve-cached-html",
-          "serve_scope": "all",
-          "max_age_s": 60,
-          "credentialed": "anonymous-only",
-          "ignore_cookies": true,
-          "ignore_cookie": [],
-          "policy_stamp": "5a17c0de00000001"
-        }
+        ]
       }
     },
     {
@@ -26210,6 +26821,18 @@
       "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "all",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_store_classify",
@@ -26322,16 +26945,7 @@
               }
             ]
           }
-        ],
-        "config": {
-          "mode": "serve-cached-html",
-          "serve_scope": "all",
-          "max_age_s": 60,
-          "credentialed": "anonymous-only",
-          "ignore_cookies": true,
-          "ignore_cookie": [],
-          "policy_stamp": "5a17c0de00000001"
-        }
+        ]
       }
     },
     {
@@ -26340,6 +26954,18 @@
       "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "all",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_store_classify",
@@ -26447,16 +27073,7 @@
               }
             ]
           }
-        ],
-        "config": {
-          "mode": "serve-cached-html",
-          "serve_scope": "all",
-          "max_age_s": 60,
-          "credentialed": "anonymous-only",
-          "ignore_cookies": true,
-          "ignore_cookie": [],
-          "policy_stamp": "5a17c0de00000001"
-        }
+        ]
       }
     },
     {
@@ -26465,6 +27082,18 @@
       "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "all",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_store_classify",
@@ -26577,16 +27206,7 @@
               }
             ]
           }
-        ],
-        "config": {
-          "mode": "serve-cached-html",
-          "serve_scope": "all",
-          "max_age_s": 60,
-          "credentialed": "anonymous-only",
-          "ignore_cookies": true,
-          "ignore_cookie": [],
-          "policy_stamp": "5a17c0de00000001"
-        }
+        ]
       }
     },
     {
@@ -26595,6 +27215,18 @@
       "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "all",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_store_classify",
@@ -26701,16 +27333,7 @@
               }
             ]
           }
-        ],
-        "config": {
-          "mode": "serve-cached-html",
-          "serve_scope": "all",
-          "max_age_s": 60,
-          "credentialed": "anonymous-only",
-          "ignore_cookies": true,
-          "ignore_cookie": [],
-          "policy_stamp": "5a17c0de00000001"
-        }
+        ]
       }
     },
     {
@@ -26719,6 +27342,18 @@
       "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "all",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_store_classify",
@@ -26831,16 +27466,7 @@
               }
             ]
           }
-        ],
-        "config": {
-          "mode": "serve-cached-html",
-          "serve_scope": "all",
-          "max_age_s": 60,
-          "credentialed": "anonymous-only",
-          "ignore_cookies": true,
-          "ignore_cookie": [],
-          "policy_stamp": "5a17c0de00000001"
-        }
+        ]
       }
     },
     {
@@ -26849,6 +27475,18 @@
       "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "all",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_store_classify",
@@ -26956,16 +27594,7 @@
               }
             ]
           }
-        ],
-        "config": {
-          "mode": "serve-cached-html",
-          "serve_scope": "all",
-          "max_age_s": 60,
-          "credentialed": "anonymous-only",
-          "ignore_cookies": true,
-          "ignore_cookie": [],
-          "policy_stamp": "5a17c0de00000001"
-        }
+        ]
       }
     },
     {
@@ -26974,6 +27603,18 @@
       "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "all",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_store_classify",
@@ -27086,16 +27727,7 @@
               }
             ]
           }
-        ],
-        "config": {
-          "mode": "serve-cached-html",
-          "serve_scope": "all",
-          "max_age_s": 60,
-          "credentialed": "anonymous-only",
-          "ignore_cookies": true,
-          "ignore_cookie": [],
-          "policy_stamp": "5a17c0de00000001"
-        }
+        ]
       }
     },
     {
@@ -27104,6 +27736,18 @@
       "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "all",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_store_classify",
@@ -27211,16 +27855,7 @@
               }
             ]
           }
-        ],
-        "config": {
-          "mode": "serve-cached-html",
-          "serve_scope": "all",
-          "max_age_s": 60,
-          "credentialed": "anonymous-only",
-          "ignore_cookies": true,
-          "ignore_cookie": [],
-          "policy_stamp": "5a17c0de00000001"
-        }
+        ]
       }
     },
     {
@@ -27229,6 +27864,18 @@
       "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "all",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_store_classify",
@@ -27341,16 +27988,7 @@
               }
             ]
           }
-        ],
-        "config": {
-          "mode": "serve-cached-html",
-          "serve_scope": "all",
-          "max_age_s": 60,
-          "credentialed": "anonymous-only",
-          "ignore_cookies": true,
-          "ignore_cookie": [],
-          "policy_stamp": "5a17c0de00000001"
-        }
+        ]
       }
     },
     {
@@ -27359,6 +27997,18 @@
       "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "all",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_store_classify",
@@ -27466,16 +28116,7 @@
               }
             ]
           }
-        ],
-        "config": {
-          "mode": "serve-cached-html",
-          "serve_scope": "all",
-          "max_age_s": 60,
-          "credentialed": "anonymous-only",
-          "ignore_cookies": true,
-          "ignore_cookie": [],
-          "policy_stamp": "5a17c0de00000001"
-        }
+        ]
       }
     },
     {
@@ -27484,6 +28125,18 @@
       "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "all",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_store_classify",
@@ -27596,16 +28249,7 @@
               }
             ]
           }
-        ],
-        "config": {
-          "mode": "serve-cached-html",
-          "serve_scope": "all",
-          "max_age_s": 60,
-          "credentialed": "anonymous-only",
-          "ignore_cookies": true,
-          "ignore_cookie": [],
-          "policy_stamp": "5a17c0de00000001"
-        }
+        ]
       }
     },
     {
@@ -27614,6 +28258,18 @@
       "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "all",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_store_classify",
@@ -27720,16 +28376,7 @@
               }
             ]
           }
-        ],
-        "config": {
-          "mode": "serve-cached-html",
-          "serve_scope": "all",
-          "max_age_s": 60,
-          "credentialed": "anonymous-only",
-          "ignore_cookies": true,
-          "ignore_cookie": [],
-          "policy_stamp": "5a17c0de00000001"
-        }
+        ]
       }
     },
     {
@@ -27738,6 +28385,18 @@
       "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "all",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_store_classify",
@@ -27850,16 +28509,7 @@
               }
             ]
           }
-        ],
-        "config": {
-          "mode": "serve-cached-html",
-          "serve_scope": "all",
-          "max_age_s": 60,
-          "credentialed": "anonymous-only",
-          "ignore_cookies": true,
-          "ignore_cookie": [],
-          "policy_stamp": "5a17c0de00000001"
-        }
+        ]
       }
     },
     {
@@ -27868,6 +28518,18 @@
       "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "all",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_store_classify",
@@ -27977,16 +28639,7 @@
               }
             ]
           }
-        ],
-        "config": {
-          "mode": "serve-cached-html",
-          "serve_scope": "all",
-          "max_age_s": 60,
-          "credentialed": "anonymous-only",
-          "ignore_cookies": true,
-          "ignore_cookie": [],
-          "policy_stamp": "5a17c0de00000001"
-        }
+        ]
       }
     },
     {
@@ -27995,6 +28648,18 @@
       "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "all",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_store_classify",
@@ -28110,16 +28775,7 @@
               }
             ]
           }
-        ],
-        "config": {
-          "mode": "serve-cached-html",
-          "serve_scope": "all",
-          "max_age_s": 60,
-          "credentialed": "anonymous-only",
-          "ignore_cookies": true,
-          "ignore_cookie": [],
-          "policy_stamp": "5a17c0de00000001"
-        }
+        ]
       }
     },
     {
@@ -28128,6 +28784,18 @@
       "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "all",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_store_classify",
@@ -28237,16 +28905,7 @@
               }
             ]
           }
-        ],
-        "config": {
-          "mode": "serve-cached-html",
-          "serve_scope": "all",
-          "max_age_s": 60,
-          "credentialed": "anonymous-only",
-          "ignore_cookies": true,
-          "ignore_cookie": [],
-          "policy_stamp": "5a17c0de00000001"
-        }
+        ]
       }
     },
     {
@@ -28255,6 +28914,18 @@
       "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "all",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_store_classify",
@@ -28370,16 +29041,7 @@
               }
             ]
           }
-        ],
-        "config": {
-          "mode": "serve-cached-html",
-          "serve_scope": "all",
-          "max_age_s": 60,
-          "credentialed": "anonymous-only",
-          "ignore_cookies": true,
-          "ignore_cookie": [],
-          "policy_stamp": "5a17c0de00000001"
-        }
+        ]
       }
     },
     {
@@ -28388,6 +29050,18 @@
       "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "all",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_store_classify",
@@ -28497,16 +29171,7 @@
               }
             ]
           }
-        ],
-        "config": {
-          "mode": "serve-cached-html",
-          "serve_scope": "all",
-          "max_age_s": 60,
-          "credentialed": "anonymous-only",
-          "ignore_cookies": true,
-          "ignore_cookie": [],
-          "policy_stamp": "5a17c0de00000001"
-        }
+        ]
       }
     },
     {
@@ -28515,6 +29180,18 @@
       "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "all",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_store_classify",
@@ -28630,16 +29307,7 @@
               }
             ]
           }
-        ],
-        "config": {
-          "mode": "serve-cached-html",
-          "serve_scope": "all",
-          "max_age_s": 60,
-          "credentialed": "anonymous-only",
-          "ignore_cookies": true,
-          "ignore_cookie": [],
-          "policy_stamp": "5a17c0de00000001"
-        }
+        ]
       }
     },
     {
@@ -28648,6 +29316,18 @@
       "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "all",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_store_classify",
@@ -28757,16 +29437,7 @@
               }
             ]
           }
-        ],
-        "config": {
-          "mode": "serve-cached-html",
-          "serve_scope": "all",
-          "max_age_s": 60,
-          "credentialed": "anonymous-only",
-          "ignore_cookies": true,
-          "ignore_cookie": [],
-          "policy_stamp": "5a17c0de00000001"
-        }
+        ]
       }
     },
     {
@@ -28775,6 +29446,18 @@
       "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "all",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_store_classify",
@@ -28890,16 +29573,7 @@
               }
             ]
           }
-        ],
-        "config": {
-          "mode": "serve-cached-html",
-          "serve_scope": "all",
-          "max_age_s": 60,
-          "credentialed": "anonymous-only",
-          "ignore_cookies": true,
-          "ignore_cookie": [],
-          "policy_stamp": "5a17c0de00000001"
-        }
+        ]
       }
     },
     {
@@ -28908,6 +29582,18 @@
       "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "all",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_store_classify",
@@ -29001,16 +29687,7 @@
               }
             ]
           }
-        ],
-        "config": {
-          "mode": "serve-cached-html",
-          "serve_scope": "all",
-          "max_age_s": 60,
-          "credentialed": "anonymous-only",
-          "ignore_cookies": true,
-          "ignore_cookie": [],
-          "policy_stamp": "5a17c0de00000001"
-        }
+        ]
       }
     },
     {
@@ -29019,6 +29696,18 @@
       "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "all",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_store_classify",
@@ -29116,16 +29805,7 @@
               }
             ]
           }
-        ],
-        "config": {
-          "mode": "serve-cached-html",
-          "serve_scope": "all",
-          "max_age_s": 60,
-          "credentialed": "anonymous-only",
-          "ignore_cookies": true,
-          "ignore_cookie": [],
-          "policy_stamp": "5a17c0de00000001"
-        }
+        ]
       }
     },
     {
@@ -29134,6 +29814,18 @@
       "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "all",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_store_classify",
@@ -29234,16 +29926,7 @@
               }
             ]
           }
-        ],
-        "config": {
-          "mode": "serve-cached-html",
-          "serve_scope": "all",
-          "max_age_s": 60,
-          "credentialed": "anonymous-only",
-          "ignore_cookies": true,
-          "ignore_cookie": [],
-          "policy_stamp": "5a17c0de00000001"
-        }
+        ]
       }
     },
     {
@@ -29252,6 +29935,18 @@
       "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "all",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_store_classify",
@@ -29394,16 +30089,7 @@
               }
             ]
           }
-        ],
-        "config": {
-          "mode": "serve-cached-html",
-          "serve_scope": "all",
-          "max_age_s": 60,
-          "credentialed": "anonymous-only",
-          "ignore_cookies": true,
-          "ignore_cookie": [],
-          "policy_stamp": "5a17c0de00000001"
-        }
+        ]
       }
     },
     {
@@ -29412,6 +30098,18 @@
       "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "all",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_store_classify",
@@ -29559,16 +30257,7 @@
               }
             ]
           }
-        ],
-        "config": {
-          "mode": "serve-cached-html",
-          "serve_scope": "all",
-          "max_age_s": 60,
-          "credentialed": "anonymous-only",
-          "ignore_cookies": true,
-          "ignore_cookie": [],
-          "policy_stamp": "5a17c0de00000001"
-        }
+        ]
       }
     },
     {
@@ -29585,6 +30274,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -29653,7 +30345,7 @@
                 "absent": ["secretvalue1"]
               },
               "counters": {
-                "daemon_html_refused_cookie": 1
+                "daemon_html_refused_cookie_request": 1
               }
             }
           }
@@ -29674,6 +30366,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "verdicts": [
           {
@@ -29711,7 +30406,7 @@
             "expect": {
               "calls_exclude": ["ps_cache_write_original_site", "ps_cache_write_headers_sidecar_site", "ps_html_store_classify"],
               "counters": {
-                "daemon_html_refused_cookie": 1
+                "daemon_html_refused_cookie_request": 1
               }
             }
           }
@@ -29732,6 +30427,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -29817,6 +30515,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -29885,6 +30586,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -29948,6 +30652,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -30039,6 +30746,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_request_guard",
@@ -30098,6 +30808,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -30180,6 +30893,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_classify_cookies",
@@ -30257,6 +30973,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "verdicts": [
           {
@@ -30337,6 +31056,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_classify_cookies",
@@ -30414,6 +31136,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "verdicts": [
           {
@@ -30493,6 +31218,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_classify_cookies",
@@ -30570,6 +31298,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "verdicts": [
           {
@@ -30650,6 +31381,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_classify_cookies",
@@ -30727,6 +31461,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "verdicts": [
           {
@@ -30819,9 +31556,9 @@
       }
     },
     {
-      "id": "m2-store-anonymous-bit-mode2",
+      "id": "m2-store-forwards-anonymous-bit-mode2",
       "runners": ["engine"],
-      "why": "credentials: an anonymous store sets the anonymous bit",
+      "why": "credentials: the store forwards the library's anonymous bit to the entry",
       "engine": {
         "config": {
           "mode": "serve-variants",
@@ -30831,6 +31568,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "verdicts": [
           {
@@ -30911,6 +31651,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -30978,7 +31721,7 @@
                 "absent": ["secretvalue1"]
               },
               "counters": {
-                "daemon_html_refused_cookie": 1
+                "daemon_html_refused_cookie_request": 1
               }
             }
           }
@@ -30999,6 +31742,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "verdicts": [
           {
@@ -31036,7 +31782,7 @@
             "expect": {
               "calls_exclude": ["ps_cache_write_original_site", "ps_cache_write_headers_sidecar_site", "ps_html_store_classify"],
               "counters": {
-                "daemon_html_refused_cookie": 1
+                "daemon_html_refused_cookie_request": 1
               }
             }
           }
@@ -31057,6 +31803,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -31142,6 +31891,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -31210,6 +31962,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -31273,6 +32028,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -31364,6 +32122,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_request_guard",
@@ -31423,6 +32184,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -31505,6 +32269,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_classify_cookies",
@@ -31582,6 +32349,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "verdicts": [
           {
@@ -31662,6 +32432,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_classify_cookies",
@@ -31739,6 +32512,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "verdicts": [
           {
@@ -31818,6 +32594,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_classify_cookies",
@@ -31895,6 +32674,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "verdicts": [
           {
@@ -31975,6 +32757,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_classify_cookies",
@@ -32052,6 +32837,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "verdicts": [
           {
@@ -32144,9 +32932,9 @@
       }
     },
     {
-      "id": "m2-store-anonymous-bit-mode3",
+      "id": "m2-store-forwards-anonymous-bit-mode3",
       "runners": ["engine"],
-      "why": "credentials: an anonymous store sets the anonymous bit",
+      "why": "credentials: the store forwards the library's anonymous bit to the entry",
       "engine": {
         "config": {
           "mode": "serve-cached-html",
@@ -32156,6 +32944,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "verdicts": [
           {
@@ -32236,6 +33027,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -32309,6 +33103,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -32402,6 +33199,9 @@
           "ignore_cookie": ["PHPSESSID"],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_ignore_cookie_guard",
@@ -32435,6 +33235,9 @@
           "ignore_cookies": true,
           "ignore_cookie": ["*"],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "verdicts": [
           {
@@ -32470,6 +33273,9 @@
           "ignore_cookie": ["ab*"],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_ignore_cookie_guard",
@@ -32503,6 +33309,9 @@
           "ignore_cookies": true,
           "ignore_cookie": ["wordpress_*"],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "verdicts": [
           {
@@ -32538,6 +33347,9 @@
           "ignore_cookie": ["utm_src"],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_ignore_cookie_guard",
@@ -32569,6 +33381,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -32667,6 +33482,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -32943,6 +33761,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -33036,6 +33857,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -33133,6 +33957,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -33217,7 +34044,7 @@
     {
       "id": "m2-restore-skip-unchanged-v2",
       "runners": ["engine"],
-      "why": "freshness: an unchanged anonymous page with the same stamp",
+      "why": "freshness: an unchanged anonymous page is not re-stored (the stamp half needs the stamp)",
       "engine": {
         "config": {
           "mode": "serve-cached-html",
@@ -33227,6 +34054,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -33320,6 +34150,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -33409,6 +34242,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -33529,6 +34365,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -33601,6 +34440,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -33675,6 +34517,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -33747,6 +34592,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -33823,6 +34671,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -33898,6 +34749,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -33969,6 +34823,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -34039,6 +34896,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -34121,6 +34981,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -34190,6 +35053,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -34261,6 +35127,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -34330,6 +35199,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -34401,6 +35273,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -34471,6 +35346,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -34537,6 +35415,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -34605,6 +35486,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -34672,6 +35556,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -34738,6 +35625,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "verdicts": [
           {
@@ -34860,6 +35750,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -34920,6 +35813,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -34989,6 +35885,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_unsafe_method_invalidates",
@@ -35037,6 +35936,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -35139,6 +36041,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -35237,6 +36142,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -35309,6 +36217,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -35455,6 +36366,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -35562,6 +36476,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -35685,6 +36602,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -35712,10 +36632,9 @@
         "verdicts": [
           {
             "fn": "ps_html_serve_classify",
-            "action": "serve_html",
-            "reason": "fresh",
-            "wants_markdown": false,
-            "age_s": 10
+            "action": "fall_through",
+            "reason": "absent",
+            "wants_markdown": true
           }
         ],
         "steps": [
@@ -35728,11 +36647,19 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "accept": ["text/html,application/xhtml+xml;q=0.9,*/*;q=0.8"],
+              "accept": ["text/markdown"],
               "user_agent": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; GPTBot/1.1; +https://openai.com/gptbot)"
             },
             "expect": {
-              "agent_class": 3
+              "agent_class": 3,
+              "calls": [
+                {
+                  "fn": "ps_html_serve_classify",
+                  "args": {
+                    "request.agent_class": 3
+                  }
+                }
+              ]
             }
           }
         ]
@@ -35752,6 +36679,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -35779,10 +36709,9 @@
         "verdicts": [
           {
             "fn": "ps_html_serve_classify",
-            "action": "serve_html",
-            "reason": "fresh",
-            "wants_markdown": false,
-            "age_s": 10
+            "action": "fall_through",
+            "reason": "absent",
+            "wants_markdown": true
           }
         ],
         "steps": [
@@ -35795,11 +36724,19 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "accept": ["text/html,application/xhtml+xml;q=0.9,*/*;q=0.8"],
+              "accept": ["text/markdown"],
               "user_agent": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; GPTBot/1.2; +https://openai.com/gptbot)"
             },
             "expect": {
-              "agent_class": 3
+              "agent_class": 3,
+              "calls": [
+                {
+                  "fn": "ps_html_serve_classify",
+                  "args": {
+                    "request.agent_class": 3
+                  }
+                }
+              ]
             }
           }
         ]
@@ -35819,6 +36756,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -35846,10 +36786,9 @@
         "verdicts": [
           {
             "fn": "ps_html_serve_classify",
-            "action": "serve_html",
-            "reason": "fresh",
-            "wants_markdown": false,
-            "age_s": 10
+            "action": "fall_through",
+            "reason": "absent",
+            "wants_markdown": true
           }
         ],
         "steps": [
@@ -35862,11 +36801,19 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "accept": ["text/html,application/xhtml+xml;q=0.9,*/*;q=0.8"],
+              "accept": ["text/markdown"],
               "user_agent": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; OAI-SearchBot/1.0; +https://openai.com/searchbot"
             },
             "expect": {
-              "agent_class": 3
+              "agent_class": 3,
+              "calls": [
+                {
+                  "fn": "ps_html_serve_classify",
+                  "args": {
+                    "request.agent_class": 3
+                  }
+                }
+              ]
             }
           }
         ]
@@ -35886,6 +36833,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -35913,10 +36863,9 @@
         "verdicts": [
           {
             "fn": "ps_html_serve_classify",
-            "action": "serve_html",
-            "reason": "fresh",
-            "wants_markdown": false,
-            "age_s": 10
+            "action": "fall_through",
+            "reason": "absent",
+            "wants_markdown": true
           }
         ],
         "steps": [
@@ -35929,11 +36878,19 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "accept": ["text/html,application/xhtml+xml;q=0.9,*/*;q=0.8"],
+              "accept": ["text/markdown"],
               "user_agent": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; ChatGPT-User/1.0; +https://openai.com/bot"
             },
             "expect": {
-              "agent_class": 3
+              "agent_class": 3,
+              "calls": [
+                {
+                  "fn": "ps_html_serve_classify",
+                  "args": {
+                    "request.agent_class": 3
+                  }
+                }
+              ]
             }
           }
         ]
@@ -35953,6 +36910,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -35980,10 +36940,9 @@
         "verdicts": [
           {
             "fn": "ps_html_serve_classify",
-            "action": "serve_html",
-            "reason": "fresh",
-            "wants_markdown": false,
-            "age_s": 10
+            "action": "fall_through",
+            "reason": "absent",
+            "wants_markdown": true
           }
         ],
         "steps": [
@@ -35996,11 +36955,19 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "accept": ["text/html,application/xhtml+xml;q=0.9,*/*;q=0.8"],
+              "accept": ["text/markdown"],
               "user_agent": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; ClaudeBot/1.0; +claudebot@anthropic.com)"
             },
             "expect": {
-              "agent_class": 3
+              "agent_class": 3,
+              "calls": [
+                {
+                  "fn": "ps_html_serve_classify",
+                  "args": {
+                    "request.agent_class": 3
+                  }
+                }
+              ]
             }
           }
         ]
@@ -36020,6 +36987,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -36047,10 +37017,9 @@
         "verdicts": [
           {
             "fn": "ps_html_serve_classify",
-            "action": "serve_html",
-            "reason": "fresh",
-            "wants_markdown": false,
-            "age_s": 10
+            "action": "fall_through",
+            "reason": "absent",
+            "wants_markdown": true
           }
         ],
         "steps": [
@@ -36063,11 +37032,19 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "accept": ["text/html,application/xhtml+xml;q=0.9,*/*;q=0.8"],
+              "accept": ["text/markdown"],
               "user_agent": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Claude-User/1.0; +Claude-User@anthropic.com)"
             },
             "expect": {
-              "agent_class": 3
+              "agent_class": 3,
+              "calls": [
+                {
+                  "fn": "ps_html_serve_classify",
+                  "args": {
+                    "request.agent_class": 3
+                  }
+                }
+              ]
             }
           }
         ]
@@ -36087,6 +37064,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -36114,10 +37094,9 @@
         "verdicts": [
           {
             "fn": "ps_html_serve_classify",
-            "action": "serve_html",
-            "reason": "fresh",
-            "wants_markdown": false,
-            "age_s": 10
+            "action": "fall_through",
+            "reason": "absent",
+            "wants_markdown": true
           }
         ],
         "steps": [
@@ -36130,11 +37109,19 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "accept": ["text/html,application/xhtml+xml;q=0.9,*/*;q=0.8"],
+              "accept": ["text/markdown"],
               "user_agent": "ChatGPTAgent/1.0"
             },
             "expect": {
-              "agent_class": 0
+              "agent_class": 0,
+              "calls": [
+                {
+                  "fn": "ps_html_serve_classify",
+                  "args": {
+                    "request.agent_class": 0
+                  }
+                }
+              ]
             }
           }
         ]
@@ -36154,6 +37141,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -36181,10 +37171,9 @@
         "verdicts": [
           {
             "fn": "ps_html_serve_classify",
-            "action": "serve_html",
-            "reason": "fresh",
-            "wants_markdown": false,
-            "age_s": 10
+            "action": "fall_through",
+            "reason": "absent",
+            "wants_markdown": true
           }
         ],
         "steps": [
@@ -36197,11 +37186,19 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "accept": ["text/html,application/xhtml+xml;q=0.9,*/*;q=0.8"],
+              "accept": ["text/markdown"],
               "user_agent": "ChatGPT-Agent/1.0"
             },
             "expect": {
-              "agent_class": 0
+              "agent_class": 0,
+              "calls": [
+                {
+                  "fn": "ps_html_serve_classify",
+                  "args": {
+                    "request.agent_class": 0
+                  }
+                }
+              ]
             }
           }
         ]
@@ -36221,6 +37218,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -36248,10 +37248,9 @@
         "verdicts": [
           {
             "fn": "ps_html_serve_classify",
-            "action": "serve_html",
-            "reason": "fresh",
-            "wants_markdown": false,
-            "age_s": 10
+            "action": "fall_through",
+            "reason": "absent",
+            "wants_markdown": true
           }
         ],
         "steps": [
@@ -36264,11 +37263,19 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "accept": ["text/html,application/xhtml+xml;q=0.9,*/*;q=0.8"],
+              "accept": ["text/markdown"],
               "user_agent": "ChatGPT  Agent/1.0"
             },
             "expect": {
-              "agent_class": 0
+              "agent_class": 0,
+              "calls": [
+                {
+                  "fn": "ps_html_serve_classify",
+                  "args": {
+                    "request.agent_class": 0
+                  }
+                }
+              ]
             }
           }
         ]
@@ -36288,6 +37295,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -36315,10 +37325,9 @@
         "verdicts": [
           {
             "fn": "ps_html_serve_classify",
-            "action": "serve_html",
-            "reason": "fresh",
-            "wants_markdown": false,
-            "age_s": 10
+            "action": "fall_through",
+            "reason": "absent",
+            "wants_markdown": true
           }
         ],
         "steps": [
@@ -36331,11 +37340,19 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "accept": ["text/html,application/xhtml+xml;q=0.9,*/*;q=0.8"],
+              "accept": ["text/markdown"],
               "user_agent": "ChatGPT Agents/1.0"
             },
             "expect": {
-              "agent_class": 0
+              "agent_class": 0,
+              "calls": [
+                {
+                  "fn": "ps_html_serve_classify",
+                  "args": {
+                    "request.agent_class": 0
+                  }
+                }
+              ]
             }
           }
         ]
@@ -36355,72 +37372,8 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
-        "volume": [
-          {
-            "kind": "original",
-            "url": "https://www.example.test/page",
-            "stored_at_s": 1789999990,
-            "lifetime_s": 300,
-            "body_ref": "page",
-            "paired": true,
-            "cc_flags": [],
-            "content_type": "text/html; charset=utf-8",
-            "store_v2": true,
-            "anonymous_recorded": true
-          },
-          {
-            "kind": "sidecar",
-            "url": "https://www.example.test/page",
-            "format": 3,
-            "policy_stamp": "5a17c0de00000001",
-            "headers": [
-              ["X-Frame-Options", "DENY"],
-              ["Cache-Control", "max-age=300"]
-            ]
-          }
-        ],
-        "verdicts": [
-          {
-            "fn": "ps_html_serve_classify",
-            "action": "serve_html",
-            "reason": "fresh",
-            "wants_markdown": false,
-            "age_s": 10
-          }
-        ],
-        "steps": [
-          {
-            "kind": "serve",
-            "request": {
-              "method": "GET",
-              "scheme": "https",
-              "host": "www.example.test",
-              "path": "/page",
-              "url_agreed": true,
-              "options_enabled_and_allowed": true,
-              "accept": ["text/html,application/xhtml+xml;q=0.9,*/*;q=0.8"],
-              "user_agent": "MyChatGPT Agent/1.0"
-            },
-            "expect": {
-              "agent_class": 0
-            }
-          }
-        ]
-      }
-    },
-    {
-      "id": "m2-class-token-12",
-      "runners": ["engine"],
-      "why": "agent class: the user agent's class from the shared vectors",
-      "engine": {
-        "config": {
-          "mode": "serve-cached-html",
-          "serve_scope": "all",
-          "max_age_s": 60,
-          "credentialed": "anonymous-only",
-          "ignore_cookies": true,
-          "ignore_cookie": [],
-          "policy_stamp": "5a17c0de00000001"
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -36449,10 +37402,9 @@
         "verdicts": [
           {
             "fn": "ps_html_serve_classify",
-            "action": "serve_html",
-            "reason": "fresh",
-            "wants_markdown": false,
-            "age_s": 10
+            "action": "fall_through",
+            "reason": "absent",
+            "wants_markdown": true
           }
         ],
         "steps": [
@@ -36465,11 +37417,96 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "accept": ["text/html,application/xhtml+xml;q=0.9,*/*;q=0.8"],
+              "accept": ["text/markdown"],
+              "user_agent": "MyChatGPT Agent/1.0"
+            },
+            "expect": {
+              "agent_class": 0,
+              "calls": [
+                {
+                  "fn": "ps_html_serve_classify",
+                  "args": {
+                    "request.agent_class": 0
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "m2-class-token-12",
+      "runners": ["engine"],
+      "why": "agent class: the user agent's class from the shared vectors",
+      "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "all",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": [],
+            "content_type": "text/html; charset=utf-8",
+            "store_v2": true,
+            "anonymous_recorded": true
+          },
+          {
+            "kind": "sidecar",
+            "url": "https://www.example.test/page",
+            "format": 3,
+            "policy_stamp": "5a17c0de00000001",
+            "headers": [
+              ["X-Frame-Options", "DENY"],
+              ["Cache-Control", "max-age=300"]
+            ]
+          }
+        ],
+        "verdicts": [
+          {
+            "fn": "ps_html_serve_classify",
+            "action": "fall_through",
+            "reason": "absent",
+            "wants_markdown": true
+          }
+        ],
+        "steps": [
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/markdown"],
               "user_agent": "ChatGPT Agent-Beta/1.0"
             },
             "expect": {
-              "agent_class": 0
+              "agent_class": 0,
+              "calls": [
+                {
+                  "fn": "ps_html_serve_classify",
+                  "args": {
+                    "request.agent_class": 0
+                  }
+                }
+              ]
             }
           }
         ]
@@ -36488,6 +37525,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -36524,7 +37564,7 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "accept": ["text/html,application/xhtml+xml;q=0.9,*/*;q=0.8"]
+              "accept": ["text/markdown"]
             },
             "expect": {
               "agent_vectors": "agent_vectors.txt"
@@ -36548,6 +37588,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -36575,10 +37618,9 @@
         "verdicts": [
           {
             "fn": "ps_html_serve_classify",
-            "action": "serve_html",
-            "reason": "fresh",
-            "wants_markdown": false,
-            "age_s": 10
+            "action": "fall_through",
+            "reason": "absent",
+            "wants_markdown": true
           }
         ],
         "steps": [
@@ -36591,7 +37633,7 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "accept": ["text/html,application/xhtml+xml;q=0.9,*/*;q=0.8"],
+              "accept": ["text/markdown"],
               "user_agent": "Mozilla/5.0 (compatible; GPTBot/1.2; +https://openai.com/gptbot)",
               "signature": "signed_agent"
             },
@@ -36599,7 +37641,15 @@
               "agent_class": 1,
               "counters": {
                 "daemon_html_agent_class_c1": 1
-              }
+              },
+              "calls": [
+                {
+                  "fn": "ps_html_serve_classify",
+                  "args": {
+                    "request.agent_class": 1
+                  }
+                }
+              ]
             }
           }
         ]
@@ -36620,6 +37670,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -36647,10 +37700,9 @@
         "verdicts": [
           {
             "fn": "ps_html_serve_classify",
-            "action": "serve_html",
-            "reason": "fresh",
-            "wants_markdown": false,
-            "age_s": 10
+            "action": "fall_through",
+            "reason": "absent",
+            "wants_markdown": true
           }
         ],
         "steps": [
@@ -36663,7 +37715,7 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "accept": ["text/html,application/xhtml+xml;q=0.9,*/*;q=0.8"],
+              "accept": ["text/markdown"],
               "user_agent": "Mozilla/5.0 (compatible; GPTBot/1.2; +https://openai.com/gptbot)",
               "signature": "verified_bot"
             },
@@ -36671,7 +37723,15 @@
               "agent_class": 1,
               "counters": {
                 "daemon_html_agent_class_c1": 1
-              }
+              },
+              "calls": [
+                {
+                  "fn": "ps_html_serve_classify",
+                  "args": {
+                    "request.agent_class": 1
+                  }
+                }
+              ]
             }
           }
         ]
@@ -36692,6 +37752,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -36719,10 +37782,9 @@
         "verdicts": [
           {
             "fn": "ps_html_serve_classify",
-            "action": "serve_html",
-            "reason": "fresh",
-            "wants_markdown": false,
-            "age_s": 10
+            "action": "fall_through",
+            "reason": "absent",
+            "wants_markdown": true
           }
         ],
         "steps": [
@@ -36735,7 +37797,7 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "accept": ["text/html,application/xhtml+xml;q=0.9,*/*;q=0.8"],
+              "accept": ["text/markdown"],
               "user_agent": "Mozilla/5.0 (compatible; GPTBot/1.2; +https://openai.com/gptbot)",
               "signature": "not_ready"
             },
@@ -36743,7 +37805,15 @@
               "agent_class": 3,
               "counters": {
                 "daemon_html_agent_class_c1_not_ready": 1
-              }
+              },
+              "calls": [
+                {
+                  "fn": "ps_html_serve_classify",
+                  "args": {
+                    "request.agent_class": 3
+                  }
+                }
+              ]
             }
           }
         ]
@@ -36764,76 +37834,8 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
-        "volume": [
-          {
-            "kind": "original",
-            "url": "https://www.example.test/page",
-            "stored_at_s": 1789999990,
-            "lifetime_s": 300,
-            "body_ref": "page",
-            "paired": true,
-            "cc_flags": [],
-            "content_type": "text/html; charset=utf-8",
-            "store_v2": true,
-            "anonymous_recorded": true
-          },
-          {
-            "kind": "sidecar",
-            "url": "https://www.example.test/page",
-            "format": 3,
-            "policy_stamp": "5a17c0de00000001",
-            "headers": [
-              ["X-Frame-Options", "DENY"],
-              ["Cache-Control", "max-age=300"]
-            ]
-          }
-        ],
-        "verdicts": [
-          {
-            "fn": "ps_html_serve_classify",
-            "action": "serve_html",
-            "reason": "fresh",
-            "wants_markdown": false,
-            "age_s": 10
-          }
-        ],
-        "steps": [
-          {
-            "kind": "serve",
-            "request": {
-              "method": "GET",
-              "scheme": "https",
-              "host": "www.example.test",
-              "path": "/page",
-              "url_agreed": true,
-              "options_enabled_and_allowed": true,
-              "accept": ["text/html,application/xhtml+xml;q=0.9,*/*;q=0.8"],
-              "user_agent": "Mozilla/5.0 (compatible; GPTBot/1.2; +https://openai.com/gptbot)",
-              "signature": "failed"
-            },
-            "expect": {
-              "agent_class": 3,
-              "counters": {
-                "daemon_html_agent_class_signature_failed": 1
-              }
-            }
-          }
-        ]
-      }
-    },
-    {
-      "id": "m2-class-once-per-main-request",
-      "runners": ["engine"],
-      "why": "agent class: computed once per main request",
-      "engine": {
-        "config": {
-          "mode": "serve-cached-html",
-          "serve_scope": "all",
-          "max_age_s": 60,
-          "credentialed": "anonymous-only",
-          "ignore_cookies": true,
-          "ignore_cookie": [],
-          "policy_stamp": "5a17c0de00000001"
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -36862,10 +37864,9 @@
         "verdicts": [
           {
             "fn": "ps_html_serve_classify",
-            "action": "serve_html",
-            "reason": "fresh",
-            "wants_markdown": false,
-            "age_s": 10
+            "action": "fall_through",
+            "reason": "absent",
+            "wants_markdown": true
           }
         ],
         "steps": [
@@ -36878,7 +37879,88 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "accept": ["text/html,application/xhtml+xml;q=0.9,*/*;q=0.8"],
+              "accept": ["text/markdown"],
+              "user_agent": "Mozilla/5.0 (compatible; GPTBot/1.2; +https://openai.com/gptbot)",
+              "signature": "failed"
+            },
+            "expect": {
+              "agent_class": 3,
+              "counters": {
+                "daemon_html_agent_class_signature_failed": 1
+              },
+              "calls": [
+                {
+                  "fn": "ps_html_serve_classify",
+                  "args": {
+                    "request.agent_class": 3
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "m2-class-once-per-main-request",
+      "runners": ["engine"],
+      "why": "agent class: once per client request; a re-routed request reuses it (the port slot)",
+      "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "all",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": [],
+            "content_type": "text/html; charset=utf-8",
+            "store_v2": true,
+            "anonymous_recorded": true
+          },
+          {
+            "kind": "sidecar",
+            "url": "https://www.example.test/page",
+            "format": 3,
+            "policy_stamp": "5a17c0de00000001",
+            "headers": [
+              ["X-Frame-Options", "DENY"],
+              ["Cache-Control", "max-age=300"]
+            ]
+          }
+        ],
+        "verdicts": [
+          {
+            "fn": "ps_html_serve_classify",
+            "action": "fall_through",
+            "reason": "absent",
+            "wants_markdown": true
+          }
+        ],
+        "steps": [
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/markdown"],
               "user_agent": "GPTBot/1.2",
               "internal_redirect": true
             },
@@ -36887,7 +37969,15 @@
               "classify_agent_calls": 1,
               "counters": {
                 "daemon_html_agent_class_c3": 1
-              }
+              },
+              "calls": [
+                {
+                  "fn": "ps_html_serve_classify",
+                  "args": {
+                    "request.agent_class": 3
+                  }
+                }
+              ]
             }
           }
         ]
@@ -42558,6 +43648,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -42702,6 +43795,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -42786,6 +43882,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "verdicts": [
           {
@@ -42880,6 +43979,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -42948,6 +44050,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [],
         "steps": [
           {
@@ -42998,6 +44103,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -43067,6 +44175,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [],
         "steps": [
           {
@@ -43117,6 +44228,9 @@
           "ignore_cookies": false,
           "ignore_cookie": ["utm_src"],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -43196,6 +44310,9 @@
           "ignore_cookie": ["utm_src", "abtest_*"],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_ignore_cookie_guard",
@@ -43236,7 +44353,7 @@
     {
       "id": "m2-html-gate-url-disagree",
       "runners": ["engine"],
-      "why": "html path: a request the engine does not evaluate",
+      "why": "html path: a request the engine does not evaluate; the same gate for a Markdown request",
       "engine": {
         "config": {
           "mode": "serve-cached-html",
@@ -43246,6 +44363,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -43292,6 +44412,26 @@
               },
               "port_calls_exclude": ["EmitAsOrigin"]
             }
+          },
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": false,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/markdown"],
+              "agent_class": 3
+            },
+            "expect": {
+              "calls_exclude": ["ps_cache_read_best_site", "ps_cache_read_alternate_site", "ps_headers_sidecar_read", "ps_html_stored_facts_from_reads", "ps_html_serve_classify"],
+              "serve": {
+                "kind": "fall_through"
+              },
+              "port_calls_exclude": ["ClearAndEmitAllowlisted", "EmitAsOrigin"]
+            }
           }
         ]
       }
@@ -43299,7 +44439,7 @@
     {
       "id": "m2-html-gate-host-not-configured",
       "runners": ["engine"],
-      "why": "html path: a request the engine does not evaluate",
+      "why": "html path: a request the engine does not evaluate; the same gate for a Markdown request",
       "engine": {
         "config": {
           "mode": "serve-cached-html",
@@ -43309,6 +44449,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -43355,6 +44498,26 @@
               },
               "port_calls_exclude": ["EmitAsOrigin"]
             }
+          },
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "other.example",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/markdown"],
+              "agent_class": 3
+            },
+            "expect": {
+              "calls_exclude": ["ps_cache_read_best_site", "ps_cache_read_alternate_site", "ps_headers_sidecar_read", "ps_html_stored_facts_from_reads", "ps_html_serve_classify"],
+              "serve": {
+                "kind": "fall_through"
+              },
+              "port_calls_exclude": ["ClearAndEmitAllowlisted", "EmitAsOrigin"]
+            }
           }
         ]
       }
@@ -43362,7 +44525,8 @@
     {
       "id": "m2-html-gate-internal-request",
       "runners": ["engine"],
-      "why": "html path: a request the engine does not evaluate",
+      "pending": "serve-cached-html",
+      "why": "html path: an internal request, marked, is declined by the engine itself",
       "engine": {
         "config": {
           "mode": "serve-cached-html",
@@ -43372,6 +44536,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -43426,7 +44593,7 @@
     {
       "id": "m2-html-gate-options-off",
       "runners": ["engine"],
-      "why": "html path: a request the engine does not evaluate",
+      "why": "html path: a request the engine does not evaluate; the same gate for a Markdown request",
       "engine": {
         "config": {
           "mode": "serve-cached-html",
@@ -43436,6 +44603,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -43482,6 +44652,26 @@
               },
               "port_calls_exclude": ["EmitAsOrigin"]
             }
+          },
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": false,
+              "accept": ["text/markdown"],
+              "agent_class": 3
+            },
+            "expect": {
+              "calls_exclude": ["ps_cache_read_best_site", "ps_cache_read_alternate_site", "ps_headers_sidecar_read", "ps_html_stored_facts_from_reads", "ps_html_serve_classify"],
+              "serve": {
+                "kind": "fall_through"
+              },
+              "port_calls_exclude": ["ClearAndEmitAllowlisted", "EmitAsOrigin"]
+            }
           }
         ]
       }
@@ -43489,7 +44679,7 @@
     {
       "id": "m2-html-gate-agent-optimize-off",
       "runners": ["engine"],
-      "why": "html path: a request the engine does not evaluate",
+      "why": "html path: a request the engine does not evaluate; the same gate for a Markdown request",
       "engine": {
         "config": {
           "mode": "serve-cached-html",
@@ -43500,6 +44690,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001",
           "agent_optimize": false
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -43546,6 +44739,26 @@
               },
               "port_calls_exclude": ["EmitAsOrigin"]
             }
+          },
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/markdown"],
+              "agent_class": 3
+            },
+            "expect": {
+              "calls_exclude": ["ps_cache_read_best_site", "ps_cache_read_alternate_site", "ps_headers_sidecar_read", "ps_html_stored_facts_from_reads", "ps_html_serve_classify"],
+              "serve": {
+                "kind": "fall_through"
+              },
+              "port_calls_exclude": ["ClearAndEmitAllowlisted", "EmitAsOrigin"]
+            }
           }
         ]
       }
@@ -43564,6 +44777,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -43659,6 +44875,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -43742,6 +44961,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -43890,6 +45112,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -43954,6 +45179,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -44119,6 +45347,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -44199,6 +45430,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "verdicts": [
           {
@@ -44293,6 +45527,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -44486,6 +45723,163 @@
       }
     },
     {
+      "id": "m2-minor-14-cookie-flag-serve-mode2",
+      "runners": ["engine"],
+      "why": "credentials: below 1.15 every cookie sends the cookie flag and is not classified",
+      "engine": {
+        "config": {
+          "mode": "serve-variants",
+          "serve_scope": "agents",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 14
+        },
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": [],
+            "content_type": "text/html; charset=utf-8",
+            "store_v2": true,
+            "anonymous_recorded": true
+          },
+          {
+            "kind": "sidecar",
+            "url": "https://www.example.test/page",
+            "format": 3,
+            "policy_stamp": "5a17c0de00000001",
+            "headers": [
+              ["X-Frame-Options", "DENY"],
+              ["Cache-Control", "max-age=300"]
+            ]
+          }
+        ],
+        "verdicts": [
+          {
+            "fn": "ps_html_serve_classify",
+            "action": "fall_through",
+            "reason": "cookie_request",
+            "wants_markdown": true
+          }
+        ],
+        "steps": [
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/markdown"],
+              "agent_class": 3,
+              "cookie": true
+            },
+            "expect": {
+              "calls": [
+                {
+                  "fn": "ps_html_serve_classify",
+                  "args": {
+                    "request.mode": 2,
+                    "request.cookie": true,
+                    "request.struct_size": 64
+                  }
+                }
+              ],
+              "calls_exclude": ["ps_html_classify_cookies", "ps_html_request_guard", "ps_html_policy_stamp"],
+              "serve": {
+                "kind": "fall_through",
+                "reason": "cookie_request"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "m2-minor-14-cookie-flag-store-mode2",
+      "runners": ["engine"],
+      "why": "credentials: below 1.15 a store sees the cookie flag for every cookie, unclassified",
+      "engine": {
+        "config": {
+          "mode": "serve-variants",
+          "serve_scope": "agents",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 14
+        },
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "refuse",
+            "reason": "cookie_request"
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "refuse",
+            "reason": "cookie_request"
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "cookie": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [
+                {
+                  "fn": "ps_html_store_classify",
+                  "args": {
+                    "view": "store",
+                    "request.cookie": true
+                  }
+                }
+              ],
+              "calls_exclude": ["ps_html_classify_cookies", "ps_html_request_guard", "ps_cache_write_original_site"],
+              "stored": []
+            }
+          }
+        ]
+      }
+    },
+    {
       "id": "m2-degrade-symbol-missing-cookie-flag",
       "runners": ["engine"],
       "pending": "serve-cached-html",
@@ -44582,6 +45976,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -44661,6 +46058,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -44735,6 +46135,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -44835,6 +46238,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -45163,6 +46569,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -45247,6 +46656,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -45333,6 +46745,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_request_guard",
@@ -45392,6 +46807,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "verdicts": [
           {
@@ -45569,6 +46987,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -45653,6 +47074,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "verdicts": [
           {
@@ -45772,6 +47196,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -45857,6 +47284,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "verdicts": [
           {
             "fn": "ps_html_request_guard",
@@ -45916,6 +47346,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -46049,6 +47482,9 @@
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
         },
+        "library": {
+          "minor": 15
+        },
         "volume": [
           {
             "kind": "original",
@@ -46112,7 +47548,7 @@
                 "absent": ["GA1.2.3"]
               },
               "counters": {
-                "daemon_html_refused_cookie": 1
+                "daemon_html_refused_cookie_request": 1
               }
             }
           }
@@ -46133,6 +47569,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "verdicts": [
           {
@@ -46203,10 +47642,10 @@
       }
     },
     {
-      "id": "m2-ajax-underscore-name-no-read-mode2",
+      "id": "m2-ajax-underscore-name-no-read-markdown-mode2",
       "runners": ["engine"],
       "pending": "serve-cached-html",
-      "why": "ajax marker spelled with underscores: refused before any read",
+      "why": "ajax marker spelled with underscores: the guard gets the names; refused before any read",
       "engine": {
         "config": {
           "mode": "serve-variants",
@@ -46216,6 +47655,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -46292,10 +47734,10 @@
       }
     },
     {
-      "id": "m2-ajax-underscore-name-no-read-mode3",
+      "id": "m2-ajax-underscore-name-no-read-html-mode3",
       "runners": ["engine"],
       "pending": "serve-cached-html",
-      "why": "ajax marker spelled with underscores: refused before any read",
+      "why": "ajax marker spelled with underscores: the guard gets the names; refused before any read",
       "engine": {
         "config": {
           "mode": "serve-cached-html",
@@ -46305,6 +47747,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "volume": [
           {
@@ -46381,10 +47826,102 @@
       }
     },
     {
+      "id": "m2-ajax-underscore-name-no-read-markdown-mode3",
+      "runners": ["engine"],
+      "pending": "serve-cached-html",
+      "why": "ajax marker spelled with underscores: the guard gets the names; refused before any read",
+      "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "agents",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": [],
+            "content_type": "text/html; charset=utf-8",
+            "store_v2": true,
+            "anonymous_recorded": true
+          },
+          {
+            "kind": "sidecar",
+            "url": "https://www.example.test/page",
+            "format": 3,
+            "policy_stamp": "5a17c0de00000001",
+            "headers": [
+              ["X-Frame-Options", "DENY"],
+              ["Cache-Control", "max-age=300"]
+            ]
+          }
+        ],
+        "verdicts": [
+          {
+            "fn": "ps_html_request_guard",
+            "reason": "request_header",
+            "header_index": 0,
+            "xfp": false
+          }
+        ],
+        "steps": [
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/markdown"],
+              "agent_class": 3,
+              "request_headers": [
+                ["X_MicrosoftAjax", "1"]
+              ]
+            },
+            "expect": {
+              "calls": [
+                {
+                  "fn": "ps_html_request_guard",
+                  "args": {
+                    "header_names": ["X_MicrosoftAjax"],
+                    "header_values": ["1"]
+                  }
+                }
+              ],
+              "calls_exclude": ["ps_cache_read_best_site", "ps_cache_read_alternate_site", "ps_headers_sidecar_read", "ps_html_stored_facts_from_reads"],
+              "serve": {
+                "kind": "fall_through",
+                "reason": "request_header"
+              },
+              "decision_lines": {
+                "contains": ["\"detail\":\"X_MicrosoftAjax\""]
+              },
+              "counters": {
+                "daemon_html_refused_request_header": 1
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
       "id": "m2-ajax-underscore-name-no-store-mode2",
       "runners": ["engine"],
       "pending": "serve-cached-html",
-      "why": "ajax marker spelled with underscores: refused before the store",
+      "why": "ajax marker spelled with underscores: the guard gets the names; refused before the store",
       "engine": {
         "config": {
           "mode": "serve-variants",
@@ -46394,6 +47931,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "verdicts": [
           {
@@ -46453,7 +47993,7 @@
       "id": "m2-ajax-underscore-name-no-store-mode3",
       "runners": ["engine"],
       "pending": "serve-cached-html",
-      "why": "ajax marker spelled with underscores: refused before the store",
+      "why": "ajax marker spelled with underscores: the guard gets the names; refused before the store",
       "engine": {
         "config": {
           "mode": "serve-cached-html",
@@ -46463,6 +48003,9 @@
           "ignore_cookies": true,
           "ignore_cookie": [],
           "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
         },
         "verdicts": [
           {
