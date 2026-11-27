@@ -712,8 +712,8 @@ int StoreClassifyIn(const DaemonAbi& abi, int mode) {
   size_t detail_len = 0;
   return abi.HtmlStoreClassify(mode, "GET", "/p", 0, 200, names, values, 1, 5,
                                1, "hello", 5, 1 << 20, 1789999999, &reason,
-                               &lifetime_s, &flags, &cc_flags, &sidecar,
-                               detail, sizeof(detail), &detail_len);
+                               &lifetime_s, &flags, &cc_flags, &sidecar, detail,
+                               sizeof(detail), &detail_len);
 }
 
 // The library refuses serve-cached-html for a request of the 1.14 size: the
