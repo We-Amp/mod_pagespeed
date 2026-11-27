@@ -952,10 +952,15 @@ struct PsHtmlCookieClass {
   size_t ignorable_count;
 };
 
-// The sizes a library below 1.15 knows: what this module sends it.
-inline constexpr size_t kPsSidecarWriteParamsSize13 = 48;
-inline constexpr size_t kPsHtmlServeRequestSize14 = 64;
-inline constexpr size_t kPsHtmlStoredFactsSize14 = 96;
+// The sizes a library below 1.15 knows: what this module sends it.  Each is
+// where the first 1.15 field starts, so it holds on any layout (48, 64 and
+// 96 on a 64-bit build, asserted below).
+inline constexpr size_t kPsSidecarWriteParamsSize13 =
+    offsetof(PsSidecarWriteParams, policy_stamp);
+inline constexpr size_t kPsHtmlServeRequestSize14 =
+    offsetof(PsHtmlServeRequest, serve_scope);
+inline constexpr size_t kPsHtmlStoredFactsSize14 =
+    offsetof(PsHtmlStoredFacts, entry_policy_stamp);
 
 struct PsHtmlServeVerdict {
   size_t struct_size;
@@ -974,8 +979,7 @@ static_assert(sizeof(PsSidecarWriteParams) == 64,
               "published one");
 static_assert(offsetof(PsSidecarWriteParams, origin_html_hash) == 40,
               "the sidecar's pairing hash is not where the peer reads it");
-static_assert(offsetof(PsSidecarWriteParams, policy_stamp) ==
-                  kPsSidecarWriteParamsSize13,
+static_assert(kPsSidecarWriteParamsSize13 == 48,
               "the 1.15 sidecar fields must start where the 1.13 size ends");
 static_assert(offsetof(PsSidecarWriteParams, write_flags) == 56,
               "the sidecar write parameter layout no longer matches the "
@@ -987,8 +991,7 @@ static_assert(offsetof(PsHtmlServeRequest, if_none_match) == 48,
               "the serve request layout no longer matches the published one");
 static_assert(offsetof(PsHtmlServeRequest, now_seconds) == 60,
               "the serve request layout no longer matches the published one");
-static_assert(offsetof(PsHtmlServeRequest, serve_scope) ==
-                  kPsHtmlServeRequestSize14,
+static_assert(kPsHtmlServeRequestSize14 == 64,
               "the 1.15 request fields must start where the 1.14 size ends");
 static_assert(offsetof(PsHtmlServeRequest, policy_stamp) == 80,
               "the serve request layout no longer matches the published one");
@@ -996,8 +999,7 @@ static_assert(sizeof(PsHtmlStoredFacts) == 104,
               "the stored-facts layout no longer matches the published one");
 static_assert(offsetof(PsHtmlStoredFacts, binding_hash) == 32,
               "the stored-facts layout no longer matches the published one");
-static_assert(offsetof(PsHtmlStoredFacts, entry_policy_stamp) ==
-                  kPsHtmlStoredFactsSize14,
+static_assert(kPsHtmlStoredFactsSize14 == 96,
               "the 1.15 facts field must start where the 1.14 size ends");
 static_assert(sizeof(PsHtmlRequestGuard) == 24,
               "the request guard layout no longer matches the published one");
@@ -1279,11 +1281,13 @@ class DaemonAbi {
   //
   // True only when HasHtmlServeSet() is, the library reports minor
   // kHtmlServe15SetMinor or later, AND it exports every entry point below.
-  // When false none of them is bound and each answers its fail-closed value
-  // without reaching the library (-1, or 0 for the predicate).  Then, too,
-  // the binding never sends the serve-cached-html mode
-  // (HtmlServeClassify answers -1 for it) and sends every struct of the
-  // serve set at its 1.14 size, whatever size the caller stamped.
+  // When false none of them is bound and each answers without reaching the
+  // library: -1, or 0 for the invalidation predicate (which is the
+  // permissive answer there; a caller must check HasHtmlServe15Set() before
+  // relying on it).  Then, too, the binding never sends the
+  // serve-cached-html mode (HtmlServeClassify and HtmlStoreClassify answer
+  // -1 for it) and sends every struct of the serve set at its 1.14 size,
+  // whatever size the caller stamped.
   virtual bool HasHtmlServe15Set() const { return false; }
 
   // Why HasHtmlServe15Set() is false, as one clause for an operator's log.
@@ -1330,7 +1334,9 @@ class DaemonAbi {
   }
 
   // ps_html_unsafe_method_invalidates: 1 when the response invalidates the
-  // stored page, else 0 (also for an unbound set).
+  // stored page, else 0.  An unbound set also answers 0, which here means
+  // "does not invalidate", NOT a fail-closed answer: check
+  // HasHtmlServe15Set() first.
   virtual int HtmlUnsafeMethodInvalidates(const char* /*method*/,
                                           int /*status*/) const {
     return 0;

@@ -959,11 +959,11 @@ void DaemonHtmlEngine::NoteServe15Unavailable() {
       !abi->HasHtmlServeSet()) {
     return;
   }
-  // serve-variants with the credentialed policy at its defaults runs exactly
-  // as it did before 1.15: nothing the operator set goes unapplied.
+  // serve-variants with the credentialed policy at its default runs exactly
+  // as it did before 1.15: nothing the operator set goes unapplied.  (The
+  // two ignore-cookie settings have their own warning, on every library.)
   if (config_.mode != DaemonHtmlMode::kServeCachedHtml &&
-      config_.credentialed == kPsHtmlCredentialedAnonymousOnly &&
-      config_.ignore_cookies && config_.ignore_cookie.empty()) {
+      config_.credentialed == kPsHtmlCredentialedAnonymousOnly) {
     return;
   }
   GoogleString reason;
@@ -974,24 +974,47 @@ void DaemonHtmlEngine::NoteServe15Unavailable() {
     reason = set15_reason_;
   }
   if (deps_.handler == nullptr) return;
+  // A library that reports 1.15 but lacks part of the set applies its own
+  // 1.15 store and serve rules; only an older one keeps the earlier rule.
+  const bool reports_15 = abi->VersionMinor() >= kHtmlServe15SetMinor;
   if (config_.mode == DaemonHtmlMode::kServeCachedHtml) {
     deps_.handler->Message(
         kWarning,
         "DaemonHtmlCache serve-cached-html is unavailable (%s); running "
         "serve-variants, which serves the Markdown copies of stored pages "
-        "only, with the earlier cookie rule and no check of the stored "
-        "entry's record",
-        reason.c_str());
+        "only, %s",
+        reason.c_str(),
+        reports_15 ? "with the library's own cookie rule"
+                   : "with the earlier cookie rule and no check of the "
+                     "stored entry's record");
   } else {
     deps_.handler->Message(
         kWarning,
-        "DaemonHtmlCache: %s; serve-variants keeps the earlier cookie rule (a "
-        "page the origin marks public is stored and served for a request "
-        "with a cookie), and DaemonHtmlCacheCredentialed, "
-        "DaemonHtmlCacheIgnoreCookies and DaemonHtmlCacheIgnoreCookie have no "
+        "DaemonHtmlCache: %s; %s, and DaemonHtmlCacheCredentialed has no "
         "effect",
-        reason.c_str());
+        reason.c_str(),
+        reports_15 ? "serve-variants runs with the library's own cookie rule"
+                   : "serve-variants keeps the earlier cookie rule (a page "
+                     "the origin marks public is stored and served for a "
+                     "request with a cookie)");
   }
+}
+
+void DaemonHtmlEngine::NoteIgnoreCookieSettingsInert() {
+  if (config_.ignore_cookies && config_.ignore_cookie.empty()) return;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (ignore_cookie_logged_) return;
+    ignore_cookie_logged_ = true;
+  }
+  if (deps_.handler == nullptr) return;
+  // Accepted and validated so that a configuration written for the release
+  // that applies them keeps loading; this one does not classify cookies.
+  deps_.handler->Message(
+      kWarning,
+      "DaemonHtmlCacheIgnoreCookies and DaemonHtmlCacheIgnoreCookie take "
+      "effect in a later release; they are accepted and have no effect, and "
+      "every cookie still prevents storing and serving a page");
 }
 
 const char* DaemonHtmlEngine::ServeModeName() const {
@@ -1209,6 +1232,7 @@ std::unique_ptr<DaemonHtmlRecording> DaemonHtmlEngine::StartRecording(
   const bool serve_mode =
       config_.mode >= DaemonHtmlMode::kServeVariants && config_.agent_optimize;
   bool may_store = false;
+  NoteIgnoreCookieSettingsInert();
   if (serve_mode && config_.mode == DaemonHtmlMode::kServeCachedHtml &&
       effective_mode() != DaemonHtmlMode::kServeCachedHtml) {
     counters_->serve_cached_html_unavailable->Add(1);

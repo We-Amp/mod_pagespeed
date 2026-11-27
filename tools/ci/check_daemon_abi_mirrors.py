@@ -393,8 +393,16 @@ def check(abi_h, abi_cc, peer_h, alternate_id_h, symbols_lds):
                             "    module:    %s\n    optimizer: %s" %
                             (mine, peer, a, b))
         checked += 1
-    sets = [s for s in SETS
-            if re.search(r"void\s+%s\(\)" % s[0], _strip_comments(abi_cc))]
+    stripped_cc = _strip_comments(abi_cc)
+    sets = []
+    for s in SETS:
+        if re.search(r"void\s+%s\(\)" % s[0], stripped_cc):
+            sets.append(s)
+        elif s[2] in ours:
+            # A set the header declares must be read, or a renamed binder
+            # would drop its prototypes and minors from the gate silently.
+            raise DriftError("daemon_abi.h has %s but daemon_abi.cc has no "
+                             "%s" % (s[2], s[0]))
     if not sets or sets[0][0] != "BindHtmlServeSet":
         raise DriftError("could not find BindHtmlServeSet in daemon_abi.cc")
     theirs_protos = peer_prototypes(peer_h)
@@ -530,6 +538,7 @@ def self_test():
              "PAGESPEED_1.16 { global: ps_html_unsafe_method_invalidates;"),
             (0, "kHtmlServe15SetMinor = 15", "kHtmlServe16SetMinor = 15"),
             (1, "struct HtmlServe15SetFns", "struct HtmlServe15Set"),
+            (1, "void BindHtmlServe15Set()", "void BindHtmlServeNext()"),
         ]
         for index, old, new in drifts:
             mutated = list(args)

@@ -1523,8 +1523,9 @@ void RewriteOptions::AddProperties() {
   AddBaseProperty(true, &RewriteOptions::daemon_html_cache_ignore_cookies_,
                   "dhcics", kDaemonHtmlCacheIgnoreCookies, kServerScope,
                   "Whether DaemonHtmlCache ignores the built-in list of "
-                  "analytics cookies (default on). Needs optimizer C API "
-                  "1.15.",
+                  "analytics cookies (default on). Accepted and checked "
+                  "now; takes effect in a later release, and until then "
+                  "every cookie prevents storing a page.",
                   true);
   properties_->property(properties_->size() - 1)
       ->set_do_not_use_for_signature_computation(true);
@@ -1532,8 +1533,9 @@ void RewriteOptions::AddProperties() {
                   &RewriteOptions::daemon_html_cache_ignore_cookie_, "dhcic",
                   kDaemonHtmlCacheIgnoreCookie, kServerScope,
                   "A cookie name, or a prefix ending in *, that "
-                  "DaemonHtmlCache also ignores; repeatable. Needs optimizer "
-                  "C API 1.15.",
+                  "DaemonHtmlCache also ignores; repeatable. Accepted and "
+                  "checked now; takes effect in a later release, and until "
+                  "then every cookie prevents storing a page.",
                   true);
   properties_->property(properties_->size() - 1)
       ->set_do_not_use_for_signature_computation(true);

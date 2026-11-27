@@ -471,6 +471,10 @@ class LibraryDaemonAbi : public DaemonAbi {
                         size_t detail_capacity,
                         size_t* out_detail_len) const override {
     if (html_store_classify_ == nullptr) return -1;
+    // A library below 1.15 does not know the serve-cached-html mode.
+    if (mode == kPsHtmlCacheServeCachedHtml && !HasHtmlServe15Set()) {
+      return -1;
+    }
     return html_store_classify_(
         mode, method, url_path, request_flags, status, names, values, count,
         body_bytes, body_complete, body_prefix, body_prefix_len, max_body_bytes,
@@ -561,7 +565,8 @@ class LibraryDaemonAbi : public DaemonAbi {
     const int rc = html_serve_.stored_facts_from_reads(
         original, markdown, withheld_marker, sidecar_present, out);
     out->struct_size = size;
-    out->entry_policy_stamp = 0;
+    // Zeroed only when the caller's struct reaches it.
+    if (size >= sizeof(PsHtmlStoredFacts)) out->entry_policy_stamp = 0;
     return rc;
   }
 

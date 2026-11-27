@@ -450,7 +450,9 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
     // ...ExplicitPublic.
     int credentialed = 0;
     // DaemonHtmlCacheIgnoreCookies, and the DaemonHtmlCacheIgnoreCookie
-    // additions in order.
+    // additions in order.  Not applied yet: every cookie still sets
+    // HAS_COOKIE, and a non-default value is logged once
+    // (NoteIgnoreCookieSettingsInert).
     bool ignore_cookies = true;
     std::vector<GoogleString> ignore_cookie;
     // The stamp of the credentialed policy, sent as the request's
@@ -548,6 +550,8 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
   // serve-cached-html runs as serve-variants while the library lacks the 1.15
   // set (DaemonAbi::HasHtmlServe15Set), read with the other serving
   // conditions.  The library is never sent the serve-cached-html mode then.
+  // The binding is fixed when the library is loaded, so in a server this
+  // changes only with a server restart.
   DaemonHtmlMode effective_mode() const;
   const Config& config() const { return config_; }
   // The agent class counters, resolved once for this engine's statistics;
@@ -580,6 +584,9 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
   // once per state for a configuration that stores and serves.
   void ReadServe15Condition(bool log_change);
   void NoteServe15Unavailable();
+  // Logs once that the two ignore-cookie settings, set to anything but
+  // their defaults, have no effect yet.
+  void NoteIgnoreCookieSettingsInert();
   // The mode name a decision line carries for a store or serve.
   const char* ServeModeName() const;
   void ObservePurgeState();
@@ -645,6 +652,7 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
   bool set15_bound_ = false;
   GoogleString set15_reason_;
   bool set15_logged_ = false;
+  bool ignore_cookie_logged_ = false;
   // The newest global purge (seconds) this process wrote as an epoch.
   int64 epoch_written_s_ = -1;
   // The handle epoch_written_s_ was written through.

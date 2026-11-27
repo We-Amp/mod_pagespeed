@@ -698,8 +698,27 @@ TEST_F(HtmlServe15SetTest, AFifteenLibraryIsSentTheFifteenSizes) {
   EXPECT_EQ("absent", reason);  // not `scope`: the 1.15 fields were read
 }
 
+// One store classification of a plain 200 in `mode`: the stub answers its
+// fixed action, or the binding -1 when the call never reaches it.
+int StoreClassifyIn(const DaemonAbi& abi, int mode) {
+  const char* names[] = {"Content-Type"};
+  const char* values[] = {"text/html"};
+  int reason = 0;
+  uint32_t lifetime_s = 0;
+  uint32_t flags = 0;
+  uint16_t cc_flags = 0;
+  int sidecar = 0;
+  char detail[64] = {0};
+  size_t detail_len = 0;
+  return abi.HtmlStoreClassify(mode, "GET", "/p", 0, 200, names, values, 1, 5,
+                               1, "hello", 5, 1 << 20, 1789999999, &reason,
+                               &lifetime_s, &flags, &cc_flags, &sidecar,
+                               detail, sizeof(detail), &detail_len);
+}
+
 // The library refuses serve-cached-html for a request of the 1.14 size: the
-// fail-safe zeros (scope agents, class unknown).
+// fail-safe zeros (scope agents, class unknown).  The store classifier is
+// sent the mode as it is.
 TEST_F(HtmlServe15SetTest, AFifteenLibraryRefusesAFourteenSizeCachedHtml) {
   std::unique_ptr<DaemonAbi> abi =
       Load("15", "libdaemon_stub_html_serve_15.so");
@@ -714,6 +733,8 @@ TEST_F(HtmlServe15SetTest, AFifteenLibraryRefusesAFourteenSizeCachedHtml) {
   verdict.struct_size = sizeof(verdict);
   ASSERT_EQ(0, abi->HtmlServeClassify(&request, &facts, &verdict));
   EXPECT_STREQ("scope", abi->HtmlServeReasonName(verdict.reason));
+  ASSERT_TRUE(abi->PublishesHtmlStorePolicy());
+  EXPECT_LE(0, StoreClassifyIn(*abi, kPsHtmlCacheServeCachedHtml));
 }
 
 // The same library reporting 1.14: the 1.14 set binds, the 1.15 one does
@@ -737,9 +758,13 @@ TEST_F(HtmlServe15SetTest, AFourteenLibraryIsSentOnlyTheFourteenShape) {
                         &facts_size, &reason));
   EXPECT_EQ(kPsHtmlServeRequestSize14, request_size);
   EXPECT_EQ(kPsHtmlStoredFactsSize14, facts_size);
-  // Never serve-cached-html: refused before it reaches the library.
+  // Never serve-cached-html: refused before it reaches the library, on the
+  // serve side and on the store side.
   EXPECT_EQ(-1, Classify(*abi, kPsHtmlCacheServeCachedHtml, &request_size,
                          &facts_size, &reason));
+  ASSERT_TRUE(abi->PublishesHtmlStorePolicy());
+  EXPECT_LE(0, StoreClassifyIn(*abi, kPsHtmlCacheServeVariants));
+  EXPECT_EQ(-1, StoreClassifyIn(*abi, kPsHtmlCacheServeCachedHtml));
 
   // The facts are read at the 1.14 size and handed back at the caller's,
   // with no entry stamp.
@@ -791,7 +816,9 @@ TEST_F(HtmlServe15SetTest, OneMissingFifteenSymbolLeavesOnlyTheFourteenSet) {
   ASSERT_TRUE(abi != nullptr) << error_;
   EXPECT_TRUE(abi->HasHtmlServeSet());
   const GoogleString reason = abi->HtmlServe15SetUnavailableReason();
-  EXPECT_NE(GoogleString::npos, reason.find("ps_html_request_guard")) << reason;
+  EXPECT_NE(GoogleString::npos,
+            reason.find("ps_html_unsafe_method_invalidates"))
+      << reason;
   ExpectUnbound15Answers(*abi);
 }
 

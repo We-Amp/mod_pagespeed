@@ -514,8 +514,9 @@ cc_binary(
     win_def_file = "daemon_stub_html_serve_15.def",
 )
 
-# The 1.15 set less ps_html_request_guard, while reporting 1.15: the 1.14 set
-# is bound and none of the 1.15 one is.
+# The 1.15 set less ps_html_unsafe_method_invalidates (the last symbol the
+# binding resolves), while reporting 1.15: the 1.14 set is bound and none of
+# the 1.15 one is.
 cc_binary(
     name = "libdaemon_stub_html_serve_15_partial.so",
     testonly = True,
@@ -524,7 +525,7 @@ cc_binary(
         "PS_STUB_HTML_POLICY",
         "PS_STUB_HTML_SERVE",
         "PS_STUB_HTML_SERVE_15",
-        "PS_STUB_OMIT_REQUEST_GUARD",
+        "PS_STUB_OMIT_UNSAFE_METHOD_INVALIDATES",
     ],
     linkopts = select({
         "@platforms//os:linux": ["-nostdlib++"],

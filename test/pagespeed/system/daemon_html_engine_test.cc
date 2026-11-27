@@ -355,6 +355,30 @@ class DaemonHtmlEngineTest : public testing::Test {
     return n;
   }
 
+  // Serves and captures one request carrying only Cookie: _ga=GA1.2.3, with
+  // the library refusing the store: HAS_COOKIE on the serve request and on
+  // every store classification, and nothing written.
+  void ExpectAnalyticsCookieStillCounts(DaemonHtmlEngine* engine) {
+    InlinePort port;
+    DaemonHtmlRequestFacts facts = MarkdownRequest();
+    facts.has_cookie = true;
+    engine->Serve(facts, &port);
+    ASSERT_EQ(1u, abi_.serve_requests().size());
+    EXPECT_NE(0u, abi_.serve_requests()[0].request_flags &
+                      kPsHtmlServeRequestHasCookie);
+    abi_.Queue(kPsHtmlStoreActionRefuse, "private");
+    abi_.Queue(kPsHtmlStoreActionRefuse, "private");
+    Capture(engine, &port, kOrigin, kOrigin, facts);
+    ASSERT_FALSE(abi_.store_request_flags.empty());
+    for (uint32_t flags : abi_.store_request_flags) {
+      EXPECT_NE(0u, flags & kStoreRequestHasCookieBit);
+    }
+    EXPECT_EQ(0, CallsOf("ps_cache_write_original_site"));
+    EXPECT_EQ(0, CallsOf("ps_cache_write_headers_sidecar_site"));
+  }
+
+  // The store request's HAS_COOKIE bit (PS_HTML_STORE_REQUEST_HAS_COOKIE).
+  static constexpr uint32_t kStoreRequestHasCookieBit = 4u;
   static constexpr char kBody[] = "<html><body>hello</body></html>";
   const DaemonHtmlHeaderLines kOrigin = {{"Content-Type", "text/html"},
                                          {"Cache-Control", "max-age=300"}};
@@ -880,8 +904,8 @@ TEST_F(DaemonHtmlEngineTest, ServeCachedHtmlRunsAsServeVariantsBelowFifteen) {
       stats_.GetVariable("daemon_html_serve_cached_html_unavailable")->Get());
   EXPECT_EQ(1, handler_.MessagesOfType(kWarning));
 
-  // A library that gains the set (a restart of the optimizer) is read on the
-  // next tick.
+  // The set is read on every tick.  A real binding is fixed when the library
+  // is loaded, so in a server only a restart changes it; the fake flips.
   abi_.mutable_injection()->has_set_15 = true;
   engine->OnPurgePollTick();
   EXPECT_EQ(DaemonHtmlMode::kServeCachedHtml, engine->effective_mode());
@@ -1007,6 +1031,59 @@ TEST_F(DaemonHtmlEngineTest,
   EXPECT_EQ(
       0,
       stats_.GetVariable("daemon_html_serve_cached_html_unavailable")->Get());
+}
+
+// A request whose only cookie is an analytics one (Cookie: _ga=GA1.2.3).
+// The port sets has_cookie for any Cookie line and the engine does not
+// classify cookie names, so HAS_COOKIE reaches the library on both sides.
+// Below 1.15 that is the earlier rule and must stay so; on 1.15 it stays so
+// until cookie classification is applied, which must change the second row
+// deliberately.
+TEST_F(DaemonHtmlEngineTest, AnAnalyticsCookieAloneStillCountsBelowFifteen) {
+  config_.ignore_cookies = true;  // the default: the built-in list
+  std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
+  ASSERT_FALSE(abi_.HasHtmlServe15Set());
+  EXPECT_EQ(DaemonHtmlMode::kServeVariants, engine->effective_mode());
+  ExpectAnalyticsCookieStillCounts(engine.get());
+  EXPECT_EQ(kPsHtmlServeRequestSize14, abi_.serve_requests()[0].struct_size);
+}
+
+TEST_F(DaemonHtmlEngineTest, AnAnalyticsCookieAloneStillCountsOnFifteen) {
+  abi_.mutable_injection()->has_set_15 = true;
+  std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
+  EXPECT_EQ(DaemonHtmlMode::kServeVariants, engine->effective_mode());
+  ExpectAnalyticsCookieStillCounts(engine.get());
+  EXPECT_EQ(sizeof(PsHtmlServeRequest), abi_.serve_requests()[0].struct_size);
+  // The cookie classifier is not asked.
+  EXPECT_EQ(0, CallsOf("ps_html_classify_cookies"));
+}
+
+// Either ignore-cookie setting away from its default is accepted, has no
+// effect, and says so once per engine, whatever the library.
+TEST_F(DaemonHtmlEngineTest, ANonDefaultIgnoreCookieSettingWarnsOnce) {
+  {
+    std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
+    InlinePort port;
+    Capture(engine.get(), &port, kOrigin, kOrigin, MarkdownRequest());
+    EXPECT_EQ(0, handler_.MessagesOfType(kWarning));
+  }
+  abi_.mutable_injection()->has_set_15 = true;
+  for (int which = 0; which < 2; ++which) {
+    const int before = handler_.MessagesOfType(kWarning);
+    config_.ignore_cookies = which != 0;
+    config_.ignore_cookie.clear();
+    if (which != 0) config_.ignore_cookie.push_back("_my_ab");
+    std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
+    InlinePort port;
+    Capture(engine.get(), &port, kOrigin, kOrigin, MarkdownRequest());
+    Capture(engine.get(), &port, kOrigin, kOrigin, MarkdownRequest());
+    engine->OnPurgePollTick();
+    EXPECT_EQ(before + 1, handler_.MessagesOfType(kWarning)) << which;
+    EXPECT_NE(GoogleString::npos, Logged().find("later release")) << which;
+    EXPECT_NE(GoogleString::npos,
+              Logged().find("every cookie still prevents storing"))
+        << which;
+  }
 }
 
 TEST(DaemonHtmlModeTest, EveryOptionModeMapsAndOnlyLaterModesServe) {

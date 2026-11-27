@@ -135,9 +135,10 @@
 //                                request short of the 1.15 size falls
 //                                through with `scope`.  Bound only when the
 //                                reported minor is 15 or later.
-//   PS_STUB_OMIT_REQUEST_GUARD   with PS_STUB_HTML_SERVE_15: the 1.15 set
-//                                without ps_html_request_guard, so none of
-//                                it is used.
+//   PS_STUB_OMIT_UNSAFE_METHOD_INVALIDATES
+//                                with PS_STUB_HTML_SERVE_15: the 1.15 set
+//                                without ps_html_unsafe_method_invalidates,
+//                                the LAST one bound, so none of it is used.
 //   PS_STUB_ECHO_SIZES (setting) every serve verdict carries the request's
 //                                struct_size in age_s and the facts'
 //                                struct_size in not_modified, so a test sees
@@ -1472,7 +1473,6 @@ static bool StubCaseEqual(const char* a, const char* b) {
   return *a == *b;
 }
 
-#ifndef PS_STUB_OMIT_REQUEST_GUARD
 // Refuses a `;` in the path, an X-Forwarded-Host line, and an
 // X-Forwarded-Proto that is not the keyed scheme.
 int ps_html_request_guard(const char* raw_path, const char* const* names,
@@ -1509,7 +1509,6 @@ int ps_html_request_guard(const char* raw_path, const char* const* names,
   }
   return 0;
 }
-#endif  // PS_STUB_OMIT_REQUEST_GUARD
 
 // One Cookie line of `name=value` pairs: `_ga` and `_gid` are ignorable,
 // anything else blocks.
@@ -1602,6 +1601,7 @@ int ps_html_policy_stamp(int credentialed, int ignore_builtin,
   return 0;
 }
 
+#ifndef PS_STUB_OMIT_UNSAFE_METHOD_INVALIDATES
 int ps_html_unsafe_method_invalidates(const char* method, int status) {
   if (status < 200 || status > 399) return 0;
   if (method == nullptr || *method == '\0') return 1;
@@ -1611,6 +1611,7 @@ int ps_html_unsafe_method_invalidates(const char* method, int status) {
   }
   return 1;
 }
+#endif  // PS_STUB_OMIT_UNSAFE_METHOD_INVALIDATES
 
 // A stub block carries no stamp unless PS_STUB_POLICY_STAMP names one.
 int ps_header_block_policy_stamp(const void* block, uint64_t* out) {

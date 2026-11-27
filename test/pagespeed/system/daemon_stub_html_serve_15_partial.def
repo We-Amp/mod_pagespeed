@@ -16,13 +16,14 @@
 ; under the License.
 
 ; The stub daemon's export list with the HTML serve set and the C API 1.15 set
-; less ps_html_request_guard, spelled out by hand: a Windows linkshared build
-; exports nothing without it (the source uses plain extern "C" with default
-; visibility, POSIX-style).
+; less ps_html_unsafe_method_invalidates, spelled out by hand: a Windows
+; linkshared build exports nothing without it (the source uses plain
+; extern "C" with default visibility, POSIX-style).
 ;
-; daemon_abi_test loads this DLL (OneMissing15SymbolLeavesThe15SetUnbound):
-; the library must still load with the 1.14 set bound, and the reason must
-; name the one entry point this list leaves out.
+; daemon_abi_test loads this DLL
+; (OneMissingFifteenSymbolLeavesOnlyTheFourteenSet): the library must still
+; load with the 1.14 set bound, and the reason must name the one entry point
+; this list leaves out.
 EXPORTS
   ps_age_adjusted_insert_time
   ps_build_cache_control
@@ -52,6 +53,7 @@ EXPORTS
   ps_html_ignore_cookie_guard
   ps_html_markdown_etag
   ps_html_policy_stamp
+  ps_html_request_guard
   ps_html_serve_classify
   ps_html_serve_reason_name
   ps_html_store_classify
@@ -59,7 +61,6 @@ EXPORTS
   ps_html_store_write_params
   ps_html_stored_facts_from_reads
   ps_html_stored_facts_from_reads_ex
-  ps_html_unsafe_method_invalidates
   ps_if_none_match_matches_weak
   ps_last_error_message
   ps_notify_params_init_sized
