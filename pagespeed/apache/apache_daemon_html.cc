@@ -52,6 +52,12 @@ bool Has(const apr_table_t* table, const char* name) {
   return table != nullptr && apr_table_get(table, name) != nullptr;
 }
 
+int CollectHeaderLine(void* rec, const char* key, const char* value) {
+  static_cast<DaemonHtmlHeaderLines*>(rec)->emplace_back(
+      key == nullptr ? "" : key, value == nullptr ? "" : value);
+  return 1;
+}
+
 int FindAjaxMarker(void* rec, const char* key, const char* value) {
   const char* marker = DaemonHtmlAjaxMarker(key == nullptr ? "" : key,
                                             value == nullptr ? "" : value);
@@ -313,6 +319,16 @@ void FillApacheDaemonHtmlRequestFacts(request_rec* r,
   facts->agent_class = ApacheDaemonHtmlAgentClass(
       r, ApacheDaemonHtmlAgentClassCounters(context));
   facts->ajax_marker = ApacheDaemonHtmlAjaxMarker(in);
+  // For the request guard and the cookie classes (C API 1.15): every
+  // request header line, the target as the client sent it, and the Cookie
+  // lines.
+  facts->request_headers.clear();
+  if (in != nullptr) {
+    apr_table_do(CollectHeaderLine, &facts->request_headers, in, nullptr);
+  }
+  facts->raw_path = DaemonHtmlRawRequestPath(
+      r->unparsed_uri == nullptr ? "" : r->unparsed_uri);
+  facts->cookie_lines = Lines(in, HttpAttributes::kCookie);
   // When the request entered httpd, so never later than the origin's fetch.
   facts->capture_start_ms = apr_time_as_msec(r->request_time);
   if (options != nullptr) {

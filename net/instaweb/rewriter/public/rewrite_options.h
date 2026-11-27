@@ -2991,6 +2991,14 @@ class RewriteOptions {
   bool daemon_html_cache_ignore_cookies() const {
     return daemon_html_cache_ignore_cookies_.value();
   }
+  // The check a server runs on each DaemonHtmlCacheIgnoreCookie value while
+  // it reads its configuration, after the syntax check: false, with *error
+  // set, refuses the line, so the configuration does not load (a server's
+  // configuration test included).  A server installs it once, before it
+  // reads a configuration; with none installed only the syntax is checked.
+  using DaemonHtmlIgnoreCookieCheck = bool (*)(StringPiece addition,
+                                               GoogleString* error);
+  static void SetDaemonHtmlIgnoreCookieCheck(DaemonHtmlIgnoreCookieCheck check);
   // The DaemonHtmlCacheIgnoreCookie lines of the scope that set them, in
   // order, separated by single spaces.
   const GoogleString& daemon_html_cache_ignore_cookie() const {

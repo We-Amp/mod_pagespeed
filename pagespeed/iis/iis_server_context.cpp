@@ -294,6 +294,11 @@ namespace net_instaweb {
 			config.max_bytes = options->daemon_html_max_bytes();
 			config.agent_optimize = options->agent_optimize();
 			FillDaemonHtmlServeSettings(*options, &config);
+			// A refused ignore-list addition is an error in the event log,
+			// and the site's HTML cache then stores and serves nothing.
+			ApplyDaemonHtmlPolicySettingsForPort(
+				daemon_adapter_ == nullptr ? nullptr : daemon_adapter_->abi(),
+				&config, message_handler());
 			config.host_names = IisSiteHostNames(bindings);
 			config.site = IisRequestSiteId(iis_site_id, iis_site_id,
 				options->cache_fragment());

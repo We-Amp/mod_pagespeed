@@ -604,21 +604,13 @@ const char* const kServePathCounters[] = {
     "daemon_html_agent_html_requests",
     "daemon_html_fallthrough_capped",
     "daemon_html_fallthrough_conditional",
-    "daemon_html_fallthrough_credentialed",
-    "daemon_html_fallthrough_legacy_entry",
     "daemon_html_fallthrough_path",
-    "daemon_html_fallthrough_policy_mismatch",
     "daemon_html_fallthrough_scope",
     "daemon_html_fresh_body_changed",
     "daemon_html_hit_forbidden_header",
     "daemon_html_hit_recorded",
     "daemon_html_invalidate_failed",
     "daemon_html_invalidated_unsafe",
-    "daemon_html_refused_auth",
-    "daemon_html_refused_cookie_echo",
-    "daemon_html_refused_cookie_request",
-    "daemon_html_refused_path",
-    "daemon_html_served_credentialed_refused",
     "daemon_html_served_html",
     "daemon_html_served_html_c1",
     "daemon_html_served_html_c3",
@@ -626,7 +618,6 @@ const char* const kServePathCounters[] = {
     "daemon_html_served_html_unclassed",
     "daemon_html_shadow_sampled",
     "daemon_html_unexpected_validate",
-    "daemon_html_upgrade_restores",
     "daemon_html_would_serve_body_differs",
     "daemon_html_would_serve_html",
 };
@@ -1759,7 +1750,13 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
   bool ready() const { return abi_ != nullptr; }
 
   void Run() {
-    CreateEngine();
+    // A row that starts with a configure step loads its configuration
+    // there, once: the library's guard and stamp verdicts it injects are
+    // for that load, not for one before it.
+    const Json::Value& steps = engine_body_["steps"];
+    if (steps.empty() || steps[0].get("kind", "").asString() != "configure") {
+      CreateEngine();
+    }
     int index = 0;
     for (const Json::Value& step : engine_body_["steps"]) {
       SCOPED_TRACE(StrCat("step ", IntegerToString(index++), ": ",
@@ -3300,6 +3297,14 @@ class RunnerShape {
          *r != nullptr; ++r) {
       if (name == StrCat("daemon_markdown_fallthrough_", *r)) return true;
     }
+    for (const char* const* r = RewriteStats::kDaemonHtmlFallthroughReasons;
+         *r != nullptr; ++r) {
+      if (name == StrCat("daemon_html_fallthrough_", *r)) return true;
+    }
+    for (const char* const* r = RewriteStats::kDaemonHtmlRefusedReasons;
+         *r != nullptr; ++r) {
+      if (name == StrCat("daemon_html_refused_", *r)) return true;
+    }
     return false;
   }
 
@@ -3447,14 +3452,7 @@ TEST(DaemonHtmlEngineRowsMeta, EveryPendingRowRunsAndStillFails) {
 // runner cannot call fails here instead of reading as "not declared yet".
 TEST(DaemonHtmlEngineRowsMeta, ServePathEntryPointsStillUndeclared) {
   const std::set<GoogleString> kExpectedUndeclared = {
-      "served_from_cache",
-      "request_headers",
-      "raw_path",
-      "cookie_lines",
-      "internal",
-      "OnUnsafeRequest",
-      "ApplyPolicySettings",
-      "set_credential_skip_disabled_for_testing"};
+      "served_from_cache", "internal", "OnUnsafeRequest"};
   std::set<GoogleString> undeclared;
   for (const auto& [name, state] :
        EntryPointStates<DaemonHtmlRequestFacts, DaemonHtmlEngine>()) {
@@ -3564,8 +3562,8 @@ TEST(DaemonHtmlEngineRowsMeta, EveryEngineRowIsRegistered) {
   EXPECT_EQ(engine_rows, kRegisteredRows);
   // Pinned, so a row cannot leave the run unnoticed: marking a row pending,
   // or adding one, changes these in the same change.
-  EXPECT_EQ(240, kRegisteredRows);
-  EXPECT_EQ(216, pending_rows);
+  EXPECT_EQ(313, kRegisteredRows);
+  EXPECT_EQ(144, pending_rows);
   std::printf("engine rows: %d registered, %d pending\n", kRegisteredRows,
               pending_rows);
 }

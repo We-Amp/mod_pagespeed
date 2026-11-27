@@ -119,10 +119,10 @@ TEST(DaemonHtmlPurgeOracleTest, AFutureUrlPurgeTimeIsClamped) {
   Source source;
   DaemonHtmlPurgeOracle oracle(&source, &timer);
   oracle.NoteUrlPurge("https://a.test/", kNowMs + 3600 * 1000);
-  EXPECT_TRUE(oracle.Purged("https://a.test/",
-                            static_cast<uint32>(kNowMs / 1000)));
-  EXPECT_FALSE(oracle.Purged("https://a.test/",
-                             static_cast<uint32>(kNowMs / 1000 + 1)));
+  EXPECT_TRUE(
+      oracle.Purged("https://a.test/", static_cast<uint32>(kNowMs / 1000)));
+  EXPECT_FALSE(
+      oracle.Purged("https://a.test/", static_cast<uint32>(kNowMs / 1000 + 1)));
 }
 
 TEST(DaemonHtmlPurgeOracleTest, AFutureGlobalTimeIsClampedWhenFirstSeen) {
@@ -355,26 +355,31 @@ class DaemonHtmlEngineTest : public testing::Test {
     return n;
   }
 
-  // Serves and captures one request carrying only Cookie: _ga=GA1.2.3, with
-  // the library refusing the store: HAS_COOKIE on the serve request and on
-  // every store classification, and nothing written.  The facts carry only
-  // has_cookie today; once the cookie text reaches the engine, this request
-  // must carry "_ga=GA1.2.3" itself, or an empty cookie string decides the
-  // row for the wrong reason.
-  void ExpectAnalyticsCookieStillCounts(DaemonHtmlEngine* engine) {
-    InlinePort port;
+  // A request carrying only Cookie: _ga=GA1.2.3.
+  DaemonHtmlRequestFacts AnalyticsCookieRequest() {
     DaemonHtmlRequestFacts facts = MarkdownRequest();
     facts.has_cookie = true;
+    facts.cookie_lines = {"_ga=GA1.2.3"};
+    return facts;
+  }
+
+  // Serves and captures one request carrying only Cookie: _ga=GA1.2.3, with
+  // the library refusing the store, and checks HAS_COOKIE on the serve
+  // request and on every store classification (`cookie_flag`), with
+  // nothing written.
+  void ExpectAnalyticsCookieFlag(DaemonHtmlEngine* engine, bool cookie_flag) {
+    InlinePort port;
+    const DaemonHtmlRequestFacts facts = AnalyticsCookieRequest();
     engine->Serve(facts, &port);
     ASSERT_EQ(1u, abi_.serve_requests().size());
-    EXPECT_NE(0u, abi_.serve_requests()[0].request_flags &
-                      kPsHtmlServeRequestHasCookie);
+    EXPECT_EQ(cookie_flag, (abi_.serve_requests()[0].request_flags &
+                            kPsHtmlServeRequestHasCookie) != 0);
     abi_.Queue(kPsHtmlStoreActionRefuse, "private");
     abi_.Queue(kPsHtmlStoreActionRefuse, "private");
     Capture(engine, &port, kOrigin, kOrigin, facts);
     ASSERT_FALSE(abi_.store_request_flags.empty());
     for (uint32_t flags : abi_.store_request_flags) {
-      EXPECT_NE(0u, flags & kStoreRequestHasCookieBit);
+      EXPECT_EQ(cookie_flag, (flags & kStoreRequestHasCookieBit) != 0);
     }
     EXPECT_EQ(0, CallsOf("ps_cache_write_original_site"));
     EXPECT_EQ(0, CallsOf("ps_cache_write_headers_sidecar_site"));
@@ -1039,40 +1044,66 @@ TEST_F(DaemonHtmlEngineTest,
 }
 
 // A request whose only cookie is an analytics one (Cookie: _ga=GA1.2.3).
-// The port sets has_cookie for any Cookie line and the engine does not
-// classify cookie names, so HAS_COOKIE reaches the library on both sides.
-// Below 1.15 that is the earlier rule and must stay so; on 1.15 it stays so
-// until cookie classification is applied, which must change the second row
-// deliberately.
+// Below 1.15 the port's has_cookie reaches the library on both sides, as
+// the earlier rule has it, and no cookie is classified.
 TEST_F(DaemonHtmlEngineTest, AnAnalyticsCookieAloneStillCountsBelowFifteen) {
   config_.ignore_cookies = true;  // the default: the built-in list
   std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
   ASSERT_FALSE(abi_.HasHtmlServe15Set());
   EXPECT_EQ(DaemonHtmlMode::kServeVariants, engine->effective_mode());
-  ExpectAnalyticsCookieStillCounts(engine.get());
+  ExpectAnalyticsCookieFlag(engine.get(), /*cookie_flag=*/true);
   EXPECT_EQ(kPsHtmlServeRequestSize14, abi_.serve_requests()[0].struct_size);
+  EXPECT_EQ(0, CallsOf("ps_html_classify_cookies"));
+  EXPECT_EQ(0, CallsOf("ps_html_request_guard"));
 }
 
-TEST_F(DaemonHtmlEngineTest, AnAnalyticsCookieAloneStillCountsOnFifteen) {
+// With 1.15, in serve-variants: the library sorts the Cookie lines, and an
+// ignorable-only request is anonymous on both sides.
+TEST_F(DaemonHtmlEngineTest, AnAnalyticsCookieAloneIsAnonymousOnFifteen) {
   abi_.mutable_injection()->has_set_15 = true;
+  abi_.mutable_injection()->cookies.cookie_class = kPsHtmlCookiesIgnorableOnly;
   std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
   EXPECT_EQ(DaemonHtmlMode::kServeVariants, engine->effective_mode());
-  ExpectAnalyticsCookieStillCounts(engine.get());
+  ExpectAnalyticsCookieFlag(engine.get(), /*cookie_flag=*/false);
   EXPECT_EQ(sizeof(PsHtmlServeRequest), abi_.serve_requests()[0].struct_size);
-  // The cookie classifier is not asked.
+  // Once for the serve, once for the capture, each with the Cookie line.
+  EXPECT_EQ(2, CallsOf("ps_html_classify_cookies"));
+  EXPECT_EQ(2, CallsOf("ps_html_request_guard"));
+}
+
+// With 1.15, a blocking cookie under anonymous-only: nothing is read,
+// classified or stored, and the refusal is counted.
+TEST_F(DaemonHtmlEngineTest, ABlockingCookieReadsAndStoresNothingOnFifteen) {
+  abi_.mutable_injection()->has_set_15 = true;
+  abi_.mutable_injection()->cookies.cookie_class = kPsHtmlCookiesBlocking;
+  std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
+  InlinePort port;
+  const DaemonHtmlRequestFacts facts = AnalyticsCookieRequest();
+  const DaemonHtmlServeResult served = engine->Serve(facts, &port);
+  EXPECT_EQ(DaemonHtmlServeResult::kFallThrough, served.kind);
+  EXPECT_EQ("cookie_request", served.reason);
+  EXPECT_TRUE(abi_.serve_requests().empty());
+  EXPECT_EQ(0, CallsOf("ps_cache_read_alternate_site"));
+  EXPECT_EQ(nullptr, engine->StartRecording(facts, &port));
+  EXPECT_TRUE(abi_.store_request_flags.empty());
+  EXPECT_EQ(2, stats_.GetVariable("daemon_html_refused_cookie_request")->Get());
+}
+
+// A Cookie line the port could not show (a Cookie2 line only) is blocking.
+TEST_F(DaemonHtmlEngineTest, ACookieWithoutLinesIsBlockingOnFifteen) {
+  abi_.mutable_injection()->has_set_15 = true;
+  std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
+  InlinePort port;
+  DaemonHtmlRequestFacts facts = MarkdownRequest();
+  facts.has_cookie = true;
+  EXPECT_EQ("cookie_request", engine->Serve(facts, &port).reason);
   EXPECT_EQ(0, CallsOf("ps_html_classify_cookies"));
 }
 
-// Either ignore-cookie setting away from its default is accepted, has no
-// effect, and says so once per engine, whatever the library.
-TEST_F(DaemonHtmlEngineTest, ANonDefaultIgnoreCookieSettingWarnsOnce) {
-  {
-    std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
-    InlinePort port;
-    Capture(engine.get(), &port, kOrigin, kOrigin, MarkdownRequest());
-    EXPECT_EQ(0, handler_.MessagesOfType(kWarning));
-  }
-  abi_.mutable_injection()->has_set_15 = true;
+// Either ignore-cookie setting away from its default needs 1.15: below it
+// the setting has no effect, and the engine says so once.  With 1.15 it is
+// applied and nothing is logged.
+TEST_F(DaemonHtmlEngineTest, ANonDefaultIgnoreCookieSettingWarnsOnlyBelow15) {
   for (int which = 0; which < 2; ++which) {
     const int before = handler_.MessagesOfType(kWarning);
     const size_t mark = Logged().size();
@@ -1085,14 +1116,62 @@ TEST_F(DaemonHtmlEngineTest, ANonDefaultIgnoreCookieSettingWarnsOnce) {
     Capture(engine.get(), &port, kOrigin, kOrigin, MarkdownRequest());
     engine->OnPurgePollTick();
     EXPECT_EQ(before + 1, handler_.MessagesOfType(kWarning)) << which;
-    // This pass's own message, not the previous pass's.
     const GoogleString logged = Logged().substr(mark);
-    EXPECT_NE(GoogleString::npos, logged.find("later release")) << which;
     EXPECT_NE(GoogleString::npos,
-              logged.find("an analytics cookie included, still counts as a "
-                          "cookie"))
+              logged.find("DaemonHtmlCacheIgnoreCookies and "
+                          "DaemonHtmlCacheIgnoreCookie have no effect"))
+        << which;
+    EXPECT_NE(GoogleString::npos,
+              logged.find("an analytics cookie included, counts as a cookie"))
         << which;
   }
+  abi_.mutable_injection()->has_set_15 = true;
+  const int before = handler_.MessagesOfType(kWarning);
+  config_.ignore_cookies = false;
+  config_.ignore_cookie = {"_my_ab"};
+  std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
+  InlinePort port;
+  Capture(engine.get(), &port, kOrigin, kOrigin, MarkdownRequest());
+  engine->OnPurgePollTick();
+  EXPECT_EQ(before, handler_.MessagesOfType(kWarning));
+}
+
+// Configuration load: each addition through the library's guard, the list
+// kept as a sorted set, the stamp computed; a refused addition is named.
+TEST_F(DaemonHtmlEngineTest, ApplyPolicySettingsGuardsAndStamps) {
+  DaemonHtmlEngine::Config config;
+  config.ignore_cookie = {"utm_src", "abtest_*", "utm_src"};
+  GoogleString error;
+  // Below 1.15: no effect, no call, no stamp.
+  EXPECT_TRUE(DaemonHtmlEngine::ApplyPolicySettings(abi_, &config, &error));
+  EXPECT_EQ(0u, config.policy_stamp);
+  EXPECT_EQ(0, CallsOf("ps_html_ignore_cookie_guard"));
+  EXPECT_EQ(0, CallsOf("ps_html_policy_stamp"));
+  EXPECT_EQ((std::vector<GoogleString>{"abtest_*", "utm_src"}),
+            config.ignore_cookie);
+
+  abi_.mutable_injection()->has_set_15 = true;
+  EXPECT_TRUE(DaemonHtmlEngine::ApplyPolicySettings(abi_, &config, &error))
+      << error;
+  EXPECT_EQ(0x5A5Au, config.policy_stamp);
+  EXPECT_EQ(2, CallsOf("ps_html_ignore_cookie_guard"));
+  EXPECT_EQ(1, CallsOf("ps_html_policy_stamp"));
+
+  abi_.mutable_injection()->ignore_cookie_guard = 0;
+  config.ignore_cookie = {"PHPSESSID"};
+  EXPECT_FALSE(DaemonHtmlEngine::ApplyPolicySettings(abi_, &config, &error));
+  EXPECT_NE(GoogleString::npos, error.find("PHPSESSID")) << error;
+
+  // A stamp the library cannot compute fails closed too.
+  abi_.mutable_injection()->ignore_cookie_guard = 1;
+  abi_.mutable_injection()->policy_stamp_rc = -1;
+  EXPECT_FALSE(DaemonHtmlEngine::ApplyPolicySettings(abi_, &config, &error));
+
+  // The port's form drops the engine to report-only.
+  config.mode = DaemonHtmlMode::kServeVariants;
+  EXPECT_FALSE(ApplyDaemonHtmlPolicySettingsForPort(&abi_, &config, &handler_));
+  EXPECT_EQ(DaemonHtmlMode::kReportOnly, config.mode);
+  EXPECT_EQ(1, handler_.MessagesOfType(kError));
 }
 
 TEST(DaemonHtmlModeTest, EveryOptionModeMapsAndOnlyLaterModesServe) {

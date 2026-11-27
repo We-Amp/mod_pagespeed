@@ -173,6 +173,8 @@ DaemonHtmlEngine* ApacheServerContext::daemon_html_engine() {
     engine_config.max_bytes = config->daemon_html_max_bytes();
     engine_config.agent_optimize = true;
     FillDaemonHtmlServeSettings(*config, &engine_config);
+    ApplyDaemonHtmlPolicySettingsForPort(abi, &engine_config,
+                                         message_handler());
     // This record's own names; a request served for another record that
     // shares this configuration names another site and is never stored or
     // served here.

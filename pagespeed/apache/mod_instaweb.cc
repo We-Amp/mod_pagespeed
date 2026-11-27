@@ -1531,6 +1531,11 @@ void mod_pagespeed_register_hooks(apr_pool_t* pool) {
   // Enable logging using pagespeed style
   log_message_handler::Install(pool);
 
+  // A DaemonHtmlCacheIgnoreCookie addition the optimizer library refuses is
+  // a syntax error, so the configuration and its test (-t) fail.
+  RewriteOptions::SetDaemonHtmlIgnoreCookieCheck(
+      &DaemonHtmlCheckIgnoreCookieWithLibrary);
+
   // Use instaweb to handle generated resources.
   ap_hook_handler(InstawebHandler::instaweb_handler, nullptr, nullptr,
                   APR_HOOK_FIRST - 1);

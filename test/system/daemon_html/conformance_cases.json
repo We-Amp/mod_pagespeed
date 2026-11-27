@@ -25322,7 +25322,6 @@
     {
       "id": "m2-credentialed-serve-refused-markdown-blocking-cookie",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "defence: a serve the credentialed policy forbids is refused at emit (markdown-blocking-cookie)",
       "engine": {
         "config": {
@@ -25415,7 +25414,6 @@
     {
       "id": "m2-credentialed-serve-refused-markdown-authorization",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "defence: a serve the credentialed policy forbids is refused at emit (markdown-authorization)",
       "engine": {
         "config": {
@@ -25507,7 +25505,6 @@
     {
       "id": "m2-credentialed-serve-refused-markdown-authenticated-user",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "defence: a serve the credentialed policy forbids is refused at emit (markdown-authenticated-user)",
       "engine": {
         "config": {
@@ -25830,7 +25827,6 @@
     {
       "id": "m2-credentialed-serve-refused-markdown-entry-not-anonymous",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "defence: a serve the credentialed policy forbids is refused at emit (markdown-entry-not-anonymous)",
       "engine": {
         "config": {
@@ -25916,7 +25912,6 @@
     {
       "id": "m2-credentialed-serve-refused-markdown-stamp-mismatch",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "defence: a serve the credentialed policy forbids is refused at emit (markdown-stamp-mismatch)",
       "engine": {
         "config": {
@@ -30272,7 +30267,6 @@
     {
       "id": "m2-cookie-blocking-no-read-mode2",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: a blocking cookie reads nothing and names the cookie, never its value",
       "engine": {
         "config": {
@@ -30364,7 +30358,6 @@
     {
       "id": "m2-cookie-blocking-no-store-mode2",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: a blocking cookie never stores",
       "engine": {
         "config": {
@@ -30425,7 +30418,6 @@
     {
       "id": "m2-cookie-ignorable-only-passes-no-cookie-flag-mode2",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: only ignorable cookies send no cookie flag",
       "engine": {
         "config": {
@@ -30512,7 +30504,6 @@
     {
       "id": "m2-auth-no-read-mode2",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: Authorization reads nothing",
       "engine": {
         "config": {
@@ -30583,7 +30574,6 @@
     {
       "id": "m2-authenticated-user-no-read-mode2",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: an authenticated user reads nothing",
       "engine": {
         "config": {
@@ -30650,7 +30640,6 @@
     {
       "id": "m2-request-header-no-read-mode2",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "unkeyed header: refused before any read",
       "engine": {
         "config": {
@@ -30743,7 +30732,6 @@
     {
       "id": "m2-request-header-no-store-mode2",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "unkeyed header: refused before the store",
       "engine": {
         "config": {
@@ -30806,7 +30794,6 @@
     {
       "id": "m2-path-no-read-mode2",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "deception path: refused before any read",
       "engine": {
         "config": {
@@ -30890,7 +30877,6 @@
     {
       "id": "m2-cookie-echo-body-refuses-mode2",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: an echoed listed cookie value is never stored (body)",
       "engine": {
         "config": {
@@ -30971,7 +30957,6 @@
     {
       "id": "m2-cookie-echo-header-refuses-mode2",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: an echoed listed cookie value is never stored (header)",
       "engine": {
         "config": {
@@ -31053,7 +31038,6 @@
     {
       "id": "m2-cookie-echo-percent-encoded-in-body-refuses-mode2",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: an echoed listed cookie value is never stored (percent-encoded-in-body)",
       "engine": {
         "config": {
@@ -31134,7 +31118,6 @@
     {
       "id": "m2-cookie-echo-percent-encoded-cookie-refuses-mode2",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: an echoed listed cookie value is never stored (percent-encoded-cookie)",
       "engine": {
         "config": {
@@ -31215,7 +31198,6 @@
     {
       "id": "m2-cookie-echo-exactly-8-bytes-refuses-mode2",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: an echoed listed cookie value is never stored (exactly-8-bytes)",
       "engine": {
         "config": {
@@ -31296,7 +31278,6 @@
     {
       "id": "m2-cookie-echo-split-across-chunks-refuses-mode2",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: an echoed listed cookie value is never stored (split-across-chunks)",
       "engine": {
         "config": {
@@ -31378,7 +31359,6 @@
     {
       "id": "m2-cookie-echo-short-value-ignored-mode2",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: a listed cookie value under 8 bytes is not an echo",
       "engine": {
         "config": {
@@ -31459,7 +31439,6 @@
     {
       "id": "m2-stamp-written-and-compared-mode2",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "policy stamp: written in the header block and sent on every classify",
       "engine": {
         "config": {
@@ -31648,7 +31627,6 @@
     {
       "id": "m2-cookie-blocking-no-read-mode3",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: a blocking cookie reads nothing and names the cookie, never its value",
       "engine": {
         "config": {
@@ -31740,7 +31718,6 @@
     {
       "id": "m2-cookie-blocking-no-store-mode3",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: a blocking cookie never stores",
       "engine": {
         "config": {
@@ -31888,7 +31865,6 @@
     {
       "id": "m2-auth-no-read-mode3",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: Authorization reads nothing",
       "engine": {
         "config": {
@@ -31959,7 +31935,6 @@
     {
       "id": "m2-authenticated-user-no-read-mode3",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: an authenticated user reads nothing",
       "engine": {
         "config": {
@@ -32026,7 +32001,6 @@
     {
       "id": "m2-request-header-no-read-mode3",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "unkeyed header: refused before any read",
       "engine": {
         "config": {
@@ -32119,7 +32093,6 @@
     {
       "id": "m2-request-header-no-store-mode3",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "unkeyed header: refused before the store",
       "engine": {
         "config": {
@@ -32182,7 +32155,6 @@
     {
       "id": "m2-path-no-read-mode3",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "deception path: refused before any read",
       "engine": {
         "config": {
@@ -32266,7 +32238,6 @@
     {
       "id": "m2-cookie-echo-body-refuses-mode3",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: an echoed listed cookie value is never stored (body)",
       "engine": {
         "config": {
@@ -32347,7 +32318,6 @@
     {
       "id": "m2-cookie-echo-header-refuses-mode3",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: an echoed listed cookie value is never stored (header)",
       "engine": {
         "config": {
@@ -32429,7 +32399,6 @@
     {
       "id": "m2-cookie-echo-percent-encoded-in-body-refuses-mode3",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: an echoed listed cookie value is never stored (percent-encoded-in-body)",
       "engine": {
         "config": {
@@ -32510,7 +32479,6 @@
     {
       "id": "m2-cookie-echo-percent-encoded-cookie-refuses-mode3",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: an echoed listed cookie value is never stored (percent-encoded-cookie)",
       "engine": {
         "config": {
@@ -32591,7 +32559,6 @@
     {
       "id": "m2-cookie-echo-exactly-8-bytes-refuses-mode3",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: an echoed listed cookie value is never stored (exactly-8-bytes)",
       "engine": {
         "config": {
@@ -32672,7 +32639,6 @@
     {
       "id": "m2-cookie-echo-split-across-chunks-refuses-mode3",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: an echoed listed cookie value is never stored (split-across-chunks)",
       "engine": {
         "config": {
@@ -32754,7 +32720,6 @@
     {
       "id": "m2-cookie-echo-short-value-ignored-mode3",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: a listed cookie value under 8 bytes is not an echo",
       "engine": {
         "config": {
@@ -33105,7 +33070,6 @@
     {
       "id": "m2-mode2-markdown-legacy-falls-through",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: in serve-variants a pre-upgrade entry is a legacy miss for Markdown",
       "engine": {
         "config": {
@@ -33182,7 +33146,6 @@
     {
       "id": "m2-legacy-restore-counted",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: a legacy entry is re-stored and counted",
       "engine": {
         "config": {
@@ -33277,7 +33240,6 @@
     {
       "id": "m2-config-guard-refuses-session-pattern",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: an ignore-list addition the guard refuses fails the configuration",
       "engine": {
         "config": {
@@ -33314,7 +33276,6 @@
     {
       "id": "m2-config-guard-refuses-star",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: an ignore-list addition the guard refuses fails the configuration",
       "engine": {
         "config": {
@@ -33351,7 +33312,6 @@
     {
       "id": "m2-config-guard-refuses-short-prefix",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: an ignore-list addition the guard refuses fails the configuration",
       "engine": {
         "config": {
@@ -33388,7 +33348,6 @@
     {
       "id": "m2-config-guard-refuses-wordpress",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: an ignore-list addition the guard refuses fails the configuration",
       "engine": {
         "config": {
@@ -33425,7 +33384,6 @@
     {
       "id": "m2-config-guard-accepts-analytics",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: a narrow addition is accepted",
       "engine": {
         "config": {
@@ -33460,7 +33418,6 @@
     {
       "id": "m2-xfp-mismatch-warns-once",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "unkeyed header: the scheme mismatch warns once per vhost",
       "engine": {
         "config": {
@@ -33839,7 +33796,6 @@
     {
       "id": "m2-restore-skip-never-legacy",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "freshness: a legacy entry is always re-stored",
       "engine": {
         "config": {
@@ -33934,9 +33890,140 @@
       }
     },
     {
+      "id": "m2-legacy-entry-restored-on-miss",
+      "runners": ["engine"],
+      "why": "upgrade: a page stored before 1.15 is re-stored on its next miss",
+      "engine": {
+        "config": {
+          "mode": "serve-variants",
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": [],
+            "content_type": "text/html; charset=utf-8",
+            "store_v2": false,
+            "anonymous_recorded": false
+          },
+          {
+            "kind": "sidecar",
+            "url": "https://www.example.test/page",
+            "headers": [
+              ["X-Frame-Options", "DENY"]
+            ]
+          }
+        ],
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300,
+            "flags": ["lifetime_explicit", "request_anonymous"]
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300,
+            "flags": ["lifetime_explicit", "request_anonymous"]
+          },
+          {
+            "fn": "ps_html_serve_classify",
+            "action": "fall_through",
+            "reason": "absent",
+            "wants_markdown": true
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""],
+                ["X-Frame-Options", "DENY"]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [
+                {
+                  "fn": "ps_cache_write_headers_sidecar_site",
+                  "args": {
+                    "format": 3,
+                    "policy_stamp": "5a17c0de00000001"
+                  }
+                },
+                {
+                  "fn": "ps_cache_write_original_site"
+                }
+              ],
+              "counters": {
+                "daemon_html_restore_skipped": 0,
+                "daemon_html_upgrade_restores": 1,
+                "daemon_html_stored": 1
+              }
+            }
+          },
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/markdown"]
+            },
+            "expect": {
+              "calls": [
+                {
+                  "fn": "ps_html_serve_classify",
+                  "args": {
+                    "stored.store_v2": true,
+                    "stored.anonymous_recorded": true,
+                    "stored.entry_policy_stamp": "5a17c0de00000001"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
       "id": "m2-restore-skip-credential-state-differs",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "freshness: an unchanged page re-stores when the anonymous bit differs",
       "engine": {
         "config": {
@@ -34035,7 +34122,6 @@
     {
       "id": "m2-restore-skip-stamp-differs",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "freshness: an unchanged page re-stores when the stamp differs",
       "engine": {
         "config": {
@@ -43961,7 +44047,6 @@
     {
       "id": "m2-explicit-public-cookie-store-not-anonymous",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: explicit-public stores a cookie request's page without the anonymous bit",
       "engine": {
         "config": {
@@ -44057,7 +44142,6 @@
     {
       "id": "m2-proxy-authorization-no-read-mode2",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: Proxy-Authorization reads nothing",
       "engine": {
         "config": {
@@ -44128,7 +44212,6 @@
     {
       "id": "m2-proxy-authorization-no-store-mode2",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: Proxy-Authorization never stores",
       "engine": {
         "config": {
@@ -44182,7 +44265,6 @@
     {
       "id": "m2-proxy-authorization-no-read-mode3",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: Proxy-Authorization reads nothing",
       "engine": {
         "config": {
@@ -44253,7 +44335,6 @@
     {
       "id": "m2-proxy-authorization-no-store-mode3",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: Proxy-Authorization never stores",
       "engine": {
         "config": {
@@ -44307,7 +44388,6 @@
     {
       "id": "m2-ignore-cookies-off-passed",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: the list switch and additions are passed",
       "engine": {
         "config": {
@@ -44388,7 +44468,6 @@
     {
       "id": "m2-policy-stamp-inputs",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "policy stamp: computed once at configuration from the settings",
       "engine": {
         "config": {
@@ -45755,7 +45834,6 @@
     {
       "id": "m2-degrade-minor-14-cookie-flag",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "degrade: an earlier library gets the cookie flag for every cookie",
       "engine": {
         "config": {
@@ -45993,7 +46071,6 @@
     {
       "id": "m2-degrade-symbol-missing-cookie-flag",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "degrade: an earlier library gets the cookie flag for every cookie",
       "engine": {
         "config": {
@@ -46075,7 +46152,6 @@
     {
       "id": "m2-request-header-beside-matching-xfp",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "unkeyed header: the refused header is named and a matching scheme does not warn",
       "engine": {
         "config": {
@@ -46668,7 +46744,6 @@
     {
       "id": "m2-ajax-marker-x-requested-with-no-read",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "ajax marker: refused before any read",
       "engine": {
         "config": {
@@ -46756,7 +46831,6 @@
     {
       "id": "m2-ajax-marker-x-requested-with-comma-list-no-read",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "ajax marker: refused before any read",
       "engine": {
         "config": {
@@ -46844,7 +46918,6 @@
     {
       "id": "m2-ajax-marker-x-requested-with-no-store",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "ajax marker: refused before the store",
       "engine": {
         "config": {
@@ -46907,7 +46980,6 @@
     {
       "id": "m2-ajax-marker-x-requested-with-comma-list-no-store",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "ajax marker: refused before the store",
       "engine": {
         "config": {
@@ -47086,7 +47158,6 @@
     {
       "id": "m2-ajax-marker-x-microsoftajax-no-read",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "ajax marker: refused before any read",
       "engine": {
         "config": {
@@ -47174,7 +47245,6 @@
     {
       "id": "m2-ajax-marker-x-microsoftajax-no-store",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "ajax marker: refused before the store",
       "engine": {
         "config": {
@@ -47295,7 +47365,6 @@
     {
       "id": "m2-ajax-marker-x-prototype-version-no-read",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "ajax marker: refused before any read",
       "engine": {
         "config": {
@@ -47383,7 +47452,6 @@
     {
       "id": "m2-ajax-marker-x-prototype-version-no-store",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "ajax marker: refused before the store",
       "engine": {
         "config": {
@@ -47446,7 +47514,6 @@
     {
       "id": "m2-guard-skipped-fails",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "unkeyed header and path: the guard sees the request's headers and its raw path",
       "engine": {
         "config": {
@@ -47581,7 +47648,6 @@
     {
       "id": "m2-cookie-capacity-blocks",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: more listed cookie values than the engine holds count as blocking",
       "engine": {
         "config": {
@@ -47669,7 +47735,6 @@
     {
       "id": "m2-path-double-encoded-slash",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "deception path: a double-encoded slash passes the guard and the store refuses it",
       "engine": {
         "config": {
@@ -47755,7 +47820,6 @@
     {
       "id": "m2-ajax-underscore-name-no-read-markdown-mode2",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "ajax marker spelled with underscores: the guard gets the names; refused before any read",
       "engine": {
         "config": {
@@ -47847,7 +47911,6 @@
     {
       "id": "m2-ajax-underscore-name-no-read-html-mode3",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "ajax marker spelled with underscores: the guard gets the names; refused before any read",
       "engine": {
         "config": {
@@ -47939,7 +48002,6 @@
     {
       "id": "m2-ajax-underscore-name-no-read-markdown-mode3",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "ajax marker spelled with underscores: the guard gets the names; refused before any read",
       "engine": {
         "config": {
@@ -48031,7 +48093,6 @@
     {
       "id": "m2-ajax-underscore-name-no-store-mode2",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "ajax marker spelled with underscores: the guard gets the names; refused before the store",
       "engine": {
         "config": {
@@ -48103,7 +48164,6 @@
     {
       "id": "m2-ajax-underscore-name-no-store-mode3",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "ajax marker spelled with underscores: the guard gets the names; refused before the store",
       "engine": {
         "config": {
