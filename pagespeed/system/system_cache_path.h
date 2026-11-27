@@ -126,6 +126,9 @@ class SystemCachePath {
   // The observers every admin purge of this path is also given (the HTML
   // cache engines of its virtual hosts; see daemon_html_purge_observer.h).
   // Not owned: an observer removes itself before it is destroyed.
+  // The purge file this path's purges are kept in.
+  const GoogleString& purge_file() const { return cache_flush_filename_; }
+
   void AddPurgeObserver(DaemonHtmlPurgeObserver* observer);
   void RemovePurgeObserver(DaemonHtmlPurgeObserver* observer);
   std::vector<DaemonHtmlPurgeObserver*> purge_observers() const;

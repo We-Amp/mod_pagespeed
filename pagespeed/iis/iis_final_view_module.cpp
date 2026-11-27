@@ -3,15 +3,99 @@
 
 #include "pagespeed/iis/iis_final_view_module.h"
 
+#include <cstring>
+#include <memory>
 #include <new>
 
 #include "pagespeed/iis/iis_daemon_html_capture.h"
+#include "pagespeed/iis/iis_daemon_html_serve.h"
 #include "pagespeed/iis/iis_global_constants.h"
+#include "pagespeed/iis/iis_misc.h"
 #include "pagespeed/iis/iis_module_factory.h"
 #include "pagespeed/iis/iis_module_request_context.h"
 #include "pagespeed/iis/iis_request_context.h"
+#include "pagespeed/iis/iis_server_context.h"
 
 namespace net_instaweb {
+
+namespace {
+
+// Replaces the pending error response with the Markdown answer the main
+// registration kept (iis_daemon_html_serve.h).  Runs at the first send that
+// carries the headers, on the thread that made the answer.
+void FinalizeIisMarkdownAnswer(IHttpContext* http_context,
+                               IisInnerRequestContext* inner) {
+  std::unique_ptr<IisMarkdownAnswer> answer = inner->take_markdown_answer();
+  IHttpResponse* response = http_context->GetResponse();
+  HTTP_RESPONSE* raw =
+      response == nullptr ? nullptr : response->GetRawHttpResponse();
+  if (answer == nullptr || raw == nullptr) return;
+  USHORT status = 0;
+  USHORT substatus = 0;
+  response->GetStatus(&status, &substatus);
+  const IisMarkdownFinalPlan plan =
+      PlanIisMarkdownFinal(status, substatus, raw->EntityChunkCount,
+                           IisResponseHeaderLines(*raw), *answer);
+  IisServerContext* server_context = inner->server_context();
+  if (plan.transport_conflict) {
+    DaemonHtmlEngine* engine = server_context->daemon_html_engine_if_built();
+    if (engine != nullptr) engine->NoteTransportConflict();
+  }
+  if (!plan.finalize) {
+    // Another module replaced the response (a custom error page) or encoded
+    // it: it goes out as that stage made it, and the site answers later
+    // Markdown requests with their HTML.
+    server_context->NoteDaemonHtmlMarkdownNotFinalized(
+        plan.transport_conflict
+            ? "a compressor encoded the response the module left for it"
+            : "another module, such as a custom error page, replaced the "
+              "response first");
+    return;
+  }
+  // The body first, before the response changes: a failure leaves the
+  // pending error.
+  char* body = nullptr;
+  HTTP_DATA_CHUNK* chunk = nullptr;
+  if (!answer->body.empty()) {
+    const DWORD size = static_cast<DWORD>(answer->body.size());
+    body = static_cast<char*>(http_context->AllocateRequestMemory(size));
+    chunk = static_cast<HTTP_DATA_CHUNK*>(
+        http_context->AllocateRequestMemory(sizeof(HTTP_DATA_CHUNK)));
+    if (body == nullptr || chunk == nullptr) return;
+    memcpy(body, answer->body.data(), size);
+    memset(chunk, 0, sizeof(*chunk));
+    chunk->DataChunkType = HttpDataChunkFromMemory;
+    chunk->FromMemory.pBuffer = body;
+    chunk->FromMemory.BufferLength = size;
+  }
+  bool ok = true;
+  for (const GoogleString& name : plan.remove) {
+    ok = ok && SUCCEEDED(response->DeleteHeader(name.c_str()));
+  }
+  ok = ok && SUCCEEDED(response->SetStatus(
+                 static_cast<USHORT>(answer->status),
+                 answer->status == 304 ? "Not Modified" : "OK", 0, S_OK,
+                 nullptr, TRUE));
+  for (const auto& [name, value] : answer->headers) {
+    ok = ok && SUCCEEDED(response->SetHeader(
+                   name.c_str(), value.c_str(),
+                   static_cast<USHORT>(value.size()), TRUE));
+  }
+  if (!ok) {
+    // A header that could not be removed or set: never a Markdown answer
+    // with the wrong header set.
+    response->Clear();
+    response->SetStatus(500, "Internal Server Error", 0, S_OK, nullptr, TRUE);
+    return;
+  }
+  if (chunk != nullptr) {
+    raw->pEntityChunks = chunk;
+    raw->EntityChunkCount = 1;
+  }
+  DisarmResponseCaches(response);
+}
+
+}  // namespace
 
 DaemonHtmlHeaderLines IisResponseHeaderLines(const HTTP_RESPONSE& response) {
   DaemonHtmlHeaderLines lines;
@@ -47,6 +131,15 @@ REQUEST_NOTIFICATION_STATUS IisFinalViewModule::OnSendResponse(
   if (request_context == nullptr) return RQ_NOTIFICATION_CONTINUE;
   IisInnerRequestContext* inner = request_context->GetInnerContext();
   if (inner == nullptr) return RQ_NOTIFICATION_CONTINUE;
+  // This entry runs for the site: it can send a Markdown answer.
+  inner->server_context()->NoteDaemonHtmlFinalViewSeen();
+  // A Markdown answer the main registration kept for this send.
+  if (inner->markdown_answer_pending()) {
+    if (pProvider->GetHeadersBeingSent()) {
+      FinalizeIisMarkdownAnswer(pHttpContext, inner);
+    }
+    return RQ_NOTIFICATION_CONTINUE;
+  }
   IisDaemonHtmlCapture* capture = inner->daemon_html_capture();
   if (capture == nullptr) return RQ_NOTIFICATION_CONTINUE;
 

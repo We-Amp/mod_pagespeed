@@ -659,6 +659,43 @@ pagespeed_cc_test(
     ],
 )
 
+# DaemonHtmlCache serve-variants on IIS: the one spelling of a path the HTML
+# cache keeps, and the plan the final-view registration follows to finalise
+# a pending Markdown answer.  Free of the IIS headers, any platform.
+pagespeed_cc_test(
+    name = "iis_daemon_html_serve_test",
+    srcs = ["iis_daemon_html_serve_test.cc"],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/iis:iis_daemon_html_serve",
+    ],
+)
+
+# The IIS purge source: another process's purge seen at once, the server's
+# own purges never lost.  Any platform.
+pagespeed_cc_test(
+    name = "iis_daemon_html_purge_source_test",
+    srcs = ["iis_daemon_html_purge_source_test.cc"],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/iis:iis_daemon_html_purge_source",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/util",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)
+
+# The host names an IIS site's bindings vouch for.  Any platform.
+pagespeed_cc_test(
+    name = "iis_site_bindings_test",
+    srcs = ["iis_site_bindings_test.cc"],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/iis:iis_site_bindings",
+        "//pagespeed/system:serve_host_names",
+    ],
+)
+
 # DaemonHtmlCache on IIS: the header views and the body the port's capture
 # hands to the HTML cache engine (chunk assembly, the size cap, nothing after
 # the body ended, the final view with and without the final-view entry), read

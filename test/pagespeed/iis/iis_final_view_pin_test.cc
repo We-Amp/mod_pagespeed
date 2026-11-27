@@ -10,9 +10,15 @@
 //     process-wide setup once, and sets the module id every per-request
 //     context is kept under from the main registration only;
 //   * the final-view registration has one send notification, at
-//     PRIORITY_ALIAS_FIRST, and its handler only reads: it reaches the
-//     request's state only through the main registration's module context,
-//     changes nothing, completes nothing and takes no lock;
+//     PRIORITY_ALIAS_FIRST, and keeps no module context of its own (IIS
+//     gives both entries of one image the same module id); its send
+//     reaches the request's state only through the main registration's
+//     module context, completes nothing and takes no lock, and changes the
+//     response only to finalise a Markdown answer the main registration
+//     kept, after the plan says the response is still the pending one;
+//   * the main registration never writes a Markdown answer itself, and
+//     makes none for a site where the final-view entry was seen not to
+//     run;
 //   * the capture's body is fed only from the main registration's send,
 //     before that send clears the response for the rewriter, so the
 //     module's rewritten output can never be recorded.
@@ -85,7 +91,8 @@ const char* const kCallsAllowedInFinalView[] = {
     "GetInnerContext",  "daemon_html_capture", "GetHeadersBeingSent",
     "needs_final_view", "GetResponse",         "GetRawHttpResponse",
     "NoteFinalView",    "GetConnection",       "IsConnected",
-    "NoteAborted",
+    "NoteAborted",      "markdown_answer_pending",
+    "server_context",   "NoteDaemonHtmlFinalViewSeen",
 };
 
 class IisFinalViewPinTest : public testing::Test {};
@@ -136,7 +143,8 @@ TEST_F(IisFinalViewPinTest, RegisterModuleKeepsTheMainIdToTheMainEntry) {
             CountOf(final_branch, "RQ_"))
       << "the final-view branch names another notification";
   for (const char* name : {"set_module_id", "SetGlobalNotifications",
-                           "IisModuleFactory(", "RQ_RESOLVE_REQUEST_CACHE"}) {
+                           "IisModuleFactory(", "RQ_RESOLVE_REQUEST_CACHE",
+                           "GetId()"}) {
     EXPECT_EQ(GoogleString::npos, final_branch.find(name))
         << "the final-view branch names " << name;
   }
@@ -179,6 +187,20 @@ TEST_F(IisFinalViewPinTest, TheFinalViewModuleOnlyReadsAtItsSend) {
         << "the final-view send names " << name;
   }
   EXPECT_EQ(GoogleString::npos, cc.find("thread_local"));
+  // It never takes a module context slot: the slot is the main
+  // registration's (both entries share one module id).
+  EXPECT_EQ(GoogleString::npos, cc.find("SetModuleContext"));
+  EXPECT_EQ(GoogleString::npos, cc.find("GetModuleContext("));
+  // The one writer it calls, for a pending Markdown answer only, at the
+  // first send that carries the headers.
+  EXPECT_EQ(1, CountOf(send, "FinalizeIisMarkdownAnswer("));
+  const size_t pending_at = send.find("inner->markdown_answer_pending()");
+  const size_t finalize_at = send.find("FinalizeIisMarkdownAnswer(");
+  const size_t capture_at = send.find("daemon_html_capture()");
+  ASSERT_NE(GoogleString::npos, pending_at);
+  ASSERT_NE(GoogleString::npos, capture_at);
+  EXPECT_LT(pending_at, finalize_at);
+  EXPECT_LT(finalize_at, capture_at);
   // It continues the pipeline, always.
   EXPECT_EQ(CountOf(send, "return"),
             CountOf(send, "returnRQ_NOTIFICATION_CONTINUE;"));
@@ -207,6 +229,113 @@ TEST_F(IisFinalViewPinTest, TheFinalViewModuleOnlyReadsAtItsSend) {
     }
     EXPECT_TRUE(allowed) << "the final-view send calls ->" << name;
   }
+}
+
+TEST_F(IisFinalViewPinTest, AMarkdownAnswerIsFinalisedOnlyAfterThePlanSaysSo) {
+  const GoogleString cc = ReadStrippedSource("iis_final_view_module.cpp");
+  const GoogleString finalize =
+      FunctionBody(cc, "voidFinalizeIisMarkdownAnswer(");
+  ASSERT_FALSE(finalize.empty())
+      << "FinalizeIisMarkdownAnswer was not found; this pin needs updating";
+  // The answer is taken once, the plan is made from the response as it is,
+  // and nothing is written before the plan says the response is still the
+  // pending one.
+  const size_t take_at = finalize.find("inner->take_markdown_answer()");
+  const size_t plan_at = finalize.find("PlanIisMarkdownFinal(");
+  const size_t refuse_at = finalize.find("if(!plan.finalize){");
+  // A refused answer is latched: the site answers later Markdown requests
+  // with their HTML.
+  EXPECT_NE(GoogleString::npos,
+            finalize.find("server_context->NoteDaemonHtmlMarkdownNotFinalized("));
+  // Every header call is checked, and a failure leaves a plain error.
+  EXPECT_EQ(0, CountOf(finalize, ";response->DeleteHeader("));
+  EXPECT_EQ(0, CountOf(finalize, ";response->SetHeader("));
+  ASSERT_NE(GoogleString::npos, take_at);
+  ASSERT_NE(GoogleString::npos, plan_at);
+  ASSERT_NE(GoogleString::npos, refuse_at);
+  EXPECT_LT(take_at, plan_at);
+  EXPECT_LT(plan_at, refuse_at);
+  const GoogleString refused =
+      FunctionBody(finalize.substr(refuse_at), "if(!plan.finalize){");
+  ASSERT_FALSE(refused.empty());
+  for (const char* write : {"DeleteHeader(", "SetStatus(", "SetHeader(",
+                            "pEntityChunks", "Clear("}) {
+    const size_t at = finalize.find(write);
+    if (at != GoogleString::npos) {
+      EXPECT_LT(refuse_at + refused.size(), at)
+          << write << " before the plan allowed it";
+    }
+    EXPECT_EQ(GoogleString::npos, refused.find(write))
+        << "a refused answer still writes " << write;
+  }
+  // It never completes the request or writes through IIS's own write path.
+  for (const char* name : {"IndicateCompletion", "WriteEntityChunk", "Flush(",
+                           "thread_local", "Lock", "mutex"}) {
+    EXPECT_EQ(GoogleString::npos, finalize.find(name)) << name;
+  }
+}
+
+TEST_F(IisFinalViewPinTest, TheMainRegistrationKeepsTheAnswerForTheFinalView) {
+  const GoogleString cc = ReadStrippedSource("iis_http_module.cpp");
+  const GoogleString serve =
+      FunctionBody(cc, "staticboolServeIisMarkdownAnswer(");
+  ASSERT_FALSE(serve.empty())
+      << "ServeIisMarkdownAnswer was not found; this pin needs updating";
+  const size_t seen_at =
+      serve.find("!server_context->daemon_html_final_view_seen()");
+  ASSERT_NE(GoogleString::npos, seen_at);
+  const size_t missing_at =
+      serve.find("server_context->daemon_html_final_view_missing()");
+  const size_t serve_at = serve.find("engine->Serve(");
+  ASSERT_NE(GoogleString::npos, missing_at);
+  ASSERT_NE(GoogleString::npos, serve_at);
+  EXPECT_LT(seen_at, serve_at)
+      << "a Markdown answer can be made before the final view was seen";
+  EXPECT_LT(missing_at, serve_at)
+      << "a Markdown answer can be made where the final view was missing";
+  // An answer no final-view send took is noted when the request ends.
+  const GoogleString inner = ReadStrippedSource("iis_request_context.cpp");
+  const size_t kept_at = inner.find("if(markdown_answer_!=nullptr){");
+  ASSERT_NE(GoogleString::npos, kept_at);
+  EXPECT_NE(GoogleString::npos,
+            FunctionBody(inner.substr(kept_at), "if(markdown_answer_!=nullptr){")
+                .find("server_context_->NoteDaemonHtmlMarkdownNotFinalized("));
+
+  const GoogleString emit = FunctionBody(
+      cc, "boolClearAndEmitAllowlisted(constDaemonHtmlServeResult&result,"
+          "boolhead)override{");
+  ASSERT_FALSE(emit.empty());
+  EXPECT_NE(GoogleString::npos,
+            emit.find("SetStatus(kIisMarkdownPendingStatus"));
+  EXPECT_NE(GoogleString::npos, emit.find("DisarmResponseCaches(response)"));
+  EXPECT_NE(GoogleString::npos, emit.find("inner_->set_markdown_answer("));
+  for (const char* name : {"WriteResponseMessage", "WriteEntityChunk",
+                           "SetHeader(", "Flush("}) {
+    EXPECT_EQ(GoogleString::npos, emit.find(name))
+        << "the main registration sends part of the answer itself: " << name;
+  }
+}
+
+TEST_F(IisFinalViewPinTest, ARequestWithoutItsPristineTargetNeverAgrees) {
+  const GoogleString cc = ReadStrippedSource("iis_http_module.cpp");
+  const GoogleString facts = FunctionBody(cc, "staticvoidBuildIisDaemonHtmlFacts(");
+  ASSERT_FALSE(facts.empty());
+  EXPECT_NE(GoogleString::npos, facts.find("facts->url_agreed=pristine_read&&"));
+  const GoogleString dll = ReadStrippedSource("dll_main.cc");
+  EXPECT_NE(GoogleString::npos,
+            dll.find("IisWidenRawTarget(raw->pRawUrl,raw->RawUrlLength)"));
+}
+
+TEST_F(IisFinalViewPinTest, TheEngineReadsThePurgeFileAsItIsNow) {
+  // A worker process polls the purge file only at the purge poll interval:
+  // the engine's purge source is the IIS one, which also reads the file as
+  // it is on disk now (another process's purge).
+  const GoogleString cc = ReadStrippedSource("iis_server_context.cpp");
+  const size_t iis_at = cc.find("daemon_html_purge_source_.reset(newIisDaemonHtmlPurgeSource(");
+  const size_t deps_at = cc.find("deps.purge_source=daemon_html_purge_source_.get();");
+  ASSERT_NE(GoogleString::npos, iis_at);
+  ASSERT_NE(GoogleString::npos, deps_at);
+  EXPECT_LT(iis_at, deps_at);
 }
 
 TEST_F(IisFinalViewPinTest, TheBodyIsRecordedOnlyBeforeTheResponseIsCleared) {

@@ -15366,7 +15366,7 @@
       "id": "live-later-added-short-max-age",
       "runners": ["live"],
       "why": "store: shorter of the two lifetimes",
-      "ports": ["apache", "iis"],
+      "ports": ["apache"],
       "live": {
         "mode": "serve-variants",
         "agent_optimize": true,
@@ -15474,7 +15474,7 @@
       "id": "live-leak-always-public-200",
       "runners": ["live"],
       "why": "markdown: response header allowlist",
-      "ports": ["apache", "nginx"],
+      "ports": ["apache", "nginx", "iis"],
       "live": {
         "mode": "serve-variants",
         "agent_optimize": true,
@@ -15530,7 +15530,7 @@
       "id": "live-leak-always-public-head",
       "runners": ["live"],
       "why": "markdown: response header allowlist",
-      "ports": ["apache", "nginx"],
+      "ports": ["apache", "nginx", "iis"],
       "live": {
         "mode": "serve-variants",
         "agent_optimize": true,
@@ -15587,7 +15587,7 @@
       "id": "live-leak-always-public-304",
       "runners": ["live"],
       "why": "markdown: response header allowlist",
-      "ports": ["apache", "nginx"],
+      "ports": ["apache", "nginx", "iis"],
       "live": {
         "mode": "serve-variants",
         "agent_optimize": true,
@@ -18092,6 +18092,7 @@
       "id": "live-strip-chained-module-origin",
       "runners": ["live"],
       "why": "validator: module tags never reach the origin",
+      "ports": ["apache", "nginx"],
       "live": {
         "mode": "serve-variants",
         "agent_optimize": true,
@@ -18169,7 +18170,7 @@
       "id": "live-markdown-request-cookie-gets-html",
       "runners": ["live"],
       "why": "serve: request facts reach the verdict",
-      "ports": ["apache", "nginx"],
+      "ports": ["apache", "nginx", "iis"],
       "live": {
         "mode": "serve-variants",
         "agent_optimize": true,
@@ -18207,7 +18208,7 @@
       "id": "live-markdown-request-authorization-gets-html",
       "runners": ["live"],
       "why": "serve: request facts reach the verdict",
-      "ports": ["apache", "nginx"],
+      "ports": ["apache", "nginx", "iis"],
       "live": {
         "mode": "serve-variants",
         "agent_optimize": true,
@@ -18245,7 +18246,7 @@
       "id": "live-markdown-request-client-no-cache-gets-html",
       "runners": ["live"],
       "why": "serve: request facts reach the verdict",
-      "ports": ["apache", "nginx"],
+      "ports": ["apache", "nginx", "iis"],
       "live": {
         "mode": "serve-variants",
         "agent_optimize": true,

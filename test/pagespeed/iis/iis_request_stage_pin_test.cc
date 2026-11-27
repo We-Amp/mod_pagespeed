@@ -192,6 +192,12 @@ TEST_F(IisRequestStagePinTest, TheModuleHandlesNoStageBeforeAuthorization) {
   }
   EXPECT_EQ(GoogleString::npos, final_view.find("OnResolveRequestCache("))
       << "the final-view module takes up requests";
+  const GoogleString final_cc = ReadStrippedSource("iis_final_view_module.cpp");
+  for (const char* serve : {"WriteResponseMessage", "ServeFrom", "Fetch",
+                            "OnBeginRequestPageSpeed"}) {
+    EXPECT_EQ(GoogleString::npos, final_cc.find(serve))
+        << "the final-view module takes up requests: " << serve;
+  }
 }
 
 TEST_F(IisRequestStagePinTest, EveryServeIsReachedOnlyFromThatStage) {

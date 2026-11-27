@@ -38,6 +38,8 @@
 #include "pagespeed/iis/iis_rewrite_options.h"
 #include "pagespeed/iis/iis_module_factory.h"
 #include "pagespeed/iis/iis_daemon_html_capture.h"
+#include "pagespeed/iis/iis_daemon_html_serve.h"
+#include "pagespeed/iis/iis_server_context.h"
 #include "pagespeed/iis/iis_final_view_module.h"
 #include "pagespeed/iis/iis_registration.h"
 #include "pagespeed/iis/iis_configuration.h"
@@ -156,6 +158,16 @@ class MyGlobalModule : public CGlobalModule {
                                 cooked.AbsPathLength / sizeof(WCHAR));
         pProvider->GetHttpContext()->GetRootContext()->SetServerVariable(
             "X-PRISTINE-PATH", path.c_str());
+      }
+      // And the request target as the client sent it, before an inbound
+      // rewrite can replace it: the HTML cache keys a page on it.  The raw
+      // target is bytes; each one is kept as one wide character.
+      const HTTP_REQUEST* raw = rq->GetRawHttpRequest();
+      if (raw->pRawUrl != nullptr && raw->RawUrlLength > 0) {
+        const std::wstring target =
+            net_instaweb::IisWidenRawTarget(raw->pRawUrl, raw->RawUrlLength);
+        pProvider->GetHttpContext()->GetRootContext()->SetServerVariable(
+            net_instaweb::kIisPristineTargetVariable, target.c_str());
       }
     }
     return GL_NOTIFICATION_CONTINUE;
@@ -307,12 +319,19 @@ extern "C" __declspec(dllexport) HRESULT __stdcall RegisterModule(
     net_instaweb::cf = new ConfigFactory();
   }
 
+  // The server interface is the same for both registrations: kept for the
+  // admin manager (a site's bindings).
+  net_instaweb::SetIisHttpServer(pGlobalInfo);
+
   HRESULT hr = S_OK;
   if (kind == net_instaweb::IisRegistrationKind::kFinalView) {
     // One send notification, at PRIORITY_ALIAS_FIRST: IIS runs it after its
     // header stages (customHeaders) and dynamic compression, the last point
-    // a module sees the response before it goes out.  It reads that view
-    // and changes nothing (iis_final_view_module.h).
+    // a module sees the response before it goes out.  It reads that view,
+    // and sends a Markdown answer the main registration kept for it with
+    // exactly its own header set (iis_final_view_module.h).  IIS gives both
+    // entries of one image the same module id, so this registration keeps
+    // no module context of its own.
     hr = pModuleInfo->SetRequestNotifications(
         new net_instaweb::IisFinalViewModuleFactory(), RQ_SEND_RESPONSE, 0);
     if (FAILED(hr)) return hr;

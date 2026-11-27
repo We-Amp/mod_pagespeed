@@ -4414,6 +4414,19 @@ jobs:
           [ "$IS_PRERELEASE" = "true" ] && pre=(--prerelease)
           bash tools/ci/assert_release_stamp.sh --require-families "${pre[@]+"${pre[@]}"}" --version "$VERSION" "${RUNNER_TEMP}/release-assets" "$RELEASE_SHA"
 
+      # An nginx module loads only into the exact nginx it was built for, so
+      # each portable tarball (x64 and arm64) must name that nginx: its
+      # README, the version compiled into the module and the build image's
+      # NGINX_VERSION (docker/Dockerfile of the release commit, which this
+      # master checkout may not be) must agree.
+      - name: nginx module tarballs name the nginx they are built for
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$RELEASE_SHA"
+          git show "${RELEASE_SHA}:docker/Dockerfile" > "${RUNNER_TEMP}/release-Dockerfile"
+          bash tools/ci/assert_nginx_tarball_version.sh --dockerfile "${RUNNER_TEMP}/release-Dockerfile" \
+            "${RUNNER_TEMP}/release-assets"
+
       # What the names promise, the packages must contain: the version of
       # every package, and the serving pair (the module packages require the
       # optimizer at exactly the pair version, and the optimizer packages

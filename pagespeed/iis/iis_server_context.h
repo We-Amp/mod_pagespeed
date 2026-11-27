@@ -18,8 +18,16 @@
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 
+class IHttpServer;
+
 namespace net_instaweb {
 
+	// The IIS server interface RegisterModule is given, kept for the admin
+	// manager (a site's bindings); nullptr before registration.
+	void SetIisHttpServer(IHttpServer* server);
+	IHttpServer* GetIisHttpServer();
+
+	class DaemonHtmlPurgeSource;
 	class IisRewriteDriverFactory;
 	class IisRewriteOptions;
 	class ProxyFetchFactory;
@@ -80,14 +88,80 @@ namespace net_instaweb {
 		}
 
 		// The HTML cache engine of this site (DaemonHtmlCache), built on
-		// first use so a site that never sets the option has none.  It
-		// holds the report-only counters and decision log.
-		DaemonHtmlEngine* daemon_html_engine();
+		// first use so a site that never sets the option has none; nullptr
+		// with the option off.  `iis_site_id` is the IIS site this context
+		// serves (IisProcessContext::site_id()).  In serve-variants it is
+		// built with the host names the site's bindings vouch for, the
+		// site's purge state and the volume handle of the moment, and is
+		// registered as a purge observer of the cache path; otherwise it
+		// only reports.
+		DaemonHtmlEngine* daemon_html_engine(uint32_t iis_site_id);
+		// The engine once built, or nullptr; never builds it.
+		DaemonHtmlEngine* daemon_html_engine_if_built() {
+			return daemon_html_engine_built_.load(std::memory_order_acquire);
+		}
+		// Whether HTML responses of this site can be answered with their
+		// Markdown copy: serve-variants with AgentOptimize on.  Such a
+		// response must never be left in IIS's response caches, which
+		// would answer an agent with the HTML.
+		bool daemon_html_serves_variants() const;
+
+		// The engine's purge-poll and statistics ticks, from the request
+		// path next to FlushCacheIfNecessary, inline (an IIS request
+		// thread may block): at most one purge-poll tick per poll interval
+		// and one statistics tick per kDaemonHtmlStatisticsTickMs.
+		void MaybeTickDaemonHtmlEngine();
+
+
+		static constexpr int64 kDaemonHtmlStatisticsTickMs = 10 * 1000;
+
+		// The capture of an HTML response finished its body, so the engine
+		// will classify it, and store or remove, when IIS releases the
+		// request; and that work ran.  The two counters
+		// (kDaemonHtmlCommitsStarted, kDaemonHtmlCommitsFinished) are what
+		// a test reads to know every commit of the responses it has is done.
+		void NoteDaemonHtmlCommitStarted();
+		void NoteDaemonHtmlCommitFinished();
+		static const char kDaemonHtmlCommitsStarted[];
+		static const char kDaemonHtmlCommitsFinished[];
+		static void InitDaemonHtmlStats(Statistics* statistics);
+
+		// Test equipment: when PAGESPEED_TEST_HTML_TRACE_FILE names a file,
+		// one line per HTML cache decision is appended to it (process id,
+		// time, `event`, the shared purge index, whether this process's
+		// purge set holds a purge of `url`, and `detail`).  Unset in
+		// production; a no-op then.
+		void TraceDaemonHtml(const char* event, const GoogleString& url,
+		                     const GoogleString& detail);
+		// Whether that trace is on: callers build its strings only then.
+		static bool daemon_html_trace_on();
 
 		// A recorded HTML response got no final header view: the
 		// final-view module entry did not run for this site.  Logged once
 		// per site.
 		void NoteDaemonHtmlFinalViewMissing();
+
+		// A Markdown answer the main registration kept was never taken: the
+		// final-view module entry did not run for it (it is not in the
+		// site's modules list), so the client got the pending error.  From
+		// then on this site answers Markdown requests with their HTML.
+		// Logged once.
+		// `why` names the cause for the log: the entry did not run, another
+		// module replaced the response, or a compressor encoded it.
+		void NoteDaemonHtmlMarkdownNotFinalized(const char* why);
+		bool daemon_html_final_view_missing() const {
+			return daemon_html_markdown_not_finalized_.load(std::memory_order_relaxed);
+		}
+		// The final-view entry's send ran for a response of this site in
+		// this process: positive evidence that it can send a Markdown
+		// answer.  Until then this site answers Markdown requests with
+		// their HTML.  Lock-free.
+		void NoteDaemonHtmlFinalViewSeen() {
+			daemon_html_final_view_seen_.store(true, std::memory_order_relaxed);
+		}
+		bool daemon_html_final_view_seen() const {
+			return daemon_html_final_view_seen_.load(std::memory_order_relaxed);
+		}
 
 	private:
 
@@ -104,8 +178,20 @@ namespace net_instaweb {
 			DaemonHealth::kNotConfigured};
 		std::unique_ptr<DaemonServeStats> daemon_serve_stats_;
 		std::once_flag daemon_html_engine_once_;
+		// What the serving engine reads purges from (the server's own purge
+		// state and the purge file as it is now, iis_daemon_html_purge_source.h);
+		// declared before the engine, which borrows them.
+		std::unique_ptr<DaemonHtmlPurgeSource> daemon_html_system_purge_source_;
+		std::unique_ptr<DaemonHtmlPurgeSource> daemon_html_purge_source_;
 		std::unique_ptr<DaemonHtmlEngine> daemon_html_engine_;
+		std::atomic<DaemonHtmlEngine*> daemon_html_engine_built_{nullptr};
+		bool daemon_html_observing_ = false;
+		std::atomic<int64> daemon_html_last_poll_tick_ms_{0};
+		std::atomic<int64> daemon_html_last_stats_tick_ms_{0};
+
 		std::atomic<bool> daemon_html_final_view_missing_logged_{false};
+		std::atomic<bool> daemon_html_markdown_not_finalized_{false};
+		std::atomic<bool> daemon_html_final_view_seen_{false};
  		IisServerContext(const IisServerContext&) = delete;
  		IisServerContext& operator=(const IisServerContext&) = delete;
 	};

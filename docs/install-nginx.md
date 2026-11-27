@@ -46,7 +46,7 @@ The `nginx-module-pagespeed-nginxorg` package is the same module, built for
 nginx.org's stable nginx on Debian 13, Ubuntu 24.04 and Enterprise Linux 9
 (AlmaLinux, Rocky Linux, RHEL), amd64 (x86_64) only. Each build is pinned to
 one nginx version, which the package version names
-(`<version>+ngx1.30.6~trixie`, `<version>-0.ngx1.30.6.el9`), so it must match
+(`<version>+ngx1.30.7~trixie`, `<version>-0.ngx1.30.7.el9`), so it must match
 the nginx you run, and it cannot be installed alongside
 `nginx-module-pagespeed`. There is no build for Enterprise Linux 10, and none
 for nginx.org's mainline.
@@ -87,7 +87,7 @@ rather than moving nginx when no package exists for that version yet.
 format, so neither works with this package.
 
 ```dockerfile
-FROM nginx:1.30.6
+FROM nginx:1.30.7
 RUN apt-get update && apt-get install -y curl ca-certificates gnupg \
  && curl -fsSL https://packages.modpagespeed.com/install.sh | sh \
  && apt-get update \

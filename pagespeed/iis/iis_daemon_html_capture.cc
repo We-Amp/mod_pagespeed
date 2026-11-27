@@ -60,6 +60,32 @@ DaemonHtmlHeaderLines IisDaemonHtmlViewLines(const DaemonHtmlHeaderLines& raw) {
   return lines;
 }
 
+DaemonHtmlHeaderLines IisUnmergeFinalView(const DaemonHtmlHeaderLines& module,
+                                          const DaemonHtmlHeaderLines& final) {
+  DaemonHtmlHeaderLines out;
+  out.reserve(final.size());
+  for (const auto& line : final) {
+    bool split = false;
+    for (const auto& m : module) {
+      if (!StringCaseEqual(m.first, line.first) || m.second.empty() ||
+          line.second.size() <= m.second.size() ||
+          line.second.compare(0, m.second.size(), m.second) != 0 ||
+          line.second[m.second.size()] != ',') {
+        continue;
+      }
+      StringPiece rest(line.second);
+      rest.remove_prefix(m.second.size() + 1);
+      TrimWhitespace(&rest);
+      out.emplace_back(line.first, m.second);
+      if (!rest.empty()) out.emplace_back(line.first, rest.as_string());
+      split = true;
+      break;
+    }
+    if (!split) out.push_back(line);
+  }
+  return out;
+}
+
 IisDaemonHtmlCapture::IisDaemonHtmlCapture(
     std::unique_ptr<DaemonHtmlRecording> recording)
     : recording_(std::move(recording)) {}
@@ -110,7 +136,8 @@ void IisDaemonHtmlCapture::NoteModuleView(const DaemonHtmlHeaderLines& lines) {
   // Only the first: the engine keeps the latest baseline it is given.
   if (finished_ || module_view_taken_) return;
   module_view_taken_ = true;
-  recording_->SetBaselineHeaders(IisDaemonHtmlViewLines(lines));
+  module_view_ = IisDaemonHtmlViewLines(lines);
+  recording_->SetBaselineHeaders(module_view_);
 }
 
 bool IisDaemonHtmlCapture::needs_final_view() const {
@@ -121,7 +148,8 @@ void IisDaemonHtmlCapture::NoteFinalView(int status,
                                          const DaemonHtmlHeaderLines& lines) {
   if (!needs_final_view()) return;
   if (status != status_) aborted_ = true;
-  recording_->NoteFinalHeaders(IisDaemonHtmlViewLines(lines));
+  recording_->NoteFinalHeaders(
+      IisUnmergeFinalView(module_view_, IisDaemonHtmlViewLines(lines)));
 }
 
 bool IisDaemonHtmlCapture::Finish() {
