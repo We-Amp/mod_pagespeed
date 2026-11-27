@@ -295,6 +295,15 @@ const char RewriteOptions::kRewriteUncacheableResources[] =
 const char RewriteOptions::kRulePackFile[] = "RulePackFile";
 const char RewriteOptions::kRulePackMode[] = "RulePackMode";
 const char RewriteOptions::kDaemonHtmlCache[] = "DaemonHtmlCache";
+const char RewriteOptions::kDaemonHtmlCacheCredentialed[] =
+    "DaemonHtmlCacheCredentialed";
+const char RewriteOptions::kDaemonHtmlCacheIgnoreCookie[] =
+    "DaemonHtmlCacheIgnoreCookie";
+const char RewriteOptions::kDaemonHtmlCacheIgnoreCookies[] =
+    "DaemonHtmlCacheIgnoreCookies";
+const char RewriteOptions::kDaemonHtmlCacheMaxAge[] = "DaemonHtmlCacheMaxAge";
+const char RewriteOptions::kDaemonHtmlCacheServeScope[] =
+    "DaemonHtmlCacheServeScope";
 const char RewriteOptions::kDaemonHtmlMaxBytes[] = "DaemonHtmlMaxBytes";
 const char RewriteOptions::kRulePackRequireSigned[] = "RulePackRequireSigned";
 const char RewriteOptions::kRulePackTrustKey[] = "RulePackTrustKey";
@@ -1479,6 +1488,58 @@ void RewriteOptions::AddProperties() {
                   true);
   properties_->property(properties_->size() - 1)
       ->set_do_not_use_for_signature_computation(true);
+  // The settings of the serve-cached-html mode a later release adds: parsed
+  // and kept so that its configuration keeps loading here, and read by
+  // nothing.  Not part of the signature, like DaemonHtmlCache.
+  AddBaseProperty(kDaemonHtmlCacheServeScopeAgents,
+                  &RewriteOptions::daemon_html_cache_serve_scope_, "dhcss",
+                  kDaemonHtmlCacheServeScope, kServerScope,
+                  "Which requests DaemonHtmlCache serve-cached-html serves a "
+                  "stored page to: agents (default) or all. Takes effect "
+                  "with serve-cached-html, which this release does not "
+                  "have.",
+                  true);
+  properties_->property(properties_->size() - 1)
+      ->set_do_not_use_for_signature_computation(true);
+  AddBaseProperty(int64{3600}, &RewriteOptions::daemon_html_cache_max_age_,
+                  "dhcma", kDaemonHtmlCacheMaxAge, kServerScope,
+                  "The longest a page stored by DaemonHtmlCache "
+                  "serve-cached-html is served, in seconds, 0 to 86400 "
+                  "(default 3600; 0 means no cap). It only shortens the "
+                  "lifetime the origin gives a page, never extends it. "
+                  "Takes effect with serve-cached-html, which this release "
+                  "does not have.",
+                  true);
+  properties_->property(properties_->size() - 1)
+      ->set_do_not_use_for_signature_computation(true);
+  AddBaseProperty(kDaemonHtmlCacheCredentialedAnonymousOnly,
+                  &RewriteOptions::daemon_html_cache_credentialed_, "dhccr",
+                  kDaemonHtmlCacheCredentialed, kServerScope,
+                  "Whether DaemonHtmlCache stores and serves a page for a "
+                  "request with a cookie: anonymous-only (default) or "
+                  "explicit-public. Takes effect with serve-cached-html, "
+                  "which this release does not have.",
+                  true);
+  properties_->property(properties_->size() - 1)
+      ->set_do_not_use_for_signature_computation(true);
+  AddBaseProperty(true, &RewriteOptions::daemon_html_cache_ignore_cookies_,
+                  "dhcics", kDaemonHtmlCacheIgnoreCookies, kServerScope,
+                  "Whether DaemonHtmlCache ignores the built-in list of "
+                  "analytics cookies (default on). Takes effect with "
+                  "serve-cached-html, which this release does not have.",
+                  true);
+  properties_->property(properties_->size() - 1)
+      ->set_do_not_use_for_signature_computation(true);
+  AddBaseProperty(GoogleString(),
+                  &RewriteOptions::daemon_html_cache_ignore_cookie_, "dhcic",
+                  kDaemonHtmlCacheIgnoreCookie, kServerScope,
+                  "A cookie name, or a prefix ending in *, that "
+                  "DaemonHtmlCache also ignores; repeatable. Takes effect "
+                  "with serve-cached-html, which this release does not "
+                  "have.",
+                  true);
+  properties_->property(properties_->size() - 1)
+      ->set_do_not_use_for_signature_computation(true);
   AddBaseProperty(int64{5} * 1024 * 1024,
                   &RewriteOptions::daemon_html_max_bytes_, "dhmb",
                   kDaemonHtmlMaxBytes, kServerScope,
@@ -2639,6 +2700,42 @@ bool RewriteOptions::DeprecatedOptionMessage(StringPiece name,
   return false;
 }
 
+GoogleString RewriteOptions::LaterReleaseOptionWarning(StringPiece name,
+                                                       StringPiece arg) {
+  if (StringCaseEqual(name, kDaemonHtmlCache)) {
+    if (!StringCaseEqual(arg, "serve-cached-html")) return GoogleString();
+    return StrCat("'", kDaemonHtmlCache,
+                  " serve-cached-html' is not available in this release; it "
+                  "runs as serve-variants, which serves the Markdown copies "
+                  "of stored pages only");
+  }
+  for (const char* later :
+       {kDaemonHtmlCacheServeScope, kDaemonHtmlCacheMaxAge,
+        kDaemonHtmlCacheCredentialed, kDaemonHtmlCacheIgnoreCookies,
+        kDaemonHtmlCacheIgnoreCookie}) {
+    if (StringCaseEqual(name, later)) {
+      return StrCat("'", later,
+                    "' takes effect with DaemonHtmlCache serve-cached-html, "
+                    "which this release does not have; it is accepted and "
+                    "has no effect");
+    }
+  }
+  return GoogleString();
+}
+
+bool RewriteOptions::IsValidDaemonHtmlCacheIgnoreCookie(StringPiece value) {
+  if (value.empty()) return false;
+  if (value.ends_with("*")) value.remove_suffix(1);
+  // An RFC 6265 cookie name: a token.  A '*' may only end a prefix.
+  for (char c : value) {
+    if (c <= ' ' || c >= 0x7f) return false;
+    if (StringPiece("()<>@,;:\\\"/[]?={}*").find(c) != StringPiece::npos) {
+      return false;
+    }
+  }
+  return true;
+}
+
 RewriteOptions::OptionSettingResult RewriteOptions::ParseAndSetOptionFromName1(
     StringPiece name, StringPiece arg, GoogleString* msg,
     MessageHandler* handler) {
@@ -2654,29 +2751,25 @@ RewriteOptions::OptionSettingResult
 RewriteOptions::ParseAndSetOptionFromNameWithScope(
     StringPiece name, StringPiece arg, RewriteOptions::OptionScope max_scope,
     GoogleString* msg, MessageHandler* handler) {
-  // A value reserved for a later release: refused, with a warning instead of
-  // a configuration error, so a configuration written for that release still
-  // loads.  The option keeps the value it had.  Only where the option may be
-  // set at all: below its scope the usual scope error is the answer.
-  if (StringCaseEqual(name, kDaemonHtmlCache) &&
-      StringCaseEqual(arg, "serve-cached-html") && max_scope >= kServerScope) {
-    const GoogleString warning =
-        StrCat("'", kDaemonHtmlCache,
-               " serve-cached-html' is not available in this release and is "
-               "ignored; use serve-variants or report-only");
-    if (handler != nullptr) {
-      handler->Message(kWarning, "%s", warning.c_str());
-    }
-    // Also to a caller that reports the message itself.
-    if (msg != nullptr) *msg = warning;
-    return kOptionOk;
-  }
   GoogleString error_detail;
   OptionSettingResult result =
       SetOptionFromNameInternal(name, arg, max_scope, &error_detail);
   if (result != RewriteOptions::kOptionNameUnknown) {
     if (result == RewriteOptions::kOptionOk) {
       WarnDeprecatedOption(name, DeprecatedWhen::kWhenAccepted, handler);
+      // The serve-cached-html settings, and the mode itself (set as
+      // serve-variants), parse so that a configuration written for the
+      // release that adds them still loads; each says what it does here.
+      GoogleString warning = LaterReleaseOptionWarning(name, arg);
+      if (!warning.empty()) {
+        if (handler != nullptr) {
+          handler->Message(kWarning, "%s", warning.c_str());
+        } else if (msg != nullptr) {
+          // To a caller that reports the message itself.
+          *msg = warning;
+        }
+        return result;
+      }
     }
     return FormatSetOptionMessage(result, name, arg, error_detail, msg);
   }
@@ -2911,6 +3004,40 @@ RewriteOptions::OptionSettingResult RewriteOptions::SetOptionFromNameInternal(
       } else if (option == &rule_pack_file_) {
         return AddRulePackFile(value, error_detail) ? kOptionOk
                                                     : kOptionValueInvalid;
+      } else if (option == &daemon_html_cache_max_age_) {
+        int64 seconds = 0;
+        if (!StringToInt64(value, &seconds) || seconds < 0 ||
+            seconds > kDaemonHtmlCacheMaxAgeLimitS) {
+          StrAppend(error_detail, kDaemonHtmlCacheMaxAge,
+                    " takes a number of seconds from 0 to ",
+                    Integer64ToString(kDaemonHtmlCacheMaxAgeLimitS));
+          return kOptionValueInvalid;
+        }
+        set_option(seconds, &daemon_html_cache_max_age_);
+        return kOptionOk;
+      } else if (option == &daemon_html_cache_ignore_cookie_) {
+        if (!IsValidDaemonHtmlCacheIgnoreCookie(value)) {
+          StrAppend(error_detail, kDaemonHtmlCacheIgnoreCookie,
+                    " takes one cookie name, or a prefix ending in *");
+          return kOptionValueInvalid;
+        }
+        // Repeatable: each line adds a name, once.  The first line of a
+        // scope replaces the inherited list, as with RulePackFile.
+        GoogleString names = daemon_html_cache_ignore_cookie_.was_set()
+                                 ? daemon_html_cache_ignore_cookie_.value()
+                                 : GoogleString();
+        StringPieceVector existing;
+        SplitStringPieceToVector(names, " ", &existing, true);
+        for (StringPiece listed : existing) {
+          if (listed == value) {
+            set_option(names, &daemon_html_cache_ignore_cookie_);
+            return kOptionOk;
+          }
+        }
+        if (!names.empty()) names += " ";
+        StrAppend(&names, value);
+        set_option(names, &daemon_html_cache_ignore_cookie_);
+        return kOptionOk;
       } else if (!option->SetFromString(value, error_detail)) {
         return kOptionValueInvalid;
       } else {
@@ -3006,10 +3133,36 @@ bool RewriteOptions::ParseFromString(StringPiece value_string,
     *value = kDaemonHtmlCacheOff;
   } else if (StringCaseEqual(value_string, "report-only")) {
     *value = kDaemonHtmlCacheReportOnly;
-  } else if (StringCaseEqual(value_string, "serve-variants")) {
+  } else if (StringCaseEqual(value_string, "serve-variants") ||
+             // The mode a later release adds runs as the Markdown-only part
+             // of it here: see LaterReleaseOptionWarning.
+             StringCaseEqual(value_string, "serve-cached-html")) {
     *value = kDaemonHtmlCacheServeVariants;
   } else {
-    // serve-cached-html included: see ParseAndSetOptionFromNameWithScope.
+    return false;
+  }
+  return true;
+}
+
+bool RewriteOptions::ParseFromString(StringPiece value_string,
+                                     DaemonHtmlCacheServeScope* value) {
+  if (StringCaseEqual(value_string, "agents")) {
+    *value = kDaemonHtmlCacheServeScopeAgents;
+  } else if (StringCaseEqual(value_string, "all")) {
+    *value = kDaemonHtmlCacheServeScopeAll;
+  } else {
+    return false;
+  }
+  return true;
+}
+
+bool RewriteOptions::ParseFromString(StringPiece value_string,
+                                     DaemonHtmlCacheCredentialed* value) {
+  if (StringCaseEqual(value_string, "anonymous-only")) {
+    *value = kDaemonHtmlCacheCredentialedAnonymousOnly;
+  } else if (StringCaseEqual(value_string, "explicit-public")) {
+    *value = kDaemonHtmlCacheCredentialedExplicitPublic;
+  } else {
     return false;
   }
   return true;
@@ -3892,6 +4045,26 @@ GoogleString RewriteOptions::ToString(DaemonHtmlCacheMode mode) {
       return "report-only";
     case kDaemonHtmlCacheServeVariants:
       return "serve-variants";
+  }
+  return "?";
+}
+
+GoogleString RewriteOptions::ToString(DaemonHtmlCacheServeScope scope) {
+  switch (scope) {
+    case kDaemonHtmlCacheServeScopeAgents:
+      return "agents";
+    case kDaemonHtmlCacheServeScopeAll:
+      return "all";
+  }
+  return "?";
+}
+
+GoogleString RewriteOptions::ToString(DaemonHtmlCacheCredentialed policy) {
+  switch (policy) {
+    case kDaemonHtmlCacheCredentialedAnonymousOnly:
+      return "anonymous-only";
+    case kDaemonHtmlCacheCredentialedExplicitPublic:
+      return "explicit-public";
   }
   return "?";
 }

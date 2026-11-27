@@ -25,13 +25,55 @@
 
 #include "pagespeed/envoy/envoy_rewrite_options.h"
 #include "pagespeed/kernel/base/message_handler.h"
+#include "pagespeed/kernel/base/string_util.h"
 
 namespace net_instaweb {
+
+namespace {
+
+// DaemonHtmlCacheIgnoreCookie as a comma-separated list: every element is
+// set as its own line would be, with the setting's one warning, or none is.
+bool ApplyIgnoreCookieList(EnvoyRewriteOptions* options,
+                           const std::string& host_pattern,
+                           const std::string& key, const std::string& value,
+                           MessageHandler* handler) {
+  StringPieceVector names;
+  SplitStringPieceToVector(value, ",", &names, false);
+  for (StringPiece& name : names) {
+    TrimWhitespace(&name);
+    if (!RewriteOptions::IsValidDaemonHtmlCacheIgnoreCookie(name)) {
+      handler->Message(kWarning,
+                       "VHost %s: Failed to set option %s: '%s' is not one "
+                       "cookie name, or a prefix ending in *",
+                       host_pattern.c_str(), key.c_str(),
+                       name.as_string().c_str());
+      return false;
+    }
+  }
+  for (size_t i = 0; i < names.size(); ++i) {
+    GoogleString msg;
+    if (options->ParseAndSetOptionFromName1(key, names[i], &msg,
+                                            i == 0 ? handler : nullptr) !=
+        RewriteOptions::kOptionOk) {
+      handler->Message(kWarning, "VHost %s: Failed to set option %s: %s",
+                       host_pattern.c_str(), key.c_str(), msg.c_str());
+      return false;
+    }
+  }
+  handler->Message(kInfo, "VHost %s: Set option %s = %s", host_pattern.c_str(),
+                   key.c_str(), value.c_str());
+  return true;
+}
+
+}  // namespace
 
 bool ApplyVHostCustomOption(EnvoyRewriteOptions* options,
                             const std::string& host_pattern,
                             const std::string& key, const std::string& value,
                             MessageHandler* handler) {
+  if (StringCaseEqual(key, RewriteOptions::kDaemonHtmlCacheIgnoreCookie)) {
+    return ApplyIgnoreCookieList(options, host_pattern, key, value, handler);
+  }
   GoogleString msg;
   RewriteOptions::OptionSettingResult result =
       options->ParseAndSetOptionFromName1(key, value, &msg, handler);

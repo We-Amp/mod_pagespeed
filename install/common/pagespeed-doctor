@@ -1808,7 +1808,9 @@ exit "$EXIT"
 #: CriticalImagesBeaconEnabled CssFlattenMaxBytes CssImageInlineMaxBytes
 #: CssInlineMaxBytes CssOutlineMinBytes CssParseMaxBytes CssPreserveURLs
 #: CustomFetchHeader CycloneRamCacheKb CycloneZeroCopy CycloneZeroCopyServe
-#: DaemonApiSocketPath DaemonHtmlCache DaemonHtmlMaxBytes
+#: DaemonApiSocketPath DaemonHtmlCache DaemonHtmlCacheCredentialed
+#: DaemonHtmlCacheIgnoreCookie DaemonHtmlCacheIgnoreCookies
+#: DaemonHtmlCacheMaxAge DaemonHtmlCacheServeScope DaemonHtmlMaxBytes
 #: DaemonServeHonorRequestFreshness DaemonServeStoredEncodings DaemonSocketPath
 #: DaemonVolumePath DebugOutputMaxBytes DefaultCacheHtml DetectHydratedPages
 #: DisableBackgroundFetchesForBots DisableFilters DisableRewriteOnNoTransform
@@ -1926,7 +1928,9 @@ exit "$EXIT"
 #: BlockingRewriteKey BlockingRewriteRefererUrls CacheFlushFilename
 #: CacheFlushPollIntervalSec CompressMetadataCache ConsolePath
 #: CycloneRamCacheKb CycloneZeroCopy CycloneZeroCopyServe DaemonApiSocketPath
-#: DaemonHtmlCache DaemonHtmlMaxBytes DaemonServeHonorRequestFreshness
+#: DaemonHtmlCache DaemonHtmlCacheCredentialed DaemonHtmlCacheIgnoreCookie
+#: DaemonHtmlCacheIgnoreCookies DaemonHtmlCacheMaxAge DaemonHtmlCacheServeScope
+#: DaemonHtmlMaxBytes DaemonServeHonorRequestFreshness
 #: DaemonServeStoredEncodings DaemonSocketPath DaemonVolumePath
 #: FetcherTimeoutMs FetchHttps FetchProxy FileCachePath FileCacheSizeKb
 #: FileCacheSmallTierPercent FlushHtml ForceCaching GeneratedFilePrefix

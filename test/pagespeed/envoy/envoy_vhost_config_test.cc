@@ -109,9 +109,9 @@ TEST_F(EnvoyVHostConfigTest, KnownCustomOptionIsSet) {
   EXPECT_EQ(0, rec.Count("Failed"));
 }
 
-// DaemonHtmlCache takes serve-variants on this server too; the value
-// reserved for a later release is refused with a warning and changes
-// nothing.  (The mode itself is inert here: http_filter_test.)
+// DaemonHtmlCache takes serve-variants on this server too; serve-cached-html,
+// the mode a later release adds, is accepted with a warning as
+// serve-variants.  (The mode itself is inert here: http_filter_test.)
 TEST_F(EnvoyVHostConfigTest, DaemonHtmlCacheModesParse) {
   RecordingHandler rec;
   EnvoyRewriteOptions options(&thread_system_);
@@ -120,12 +120,129 @@ TEST_F(EnvoyVHostConfigTest, DaemonHtmlCacheModesParse) {
   EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
             options.daemon_html_cache());
   EXPECT_EQ(0, rec.Count("Failed"));
-  ApplyVHostCustomOption(&options, "example.com", "DaemonHtmlCache",
-                         "serve-cached-html", &rec);
+  EXPECT_TRUE(ApplyVHostCustomOption(&options, "example.com", "DaemonHtmlCache",
+                                     "report-only", &rec));
+  EXPECT_TRUE(ApplyVHostCustomOption(&options, "example.com", "DaemonHtmlCache",
+                                     "serve-cached-html", &rec));
   EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
             options.daemon_html_cache());
-  EXPECT_EQ(1, rec.Count("serve-cached-html' is not available"));
+  EXPECT_EQ(1, rec.Count("it runs as serve-variants"));
   EXPECT_EQ(0, rec.Count("Failed"));
+}
+
+// The settings of the serve-cached-html mode are accepted on this server, each
+// with one warning, and change nothing; an invalid value is refused with the
+// generic warning.
+TEST_F(EnvoyVHostConfigTest, DaemonHtmlCacheLaterReleaseSettingsParse) {
+  const struct {
+    const char* name;
+    const char* value;
+    bool valid;
+  } kLines[] = {
+      {"DaemonHtmlCacheServeScope", "agents", true},
+      {"DaemonHtmlCacheServeScope", "all", true},
+      {"DaemonHtmlCacheServeScope", "some", false},
+      {"DaemonHtmlCacheMaxAge", "0", true},
+      {"DaemonHtmlCacheMaxAge", "86400", true},
+      {"DaemonHtmlCacheMaxAge", "-5", false},
+      {"DaemonHtmlCacheCredentialed", "anonymous-only", true},
+      {"DaemonHtmlCacheCredentialed", "explicit-public", true},
+      {"DaemonHtmlCacheCredentialed", "nobody", false},
+      {"DaemonHtmlCacheIgnoreCookies", "on", true},
+      {"DaemonHtmlCacheIgnoreCookies", "off", true},
+      {"DaemonHtmlCacheIgnoreCookies", "2", false},
+      {"DaemonHtmlCacheIgnoreCookie", "_my_ab", true},
+      {"DaemonHtmlCacheIgnoreCookie", "_my_prefix*", true},
+      {"DaemonHtmlCacheIgnoreCookie", "a b", false},
+  };
+  EnvoyRewriteOptions options(&thread_system_);
+  EXPECT_EQ(3600, options.daemon_html_cache_max_age_s());
+  int warnings = 0;
+  int failures = 0;
+  for (const auto& line : kLines) {
+    RecordingHandler rec;
+    EXPECT_EQ(line.valid, ApplyVHostCustomOption(&options, "example.com",
+                                                 line.name, line.value, &rec))
+        << line.name << " " << line.value;
+    warnings += rec.Count("takes effect with DaemonHtmlCache serve-cached-html");
+    failures += rec.Count("Failed to set option");
+  }
+  EXPECT_EQ(10, warnings);
+  EXPECT_EQ(5, failures);
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeScopeAll,
+            options.daemon_html_cache_serve_scope());
+  EXPECT_EQ(86400, options.daemon_html_cache_max_age_s());
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheCredentialedExplicitPublic,
+            options.daemon_html_cache_credentialed());
+  EXPECT_FALSE(options.daemon_html_cache_ignore_cookies());
+  EXPECT_EQ("_my_ab _my_prefix*", options.daemon_html_cache_ignore_cookie());
+  // Nothing reads them: the mode stays as it was.
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheOff, options.daemon_html_cache());
+}
+
+// One custom option for every value and form of the later release's
+// directives that this release must accept, and the values just outside them
+// that it must refuse (logged, and the vhost keeps loading).  On this server
+// DaemonHtmlCacheIgnoreCookie is a comma-separated list, each element checked
+// as one name.
+TEST_F(EnvoyVHostConfigTest, DaemonHtmlCacheLaterReleaseValueTable) {
+  const struct {
+    const char* key;
+    const char* value;
+    bool loads;
+  } kValues[] = {
+      {"DaemonHtmlCache", "serve-cached-html", true},
+      {"DaemonHtmlCache", "Serve-Cached-HTML", true},
+      {"DaemonHtmlCache", "serve-everything", false},
+      {"DaemonHtmlCacheServeScope", "agents", true},
+      {"DaemonHtmlCacheServeScope", "all", true},
+      {"DaemonHtmlCacheServeScope", "everyone", false},
+      {"DaemonHtmlCacheServeScope", "agents all", false},
+      {"DaemonHtmlCacheMaxAge", "0", true},
+      {"DaemonHtmlCacheMaxAge", "3600", true},
+      {"DaemonHtmlCacheMaxAge", "86400", true},
+      {"DaemonHtmlCacheMaxAge", "86401", false},
+      {"DaemonHtmlCacheMaxAge", "-1", false},
+      {"DaemonHtmlCacheCredentialed", "anonymous-only", true},
+      {"DaemonHtmlCacheCredentialed", "explicit-public", true},
+      {"DaemonHtmlCacheCredentialed", "anyone", false},
+      {"DaemonHtmlCacheIgnoreCookies", "on", true},
+      {"DaemonHtmlCacheIgnoreCookies", "off", true},
+      {"DaemonHtmlCacheIgnoreCookies", "maybe", false},
+      {"DaemonHtmlCacheIgnoreCookie", "_my_ab", true},
+      {"DaemonHtmlCacheIgnoreCookie", "_my_prefix*", true},
+      {"DaemonHtmlCacheIgnoreCookie", "_my_ab,_my_cd", true},
+      {"DaemonHtmlCacheIgnoreCookie", "_my_ab, _my_prefix*", true},
+      {"DaemonHtmlCacheIgnoreCookie", "_my_ab _my_cd", false},
+      {"DaemonHtmlCacheIgnoreCookie", "_my_ab,,_my_cd", false},
+      {"DaemonHtmlCacheIgnoreCookie", "_my_ab,a=b", false},
+      {"DaemonHtmlCacheIgnoreCookie", "", false},
+  };
+  for (const auto& c : kValues) {
+    RecordingHandler rec;
+    EnvoyRewriteOptions options(&thread_system_);
+    EXPECT_EQ(c.loads, ApplyVHostCustomOption(&options, "example.com", c.key,
+                                              c.value, &rec))
+        << c.key << " " << c.value;
+    const int later =
+        rec.Count("takes effect with DaemonHtmlCache serve-cached-html") +
+        rec.Count("it runs as serve-variants");
+    EXPECT_EQ(c.loads ? 1 : 0, later) << c.key << " " << c.value;
+    EXPECT_EQ(c.loads ? 0 : 1, rec.Count("Failed to set option"))
+        << c.key << " " << c.value;
+  }
+  // A list sets every name, and a refused list sets none.
+  RecordingHandler rec;
+  EnvoyRewriteOptions options(&thread_system_);
+  ASSERT_TRUE(ApplyVHostCustomOption(&options, "example.com",
+                                     "DaemonHtmlCacheIgnoreCookie",
+                                     "_my_ab, _my_prefix*,_my_ab", &rec));
+  EXPECT_EQ("_my_ab _my_prefix*", options.daemon_html_cache_ignore_cookie());
+  EnvoyRewriteOptions refused(&thread_system_);
+  EXPECT_FALSE(ApplyVHostCustomOption(&refused, "example.com",
+                                      "DaemonHtmlCacheIgnoreCookie",
+                                      "_my_ab,a=b", &rec));
+  EXPECT_EQ("", refused.daemon_html_cache_ignore_cookie());
 }
 
 TEST_F(EnvoyVHostConfigTest, ExactMatch) {

@@ -15,7 +15,7 @@
   each server stores and serves, and the guide in
   `docs/html-cache-serve-variants.md` covers the steps and the limits. The value `serve-cached-html` is reserved
   for a later release:
-  setting it logs a warning and leaves the option as it was, so a configuration
+  setting it logs a warning and runs as `serve-variants`, so a configuration
   written for that release still loads.
 - **The HTML cache decision log names what the server configuration added.**
   With an optimizer library that publishes C API 1.14, a report-only line on

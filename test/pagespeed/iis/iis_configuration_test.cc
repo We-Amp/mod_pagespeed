@@ -309,8 +309,8 @@ TEST_F(IisConfigurationTest, HonorRequestFreshnessDefaultsOffAndParses) {
 }
 
 // DaemonHtmlCache takes serve-variants here too (inert on this server, like
-// report-only); the value reserved for a later release is refused, with the
-// file's own warning, and leaves the option as it was.
+// report-only); serve-cached-html, the mode a later release adds, is accepted
+// with a warning as serve-variants, in either line form.
 TEST_F(IisConfigurationTest, DaemonHtmlCacheModesParse) {
   IisRewriteOptions variants(nullptr);
   ParseAndGetConfig("pagespeed DaemonHtmlCache serve-variants\n", "",
@@ -318,13 +318,159 @@ TEST_F(IisConfigurationTest, DaemonHtmlCacheModesParse) {
   EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
             variants.daemon_html_cache());
 
-  IisRewriteOptions reserved(nullptr);
-  ParseAndGetConfig(
+  RecordingMessageHandler recorder;
+  ConfigurationFile* cf = CreateTestConfigFile(
       "pagespeed DaemonHtmlCache report-only\n"
       "pagespeed DaemonHtmlCache serve-cached-html\n",
-      "", &reserved);
-  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheReportOnly,
-            reserved.daemon_html_cache());
+      &recorder, global_config_, nullptr);
+  std::map<std::string, std::string> input;
+  input["config"] = "base";
+  IisRewriteOptions later(nullptr);
+  TestConfigFileGetConfig(cf, input, later);
+  TestConfigFileRelease(cf);
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
+            later.daemon_html_cache());
+  EXPECT_EQ(1, recorder.CountContaining("it runs as serve-variants"));
+  EXPECT_EQ(0, recorder.CountContaining("Error handling config line"));
+
+  // The legacy "name value" line form maps it the same way, with the same
+  // warning, and warns once for each of the settings.
+  RecordingMessageHandler legacy_recorder;
+  ConfigurationFile* legacy_cf = CreateTestConfigFile(
+      "DaemonHtmlCache serve-cached-html\n"
+      "DaemonHtmlCacheServeScope all\n"
+      "DaemonHtmlCacheMaxAge 60\n"
+      "DaemonHtmlCacheCredentialed explicit-public\n"
+      "DaemonHtmlCacheIgnoreCookies off\n"
+      "DaemonHtmlCacheIgnoreCookie _my_ab\n"
+      "DaemonHtmlCacheMaxAge 86401\n",
+      &legacy_recorder, global_config_, nullptr);
+  IisRewriteOptions legacy(nullptr);
+  TestConfigFileGetConfig(legacy_cf, input, legacy);
+  TestConfigFileRelease(legacy_cf);
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
+            legacy.daemon_html_cache());
+  EXPECT_EQ(1, legacy_recorder.CountContaining("it runs as serve-variants"));
+  EXPECT_EQ(5, legacy_recorder.CountContaining(
+                   "takes effect with DaemonHtmlCache serve-cached-html"));
+  for (const char* name :
+       {"'DaemonHtmlCacheServeScope'", "'DaemonHtmlCacheMaxAge'",
+        "'DaemonHtmlCacheCredentialed'", "'DaemonHtmlCacheIgnoreCookies'",
+        "'DaemonHtmlCacheIgnoreCookie'"}) {
+    EXPECT_EQ(1, legacy_recorder.CountContaining(name)) << name;
+  }
+  // The invalid value is refused with the parser's warning; the valid one
+  // stays.
+  EXPECT_EQ(1, legacy_recorder.CountContaining(
+                   "Failed to set option [DaemonHtmlCacheMaxAge]"));
+  EXPECT_EQ(60, legacy.daemon_html_cache_max_age_s());
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeScopeAll,
+            legacy.daemon_html_cache_serve_scope());
+}
+
+// The settings of the serve-cached-html mode load from pagespeed.config, every
+// value of each, with one warning each and no effect; an invalid value is
+// refused with the parser's warning and leaves the setting as it was.
+TEST_F(IisConfigurationTest, DaemonHtmlCacheLaterReleaseSettingsParse) {
+  RecordingMessageHandler recorder;
+  ConfigurationFile* cf = CreateTestConfigFile(
+      "pagespeed DaemonHtmlCacheServeScope agents\n"
+      "pagespeed DaemonHtmlCacheServeScope all\n"
+      "pagespeed DaemonHtmlCacheServeScope some\n"
+      "pagespeed DaemonHtmlCacheMaxAge 0\n"
+      "pagespeed DaemonHtmlCacheMaxAge 86400\n"
+      "pagespeed DaemonHtmlCacheMaxAge 86401\n"
+      "pagespeed DaemonHtmlCacheCredentialed anonymous-only\n"
+      "pagespeed DaemonHtmlCacheCredentialed explicit-public\n"
+      "pagespeed DaemonHtmlCacheCredentialed nobody\n"
+      "pagespeed DaemonHtmlCacheIgnoreCookies on\n"
+      "pagespeed DaemonHtmlCacheIgnoreCookies off\n"
+      "pagespeed DaemonHtmlCacheIgnoreCookies 2\n"
+      "pagespeed DaemonHtmlCacheIgnoreCookie _my_ab\n"
+      "pagespeed DaemonHtmlCacheIgnoreCookie _my_prefix*\n"
+      "pagespeed DaemonHtmlCacheIgnoreCookie a=b\n",
+      &recorder, global_config_, nullptr);
+  std::map<std::string, std::string> input;
+  input["config"] = "base";
+  IisRewriteOptions rwo(nullptr);
+  TestConfigFileGetConfig(cf, input, rwo);
+  TestConfigFileRelease(cf);
+
+  EXPECT_EQ(10, recorder.CountContaining(
+                    "takes effect with DaemonHtmlCache serve-cached-html"));
+  EXPECT_EQ(5, recorder.CountContaining("Error handling config line"));
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeScopeAll,
+            rwo.daemon_html_cache_serve_scope());
+  EXPECT_EQ(86400, rwo.daemon_html_cache_max_age_s());
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheCredentialedExplicitPublic,
+            rwo.daemon_html_cache_credentialed());
+  EXPECT_FALSE(rwo.daemon_html_cache_ignore_cookies());
+  EXPECT_EQ("_my_ab _my_prefix*", rwo.daemon_html_cache_ignore_cookie());
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheOff, rwo.daemon_html_cache());
+}
+
+// One line for every value and form of the later release's directives that
+// this release must load, in both line forms, and the lines just outside them
+// that it must refuse (logged and skipped, as for any directive here).
+TEST_F(IisConfigurationTest, DaemonHtmlCacheLaterReleaseLineTable) {
+  const struct {
+    const char* line;  // name and value
+    bool loads;
+  } kLines[] = {
+      {"DaemonHtmlCache serve-cached-html", true},
+      {"DaemonHtmlCache Serve-Cached-HTML", true},
+      {"DaemonHtmlCache serve-everything", false},
+      {"DaemonHtmlCacheServeScope agents", true},
+      {"DaemonHtmlCacheServeScope all", true},
+      {"DaemonHtmlCacheServeScope everyone", false},
+      {"DaemonHtmlCacheServeScope agents all", false},
+      {"DaemonHtmlCacheMaxAge 0", true},
+      {"DaemonHtmlCacheMaxAge 3600", true},
+      {"DaemonHtmlCacheMaxAge 86400", true},
+      {"DaemonHtmlCacheMaxAge 86401", false},
+      {"DaemonHtmlCacheMaxAge -1", false},
+      {"DaemonHtmlCacheCredentialed anonymous-only", true},
+      {"DaemonHtmlCacheCredentialed explicit-public", true},
+      {"DaemonHtmlCacheCredentialed anyone", false},
+      {"DaemonHtmlCacheIgnoreCookies on", true},
+      {"DaemonHtmlCacheIgnoreCookies off", true},
+      {"DaemonHtmlCacheIgnoreCookies maybe", false},
+      {"DaemonHtmlCacheIgnoreCookie _my_ab", true},
+      {"DaemonHtmlCacheIgnoreCookie _my_prefix*", true},
+      {"DaemonHtmlCacheIgnoreCookie _my_ab _my_cd", false},
+      {"DaemonHtmlCacheIgnoreCookie _my_ab,_my_cd", false},
+      {"DaemonHtmlCacheIgnoreCookie a=b", false},
+  };
+  std::map<std::string, std::string> input;
+  input["config"] = "base";
+  for (const auto& c : kLines) {
+    for (const char* form : {"pagespeed ", ""}) {
+      const std::string line = std::string(form) + c.line;
+      RecordingMessageHandler recorder;
+      ConfigurationFile* cf = CreateTestConfigFile(line + "\n", &recorder,
+                                                   global_config_, nullptr);
+      IisRewriteOptions rwo(nullptr);
+      TestConfigFileGetConfig(cf, input, rwo);
+      TestConfigFileRelease(cf);
+      const int later =
+          recorder.CountContaining(
+              "takes effect with DaemonHtmlCache serve-cached-html") +
+          recorder.CountContaining("it runs as serve-variants");
+      if (c.loads) {
+        EXPECT_EQ(1, later) << line;
+        EXPECT_EQ(0, recorder.CountContaining("Error handling config line"))
+            << line;
+        EXPECT_EQ(0, recorder.CountContaining("Failed to set option"))
+            << line;
+      } else {
+        EXPECT_EQ(0, later) << line;
+        // Logged: the line itself, or the setter's refusal.
+        EXPECT_LE(1, recorder.CountContaining(c.line) +
+                         recorder.CountContaining("Failed to set option"))
+            << line;
+      }
+    }
+  }
 }
 
 // A quoted value with spaces and a backslash path survives byte for byte:
