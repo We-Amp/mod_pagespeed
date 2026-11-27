@@ -1652,28 +1652,74 @@ eg_unreached() { # workflow file, 1 if it is a workflow_call file (rule d pins i
 # All its jobs are hosted, so the fleet event-guard form above does not apply;
 # the lane's own guard is checked instead (rule release-env):
 #   - on: is workflow_dispatch alone, and it has a module_tag input;
-#   - the event-guard job holds ALLOWED_REFS: "<eg_refs_for nginx-org-rebuild.yml>"
-#     (exact refs/heads refs, no glob, no tag) and the lines that refuse another
-#     event, an app or bot actor, another ref and a module_tag outside
-#     ^module-v[0-9]+\.[0-9]+\.[0-9]+$; it has no if: and no continue-on-error;
-#   - plan needs event-guard, and every other job needs plan;
-#   - each job with `environment: release` carries
-#     needs.plan.outputs.dry_run == 'false' in its if:;
+#   - the event-guard job is exactly the text of nginxorg_eg_expected (comment
+#     and blank lines aside): one step, no if: or continue-on-error at job or
+#     step level, ALLOWED_REFS from the ref table (eg_refs_for
+#     nginx-org-rebuild.yml: exact refs/heads refs, no glob, no tag), and the
+#     script that refuses another event, an app or bot actor, another ref and
+#     a module_tag outside ^module-v[0-9]+\.[0-9]+\.[0-9]+$;
+#   - plan needs event-guard and has no if: or continue-on-error; every other
+#     job needs plan;
+#   - each job with `environment: release` has a one-line if: of the form
+#     ${{ !cancelled() && <term> && ... }}, each term being
+#     needs.<job>.result == 'success' or needs.plan.outputs.dry_run == 'false'
+#     (which must be one of them), and nothing else: no ||, no other status
+#     function;
 #   - inputs.module_tag appears only as a step env value
 #     (`MODULE_TAG: ${{ inputs.module_tag }}`), never in a run: block, and
 #     github.ref_name appears nowhere (the release is module_tag, not the
 #     run's ref);
 #   - every checkout ref: is ${{ github.sha }}, so the plan, the approval and
 #     the signing jobs run the one commit the dispatch was made at.
-nginxorg_env_if_records() { # jobs with environment: release whose if: lacks the dry-run term
+nginxorg_eg_expected() { # ALLOWED_REFS value
+  # shellcheck disable=SC2016  # the text to match carries literal ${{ ... }} and $VAR
+  printf '%s\n' \
+    '  event-guard:' \
+    '    name: Event guard' \
+    '    runs-on: ubuntu-24.04' \
+    '    timeout-minutes: 5' \
+    '    steps:' \
+    "      - name: A person's dispatch on master for a module release tag" \
+    '        env:' \
+    '          EVENT: ${{ github.event_name }}' \
+    '          REF: ${{ github.ref }}' \
+    '          ACTOR: ${{ github.actor }}' \
+    '          TRIGGERING_ACTOR: ${{ github.triggering_actor }}' \
+    '          MODULE_TAG: ${{ inputs.module_tag }}' \
+    "          ALLOWED_REFS: \"$1\"" \
+    '        run: |' \
+    '          set -euo pipefail' \
+    '          [ "$EVENT" = workflow_dispatch ] || { echo "::error::only a dispatch runs this lane"; exit 1; }' \
+    '          for a in "$ACTOR" "$TRIGGERING_ACTOR"; do' \
+    '            case "$a" in *"[bot]") echo "::error::a dispatch or re-run by an app or bot account ($a) is not allowed"; exit 1 ;; esac' \
+    '          done' \
+    '          [ "$REF" = "$ALLOWED_REFS" ] || { echo "::error::dispatch this lane on master (--ref master -f module_tag=module-vX.Y.Z), not on '"'"'$REF'"'"'"; exit 1; }' \
+    '          [[ "$MODULE_TAG" =~ ^module-v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::module_tag must be module-vX.Y.Z"; exit 1; }' \
+    '          echo "dispatch on ${REF} for ${MODULE_TAG} by ${ACTOR} accepted"'
+}
+# Jobs with environment: release whose if: is not the pinned form, one per
+# line: "<job> <tab> <line> <tab> <if: text or -none->".
+nginxorg_env_if_records() {
   awk -v tab="${TAB}" '
-    function flush() { if (job != "" && env_line > 0 && !has_dry) printf "%s%s%d\n", job, tab, env_line }
+    function ok(c,   t, n, i, dry) {
+      if (c !~ /^\$\{\{ .* \}\}$/) return 0
+      c = substr(c, 5, length(c) - 7)
+      n = split(c, t, / && /)
+      if (t[1] != "!cancelled()") return 0
+      dry = 0
+      for (i = 2; i <= n; i++) {
+        if (t[i] == "needs.plan.outputs.dry_run == \047false\047") { dry = 1; continue }
+        if (t[i] !~ /^needs\.[A-Za-z0-9_-]+\.result == \047success\047$/) return 0
+      }
+      return dry
+    }
+    function flush() { if (job != "" && env_line > 0 && !ok(cond)) printf "%s%s%d%s%s\n", job, tab, env_line, tab, (cond == "" ? "-none-" : cond) }
     /^[[:space:]]*#/ { next }
     /^jobs:[[:space:]]*$/ { injobs=1; next }
     injobs && /^[^[:space:]#]/ { flush(); injobs=0; job="" }
-    injobs && /^  [^[:space:]]/ { flush(); job=$1; sub(/:$/, "", job); env_line=0; has_dry=0; next }
+    injobs && /^  [^[:space:]]/ { flush(); job=$1; sub(/:$/, "", job); env_line=0; cond=""; next }
     injobs && /^    environment:[[:space:]]*["\047]?release["\047]?[[:space:]]*$/ { env_line=NR }
-    injobs && /^    if:/ { if (index($0, "needs.plan.outputs.dry_run == \047false\047")) has_dry=1 }
+    injobs && /^    ["\047]?if["\047]?[[:space:]]*:/ { cond=$0; sub(/^[^:]*:[[:space:]]*/, "", cond); sub(/[[:space:]]+$/, "", cond) }
     END { flush() }
   ' "$1"
 }
@@ -1684,36 +1730,18 @@ for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
   ng_err() { err "${wf}: $* (rule release-env)"; }
   [ "$(on_triggers "${wf}" | tr '\n' ' ')" = "workflow_dispatch " ] || ng_err "on: must be workflow_dispatch alone"
   grep -qE '^      module_tag:[[:space:]]*$' "${wf}" || ng_err "the dispatch needs a module_tag input"
-  ng_eg="$(awk '/^(  )?#/ { next } /^  [A-Za-z0-9_-]+:[ ]*$/ { inj = ($1 == "event-guard:") } /^[^[:space:]]/ { inj = 0 } inj { print }' "${wf}")"
+  case "${ng_refs}" in *[*?[]*|*refs/tags/*|"") ng_err "ALLOWED_REFS of the lane must be exact refs/heads refs" ;; esac
+  # The job's text, comment lines, blank lines and the runner pin note aside.
+  ng_eg="$(awk '/^  [A-Za-z0-9_-]+:[ ]*$/ { inj = ($1 == "event-guard:") } /^[^[:space:]#]/ { inj = 0 } inj && !/^[[:space:]]*#/ && !/^[[:space:]]*$/ { print }' "${wf}")"
   if [ -z "${ng_eg}" ]; then
     ng_err "the lane needs the job 'event-guard'"
-  else
-    # shellcheck disable=SC2016  # the text to match carries literal ${{ ... }} and $VAR
-    for ng_line in \
-      "          ALLOWED_REFS: \"${ng_refs}\"" \
-      '          EVENT: ${{ github.event_name }}' \
-      '          REF: ${{ github.ref }}' \
-      '          ACTOR: ${{ github.actor }}' \
-      '          TRIGGERING_ACTOR: ${{ github.triggering_actor }}' \
-      '          MODULE_TAG: ${{ inputs.module_tag }}' \
-      '          set -euo pipefail' \
-      '          [ "$EVENT" = workflow_dispatch ] || { echo "::error::only a dispatch runs this lane"; exit 1; }' \
-      '          for a in "$ACTOR" "$TRIGGERING_ACTOR"; do' \
-      '            case "$a" in *"[bot]") echo "::error::a dispatch or re-run by an app or bot account ($a) is not allowed"; exit 1 ;; esac'; do
-      printf '%s\n' "${ng_eg}" | grep -qxF -- "${ng_line}" || ng_err "the event-guard job lacks the line '${ng_line#"${ng_line%%[! ]*}"}'"
-    done
-    # shellcheck disable=SC2016
-    printf '%s\n' "${ng_eg}" | grep -qE '^          \[ "\$REF" = "\$ALLOWED_REFS" \] \|\| \{ .*exit 1; \}$' \
-      || ng_err "the event-guard job must refuse any ref but ALLOWED_REFS ([ \"\$REF\" = \"\$ALLOWED_REFS\" ] || { ...; exit 1; })"
-    # shellcheck disable=SC2016
-    printf '%s\n' "${ng_eg}" | grep -qxF -e '          [[ "$MODULE_TAG" =~ ^module-v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::module_tag must be module-vX.Y.Z"; exit 1; }' \
-      || ng_err "the event-guard job must refuse a module_tag outside ^module-v[0-9]+\\.[0-9]+\\.[0-9]+\$"
-    case "${ng_refs}" in *[*?[]*|*refs/tags/*|"") ng_err "ALLOWED_REFS of the lane must be exact refs/heads refs" ;; esac
-    if printf '%s\n' "${ng_eg}" | grep -qE '^    (if|continue-on-error|"if"|'"'"'if'"'"')[[:space:]]*:'; then
-      ng_err "the event-guard job takes no if: or continue-on-error"
-    fi
+  elif [ "${ng_eg}" != "$(nginxorg_eg_expected "${ng_refs}")" ]; then
+    ng_err "the event-guard job must match its pinned text exactly (nginxorg_eg_expected): one step, no if: or continue-on-error, no other line"
   fi
   ng_jobs="$(job_records "${wf}")"
+  if printf '%s\n' "${ng_jobs}" | awk -F"${TAB}" '$1=="KEY" && $2=="plan" && ($3=="if" || $3=="continue-on-error") {f=1} END {exit !f}'; then
+    ng_err "the plan job takes no if: or continue-on-error: it runs only after a passed event guard"
+  fi
   while IFS="${TAB}" read -r ng_kind ng_job _; do
     [ "${ng_kind}" = JOB ] || continue
     [ "${ng_job}" != event-guard ] || continue
@@ -1724,9 +1752,9 @@ for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
   done <<EOT
 ${ng_jobs}
 EOT
-  while IFS="${TAB}" read -r ng_job ng_l; do
+  while IFS="${TAB}" read -r ng_job ng_l ng_c; do
     [ -n "${ng_job}" ] || continue
-    err "${wf}:${ng_l}: job '${ng_job}' names environment release but its if: lacks needs.plan.outputs.dry_run == 'false' (rule release-env)"
+    err "${wf}:${ng_l}: job '${ng_job}' names environment release but its if: is not \${{ !cancelled() && <needs.<job>.result == 'success' terms> && needs.plan.outputs.dry_run == 'false' }} (got ${ng_c}) (rule release-env)"
   done <<EOT
 $(nginxorg_env_if_records "${wf}")
 EOT

@@ -1187,7 +1187,10 @@ container (`install/nginx/build_module_in_container.sh`,
 Bazel files, the patches, `net/instaweb/public/VERSION`) is the tarball's,
 extracted into a directory of its own; the driver copies only
 `release_nginx.sh` and its three helpers from the run's commit, and the
-gates and tests from that commit only read the built packages. A tree that cannot build the lane's
+gates and tests from that commit only read the built packages. The driver's
+own part of each leg is the run's commit's too: the inline container script
+(including the LASTCHANGE pin of the package revision), the choice of each
+leg's image and the environment the leg runs with. A tree that cannot build the lane's
 version shape fails the version check before anything is published.
 
 The SLSA provenance of a lane release names `refs/heads/master`, the ref the
@@ -1197,7 +1200,11 @@ the `release` environment's deployment policy to admit `refs/heads/master`
 besides the `module-v*` tags. A dry run never reaches the environment:
 `sign-checksums` and `create-release` are skipped by their `if:` before the
 environment is evaluated, and the provenance call runs only after
-`sign-checksums`.
+`sign-checksums`. "Re-run failed jobs" does not re-run an `event-guard` that
+passed, so the actor of a re-run is not checked again there; the required
+reviewers of the `release` environment are the check on that path.
+`create-release` checks again, before it creates anything, that
+`module_tag` (an annotated tag dereferenced) still names `source_sha`.
 
 ## Tooling
 

@@ -15,9 +15,15 @@ permissions:
   contents: read
 jobs:
   event-guard:
+    name: Event guard
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
-      - env:
+      # The shape gate pins this job (tools/ci/check-workflow-shape.sh, rule
+      # release-env): master only, a person only, module_tag by its grammar.
+      - name: A person's dispatch on master for a module release tag
+        env:
           EVENT: ${{ github.event_name }}
           REF: ${{ github.ref }}
           ACTOR: ${{ github.actor }}
@@ -30,7 +36,8 @@ jobs:
           for a in "$ACTOR" "$TRIGGERING_ACTOR"; do
             case "$a" in *"[bot]") echo "::error::a dispatch or re-run by an app or bot account ($a) is not allowed"; exit 1 ;; esac
           done
-          [ "$REF" = "$ALLOWED_REFS" ] || { echo "::error::dispatch on master"; exit 1; }
+          [ "$REF" = "$ALLOWED_REFS" ] || { echo "::error::dispatch this lane on master (--ref master -f module_tag=module-vX.Y.Z), not on '$REF'"; exit 1; }
+          echo "dispatch on ${REF} for ${MODULE_TAG} by ${ACTOR} accepted"
   plan:
     needs: event-guard
     runs-on: ubuntu-24.04

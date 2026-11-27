@@ -30,7 +30,14 @@
 # test/package-test) comes from the run's commit, so the leg table, the gates
 # and the tests can change without a module release; the packages are built by
 # the build scripts, Bazel files and patches of the release's tarball, never by
-# those of the run's commit.
+# those of the run's commit. The driver's own part of each leg also comes from
+# the run's commit: the inline container script (with the LASTCHANGE pin of
+# the package revision), the choice of each leg's image and the environment
+# the leg runs with.
+#
+# Re-runs. "Re-run failed jobs" does not re-run an event-guard job that
+# passed, so the actor of a re-run is not checked again there; the required
+# reviewers of the `release` environment are the check on that path.
 #
 # Every job runs on a GitHub-hosted runner. Only sign-checksums and
 # create-release, in the protected `release` environment and only when dry_run
@@ -879,6 +886,14 @@ jobs:
           # been published while this run waited for its approvals).
           latest="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)"
           [ "$latest" = "$MODULE_TAG" ] || { echo "::error::${MODULE_TAG} is no longer the current module release (latest is ${latest}); nothing was released"; exit 1; }
+          # module_tag still names the commit the plan verified (an annotated
+          # tag dereferenced), so the release cannot follow a moved tag.
+          obj="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${MODULE_TAG}" --jq '"\(.object.type) \(.object.sha)"')"
+          case "$obj" in
+            "tag "*) commit="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${obj#tag }" --jq '"\(.object.type) \(.object.sha)"')" ;;
+            *) commit="$obj" ;;
+          esac
+          [ "$commit" = "commit ${SOURCE_SHA}" ] || { echo "::error::${MODULE_TAG} now points at '${commit}', not the verified source commit ${SOURCE_SHA}; nothing was released"; exit 1; }
           if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${LANE_TAG}" >/dev/null 2>&1; then
             echo "::error::the tag ${LANE_TAG} exists; a published lane release is never replaced"; exit 1
           fi
