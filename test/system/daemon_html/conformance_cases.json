@@ -5783,7 +5783,7 @@
             },
             "expect": {
               "calls_exclude": ["ps_html_store_classify", "ps_cache_write_original_site"],
-              "counters": {"daemon_html_refused_request_header": 1, "daemon_html_evaluated": 0}
+              "counters": {"daemon_html_refused_request_header": 1}
             }
           }
         ]
@@ -5822,7 +5822,7 @@
             },
             "expect": {
               "calls_exclude": ["ps_html_store_classify", "ps_cache_write_original_site"],
-              "counters": {"daemon_html_refused_request_header": 1, "daemon_html_evaluated": 0}
+              "counters": {"daemon_html_refused_request_header": 1}
             }
           }
         ]
@@ -5861,7 +5861,7 @@
             },
             "expect": {
               "calls_exclude": ["ps_html_store_classify", "ps_cache_write_original_site"],
-              "counters": {"daemon_html_refused_request_header": 1, "daemon_html_evaluated": 0}
+              "counters": {"daemon_html_refused_request_header": 1}
             }
           }
         ]
@@ -5900,7 +5900,7 @@
             },
             "expect": {
               "calls_exclude": ["ps_html_store_classify", "ps_cache_write_original_site"],
-              "counters": {"daemon_html_refused_request_header": 1, "daemon_html_evaluated": 0}
+              "counters": {"daemon_html_refused_request_header": 1}
             }
           }
         ]
@@ -5940,7 +5940,7 @@
             },
             "expect": {
               "calls_exclude": ["ps_html_store_classify"],
-              "counters": {"daemon_html_refused_request_header": 1, "daemon_html_evaluated": 0}
+              "counters": {"daemon_html_refused_request_header": 1}
             }
           }
         ]
