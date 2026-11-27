@@ -357,7 +357,10 @@ class DaemonHtmlEngineTest : public testing::Test {
 
   // Serves and captures one request carrying only Cookie: _ga=GA1.2.3, with
   // the library refusing the store: HAS_COOKIE on the serve request and on
-  // every store classification, and nothing written.
+  // every store classification, and nothing written.  The facts carry only
+  // has_cookie today; once the cookie text reaches the engine, this request
+  // must carry "_ga=GA1.2.3" itself, or an empty cookie string decides the
+  // row for the wrong reason.
   void ExpectAnalyticsCookieStillCounts(DaemonHtmlEngine* engine) {
     InlinePort port;
     DaemonHtmlRequestFacts facts = MarkdownRequest();
@@ -377,7 +380,9 @@ class DaemonHtmlEngineTest : public testing::Test {
     EXPECT_EQ(0, CallsOf("ps_cache_write_headers_sidecar_site"));
   }
 
-  // The store request's HAS_COOKIE bit (PS_HTML_STORE_REQUEST_HAS_COOKIE).
+  // The store request's HAS_COOKIE bit (PS_HTML_STORE_REQUEST_HAS_COOKIE),
+  // the engine's own kStoreRequestHasCookie; the binding names no constant
+  // for it.
   static constexpr uint32_t kStoreRequestHasCookieBit = 4u;
   static constexpr char kBody[] = "<html><body>hello</body></html>";
   const DaemonHtmlHeaderLines kOrigin = {{"Content-Type", "text/html"},
@@ -1070,6 +1075,7 @@ TEST_F(DaemonHtmlEngineTest, ANonDefaultIgnoreCookieSettingWarnsOnce) {
   abi_.mutable_injection()->has_set_15 = true;
   for (int which = 0; which < 2; ++which) {
     const int before = handler_.MessagesOfType(kWarning);
+    const size_t mark = Logged().size();
     config_.ignore_cookies = which != 0;
     config_.ignore_cookie.clear();
     if (which != 0) config_.ignore_cookie.push_back("_my_ab");
@@ -1079,9 +1085,12 @@ TEST_F(DaemonHtmlEngineTest, ANonDefaultIgnoreCookieSettingWarnsOnce) {
     Capture(engine.get(), &port, kOrigin, kOrigin, MarkdownRequest());
     engine->OnPurgePollTick();
     EXPECT_EQ(before + 1, handler_.MessagesOfType(kWarning)) << which;
-    EXPECT_NE(GoogleString::npos, Logged().find("later release")) << which;
+    // This pass's own message, not the previous pass's.
+    const GoogleString logged = Logged().substr(mark);
+    EXPECT_NE(GoogleString::npos, logged.find("later release")) << which;
     EXPECT_NE(GoogleString::npos,
-              Logged().find("every cookie still prevents storing"))
+              logged.find("an analytics cookie included, still counts as a "
+                          "cookie"))
         << which;
   }
 }

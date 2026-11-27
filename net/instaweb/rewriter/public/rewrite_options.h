@@ -289,8 +289,9 @@ class RewriteOptions {
   // Serve-variants is the mode that stores HTML pages and serves their
   // Markdown copies to requests that ask for one; a server that does not
   // store and serve yet runs it exactly as report-only.  Serve-cached-html
-  // also serves a stored page itself, within DaemonHtmlCacheServeScope and
-  // DaemonHtmlCacheMaxAge; it needs optimizer C API 1.15 and runs as
+  // is to also serve a stored page itself, within DaemonHtmlCacheServeScope
+  // and DaemonHtmlCacheMaxAge (not built yet: it serves the Markdown copies
+  // as serve-variants does); it needs optimizer C API 1.15 and runs as
   // serve-variants with an older library.  The modes are ordered: a mode at
   // or after serve-variants stores and serves Markdown copies.
   enum DaemonHtmlCacheMode {

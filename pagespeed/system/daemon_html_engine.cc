@@ -1014,7 +1014,9 @@ void DaemonHtmlEngine::NoteIgnoreCookieSettingsInert() {
       kWarning,
       "DaemonHtmlCacheIgnoreCookies and DaemonHtmlCacheIgnoreCookie take "
       "effect in a later release; they are accepted and have no effect, and "
-      "every cookie still prevents storing and serving a page");
+      "every cookie, an analytics cookie included, still counts as a cookie "
+      "(the credentialed policy, or below C API 1.15 the earlier cookie rule, "
+      "then decides)");
 }
 
 const char* DaemonHtmlEngine::ServeModeName() const {

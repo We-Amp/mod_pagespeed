@@ -1485,9 +1485,10 @@ void RewriteOptions::AddProperties() {
                   "serve-variants, which stores HTML pages to serve their "
                   "Markdown copies and, on a server that does not serve "
                   "them yet, runs as report-only; or serve-cached-html, "
-                  "which also serves a stored page itself and runs as "
-                  "serve-variants with an optimizer library before C API "
-                  "1.15.",
+                  "which serves the Markdown copies as serve-variants does "
+                  "(serving a stored page itself comes in a later release) "
+                  "and runs as serve-variants with an optimizer library "
+                  "before C API 1.15.",
                   true);
   properties_->property(properties_->size() - 1)
       ->set_do_not_use_for_signature_computation(true);
@@ -1498,7 +1499,8 @@ void RewriteOptions::AddProperties() {
                   &RewriteOptions::daemon_html_cache_serve_scope_, "dhcss",
                   kDaemonHtmlCacheServeScope, kServerScope,
                   "Which requests DaemonHtmlCache serve-cached-html serves a "
-                  "stored page to: agents (default) or all.",
+                  "stored page to: agents (default) or all. Applies to the "
+                  "stored-page answer, which a later release adds.",
                   true);
   properties_->property(properties_->size() - 1)
       ->set_do_not_use_for_signature_computation(true);
@@ -1507,7 +1509,9 @@ void RewriteOptions::AddProperties() {
                   "The longest a page stored by DaemonHtmlCache "
                   "serve-cached-html is served, in seconds, 0 to 86400 "
                   "(default 3600; 0 means no cap). It only shortens the "
-                  "lifetime the origin gives a page, never extends it.",
+                  "lifetime the origin gives a page, never extends it. "
+                  "Applies to the stored-page answer, which a later release "
+                  "adds.",
                   true);
   properties_->property(properties_->size() - 1)
       ->set_do_not_use_for_signature_computation(true);
@@ -1525,7 +1529,8 @@ void RewriteOptions::AddProperties() {
                   "Whether DaemonHtmlCache ignores the built-in list of "
                   "analytics cookies (default on). Accepted and checked "
                   "now; takes effect in a later release, and until then "
-                  "every cookie prevents storing a page.",
+                  "every cookie, an analytics cookie included, counts as a "
+                  "cookie.",
                   true);
   properties_->property(properties_->size() - 1)
       ->set_do_not_use_for_signature_computation(true);
@@ -1535,7 +1540,8 @@ void RewriteOptions::AddProperties() {
                   "A cookie name, or a prefix ending in *, that "
                   "DaemonHtmlCache also ignores; repeatable. Accepted and "
                   "checked now; takes effect in a later release, and until "
-                  "then every cookie prevents storing a page.",
+                  "then every cookie, an analytics cookie included, counts "
+                  "as a cookie.",
                   true);
   properties_->property(properties_->size() - 1)
       ->set_do_not_use_for_signature_computation(true);
