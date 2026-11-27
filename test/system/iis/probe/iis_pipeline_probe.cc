@@ -262,7 +262,8 @@ std::string ServerVariable(IHttpContext* ctx, PCSTR name) {
 bool ReadFileChunk(const HTTP_DATA_CHUNK& c, std::string* out) {
   HANDLE h = c.FromFileHandle.FileHandle;
   if (h == nullptr || h == INVALID_HANDLE_VALUE) return false;
-  unsigned long long offset = c.FromFileHandle.ByteRange.StartingOffset.QuadPart;
+  unsigned long long offset =
+      c.FromFileHandle.ByteRange.StartingOffset.QuadPart;
   unsigned long long length = c.FromFileHandle.ByteRange.Length.QuadPart;
   if (length == HTTP_BYTE_RANGE_TO_EOF) {
     LARGE_INTEGER size;
@@ -809,7 +810,8 @@ class Probe : public CHttpModule {
     if (more) return;
     const std::string name = StoredName(ctx);
     if (name.empty() || capture_failed_) {
-      LogLine(id_, "act.capture", capture_failed_ ? "unreadable chunk" : "no name");
+      LogLine(id_, "act.capture",
+              capture_failed_ ? "unreadable chunk" : "no name");
       return;
     }
     const std::string base = "C:\\pipeprobe\\stored\\" + name;
@@ -917,9 +919,12 @@ extern "C" __declspec(dllexport) HRESULT __stdcall RegisterModule(
   mod->letter = n > 0 ? mod->name[n - 1] : '?';
   // F, G and H register the send notification at the other end of the
   // order.
-  mod->send_first = (mod->letter == 'F' || mod->letter == 'G' || mod->letter == 'H');
+  mod->send_first =
+      (mod->letter == 'F' || mod->letter == 'G' || mod->letter == 'H');
   mod->id = info->GetId();
-  if (mod->letter >= 'A' && mod->letter <= 'Z') g_ids[mod->letter - 'A'] = mod->id;
+  if (mod->letter >= 'A' && mod->letter <= 'Z') {
+    g_ids[mod->letter - 'A'] = mod->id;
+  }
   t_mod = mod;
   CreateDirectoryA("C:\\pipeprobe", nullptr);
   CreateDirectoryA("C:\\pipeprobe\\log", nullptr);
