@@ -89,6 +89,7 @@ SYSTEM_CORE_HDRS = [
 
 SYSTEM_CORE_DEPS = [
     ":daemon_health",
+    ":daemon_html_purge_observer",
     ":daemon_reader",
     ":daemon_site_filter",
     ":ipro_recorder",

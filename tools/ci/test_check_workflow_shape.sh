@@ -93,11 +93,46 @@ expect_bad bad-release-env-no-candidate 'rule release-env'
 expect_bad bad-release-env-no-dry-run 'rule release-env'
 expect_bad bad-release-env-no-rehearsal 'rule release-env'
 expect_bad bad-release-env-no-if 'rule release-env'
+# release-env, the nginx.org lane: a dispatch on master for module_tag, pinned.
+expect_good good-nginxorg-lane
+for d in tag-ref no-ref-check no-tag-check bot-allowed push no-dry-run ref-name input-in-run checkout-master skips-plan \
+  plan-if-always plan-if-not-cancelled guard-step-if guard-step-coe guard-extra-step allowed-refs-reassigned dry-run-or-true release-if-always; do
+  expect_bad "bad-nginxorg-${d}" 'rule release-env'
+done
 # adopt-shape: the adoption conditions, the artifacts an adopting run holds
 # and the adopt job's own uploads match tools/ci/release_adopt.py.
 expect_good good-adopt
 expect_bad bad-adopt-ungated 'adopt-shape'
 expect_bad bad-adopt-not-in-schema 'adopt-shape'
+expect_bad bad-adopt-provenance-unnamed 'adopt-shape'
+# slsa: the SLSA generic generator, by version tag, from a release lane, with
+# upload-assets false; its call job may hold the generator's write permissions.
+expect_good good-slsa
+expect_bad bad-slsa-sha-ref '(slsa)'
+expect_bad bad-slsa-other-builder '(slsa)'
+expect_bad bad-slsa-upload '(slsa)'
+expect_bad bad-slsa-extra-permission '(slsa)'
+expect_bad bad-slsa-continue-on-error '(slsa)'
+expect_bad bad-slsa-secrets-block '(slsa)'
+expect_bad bad-slsa-extra-with '(slsa)'
+expect_bad bad-slsa-permissions-flow '(slsa)'
+expect_bad bad-slsa-not-release-lane '(slsa)'
+expect_bad bad-slsa-caller-not-release-lane '(slsa)'
+expect_bad bad-slsa-secret 'rule g'
+# env-tag-ref: a job of the release environment refuses a branch ref in its if:.
+expect_good good-env-tag-ref
+expect_good good-env-tag-ref-nginxorg
+for d in module-no-ref module-no-tag mapping expression other-workflow nginxorg-unguarded or always \
+  case case-quoted defaults custom-shell negated nginxorg-defaults nginxorg-pin-elsewhere inverted; do
+  expect_bad "bad-env-tag-ref-${d}" 'rule env-tag-ref'
+done
+# repo-ref: this repository by @master, or by @ci-dev only under refs/heads/ci-dev.
+expect_good good-repo-ref-ci-dev
+expect_good good-repo-ref-reusable
+for d in ci-dev-unguarded ci-dev-or ci-dev-negated ci-dev-always ci-dev-not-anchored ci-dev-inverted reusable-ci-dev reusable-other-branch case-owner step-action; do
+  expect_bad "bad-repo-ref-${d}" 'rule repo-ref'
+done
+expect_bad bad-write-call-job 'rule f'
 expect_bad bad-adopt-download 'adopt-shape'
 expect_bad bad-adopt-pattern 'adopt-shape'
 expect_bad bad-adopt-uploads 'adopt-shape'

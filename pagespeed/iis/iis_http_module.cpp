@@ -37,6 +37,7 @@
 #include "pagespeed/system/in_place_resource_recorder.h"
 #include "pagespeed/system/ipro_record_gate.h"
 #include "pagespeed/system/serve_host_names.h"
+#include "pagespeed/system/module_entity_tags.h"
 #include "pagespeed/system/site_cache_fragment.h"
 
 #include "pagespeed/kernel/base/stack_buffer.h"
@@ -51,6 +52,10 @@
 #include "pagespeed/iis/iis_daemon_record.h"
 #include "net/instaweb/public/global_constants.h"
 #include "pagespeed/iis/iis_daemon_serve.h"
+#include "pagespeed/iis/iis_daemon_html_capture.h"
+#include "pagespeed/iis/iis_daemon_html_serve.h"
+#include "pagespeed/iis/iis_registration.h"
+#include "pagespeed/iis/iis_final_view_module.h"
 #include "pagespeed/iis/iis_url_port.h"
 #include "pagespeed/iis/iis_entity_chunk.h"
 #include "net/instaweb/rewriter/public/rewrite_stats.h"
@@ -422,6 +427,37 @@ namespace net_instaweb
 	}
 
 	REQUEST_NOTIFICATION_STATUS
+		IisHttpModule::OnBeginRequest(IN IHttpContext * pHttpContext, IN IHttpEventProvider * pProvider)
+	{
+		UNREFERENCED_PARAMETER(pProvider);
+		IHttpRequest* request = pHttpContext->GetRequest();
+		StringPieceVector if_none_match, if_modified_since;
+		USHORT length = 0;
+		PCSTR value = request->GetHeader(HttpAttributes::kIfNoneMatch, &length);
+		if (value != nullptr && length > 0) {
+			if_none_match.push_back(StringPiece(value, length));
+		}
+		length = 0;
+		value = request->GetHeader(HttpAttributes::kIfModifiedSince, &length);
+		if (value != nullptr && length > 0) {
+			if_modified_since.push_back(StringPiece(value, length));
+		}
+		if (StashClientConditionals(if_none_match, if_modified_since,
+		                            &client_conditionals_)) {
+			// Both are removed or the request goes no further: a module tag
+			// must never reach a handler.  Only a field that is present is
+			// deleted.
+			if (FAILED(request->DeleteHeader(HttpAttributes::kIfNoneMatch)) ||
+			    (!if_modified_since.empty() &&
+			     FAILED(request->DeleteHeader(HttpAttributes::kIfModifiedSince)))) {
+				pHttpContext->GetResponse()->SetStatus(500, "Internal Server Error");
+				return RQ_NOTIFICATION_FINISH_REQUEST;
+			}
+		}
+		return RQ_NOTIFICATION_CONTINUE;
+	}
+
+	REQUEST_NOTIFICATION_STATUS
 		IisHttpModule::OnResolveRequestCache(IN IHttpContext * pHttpContext, IN IHttpEventProvider * pProvider)
 	{
 		if (!has_own_iispeed_config(pHttpContext))
@@ -788,6 +824,308 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		}
 	}
 
+	// DaemonHtmlCache: the request target as the client sent it, path and
+	// query, with the scheme and authority of an absolute-form target taken
+	// off (the policy reads a path).
+	static GoogleString IisRawRequestTarget(const HTTP_REQUEST* raw)
+	{
+		if (raw == nullptr || raw->pRawUrl == nullptr || raw->RawUrlLength == 0) {
+			return "/";
+		}
+		StringPiece target(raw->pRawUrl, raw->RawUrlLength);
+		if (target[0] != '/') {
+			const size_t scheme_end = target.find("://");
+			const size_t path_start = scheme_end == StringPiece::npos
+				? StringPiece::npos
+				: target.find('/', scheme_end + 3);
+			if (path_start == StringPiece::npos) {
+				return "/";
+			}
+			target.remove_prefix(path_start);
+		}
+		return target.as_string();
+	}
+
+	// DaemonHtmlCache: one request, as the HTML cache engine reads it.
+	// Taken after IIS authentication and authorization (at
+	// RESOLVE_REQUEST_CACHE for a serve, at the send for a store), for the
+	// reason the in-place recording takes its authorization fact there.
+	// `options` are the request's resolved options.  `at_store` adds the
+	// store's own agreement test: a request IIS handed to a handler with
+	// path info after the file (PATH_INFO beyond SCRIPT_NAME) names a URL
+	// the cache key does not.
+	static void BuildIisDaemonHtmlFacts(IHttpContext* http_context,
+	                                    IisInnerRequestContext* inner,
+	                                    const RewriteOptions* options,
+	                                    bool at_store,
+	                                    DaemonHtmlRequestFacts* facts)
+	{
+		IHttpRequest* request = http_context->GetRequest();
+		const HTTP_REQUEST* raw = request->GetRawHttpRequest();
+		PCSTR method = request->GetHttpMethod();
+		facts->method = method == nullptr ? "" : method;
+		facts->scheme = (raw != nullptr && raw->pSslInfo != nullptr) ? "https" : "http";
+		// The target as the client sent it, taken before any module could
+		// rewrite the request.  When it cannot be read, the request is never
+		// stored or served: its current target may be another module's.
+		PCWSTR pristine = nullptr;
+		DWORD pristine_length = 0;
+		const bool pristine_read =
+			SUCCEEDED(http_context->GetRootContext()->GetServerVariable(
+				kIisPristineTargetVariable, &pristine, &pristine_length)) &&
+			IisPristineTarget(pristine, pristine_length, &facts->path);
+		if (!pristine_read) {
+			facts->path = IisRawRequestTarget(raw);
+		}
+		// The host of the URL this module keys the request on, with the
+		// port the request came in on unless it is the scheme's default: the
+		// URL an admin purge on this port names, so a purge finds the entry
+		// on a site bound to another port.  The port is the connection's,
+		// never one a request header could remove.
+		facts->host = inner->gurl()->Host().as_string();
+		if (facts->host.find(':') != GoogleString::npos) {
+			facts->host = StrCat("[", facts->host, "]");
+		}
+		const int local_port = inner->local_port();
+		if (local_port > 0 &&
+			!(facts->scheme == "https" && local_port == 443) &&
+			!(facts->scheme == "http" && local_port == 80)) {
+			StrAppend(&facts->host, ":", IntegerToString(local_port));
+		}
+		USHORT length = 0;
+		PCSTR value = nullptr;
+		facts->site = IisRequestSiteId(
+			RequestIisSiteId(http_context),
+			inner->process_context()->site_id(),
+			inner->server_context()->global_options()->cache_fragment());
+		// The server and this module read the path alike, and the request
+		// spells it the one way the cache keys it (iis_daemon_html_serve.h).
+		GoogleString iis_path;
+		facts->url_agreed = pristine_read &&
+			IisInPlaceUrlAgreesForRequest(http_context, *inner->gurl(), &iis_path) &&
+			IisHtmlCachePathIsCanonical(facts->path);
+		if (facts->url_agreed && at_store) {
+			PCWSTR script = nullptr;
+			DWORD script_length = 0;
+			PCWSTR path_info = nullptr;
+			DWORD path_info_length = 0;
+			if (SUCCEEDED(http_context->GetServerVariable("SCRIPT_NAME", &script, &script_length)) &&
+				SUCCEEDED(http_context->GetServerVariable("PATH_INFO", &path_info, &path_info_length)) &&
+				script != nullptr && path_info != nullptr &&
+				path_info_length > script_length) {
+				facts->url_agreed = false;
+			}
+		}
+		const IisAuthFacts auth = ReadIisAuthFacts(http_context);
+		facts->has_authorization = auth.has_authorization_header;
+		facts->authenticated_user = auth.user_authenticated ||
+			auth.has_remote_user || auth.has_client_certificate;
+		facts->has_cookie = request->GetHeader("Cookie") != nullptr ||
+			request->GetHeader("Cookie2") != nullptr;
+		length = 0;
+		value = request->GetHeader(HttpHeaderCacheControl, &length);
+		if (value != nullptr) {
+			facts->has_cache_control = true;
+			facts->cache_control.assign(value, length);
+		}
+		length = 0;
+		value = request->GetHeader(HttpHeaderPragma, &length);
+		if (value != nullptr) {
+			facts->has_pragma = true;
+			facts->pragma.assign(value, length);
+		}
+		length = 0;
+		value = request->GetHeader(HttpHeaderAccept, &length);
+		if (value != nullptr) {
+			facts->accept_lines.emplace_back(value, length);
+		}
+		// The conditionals as they arrived (the begin-request notification
+		// may have removed a module tag from the request since).
+		CopyClientConditionals(inner->client_conditionals(), facts);
+		facts->has_if_match = request->GetHeader(HttpHeaderIfMatch) != nullptr;
+		facts->has_if_unmodified_since =
+			request->GetHeader(HttpHeaderIfUnmodifiedSince) != nullptr;
+		facts->has_range = request->GetHeader(HttpHeaderRange) != nullptr;
+		facts->has_if_range = request->GetHeader(HttpHeaderIfRange) != nullptr;
+		facts->has_origin = request->GetHeader("Origin") != nullptr;
+		if (options != nullptr) {
+			facts->options_enabled_and_allowed =
+				options->enabled() && options->IsAllowed(inner->gurl()->Spec());
+			if (OptionContext::Compute(*options, &facts->option_context,
+				&facts->option_signature) != OptionContextStatus::kOk) {
+				facts->option_context.clear();
+				facts->option_signature.clear();
+			}
+		}
+		// When the request arrived, stamped before any other module ran; this
+		// context's creation, later, when that cannot be read.
+		facts->capture_start_ms = inner->created_ms();
+		PCWSTR start = nullptr;
+		DWORD start_length = 0;
+		int64 start_ms = 0;
+		if (SUCCEEDED(http_context->GetRootContext()->GetServerVariable(
+				kIisRequestStartVariable, &start, &start_length)) &&
+			IisParseRequestStartMs(start, start_length, &start_ms) &&
+			start_ms <= facts->capture_start_ms) {
+			facts->capture_start_ms = start_ms;
+		}
+	}
+
+	// DaemonHtmlCache: what the engine runs a store's volume work on.  An IIS
+	// request thread may block, so it runs inline, on the thread that
+	// releases the request.  Stateless; one per process.
+	class IisDaemonHtmlInlineRunner : public DaemonHtmlPort {
+	public:
+		void RunBlocking(DaemonHtmlCommit commit) override { commit.Run(); }
+		// A recording never emits: these are the serve's.
+		bool ClearAndEmitAllowlisted(const DaemonHtmlServeResult&, bool) override { return false; }
+		void MarkNoCompress() override {}
+		void RemoveClientConditionals() override {}
+	};
+	static IisDaemonHtmlInlineRunner iis_daemon_html_inline_runner;
+
+	// DaemonHtmlCache: the Markdown serve's port for one request, at
+	// RESOLVE_REQUEST_CACHE.  The answer is not sent from here: it is kept
+	// in the main registration's module context for the final-view
+	// registration, which sends it with exactly its header set after IIS's
+	// own header and compression stages (iis_daemon_html_serve.h).  What
+	// leaves this stage is an empty error response that only that
+	// registration replaces.
+	class IisDaemonHtmlServePort : public DaemonHtmlPort {
+	public:
+		IisDaemonHtmlServePort(IHttpContext* http_context, IisInnerRequestContext* inner)
+			: http_context_(http_context), inner_(inner) {}
+
+		void RunBlocking(DaemonHtmlCommit commit) override { commit.Run(); }
+
+		// Applied only together with the answer, in ClearAndEmitAllowlisted:
+		// an answer that is not kept leaves the response's compression as
+		// the server configures it.
+		void MarkNoCompress() override { no_compress_ = true; }
+
+		bool ClearAndEmitAllowlisted(const DaemonHtmlServeResult& result, bool head) override {
+			if (result.status != 200 && result.status != 304) return false;
+			std::unique_ptr<IisMarkdownAnswer> answer(new IisMarkdownAnswer);
+			answer->status = result.status;
+			answer->headers = result.headers;
+			if (!head && result.status == 200) answer->body = result.body;
+			IHttpResponse* response = http_context_->GetResponse();
+			if (response == nullptr) return false;
+			// Nothing of the response has been made yet at this stage, so a
+			// failure here leaves it as it was and the request falls through.
+			response->Clear();
+			if (FAILED(response->SetStatus(kIisMarkdownPendingStatus, "Internal Server Error",
+				kIisMarkdownPendingSubStatus, S_OK, nullptr, TRUE))) {
+				response->Clear();
+				return false;
+			}
+			// Never kept by IIS's response caches: the answer is per client.
+			DisarmResponseCaches(response);
+			// Dynamic compression is IIS's last stage before the final-view
+			// send; static compression never sees an answer made here.  Set
+			// last, so no failure above leaves an HTML response uncompressed.
+			// If it cannot be set, a compressed response is never finalised
+			// (PlanIisMarkdownFinal): the client gets the pending error.
+			if (no_compress_) {
+				http_context_->SetServerVariable("IIS_EnableDynamicCompression", L"0");
+			}
+			inner_->set_markdown_answer(std::move(answer));
+			return true;
+		}
+
+		void RemoveClientConditionals() override {}
+
+	private:
+		IHttpContext* http_context_;
+		IisInnerRequestContext* inner_;
+		bool no_compress_ = false;
+	};
+
+	// DaemonHtmlCache serve-variants: answers the request with the page's
+	// Markdown copy when the engine has one for it.  True when the answer is
+	// kept for the final-view registration and the request is done here.
+	static bool ServeIisMarkdownAnswer(IHttpContext* http_context,
+	                                   IisInnerRequestContext* inner,
+	                                   const RewriteOptions* options)
+	{
+		IisServerContext* server_context = inner->server_context();
+		if (!server_context->daemon_html_serves_variants()) {
+			return false;
+		}
+		DaemonHtmlEngine* engine = server_context->daemon_html_engine(
+			inner->process_context()->site_id());
+		if (engine == nullptr) {
+			return false;
+		}
+		// The final-view entry sends the answer: only once its send has been
+		// seen running for this site in this process, and never again after
+		// an answer could not be sent.  Any other request gets its HTML.
+		if (!server_context->daemon_html_final_view_seen() ||
+			server_context->daemon_html_final_view_missing()) {
+			return false;
+		}
+		DaemonHtmlRequestFacts facts;
+		BuildIisDaemonHtmlFacts(http_context, inner, options, /*at_store=*/false, &facts);
+		IisDaemonHtmlServePort port(http_context, inner);
+		const bool trace = IisServerContext::daemon_html_trace_on();
+		GoogleString trace_url;
+		if (trace) {
+			trace_url = StrCat(facts.scheme, "://", facts.host, facts.path);
+			server_context->TraceDaemonHtml("serve-begin", trace_url, "");
+		}
+		const DaemonHtmlServeResult result = engine->Serve(facts, &port);
+		if (trace) {
+			server_context->TraceDaemonHtml("serve-end", trace_url,
+				StrCat("kind=", IntegerToString(result.kind), " reason=", result.reason));
+		}
+		if (result.kind != DaemonHtmlServeResult::kFinal) {
+			return false;
+		}
+		// Set before the pending response goes out: the main registration's
+		// send runs for it and must leave it alone.
+		inner->set_leave(true);
+		return true;
+	}
+
+	// DaemonHtmlCache: starts the HTML cache engine's capture of an HTML
+	// response the module has just handed to the rewriter
+	// (iis_daemon_html_capture.h).  `origin` is the response's header table
+	// at entry to this send, before the module changed it; `inflated` says
+	// the body the rewriter reads is the decoded one.  Nothing of the
+	// request or the response is changed.
+	static void StartDaemonHtmlCapture(IHttpContext* http_context,
+	                                   IisInnerRequestContext* inner,
+	                                   const RewriteOptions* options,
+	                                   const DaemonHtmlHeaderLines& origin,
+	                                   bool inflated)
+	{
+		DaemonHtmlEngine* engine = inner->server_context()->daemon_html_engine(
+			inner->process_context()->site_id());
+		if (engine == nullptr) {
+			return;
+		}
+		DaemonHtmlRequestFacts facts;
+		BuildIisDaemonHtmlFacts(http_context, inner, options, /*at_store=*/true, &facts);
+
+		bool unavailable = false;
+		// The commit runs inline when IIS releases the request.
+		std::unique_ptr<DaemonHtmlRecording> recording =
+			engine->StartRecording(facts, &iis_daemon_html_inline_runner, &unavailable);
+		if (recording == nullptr) {
+			if (unavailable) {
+				engine->CountUnavailable();
+			}
+			return;
+		}
+		std::unique_ptr<IisDaemonHtmlCapture> capture(
+			new IisDaemonHtmlCapture(std::move(recording)));
+		capture->SetOrigin(200, origin, inflated);
+		if (IisServerContext::daemon_html_trace_on()) {
+			inner->set_daemon_html_trace_url(StrCat(facts.scheme, "://", facts.host, facts.path));
+		}
+		inner->set_daemon_html_capture(std::move(capture));
+	}
+
 	// For a request the module steps aside from before it keeps any state for
 	// it.  The send notification never sees such a request, so this is the
 	// only place its answer can be kept out of IIS's response caches: an HTML
@@ -1104,6 +1442,9 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		}
 
 
+		// The client's conditionals as they arrived, for the HTML cache: this
+		// module object took them at the begin-request notification.
+		ctx->GetInnerContext()->set_client_conditionals(client_conditionals_);
 		bool is_resource = ctx->GetInnerContext()->is_resource();
 		// TODO(oschaaf): 1.9-> is_resource arg not used?!
 		auto response_category = ps_route_request(pHttpContext, ctx, is_resource);
@@ -1130,11 +1471,21 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		}
 
 		innerContext->server_context()->FlushCacheIfNecessary();
+		innerContext->server_context()->MaybeTickDaemonHtmlEngine();
 
 
 		pHttpContext->GetModuleContextContainer()->SetModuleContext(ctx, module_creator_->module_id());
 
 		auto server_context = innerContext->server_context();
+		if (IisServerContext::daemon_html_trace_on()) {
+			// Test equipment: which worker took which client connection, for
+			// a test that names server processes.
+			const PSOCKADDR_IN remote =
+				(PSOCKADDR_IN)pHttpContext->GetRequest()->GetRemoteAddress();
+			server_context->TraceDaemonHtml("request", innerContext->url(),
+				StrCat("method=", pHttpContext->GetRequest()->GetHttpMethod(),
+					" client_port=", IntegerToString(remote == nullptr ? 0 : ntohs(remote->sin_port))));
+		}
 		// If null, that means use global options.
 		net_instaweb::RewriteOptions* tmp = nullptr;
 		std::unique_ptr<RequestHeaders> request_headers(new RequestHeaders);
@@ -1392,6 +1743,14 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 			}
 			return RQ_NOTIFICATION_FINISH_REQUEST;
 		}
+		else if ((StringCaseEqual(pHttpContext->GetRequest()->GetHttpMethod(), "GET") ||
+		          StringCaseEqual(pHttpContext->GetRequest()->GetHttpMethod(), "HEAD")) &&
+		         ServeIisMarkdownAnswer(pHttpContext, innerContext, options)) {
+			// DaemonHtmlCache serve-variants: the page's Markdown copy, ahead
+			// of the in-place gate and whatever in-place optimization is set
+			// to.  The answer goes out from the final-view registration's send.
+			return RQ_NOTIFICATION_FINISH_REQUEST;
+		}
 		else if (options->in_place_rewriting_enabled() &&
 			options->enabled() &&
 			options->IsAllowed(innerContext->gurl()->Spec()) &&
@@ -1560,6 +1919,22 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		log(pHttpContext, "OnSendResponse: [%s]", innerContext->url());
 		innerContext->set_send_response_seen(true);
 
+		// DaemonHtmlCache serve-variants: any HTML response of a site that can
+		// answer an agent with a page's Markdown copy stays out of IIS's
+		// response caches, whoever produced it and whether or not the module
+		// rewrites it: the kernel cache would answer the agent with the HTML.
+		if (innerContext->server_context()->daemon_html_serves_variants()) {
+			USHORT ct_len = 0;
+			PCSTR ct = pHttpContext->GetResponse()->GetHeader(HttpHeaderContentType, &ct_len);
+			if (ct != nullptr && ct_len > 0) {
+				const net_instaweb::ContentType* type =
+					net_instaweb::MimeTypeToContentType(StringPiece(ct, ct_len));
+				if (type != nullptr && type->IsHtmlLike()) {
+					DisarmResponseCaches(pHttpContext->GetResponse());
+				}
+			}
+		}
+
 		// An in-place request's response, whoever produced it, stays out of
 		// IIS's response caches when the module could optimize its type:
 		// those caches would answer later requests for the URL without the
@@ -1600,6 +1975,9 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 			// stop rewriting for disconnected clients.
 			if (innerContext->proxy_fetch() != nullptr) {
 				log(pHttpContext, "SendResponse -> Connection not connected - bail");
+				if (innerContext->daemon_html_capture() != nullptr) {
+					innerContext->daemon_html_capture()->NoteAborted();
+				}
 				// proxy_fetch()->Done() can synchronously tear the request down
 				// and free innerContext (HandleDone -> IndicateCompletion ->
 				// CleanupStoredContext). Clear state first, Done() last, never
@@ -1631,6 +2009,10 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 				return RQ_NOTIFICATION_CONTINUE;
 			}
 
+			// DaemonHtmlCache: the origin's header table, taken below for an HTML
+			// response when the option is on.
+			bool daemon_html_wanted = false;
+			DaemonHtmlHeaderLines daemon_html_origin;
 			if (innerContext->proxy_fetch() == nullptr)
 			{
 				USHORT ct_len;
@@ -1661,12 +2043,14 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 						else
 						{
 							innerContext->set_rewrite_html(true);
-							// DaemonHtmlCache has no capture on this server yet, so report-only
-							// says so rather than saying nothing.
-							if (innerContext->server_context()->global_options()->daemon_html_cache() ==
-							    net_instaweb::RewriteOptions::kDaemonHtmlCacheReportOnly) {
-								innerContext->server_context()->statistics()->GetVariable(
-								    "daemon_html_unavailable")->Add(1);
+							// DaemonHtmlCache: the response as the handler produced it,
+							// before this module changes anything, for the capture
+							// started once the rewriter has it (as on Apache and nginx,
+							// a 200 the module rewrites).
+							if (innerContext->server_context()->global_options()->daemon_html_cache() !=
+							    net_instaweb::RewriteOptions::kDaemonHtmlCacheOff) {
+								daemon_html_wanted = true;
+								daemon_html_origin = IisResponseHeaderLines(*pResponseStruct);
 							}
 						}
 					}
@@ -1961,6 +2345,16 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 				// The rewriter now exists and may produce output on its own
 				// threads; this thread keeps the right to touch the response.
 				iis_owner.Arm(bf);
+				// DaemonHtmlCache: the response is the rewriter's now.  Its body
+				// is recorded below as the rewriter reads it, in this send and
+				// any later one, always before this module clears the response;
+				// the rewritten output is written later and never comes back
+				// through this notification.
+				if (daemon_html_wanted && pProvider->GetHeadersBeingSent() &&
+					pResponseStruct->StatusCode == 200) {
+					StartDaemonHtmlCapture(pHttpContext, innerContext, options,
+						daemon_html_origin, request_context->inflater() != nullptr);
+				}
 				log(pHttpContext, "OnSendResponse ---  proxy fetch set - [%p]", innerContext->proxy_fetch());
 				} // if (innerContext->proxy_fetch() == NULL && innerContext->base_fetch() != NULL) 
 
@@ -2099,6 +2493,10 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 					// neither go out unchanged nor be completed without a hole.
 					// A truncated connection is the honest outcome: a client or
 					// cache never takes the incomplete body for the whole one.
+					if (innerContext->daemon_html_capture() != nullptr) {
+						innerContext->daemon_html_capture()->NoteBodyBroken();
+						innerContext->daemon_html_capture()->NoteAborted();
+					}
 					pHttpContext->GetResponse()->ResetConnection();
 					break;
 				}
@@ -2122,6 +2520,9 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 								GzipInflater* inflater = request_context->inflater();
 								if (inflater == nullptr)
 								{
+									if (innerContext->daemon_html_capture() != nullptr) {
+										innerContext->daemon_html_capture()->AddBody(datablock, datablocklength);
+									}
 									if (innerContext->proxy_fetch() != nullptr) {
 										innerContext->proxy_fetch()->Write(StringPiece(datablock, datablocklength), innerContext->process_context()->handler());
 									}
@@ -2139,6 +2540,9 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 										int num_inflated_bytes = inflater->InflateBytes(buf, net_instaweb::kStackBufferSize);
 										if (num_inflated_bytes < 0)
 										{
+											if (innerContext->daemon_html_capture() != nullptr) {
+												innerContext->daemon_html_capture()->NoteBodyBroken();
+											}
 											if (inflater->limit_exceeded())
 											{
 												innerContext->process_context()->handler()->Message(net_instaweb::kWarning, "Compressed HTML inflates to more than %d bytes", static_cast<int>(GzipInflater::kMaxInflatedHtmlBytes));
@@ -2150,6 +2554,9 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 										}
 										else if (num_inflated_bytes > 0)
 										{
+											if (innerContext->daemon_html_capture() != nullptr) {
+												innerContext->daemon_html_capture()->AddBody(buf, num_inflated_bytes);
+											}
 											if (innerContext->proxy_fetch() != nullptr) {
 												innerContext->proxy_fetch()->Write(StringPiece(buf, num_inflated_bytes), innerContext->process_context()->handler());
 											}
@@ -2237,6 +2644,15 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 
 				if (!more_data)/*not chunked, seen final chunk*/
 				{
+					if (innerContext->daemon_html_capture() != nullptr) {
+						// An inflated body is whole only when the inflater reached
+						// the end of its stream: a truncated gzip body is not.
+						GzipInflater* body_inflater = request_context->inflater();
+						innerContext->daemon_html_capture()->NoteBodyEnd(
+							body_inflater == nullptr || body_inflater->finished());
+						// A commit follows when IIS releases the request.
+						innerContext->NoteDaemonHtmlBodyEnded();
+					}
 					log(pHttpContext, "OnSendResponse: call proxy_fetch->Done(), return pending");
 					// The hand-off must precede Done(): it reads innerContext's
 					// base_fetch, and Done() can synchronously free innerContext.

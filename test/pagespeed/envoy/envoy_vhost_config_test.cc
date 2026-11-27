@@ -109,6 +109,25 @@ TEST_F(EnvoyVHostConfigTest, KnownCustomOptionIsSet) {
   EXPECT_EQ(0, rec.Count("Failed"));
 }
 
+// DaemonHtmlCache takes serve-variants on this server too; the value
+// reserved for a later release is refused with a warning and changes
+// nothing.  (The mode itself is inert here: http_filter_test.)
+TEST_F(EnvoyVHostConfigTest, DaemonHtmlCacheModesParse) {
+  RecordingHandler rec;
+  EnvoyRewriteOptions options(&thread_system_);
+  EXPECT_TRUE(ApplyVHostCustomOption(&options, "example.com", "DaemonHtmlCache",
+                                     "serve-variants", &rec));
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
+            options.daemon_html_cache());
+  EXPECT_EQ(0, rec.Count("Failed"));
+  ApplyVHostCustomOption(&options, "example.com", "DaemonHtmlCache",
+                         "serve-cached-html", &rec);
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
+            options.daemon_html_cache());
+  EXPECT_EQ(1, rec.Count("serve-cached-html' is not available"));
+  EXPECT_EQ(0, rec.Count("Failed"));
+}
+
 TEST_F(EnvoyVHostConfigTest, ExactMatch) {
   EXPECT_TRUE(
       EnvoyVHostConfigManager::HostPatternMatches("example.com", "example.com"));

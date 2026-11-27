@@ -29,6 +29,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <system_error>
@@ -68,6 +69,7 @@
 #include "pagespeed/kernel/packs/pack_overlap.h"
 #include "pagespeed/kernel/util/statistics_logger.h"
 #include "pagespeed/system/admin_daemon_handler.h"
+#include "pagespeed/system/daemon_html_purge_observer.h"
 #include "pagespeed/system/daemon_reader.h"
 #include "pagespeed/system/rule_pack_admin_view.h"
 #include "pagespeed/system/rule_pack_decision_log.h"
@@ -475,6 +477,41 @@ class PurgeFetchCallbackGasket {
 
   PurgeFetchCallbackGasket(const PurgeFetchCallbackGasket&) = delete;
   PurgeFetchCallbackGasket& operator=(const PurgeFetchCallbackGasket&) = delete;
+};
+
+// Joins the completions of one admin purge -- the purge set's, and each
+// purge observer's -- into the one answer the gasket writes.  Deletes
+// itself after the last.
+class PurgeBarrier {
+ public:
+  PurgeBarrier(PurgeFetchCallbackGasket* gasket, size_t pending)
+      : gasket_(gasket), pending_(pending) {}
+
+  void Done(bool success, StringPiece reason) {
+    bool last = false;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      if (!success && success_) {
+        success_ = false;
+        reason.CopyToString(&reason_);
+      }
+      last = --pending_ == 0;
+    }
+    if (last) {
+      gasket_->Done(success_, reason_);
+      delete this;
+    }
+  }
+
+ private:
+  PurgeFetchCallbackGasket* gasket_;
+  std::mutex mutex_;
+  size_t pending_;
+  bool success_ = true;
+  GoogleString reason_;
+
+  PurgeBarrier(const PurgeBarrier&) = delete;
+  PurgeBarrier& operator=(const PurgeBarrier&) = delete;
 };
 
 }  // namespace
@@ -1404,14 +1441,36 @@ void AdminSite::Purge(StringPiece url, SystemCachePath* cache_path,
   int64 now_ms = timer_->NowMs();
   PurgeFetchCallbackGasket* gasket =
       new PurgeFetchCallbackGasket(fetch, timer_, message_handler_);
-  PurgeContext::PurgeCallback* callback =
-      NewCallback(gasket, &PurgeFetchCallbackGasket::Done);
-  if (strings::EndsWith(url, "*")) {
-    purge_context->SetCachePurgeGlobalTimestampMs(now_ms, callback);
-  } else if (allow_eviction) {
-    purge_context->AddPurgeUrl(url, now_ms, callback);
+  const bool global = strings::EndsWith(url, "*");
+  // A URL purge goes into the purge set as given and, when it differs, in
+  // the normalised form the HTML cache checks a stored entry under.
+  const std::vector<GoogleString> keys =
+      global ? std::vector<GoogleString>() : DaemonHtmlPurgeKeys(url);
+  const std::vector<DaemonHtmlPurgeObserver*> observers =
+      cache_path->purge_observers();
+  // One answer, once the purge set and every observer are done; it reports
+  // success only when all of them succeeded.
+  PurgeBarrier* barrier =
+      new PurgeBarrier(gasket, (global ? 1 : keys.size()) + observers.size());
+  if (global) {
+    purge_context->SetCachePurgeGlobalTimestampMs(
+        now_ms, NewCallback(barrier, &PurgeBarrier::Done));
   } else {
-    purge_context->AddPurgeUrlWithoutEviction(url, now_ms, callback);
+    for (const GoogleString& key : keys) {
+      PurgeContext::PurgeCallback* callback =
+          NewCallback(barrier, &PurgeBarrier::Done);
+      if (allow_eviction) {
+        purge_context->AddPurgeUrl(key, now_ms, callback);
+      } else {
+        purge_context->AddPurgeUrlWithoutEviction(key, now_ms, callback);
+      }
+    }
+  }
+  for (DaemonHtmlPurgeObserver* observer : observers) {
+    observer->OnAdminPurge(url, global, now_ms,
+                           [barrier](bool ok, const GoogleString& reason) {
+                             barrier->Done(ok, reason);
+                           });
   }
 }
 

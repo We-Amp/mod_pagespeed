@@ -286,9 +286,15 @@ class RewriteOptions {
   // Off (the default) does nothing. Report-only classifies each HTML response
   // and reports whether the HTML cache policy would store it: nothing is
   // stored, nothing is served, and the response is not changed.
+  // Serve-variants is the mode that stores HTML pages and serves their
+  // Markdown copies to requests that ask for one; a server that does not
+  // store and serve yet runs it exactly as report-only.  The value
+  // serve-cached-html is reserved: setting it is refused with a warning and
+  // leaves the option as it was.
   enum DaemonHtmlCacheMode {
     kDaemonHtmlCacheOff,
     kDaemonHtmlCacheReportOnly,
+    kDaemonHtmlCacheServeVariants,
   };
 
   // Any new Option added should have a corresponding name here that must be
@@ -1851,6 +1857,13 @@ class RewriteOptions {
   // into account request-headers.
   bool IsUrlCacheValid(StringPiece url, int64 time_ms,
                        bool search_wildcards) const;
+
+  // Like IsUrlCacheValid without wildcards, but reading only the URL purges
+  // of the PurgeSet (PurgeSet::IsValidIgnoringGlobal): false when `url` was
+  // purged by URL at or after `time_ms`.  The global invalidation timestamp
+  // is not consulted; a caller that applies its own (clamped) global time
+  // reads that separately (cache_invalidation_timestamp).
+  bool IsUrlCacheValidIgnoringGlobal(StringPiece url, int64 time_ms) const;
 
   // If timestamp_ms greater than or equal to the last timestamp in
   // url_cache_invalidation_entries_, then appends an UrlCacheInvalidationEntry

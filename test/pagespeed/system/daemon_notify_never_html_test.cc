@@ -282,6 +282,44 @@ TEST_F(DaemonNotifyNeverHtmlTest, TheBuilderBuildsNothingForHtml) {
   EXPECT_EQ(0u, built.params().struct_size);
 }
 
+TEST_F(DaemonNotifyNeverHtmlTest, OnlyTheHtmlStoreNotifiesHtml) {
+  ModuleNotifyInput input;
+  input.url = "https://example.com/a/page";
+  input.hostname = "example.com";
+  input.scheme = "https";
+  input.site = kSite;
+  input.content_type = kPsContentHtml;
+  input.html_stored = true;
+  ModuleNotifyParams built;
+  const int64 refused_before = DaemonNotifyHtmlRefused();
+  ASSERT_TRUE(BuildModuleNotifyParams(*abi_, input, &built));
+  EXPECT_EQ(refused_before, DaemonNotifyHtmlRefused());
+  EXPECT_EQ(kPsNotifyFlagFromModule | kPsNotifyFlagHostVouched |
+                kPsNotifyFlagHtmlStored,
+            built.params().notify_flags);
+  EXPECT_EQ(kPsContentHtml, built.params().content_type);
+  EXPECT_EQ(0, built.params().agent_request);
+
+  input.agent_request = true;
+  ASSERT_TRUE(BuildModuleNotifyParams(*abi_, input, &built));
+  EXPECT_EQ(1, built.params().agent_request);
+
+  // The vouched and stored bits never ride on a resource, and a resource is
+  // never an agent request.
+  input.content_type = kPsContentImage;
+  EXPECT_FALSE(BuildModuleNotifyParams(*abi_, input, &built));
+  EXPECT_EQ(0u, built.params().struct_size);
+  input.html_stored = false;
+  ASSERT_TRUE(BuildModuleNotifyParams(*abi_, input, &built));
+  EXPECT_EQ(kPsNotifyFlagFromModule, built.params().notify_flags);
+  EXPECT_EQ(0, built.params().agent_request);
+
+  // HTML without the store's statement is still refused, and counted.
+  input.content_type = kPsContentHtml;
+  EXPECT_FALSE(BuildModuleNotifyParams(*abi_, input, &built));
+  EXPECT_EQ(refused_before + 1, DaemonNotifyHtmlRefused());
+}
+
 TEST_F(DaemonNotifyNeverHtmlTest, TheBindingHasNoUnsitedCacheCalls) {
   // The arms ran against this library in every case above.  It does not
   // export the unsited cache calls, so the module cannot have resolved them.

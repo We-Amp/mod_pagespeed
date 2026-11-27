@@ -83,6 +83,19 @@ cc_library(
     ],
 )
 
+# The entity tags this module mints (psh-, psm-) and the request rule that
+# strips them from every upstream conditional.  Shared by every port; free
+# of any server's headers.
+cc_library(
+    name = "module_entity_tags",
+    srcs = ["module_entity_tags.cc"],
+    hdrs = ["module_entity_tags.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
 cc_library(
     name = "serve_host_names",
     srcs = ["serve_host_names.cc"],
@@ -269,17 +282,62 @@ cc_library(
     ],
 )
 
-# DaemonHtmlCache report-only: a bounded read-only capture of an HTML response,
-# classified by the library's policy through the run-time binding, counted and
-# logged. Nothing here stores or serves anything.
+# The HTML cache's decision log: one writer thread per process, lines
+# formatted by the library through the run-time binding.
 cc_library(
-    name = "daemon_html_report",
-    srcs = ["daemon_html_report.cc"],
-    hdrs = ["daemon_html_report.h"],
+    name = "daemon_html_decision_log",
+    srcs = ["daemon_html_decision_log.cc"],
+    hdrs = ["daemon_html_decision_log.h"],
     visibility = ["//visibility:public"],
     deps = [
         ":daemon_adapter",
         ":rule_pack_decision_log",
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
+# The seam between the shared admin purge and the HTML cache engine, and the
+# purge-key normalisation both use.  Pure; the system library depends on it.
+cc_library(
+    name = "daemon_html_purge_observer",
+    srcs = ["daemon_html_purge_observer.cc"],
+    hdrs = ["daemon_html_purge_observer.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
+# The HTML cache engine: store, Markdown serve and purge fence for every port,
+# with every policy verdict from the library through the run-time binding.
+# The same LICENSING BOUNDARY as :daemon_adapter applies.
+cc_library(
+    name = "daemon_html_engine",
+    srcs = ["daemon_html_engine.cc"],
+    hdrs = ["daemon_html_engine.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":daemon_adapter",
+        ":daemon_html_decision_log",
+        ":daemon_html_purge_observer",
+        ":daemon_record_arm",
+        ":daemon_serve_arm",
+        ":serve_host_names",
+        ":site_cache_fragment",
+        "//net/instaweb/rewriter",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "@boringssl//:crypto",
+    ],
+)
+
+# The purge state a server's options hold, as the HTML cache engine reads it.
+cc_library(
+    name = "daemon_html_purge_source",
+    srcs = ["daemon_html_purge_source.cc"],
+    hdrs = ["daemon_html_purge_source.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":daemon_html_engine",
         "//net/instaweb/rewriter",
         "//pagespeed/kernel/base:pagespeed_base",
     ],

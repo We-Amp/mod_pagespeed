@@ -115,6 +115,7 @@ cc_library(
     srcs = [
         # IISpeed module sources
         "iis_http_module.cpp",
+        "iis_final_view_module.cpp",
         "iis_module_factory.cpp",
         "iis_module_request_context.cpp",
         "iis_module_base_fetch.cpp",
@@ -141,6 +142,7 @@ cc_library(
     hdrs = [
         # IISpeed headers
         "iis_http_module.h",
+        "iis_final_view_module.h",
         "iis_module_factory.h",
         "iis_module_request_context.h",
         "iis_module_base_fetch.h",
@@ -172,6 +174,9 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":iis_daemon_check",
+        ":iis_daemon_html_capture",
+        ":iis_daemon_html_purge_source",
+        ":iis_daemon_html_serve",
         ":iis_daemon_record",
         ":iis_daemon_serve",
         ":iis_deferred_release",
@@ -183,6 +188,8 @@ cc_library(
         ":iis_local_request",
         ":iis_option_token",
         ":iis_proxy_fetch_completion",
+        ":iis_registration",
+        ":iis_site_bindings",
         ":iis_self_fetch",
         ":iis_unclaimed_ref",
         ":iis_url_port",
@@ -191,6 +198,7 @@ cc_library(
         "//net/instaweb/http",
         "//net/instaweb/rewriter",
         "//pagespeed/automatic",
+        "//pagespeed/system:daemon_html_purge_source",
         "//pagespeed/kernel/base:pagespeed_base",
         "//pagespeed/kernel/cache",
         "//pagespeed/kernel/html",
@@ -201,8 +209,10 @@ cc_library(
         # The shared daemon substrate: the startup check, the record arm and
         # the serve arm with its notifications.
         "//pagespeed/system:daemon_adapter",
+        "//pagespeed/system:daemon_html_engine",
         "//pagespeed/system:daemon_record_arm",
         "//pagespeed/system:daemon_serve_arm",
+        "//pagespeed/system:module_entity_tags",
         "//pagespeed/system:site_cache_fragment",
         "//pagespeed/system:system_windows",
         "@re2//:re2",
@@ -215,6 +225,8 @@ cc_library(
             "shlwapi.lib",
             "ws2_32.lib",
             "bcrypt.lib",
+            # BSTR and VARIANT helpers for the admin manager (site bindings).
+            "oleaut32.lib",
         ],
         "//conditions:default": [],
     }),
@@ -328,6 +340,73 @@ cc_library(
         "//pagespeed/kernel/http",
         "//pagespeed/system:inplace_url_agreement",
     ],
+)
+
+# DaemonHtmlCache on IIS: the three header views and the body the port
+# records for the HTML cache engine.  Free of the IIS headers so it is
+# unit-tested on any platform.
+cc_library(
+    name = "iis_daemon_html_capture",
+    srcs = ["iis_daemon_html_capture.cc"],
+    hdrs = ["iis_daemon_html_capture.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//net/instaweb:net_instaweb_lib",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/http",
+        "//pagespeed/system:daemon_html_engine",
+    ],
+)
+
+# DaemonHtmlCache serve-variants on IIS: the one spelling of a path the HTML
+# cache keeps, and how the final-view registration finalises a pending
+# Markdown answer.  Free of the IIS headers so it is unit-tested on any
+# platform.
+cc_library(
+    name = "iis_daemon_html_serve",
+    srcs = ["iis_daemon_html_serve.cc"],
+    hdrs = ["iis_daemon_html_serve.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/http",
+        "//pagespeed/system:daemon_html_engine",
+    ],
+)
+
+# The purge state the HTML cache engine reads on IIS: the server's own, plus
+# the purge file as it is now (free of the IIS headers).
+cc_library(
+    name = "iis_daemon_html_purge_source",
+    srcs = ["iis_daemon_html_purge_source.cc"],
+    hdrs = ["iis_daemon_html_purge_source.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/cache",
+        "//pagespeed/system:daemon_html_engine",
+    ],
+)
+
+# The host names an IIS site's bindings vouch for (free of the IIS headers).
+cc_library(
+    name = "iis_site_bindings",
+    srcs = ["iis_site_bindings.cc"],
+    hdrs = ["iis_site_bindings.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/system:serve_host_names",
+    ],
+)
+
+# Which of the image's two registrations IIS is making, the process-wide
+# setup both share, and the main registration's module id (header-only, free
+# of the IIS headers).
+cc_library(
+    name = "iis_registration",
+    hdrs = ["iis_registration.h"],
+    visibility = ["//visibility:public"],
 )
 
 # Drops the port from the request URL's authority (IPv6-literal aware), split

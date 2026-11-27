@@ -14,6 +14,7 @@
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/iis/iis_module_factory.h"
 #include "pagespeed/iis/iis_unclaimed_ref.h"
+#include "pagespeed/system/module_entity_tags.h"
 
 namespace net_instaweb
 {
@@ -28,6 +29,17 @@ public:
 		module_creator_(module_creator)
 	{
 	}
+
+	// Runs first for every request: keeps the client's If-None-Match and
+	// If-Modified-Since in client_conditionals_ and removes both when
+	// If-None-Match carries an entity tag this module minted, so no handler
+	// or upstream (ARR, the static file handler) sees it.  It serves
+	// nothing and changes nothing else.
+	REQUEST_NOTIFICATION_STATUS OnBeginRequest(IN IHttpContext * pHttpContext, IN IHttpEventProvider * pProvider) override;
+
+	// The client's conditionals as they arrived (see OnBeginRequest).  This
+	// module object lives for one request.
+	const ClientConditionalStash& client_conditionals() const { return client_conditionals_; }
 
 	// Runs after IIS authentication and authorization (see RegisterModule):
 	// everything this module serves for a request is served from here.
@@ -95,6 +107,7 @@ private:
 	// context that is created claims it; otherwise it is released when the
 	// module goes away at the end of the request.
 	UnclaimedRef<IisProcessContext> process_context__;
+	ClientConditionalStash client_conditionals_;
 	IisHttpModule(const IisHttpModule&) = delete;
 	IisHttpModule& operator=(const IisHttpModule&) = delete;
 };

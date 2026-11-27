@@ -104,10 +104,15 @@ fi
 #    clang finds it as a builtin. Same dance as the el8 leg, gt-15 paths.
 # ---------------------------------------------------------------------------
 export PATH="${GCC15_PREFIX}/bin:${PATH}"
-mkdir -p /usr/include/c++ /usr/lib/gcc/x86_64-linux-gnu /usr/include/x86_64-linux-gnu/c++
+# The triplets come from the container's arch: gcc-toolset names its target
+# subdir <arch>-redhat-linux, the multiarch paths are <arch>-linux-gnu.
+EL_ARCH="$(rpm --eval '%{_arch}')"
+RH_TRIPLET="${EL_ARCH}-redhat-linux"
+DEB_TRIPLET="${EL_ARCH}-linux-gnu"
+mkdir -p /usr/include/c++ "/usr/lib/gcc/${DEB_TRIPLET}" "/usr/include/${DEB_TRIPLET}/c++"
 ln -sfn "${GCC15_PREFIX}/include/c++/15" /usr/include/c++/15
-ln -sfn "${GCC15_PREFIX}/lib/gcc/x86_64-redhat-linux/15" /usr/lib/gcc/x86_64-linux-gnu/15
-ln -sfn "${GCC15_PREFIX}/include/c++/15/x86_64-redhat-linux" /usr/include/x86_64-linux-gnu/c++/15
+ln -sfn "${GCC15_PREFIX}/lib/gcc/${RH_TRIPLET}/15" "/usr/lib/gcc/${DEB_TRIPLET}/15"
+ln -sfn "${GCC15_PREFIX}/include/c++/15/${RH_TRIPLET}" "/usr/include/${DEB_TRIPLET}/c++/15"
 
 # --- foreign_cc lib64 fix (RHEL-only) -------------------------------------
 # rules_foreign_cc CMake deps (libcurl/libevent/libmemcached) install to lib64/
@@ -120,7 +125,7 @@ ln -sfn "${GCC15_PREFIX}/include/c++/15/x86_64-redhat-linux" /usr/include/x86_64
 # Binding info-check: on el10 gt-15 libstdc++.a legitimately references
 # __isoc23_*@GLIBC_2.38 (glibc 2.39) — UNLIKE el8 (where 0 was expected). This is
 # informational only; the authoritative gate is the max-GLIBC floor below (2.39).
-LIBA="${GCC15_PREFIX}/lib/gcc/x86_64-redhat-linux/15/libstdc++.a"
+LIBA="${GCC15_PREFIX}/lib/gcc/${RH_TRIPLET}/15/libstdc++.a"
 if [ -f "${LIBA}" ]; then
   ISOC23="$(objdump -T "${LIBA}" 2>/dev/null | grep -c '__isoc23' || true)"
   echo "    libstdc++.a __isoc23 refs: ${ISOC23} (nonzero EXPECTED on el10 glibc 2.39 — not a floor violation)"

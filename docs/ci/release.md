@@ -24,7 +24,9 @@ The lane has two halves in one workflow.
 - **Sign and release** (a real run only, `dry_run` false): in jobs of the
   protected `release` environment on hosted runners, sign the Windows
   binaries and the installer, sign `SHA256SUMS`, and create the GitHub
-  release. These are the only jobs that hold a secret or a write token.
+  release, with the SLSA provenance of the set (`multiple.intoto.jsonl`).
+  These are the only jobs that hold a secret or a write token, apart from the
+  `provenance` call (below, real runs only), whose upload job is never run.
 
 ## Tags and versions
 
@@ -428,9 +430,10 @@ use them.
 from its own artifact listing, checks each zip against the API digest and the
 files against `adopt-binding.json`, and records the new id and digest.
 `binding-hash` prints, and optionally checks, the hash of `adopt-binding.json`.
-`schema --print` lists which jobs an adopting run skips, which always run and
-which belong to the environment; a self-test fails when a job of the pipeline
-file is in none of those groups.
+`schema --print` lists which jobs an adopting run skips, which always run,
+which belong to the environment and which run in a real run only (outside the
+environment: `provenance`); a self-test fails when a job of the pipeline file
+is in none of those groups.
 
 `seal` accepts `--plan JOB=JSON` for each plan job (`nginx-x64-plan`,
 `nginx-arm64-plan`) and records them as `plans` in the seal. The key is
@@ -532,12 +535,43 @@ It does everything a dry run does, and then, in this order:
    workflow cannot get more than its caller grants, but the job's if: keeps
    a dry run, a candidate and a rehearsal out, so none of them signs or
    attests anything.
-4. `create-release` creates a draft release for the tag with every asset,
-   `SHA256SUMS.asc` and `SHA256SUMS.sigstore.json`, downloads the draft's assets and checks them against
-   `SHA256SUMS`, then publishes it. A pre-release tag (`-rc.1`) produces a
-   release flagged as a pre-release and not as the latest one. The release
-   is never promoted any further: nothing is published to a package
-   repository and no other repository is notified.
+4. `provenance` (after `sign-checksums`, so after the environment's
+   approval) calls the SLSA project's generic generator
+   (`slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml`,
+   by version tag: the generator verifies its own ref and refuses a commit
+   SHA) with the attestation subjects that `validate` chose (its output
+   `provenance_subjects`, the `sha256sum` lines base64 encoded). The
+   generator signs, keyless, an in-toto statement with an SLSA provenance
+   v0.2 predicate and uploads it, as a Sigstore bundle, in the run artifact
+   `multiple.intoto.jsonl`, nothing else: `upload-assets` is false, which
+   the shape gate's slsa rule pins, so it never writes to a release. Its
+   jobs run on GitHub-hosted runners and declare `actions: read`,
+   `id-token: write` and, for the upload job that never runs,
+   `contents: write`; the call job grants exactly those, as both callers do.
+   Its if: is the one of `sign-checksums` plus that job's success: a dry
+   run, a candidate, a rehearsal and a rejected approval sign nothing (the
+   candidate seal would also refuse an artifact it does not know;
+   `release_adopt.py` lists the job as real-run-only, so an adopting run
+   expects it skipped in the candidate). GitHub still resolves the call when
+   a dry run starts (a permission the caller does not grant fails the run
+   there), then skips it. The generator keeps the artifact 5 days (its
+   v2.1.0 setting): a `create-release` re-run after that fails at the
+   download and needs `provenance` re-run first (whether a re-run attempt
+   may upload an artifact of the same name again is not verified here).
+5. `create-release` (which needs `provenance`) creates a draft release for
+   the tag with every asset, `SHA256SUMS.asc`, `SHA256SUMS.sigstore.json` and
+   `multiple.intoto.jsonl`, after `tools/ci/check_slsa_provenance.py` (from
+   master; `--self-test` runs in the CI tooling job against a real v2.1.0
+   bundle) has checked that the file is a Sigstore bundle (or a bare DSSE
+   envelope) of an in-toto statement with an SLSA provenance predicate and
+   that each of its subjects is a file of the set with its digest
+   (`SHA256SUMS` included). The check is one way here: the pinned optimizer
+   packages are in the set but not subjects. It then downloads the draft's
+   assets and checks them against `SHA256SUMS`, then publishes it. A
+   pre-release tag (`-rc.1`) produces a release flagged as a pre-release and
+   not as the latest one. The release is never promoted any further: nothing
+   is published to a package repository and no other repository is
+   notified.
 
 Before the first real run, someone with admin rights enters the following.
 
@@ -648,7 +682,8 @@ hosted `-ready` job joins them for the jobs that depend on the pair.
 | `vendor-ready`, `linux-ready`, `nginx-ready`, `el8-ready`, `el10-ready` | hosted | join the two legs of a pair (`nginx-ready` also gates and hands over the x64 nginx set, see above) |
 | `validate` | hosted | writes `sidecar-pair.json` from the two sidecar tarballs, builds and checks the asset set (the installer included), checks the signatures at the job boundary in a real run, asserts that every Linux module (Apache deb, rpm, el10 rpm and standalone `.so`; nginx tarball, deb and rpm; cPanel rpm; x64 and arm64) carries the short release commit stamp next to the module version (`tools/ci/assert_release_stamp.sh`, a dry run included), writes `SHA256SUMS` and `manifest.json`, uploads `release-assets`; in an adopting run applies the adoption rule above |
 | `sign-checksums` | hosted, environment `release`, real run only | signs `SHA256SUMS` with the package signing key (detached, armored: `SHA256SUMS.asc`), pinned to the release signing key's full fingerprint and verified against `RELEASE-SIGNING-KEY.asc` from master; then, keyless, records the build provenance and SBOM attestations of the module's files and signs `SHA256SUMS` with cosign (`SHA256SUMS.sigstore.json`), and verifies both as a user would |
-| `create-release` | hosted, environment `release`, real run only | creates the GitHub release as a draft with every asset, checks the draft against the set, publishes it |
+| `provenance` | the SLSA generator's GitHub-hosted jobs, real run only, after `sign-checksums` | the keyless SLSA provenance of the attestation subjects, as the run artifact `multiple.intoto.jsonl` (never uploaded to a release by the generator) |
+| `create-release` | hosted, environment `release`, real run only | checks the SLSA provenance against the set, creates the GitHub release as a draft with every asset, checks the draft against the set, publishes it |
 
 A gate workflow can succeed without testing anything: it skips when its guest
 is not provisioned. So
@@ -842,6 +877,7 @@ Run artifacts of the lane, as kept for a few days (the file artifacts and
 | `msi-old` | the synthetic older installer of the upgrade gate | no |
 | `asset-windows` | the Windows installer, `pagespeed-iis-<version>-win-x64.msi`, and `pagespeed-lint-<version>-win-x64.zip`: signed in a real run, unsigned in a dry run | yes |
 | `release-signature` | `SHA256SUMS.asc` and `SHA256SUMS.sigstore.json` (real run) | both are added to the release by `create-release` |
+| `multiple.intoto.jsonl` | the SLSA provenance of the attestation subjects (real run), uploaded by the SLSA generator | added to the release by `create-release` |
 | `candidate-seal` | `candidate-seal.json`, the hashes of the sealed artifacts (candidate run only) | no |
 | `adopt-binding` | `adopt-binding.json`, what an adopting run took over and the candidate's job list and `SHA256SUMS` rows (adopting run only) | no |
 
@@ -1065,23 +1101,27 @@ moves on its own schedule, and a dynamic module loads only into the exact
 nginx it was built against, so the lane rebuilds the current module release
 for each new nginx.org stable patch without a module release.
 
-**Dispatch.** By a person, on the tag of the current module release:
+**Dispatch.** By a person, on `master`, naming the current module release:
 
 ```
-gh workflow run nginx-org-rebuild.yml --ref module-vX.Y.Z \
+gh workflow run nginx-org-rebuild.yml --ref master -f module_tag=module-vX.Y.Z \
   -f nginx_version=A.B.C -f nginx_sha256=<sha256 of nginx-A.B.C.tar.gz> -f dry_run=true
 ```
+
+The event guard refuses another event, an app or bot actor, any ref but
+`refs/heads/master` (a tag included) and a `module_tag` outside
+`module-vX.Y.Z`; the input reaches the scripts through the environment only.
 
 `lane_revision` (default 0) rebuilds the same module and nginx pair;
 `previous_nginx_version` and `previous_nginx_sha256` are needed only for a
 cell's first ship (below). `dry_run` defaults to true: build, test and
 validate, sign and release nothing.
 
-**What it checks before it builds** (`plan`): the input grammar; that the tag
-is the module release `/releases/latest` names, published and not a
-pre-release; that no tag or release exists yet for this pair and revision;
+**What it checks before it builds** (`plan`): the input grammar; that
+`module_tag` is the module release `/releases/latest` names, published and
+not a pre-release; that no tag or release exists yet for this pair and revision;
 the release's `SHA256SUMS` signature against `RELEASE-SIGNING-KEY.asc`, the
-manifest and source tarball rows, and that the tag's commit is the
+manifest and source tarball rows, and that the commit of `module_tag` is the
 manifest's `source_sha`; the nginx tarball against the given sha256, and its
 signature against nginx.org's signing keys pinned in
 `tools/ci/nginx-org-source-signers.asc`; and, per cell, the newest published
@@ -1094,8 +1134,8 @@ dispatch.
 
 **Build and tests.** The packages are built from the release's own source
 tarball (its commit stamp must be the release commit) with the build scripts
-of that tree, driven by `tools/ci/release_nginx.sh` from `master`, so the
-leg table, the gates and the tests can change without a module release. Then
+of that tree, driven by `tools/ci/release_nginx.sh` from the run's commit, so
+the leg table, the gates and the tests can change without a module release. Then
 the exact-set check, the version and nginx pin of every package, the
 symbol-leak gate and the load check (nginx.org's nginx on each cell, and the
 `nginx:<version>` image for Debian 13). The upgrade tests
@@ -1120,19 +1160,51 @@ release is made with the workflow token, so creating its tag starts no other
 workflow, and is never marked latest; `release.yml` passes only `module-v*`
 tags to the module lane. The asset set is checked by `release_manifest.py`
 with the profile `nginxorg`: one package per cell, nothing else, and the
-manifest also carries `nginx_version` and `nginx_sha256`.
+manifest also carries `nginx_version` and `nginx_sha256`. A real run also
+records the SLSA provenance of every file and `SHA256SUMS`
+(`multiple.intoto.jsonl`, the `provenance` job after `sign-checksums`, the
+same generator call as the module lane's), which `create-release` checks
+against the set with `tools/ci/check_slsa_provenance.py --exact` (the
+subjects are exactly the files and `SHA256SUMS`) and adds to the release; a
+dry run of this lane does not record it.
 
 Every job runs on a GitHub-hosted runner.
 
-**Where each part comes from.** The workflow file runs from the release tag
-(the `release` environment admits only `module-v*` refs), so the lane exists
-from the first module release whose tree carries it, and a change to the
-workflow file takes effect with the next module release. Everything it runs
-comes from `master`: the tooling, the tests, the key files and the key
-fingerprints (`tools/ci/nginx_org_lane.sh pins`), so a new nginx.org signing
-key or a gate change needs no release. The build scripts of the packages are
-the release tree's; a tree that cannot build the lane's version shape fails
-the version check before anything is published.
+**Where each part comes from.** The workflow file runs from `master`, at the
+commit the dispatch was made at (`github.sha`), so a fix to the lane takes
+effect for the current module release without a new one. Every checkout in
+the workflow names that commit, never the moving `master` ref, so the plan,
+the approval and the signing jobs run the one reviewed tree; the plan's
+summary, and the names of the `release` jobs, show the workflow commit,
+`module_tag` and `source_sha` the approval is for. From that commit come the
+tooling (`tools/ci`), the tests (`test/package-test`), the key files and the
+key fingerprints (`tools/ci/nginx_org_lane.sh pins`), so a new nginx.org
+signing key or a gate change needs no release. The module release itself
+comes from `module_tag` and nothing else: its signed `SHA256SUMS`, its
+manifest and its source tarball. Everything the build runs inside a leg's
+container (`install/nginx/build_module_in_container.sh`,
+`install/nginx/build_nginx_deb.sh`, `install/nginx/build_nginx_rpm.sh`, the
+Bazel files, the patches, `net/instaweb/public/VERSION`) is the tarball's,
+extracted into a directory of its own; the driver copies only
+`release_nginx.sh` and its three helpers from the run's commit, and the
+gates and tests from that commit only read the built packages. The driver's
+own part of each leg is the run's commit's too: the inline container script
+(including the LASTCHANGE pin of the package revision), the choice of each
+leg's image and the environment the leg runs with. A tree that cannot build the lane's
+version shape fails the version check before anything is published.
+
+The SLSA provenance of a lane release names `refs/heads/master`, the ref the
+run was at; the manifest's `source_sha` binds the files to the module
+release (SECURITY.md has the verify command). A real run of this lane needs
+the `release` environment's deployment policy to admit `refs/heads/master`
+besides the `module-v*` tags. A dry run never reaches the environment:
+`sign-checksums` and `create-release` are skipped by their `if:` before the
+environment is evaluated, and the provenance call runs only after
+`sign-checksums`. "Re-run failed jobs" does not re-run an `event-guard` that
+passed, so the actor of a re-run is not checked again there; the required
+reviewers of the `release` environment are the check on that path.
+`create-release` checks again, before it creates anything, that
+`module_tag` (an annotated tag dereferenced) still names `source_sha`.
 
 ## Tooling
 
@@ -1148,6 +1220,7 @@ the version check before anything is published.
 | `tools/ci/release_ea4_build.sh` | the cPanel package from the stock rpm; refuses a spec whose `mps_version` is not the release version (`--self-test`) |
 | `tools/ci/check_module_optimizer_version.py` | from 2.5.0 on, the module version must equal the pinned optimizer's `VERSION.txt` at `optimizer_commit`; below 2.5.0 it passes with a notice; `--dry-run` (passed while the pin is not the paired tag) turns a mismatch into a warning and skips `-pre` tags (`--self-test`) |
 | `tools/ci/test_cache_gen_for_version.sh` | the version -> optimizer cache generation table of the two upgrade rehearsals (v3 from 2.5.0 on) |
+| `tools/ci/check_slsa_provenance.py` | the SLSA provenance against the set before `create-release` attaches it: a Sigstore bundle or DSSE envelope of an SLSA provenance statement, every subject a file of the set with its digest, `--exact` for a statement that covers the whole set (`--self-test`, against the real v2.1.0 bundle in `tools/ci/testdata/slsa-provenance/`) |
 | `tools/ci/release_signature_check.py` | structural check that Windows files and the installer carry a signature (`--self-test`) |
 | `tools/ci/Sign-Windows.ps1` | Authenticode signing with Trusted Signing and verification (status Valid and signer subject exactly `CN=We-Amp B.V., O=We-Amp B.V., L=Castricum, C=NL`), used by the two signing jobs |
 | `tools/ci/ref_guard.sh`, `tools/ci/test_ref_guard.sh` | the ref guard (candidate mode included) and its test |

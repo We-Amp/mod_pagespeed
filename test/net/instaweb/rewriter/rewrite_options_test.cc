@@ -30,7 +30,9 @@
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/null_message_handler.h"
+#include "pagespeed/kernel/base/null_mutex.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/thread.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/cache/purge_set.h"
 #include "pagespeed/kernel/http/google_url.h"
@@ -41,6 +43,7 @@
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/message_handler_test_base.h"
 #include "test/pagespeed/kernel/base/mock_hasher.h"
+#include "test/pagespeed/kernel/base/mock_message_handler.h"
 #include "test/pagespeed/kernel/base/mock_timer.h"
 #include "test/pagespeed/kernel/base/null_thread_system.h"
 
@@ -775,6 +778,24 @@ TEST_F(RewriteOptionsTest, CopyTakesLaterPurgesFromPurgeSet) {
   EXPECT_EQ(1000, location->cache_invalidation_timestamp());
 }
 
+// The URL half of the purge set alone: a global flush never makes a URL
+// invalid here, and a URL purge does from its time on (at or after).
+TEST_F(RewriteOptionsTest, UrlCacheValidityIgnoringTheGlobalFlush) {
+  const char kPurged[] = "http://example.com/page";
+  const char kOther[] = "http://example.com/other";
+  RewriteOptions options(&thread_system_);
+  options.UpdateCacheInvalidationTimestampMs(1000);
+  CopyOnWrite<PurgeSet> purges(options.purge_set());
+  purges.MakeWriteable()->Put(kPurged, 3000);
+  EXPECT_TRUE(options.UpdateCachePurgeSet(purges));
+
+  EXPECT_FALSE(options.IsUrlCacheValid(kOther, 900, false));
+  EXPECT_TRUE(options.IsUrlCacheValidIgnoringGlobal(kOther, 900));
+  EXPECT_FALSE(options.IsUrlCacheValidIgnoringGlobal(kPurged, 2999));
+  EXPECT_FALSE(options.IsUrlCacheValidIgnoringGlobal(kPurged, 3000));
+  EXPECT_TRUE(options.IsUrlCacheValidIgnoringGlobal(kPurged, 3001));
+}
+
 TEST_F(RewriteOptionsTest, MergeOnlyProcessScopeOptions) {
   RewriteOptions dest(&thread_system_), src(&thread_system_);
   dest.set_image_max_rewrites_at_once(2);
@@ -1126,13 +1147,17 @@ TEST_F(RewriteOptionsTest, DaemonHtmlCacheOption) {
                                                 "report-only", &msg, &handler));
   EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheReportOnly,
             options_.daemon_html_cache());
-  // The serving modes do not exist yet, so they are configuration errors.
-  EXPECT_EQ(RewriteOptions::kOptionValueInvalid,
+  EXPECT_EQ(RewriteOptions::kOptionOk,
             options_.ParseAndSetOptionFromName1(
                 "DaemonHtmlCache", "serve-variants", &msg, &handler));
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
+            options_.daemon_html_cache());
+  // Any other value is a configuration error.
   EXPECT_EQ(RewriteOptions::kOptionValueInvalid,
-            options_.ParseAndSetOptionFromName1(
-                "DaemonHtmlCache", "serve-cached-html", &msg, &handler));
+            options_.ParseAndSetOptionFromName1("DaemonHtmlCache", "serve",
+                                                &msg, &handler));
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
+            options_.daemon_html_cache());
   EXPECT_EQ(RewriteOptions::kOptionOk,
             options_.ParseAndSetOptionFromName1("DaemonHtmlMaxBytes", "1000",
                                                 &msg, &handler));
@@ -1140,6 +1165,55 @@ TEST_F(RewriteOptionsTest, DaemonHtmlCacheOption) {
   // Turning the report on does not re-key cached work.
   options_.ComputeSignature();
   EXPECT_EQ(signature_before, options_.signature());
+}
+
+// The value reserved for a later release is refused with a warning, not a
+// configuration error, and leaves the option as it was; on every path a
+// port's configuration takes.
+TEST_F(RewriteOptionsTest,
+       DaemonHtmlCacheServeCachedHtmlIsRefusedWithAWarning) {
+  GoogleString msg;
+  MockMessageHandler handler(new NullMutex);
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1(
+                "DaemonHtmlCache", "serve-cached-html", &msg, &handler));
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheOff, options_.daemon_html_cache());
+  EXPECT_EQ(1, handler.MessagesOfType(kWarning));
+  EXPECT_EQ(1, handler.TotalMessages());
+
+  ASSERT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1("DaemonHtmlCache",
+                                                "report-only", &msg, &handler));
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromNameWithScope(
+                "DaemonHtmlCache", "Serve-Cached-HTML",
+                RewriteOptions::kProcessScopeStrict, &msg, &handler));
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheReportOnly,
+            options_.daemon_html_cache());
+  EXPECT_EQ(2, handler.MessagesOfType(kWarning));
+
+  // With no handler the caller gets the warning as the message.
+  msg.clear();
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1(
+                "DaemonHtmlCache", "serve-cached-html", &msg, nullptr));
+  EXPECT_NE(GoogleString::npos, msg.find("serve-cached-html' is not available"))
+      << msg;
+
+  // Below the option's scope, the scope error stands.
+  EXPECT_NE(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromNameWithScope(
+                "DaemonHtmlCache", "serve-cached-html",
+                RewriteOptions::kDirectoryScope, &msg, &handler));
+  EXPECT_EQ(2, handler.MessagesOfType(kWarning));
+
+  // The handler-less setter (a configuration source with its own warning
+  // for a refused value) refuses it as a value.
+  EXPECT_EQ(
+      RewriteOptions::kOptionValueInvalid,
+      options_.SetOptionFromName("DaemonHtmlCache", "serve-cached-html", &msg));
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheReportOnly,
+            options_.daemon_html_cache());
 }
 
 TEST_F(RewriteOptionsTest, RulePackOptionsDefaultParseAndRoundTrip) {
@@ -5092,6 +5166,75 @@ TEST_F(RewriteOptionsTest, ExposeVersionInHeadersIsProcessScope) {
   ASSERT_NE(nullptr, property);
   EXPECT_EQ(RewriteOptions::kProcessScopeStrict, property->scope());
   EXPECT_FALSE(options_.expose_version_in_headers());
+}
+
+namespace {
+
+// Updates the options' purge set over and over, as a server's purge poll does
+// on whichever thread runs it. A small set of URLs, so the purge set never
+// evicts (which would raise its global invalidation time).
+class PurgeSetUpdater : public ThreadSystem::Thread {
+ public:
+  static constexpr int kUrls = 100;
+
+  PurgeSetUpdater(ThreadSystem* threads, RewriteOptions* options, int updates)
+      : Thread(threads, "purge_set_updater", ThreadSystem::kJoinable),
+        options_(options),
+        updates_(updates) {}
+
+  static GoogleString Url(int i) {
+    return StrCat("http://example.com/", i % kUrls);
+  }
+
+  void Run() override {
+    for (int i = 0; i < updates_; ++i) {
+      CopyOnWrite<PurgeSet> purges(options_->purge_set());
+      purges.MakeWriteable()->Put(Url(i), 1000 + i);
+      options_->UpdateCachePurgeSet(purges);
+    }
+  }
+
+ private:
+  RewriteOptions* options_;
+  const int updates_;
+};
+
+}  // namespace
+
+// Request threads clone the server's options and compare a pooled driver's
+// options with them while another thread updates their purge set. The update
+// unfreezes, modifies and refreezes the options under the purge lock; a
+// reader must not see them in between. In CHECK-enabled builds a reader that
+// did aborted (the frozen and thread checks in Merge and IsEqual); under TSan
+// this also covers the merge's read of the modified flag.
+TEST_F(RewriteOptionsTest, ReadWhileAnotherThreadUpdatesThePurgeSet) {
+  ThreadSystem* threads = thread_system();
+  RewriteOptions server(threads);
+  server.set_cache_invalidation_timestamp_mutex(threads->NewRWLock());
+  server.ComputeSignature();
+  std::unique_ptr<RewriteOptions> pooled(server.Clone());
+  pooled->ComputeSignature();
+
+  const int kUpdates = 1000;
+  PurgeSetUpdater updater(threads, &server, kUpdates);
+  ASSERT_TRUE(updater.Start());
+  for (int i = 0; i < kUpdates; ++i) {
+    std::unique_ptr<RewriteOptions> request(server.Clone());
+    EXPECT_TRUE(request != nullptr);
+    pooled->IsEqual(server);
+    pooled->IsEqual(server);
+  }
+  updater.Join();
+
+  // The last update is in: its URL is purged up to its time, a URL never
+  // purged is not.
+  const int last = kUpdates - 1;
+  std::unique_ptr<RewriteOptions> after(server.Clone());
+  EXPECT_FALSE(
+      after->IsUrlCacheValid(PurgeSetUpdater::Url(last), 1000 + last, true));
+  EXPECT_TRUE(after->IsUrlCacheValid(PurgeSetUpdater::Url(last),
+                                     1000 + last + 1, true));
+  EXPECT_TRUE(after->IsUrlCacheValid("http://example.org/", 1000, true));
 }
 
 }  // namespace net_instaweb

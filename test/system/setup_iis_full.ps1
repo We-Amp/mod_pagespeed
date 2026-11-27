@@ -1187,6 +1187,7 @@ function Install-PageSpeedModule {
 
     # Uninstall existing module first to release the DLL lock, then stop
     # IIS completely (WAS + W3SVC) and wait for w3wp to exit before overwrite.
+    try { Invoke-AppCmd uninstall module PageSpeedFinalView 2>$null } catch { }
     try { Invoke-AppCmd uninstall module PageSpeedModule 2>$null } catch { }
     try { Invoke-AppCmd delete module PageSpeedModule 2>$null } catch { }
     Stop-Service W3SVC -Force -ErrorAction SilentlyContinue
@@ -1232,14 +1233,31 @@ function Install-PageSpeedModule {
             Write-Status "Warning: Could not register module: $_" "Yellow"
         }
     }
+
+    # The image's second registration, as the installer sets it up: a global
+    # module whose <modules> entry is the FIRST one, so its send runs after
+    # IIS's header stages and dynamic compression (the HTML cache's final
+    # view).  "install module /add:true" would append it at the end.
+    $out = Invoke-AppCmd install module /name:PageSpeedFinalView /image:$systemModulePath /add:false
+    if ($LASTEXITCODE -ne 0) { throw "Could not register PageSpeedFinalView: $out" }
+    # /section:, not -section: -- PowerShell splits a "-name:value" token
+    # passed to a function, and appcmd then reads the section as a site.
+    $out = Invoke-AppCmd set config /section:system.webServer/modules "/+[@start,name='PageSpeedFinalView']" /commit:apphost
+    if ($LASTEXITCODE -ne 0) { throw "Could not add PageSpeedFinalView first in modules: $out" }
+    [xml]$modulesXml = (Invoke-AppCmd list config /section:system.webServer/modules) -join "`n"
+    $names = @($modulesXml.SelectNodes('/system.webServer/modules/add') | ForEach-Object { $_.GetAttribute('name') })
+    Write-Status "modules order: $($names -join ', ')" "Gray"
+    if ($names.Count -eq 0 -or $names[0] -ne 'PageSpeedFinalView') { throw "PageSpeedFinalView is not the first entry of system.webServer/modules" }
+    Write-Status "Registered PageSpeedFinalView first in modules" "Green"
 }
 
 function Uninstall-PageSpeedModule {
     Write-Status "Uninstalling PageSpeed module..."
 
     try {
+        Invoke-AppCmd uninstall module PageSpeedFinalView 2>$null
         Invoke-AppCmd uninstall module PageSpeedModule 2>$null
-        Write-Status "Unregistered PageSpeedModule" "Gray"
+        Write-Status "Unregistered PageSpeedModule and PageSpeedFinalView" "Gray"
     } catch { }
 
 

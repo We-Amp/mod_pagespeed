@@ -67,6 +67,18 @@ bool NormalizeServeHostName(StringPiece host, GoogleString* out);
 GoogleString VouchedServeHost(StringPiece request_host,
                               const ConfiguredHostNames& names);
 
+// Whether the request's host is one of the site's exact configured names
+// (the primary name or an exact alias), under the rule above, with NO
+// fallback to the primary name: a request that reached the site through a
+// wildcard name, a pattern, "_", a ".domain" entry or because the site is
+// the default one is not vouched for.  A ":port" is ignored, as the rule
+// above ignores it.  A request host ending in "." is never vouched for,
+// even though the rule above would drop the dot: a name spelled that way
+// is not one the configuration lists.  This is the test that lets this
+// module say "this host is the site's own" to the optimizer.
+bool HostExactlyConfigured(StringPiece request_host,
+                           const ConfiguredHostNames& names);
+
 }  // namespace net_instaweb
 
 #endif  // PAGESPEED_SYSTEM_SERVE_HOST_NAMES_H_

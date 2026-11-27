@@ -146,6 +146,8 @@ function Install-Module {
                 Invoke-AppCmd uninstall module $ModuleName 2>$null | Out-Null
             } catch { }
         }
+        # The image's second registration goes with it.
+        try { Invoke-AppCmd uninstall module PageSpeedFinalView 2>$null | Out-Null } catch { }
 
         # Copy DLL to system location
         Write-Status "Copying DLL to $SystemModulePath" "Gray"
@@ -154,6 +156,10 @@ function Install-Module {
         # Register as global module
         Write-Status "Registering module in IIS..." "Gray"
         Invoke-AppCmd install module /name:$ModuleName /image:$SystemModulePath /add:false | Out-Null
+        # The second registration of the same image (the HTML cache's final
+        # view). A site that adds the module adds this entry FIRST in its
+        # modules list, as the installer does for the server.
+        Invoke-AppCmd install module /name:PageSpeedFinalView /image:$SystemModulePath /add:false | Out-Null
 
         Write-Status "Module installed successfully" "Green"
 
@@ -188,6 +194,8 @@ function Uninstall-Module {
         } else {
             Write-Status "Module was not registered" "Gray"
         }
+        # The second registration names the same DLL: it goes before the DLL.
+        try { Invoke-AppCmd uninstall module PageSpeedFinalView 2>$null | Out-Null } catch { }
 
         # Remove DLL
         if (Test-Path $SystemModulePath) {

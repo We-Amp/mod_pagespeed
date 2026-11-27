@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 We-Amp B.V.
+#
+# A test-only nginx filter module for the HTML cache conformance lane (see
+# ngx_http_lane_filter_module.c). Built as a dynamic module against the lane
+# image's nginx source by the conformance provider; never shipped.
+ngx_addon_name=ngx_http_lane_filter_module
+ngx_module_type=HTTP_FILTER
+ngx_module_name=ngx_http_lane_filter_module
+# The compressor slot: after the module's own header filters run, before its
+# etag filter (filters run in reverse list order). Loaded after the module.
+ngx_module_order="ngx_http_lane_filter_module ngx_pagespeed \
+    ngx_http_postpone_filter_module"
+ngx_module_srcs="$ngx_addon_dir/ngx_http_lane_filter_module.c"
+. auto/module

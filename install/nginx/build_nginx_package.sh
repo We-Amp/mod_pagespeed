@@ -34,6 +34,22 @@ else
   VERSION="${MAJOR}.${MINOR}.${BUILD}"
 fi
 
+# The nginx this module is built against: the source tree Bazel builds it
+# from (bazel/nginx.bzl reads NGINX_PATH, default /usr/local/src/nginx). A
+# dynamic module loads only into that exact nginx version, so the README must
+# name it; never guess it.
+NGINX_SRC="${NGINX_PATH:-/usr/local/src/nginx}"
+NGINX_H="${NGINX_SRC}/src/core/nginx.h"
+NGINX_VER=""
+if [ -f "${NGINX_H}" ]; then
+  NGINX_VER="$(sed -n 's/^#define[[:space:]]\{1,\}NGINX_VERSION[[:space:]]\{1,\}"\([0-9][0-9.]*\)".*/\1/p' "${NGINX_H}")"
+fi
+if ! printf '%s' "${NGINX_VER}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+  echo "ERROR: cannot read NGINX_VERSION from ${NGINX_H} (got '${NGINX_VER}')" >&2
+  echo "Set NGINX_PATH to the nginx source tree the module was built against." >&2
+  exit 1
+fi
+
 # Detect architecture
 ARCH="$(uname -m)"
 case "${ARCH}" in
@@ -52,7 +68,7 @@ if [ ! -f "${SO_PATH}" ]; then
   exit 1
 fi
 
-echo "Creating nginx PageSpeed package: ${PKGNAME}"
+echo "Creating nginx PageSpeed package: ${PKGNAME} (nginx ${NGINX_VER})"
 
 rm -rf "${PKGDIR}"
 mkdir -p "${PKGDIR}"
@@ -227,12 +243,14 @@ nginx with PageSpeed compiled in.
 
 ## Compatibility
 
-This tarball ships the module .so built against the dev nginx (currently
-1.30.3). nginx dynamic modules are pinned to the EXACT nginx version they were
-built against -- nginx refuses to load a module built for any other version, and
---with-compat does NOT relax this (confirmed empirically: a module
-built against 1.30.2 will not even load into 1.30.3). To use this .so you must
-run the exact nginx version it was built against, or rebuild from source against
+Built for nginx: ${NGINX_VER}
+
+This tarball ships the module .so built against nginx ${NGINX_VER}. nginx
+dynamic modules are pinned to the EXACT nginx version they were built against --
+nginx refuses to load a module built for any other version, and --with-compat
+does NOT relax this (confirmed empirically: a module built against one patch
+release will not even load into the next). To use this .so you must run
+nginx ${NGINX_VER} exactly, or rebuild from source against
 your nginx with the included build_nginx_with_pagespeed.sh. For one-step
 \`apt install\`/\`dnf install\` against your distro's stock nginx, use the signed
 packages at https://packages.modpagespeed.com instead (built and version-pinned

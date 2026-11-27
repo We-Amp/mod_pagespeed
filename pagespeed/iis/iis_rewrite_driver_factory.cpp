@@ -729,6 +729,7 @@ private:
 	void IisRewriteDriverFactory::InitStats(Statistics* statistics) {
 	  SystemRewriteDriverFactory::InitStats(statistics);
 	  IisServerContext::InitStats(statistics);
+	  IisServerContext::InitDaemonHtmlStats(statistics);
 	}
 	QueuedWorkerPool* IisRewriteDriverFactory::CreateWorkerPool(
 		WorkerPoolCategory pool, StringPiece name) {

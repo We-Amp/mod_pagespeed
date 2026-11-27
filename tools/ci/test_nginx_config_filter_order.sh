@@ -85,16 +85,34 @@ run_configure() {  # <name> <module option>
   fi
 }
 
+# A third-party header filter, built along (statically, as most distribution
+# builds add them): it must run BEFORE the etag filter, the module's last
+# header filter, because that filter makes the final pass over a Markdown
+# answer's headers (pagespeed/nginx/ngx_pagespeed.cc,
+# ps_daemon_html_final_enforcement), so a line such a filter adds cannot
+# reach the client.  Configure needs only its config file.
+THIRD_PARTY="$WORK/third_party_filter"
+mkdir -p "$THIRD_PARTY"
+printf '%s\n' \
+  'ngx_addon_name=ngx_http_lane_third_party_filter_module' \
+  'ngx_module_type=HTTP_FILTER' \
+  'ngx_module_name=ngx_http_lane_third_party_filter_module' \
+  'ngx_module_srcs="$ngx_addon_dir/unused.c"' \
+  '. auto/module' > "$THIRD_PARTY/config"
+
 run_configure static --add-module
 run_configure dynamic --add-dynamic-module
+CONFIGURE_ARGS+=(--add-module="$THIRD_PARTY")
+run_configure static_third_party --add-module
 
 python3 - "$BAZEL_ORDER_SRC" "$WORK/static/objs/ngx_modules.c" \
   "$WORK/dynamic/objs/ngx_modules.c" \
-  "$WORK/dynamic/objs/ngx_pagespeed_modules.c" <<'PY'
+  "$WORK/dynamic/objs/ngx_pagespeed_modules.c" \
+  "$WORK/static_third_party/objs/ngx_modules.c" <<'PY'
 import re
 import sys
 
-bazel_src, static_c, base_c, dynamic_c = sys.argv[1:]
+bazel_src, static_c, base_c, dynamic_c, third_party_c = sys.argv[1:]
 
 
 def array(path, name):
@@ -186,9 +204,23 @@ def check_chain(name, modules):
 check_chain("static", static)
 check_chain("dynamic", loaded)
 
+# A third-party header filter runs before the etag filter (it is listed
+# after it), whatever else moves.
+third_party = array(third_party_c, "ngx_module_names")
+check_chain("static with a third-party filter", third_party)
+tp = "ngx_http_lane_third_party_filter_module"
+if tp not in third_party:
+    failures.append(f"the third-party filter is missing: {filters(third_party)}")
+elif third_party.index(tp) <= third_party.index("ngx_pagespeed_etag_filter"):
+    failures.append(
+        "a third-party header filter runs after the etag filter:\n"
+        f"  {filters(third_party)}")
+
 if failures:
     for f in failures:
         print("FAIL: " + f)
     sys.exit(1)
-print("PASS: static and dynamic builds from config match the Bazel module's filter order")
+print("PASS: static and dynamic builds from config match the Bazel module's "
+      "filter order, and a third-party header filter runs before the etag "
+      "filter")
 PY

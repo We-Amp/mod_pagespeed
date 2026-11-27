@@ -1470,9 +1470,12 @@ void RewriteOptions::AddProperties() {
   // cached work.
   AddBaseProperty(kDaemonHtmlCacheOff, &RewriteOptions::daemon_html_cache_,
                   "dhc", kDaemonHtmlCache, kServerScope,
-                  "HTML on the optimizer daemon path: off (default), or "
+                  "HTML on the optimizer daemon path: off (default); "
                   "report-only, which reports whether each HTML response "
-                  "could be stored and changes nothing else.",
+                  "could be stored and changes nothing else; or "
+                  "serve-variants, which stores HTML pages to serve their "
+                  "Markdown copies and, on a server that does not serve "
+                  "them yet, runs as report-only.",
                   true);
   properties_->property(properties_->size() - 1)
       ->set_do_not_use_for_signature_computation(true);
@@ -2651,6 +2654,23 @@ RewriteOptions::OptionSettingResult
 RewriteOptions::ParseAndSetOptionFromNameWithScope(
     StringPiece name, StringPiece arg, RewriteOptions::OptionScope max_scope,
     GoogleString* msg, MessageHandler* handler) {
+  // A value reserved for a later release: refused, with a warning instead of
+  // a configuration error, so a configuration written for that release still
+  // loads.  The option keeps the value it had.  Only where the option may be
+  // set at all: below its scope the usual scope error is the answer.
+  if (StringCaseEqual(name, kDaemonHtmlCache) &&
+      StringCaseEqual(arg, "serve-cached-html") && max_scope >= kServerScope) {
+    const GoogleString warning =
+        StrCat("'", kDaemonHtmlCache,
+               " serve-cached-html' is not available in this release and is "
+               "ignored; use serve-variants or report-only");
+    if (handler != nullptr) {
+      handler->Message(kWarning, "%s", warning.c_str());
+    }
+    // Also to a caller that reports the message itself.
+    if (msg != nullptr) *msg = warning;
+    return kOptionOk;
+  }
   GoogleString error_detail;
   OptionSettingResult result =
       SetOptionFromNameInternal(name, arg, max_scope, &error_detail);
@@ -2986,7 +3006,10 @@ bool RewriteOptions::ParseFromString(StringPiece value_string,
     *value = kDaemonHtmlCacheOff;
   } else if (StringCaseEqual(value_string, "report-only")) {
     *value = kDaemonHtmlCacheReportOnly;
+  } else if (StringCaseEqual(value_string, "serve-variants")) {
+    *value = kDaemonHtmlCacheServeVariants;
   } else {
+    // serve-cached-html included: see ParseAndSetOptionFromNameWithScope.
     return false;
   }
   return true;
@@ -3348,11 +3371,18 @@ RewriteOptions::WriteableJavascriptLibraryIdentification() {
 
 void RewriteOptions::Merge(const RewriteOptions& src) {
   DCHECK(!frozen_);
+  // UpdateCachePurgeSet unfreezes src, marks it modified on its own thread
+  // and freezes it again, all under this lock, and its purge set is merged
+  // under it below. Read the rest of what it writes under the lock too, or a
+  // merge on another thread sees src half way.
+  bool modify;
+  {
+    ThreadSystem::ScopedReader read_lock(src.cache_purge_mutex_.get());
 #ifndef NDEBUG
-  CHECK(src.MergeOK());  // DCHECK outside of the #ifndef does not link.
+    CHECK(src.MergeOK());  // DCHECK outside of the #ifndef does not link.
 #endif
-
-  bool modify = src.modified_;
+    modify = src.modified_;
+  }
 
   // Options that already forbid all disabled filters accept no merge that
   // turns on a filter not on before it, whether through the enabled set, a
@@ -3547,7 +3577,11 @@ void RewriteOptions::Merge(const RewriteOptions& src) {
 void RewriteOptions::MergeOnlyProcessScopeOptions(const RewriteOptions& src) {
   DCHECK(!frozen_);
 #ifndef NDEBUG  // MergeOK is only around in CHECK-enabled builds.
-  CHECK(src.MergeOK());
+  {
+    // As in Merge: src's state is read under the lock its updates hold.
+    ThreadSystem::ScopedReader read_lock(src.cache_purge_mutex_.get());
+    CHECK(src.MergeOK());
+  }
 #endif
 
   DCHECK_EQ(all_options_.size(), src.all_options_.size());
@@ -3784,8 +3818,8 @@ bool RewriteOptions::ClearSignatureWithCaution() {
 }
 
 bool RewriteOptions::IsEqual(const RewriteOptions& that) const {
-  DCHECK(frozen_);
-  DCHECK(that.frozen_);
+  // signature() checks that each side is frozen, under that side's lock: a
+  // purge-set update unfreezes and refreezes the server's options under it.
   if (signature() != that.signature()) {
     return false;
   }
@@ -3856,6 +3890,8 @@ GoogleString RewriteOptions::ToString(DaemonHtmlCacheMode mode) {
       return "off";
     case kDaemonHtmlCacheReportOnly:
       return "report-only";
+    case kDaemonHtmlCacheServeVariants:
+      return "serve-variants";
   }
   return "?";
 }
@@ -4914,6 +4950,12 @@ void RewriteOptions::UrlValuedAttribute(
   *element = StringPiece(eac.element);
   *attribute = StringPiece(eac.attribute);
   *category = eac.category;
+}
+
+bool RewriteOptions::IsUrlCacheValidIgnoringGlobal(StringPiece url,
+                                                   int64 time_ms) const {
+  ThreadSystem::ScopedReader read_lock(cache_purge_mutex_.get());
+  return purge_set_->IsValidIgnoringGlobal(url.as_string(), time_ms);
 }
 
 bool RewriteOptions::IsUrlCacheValid(StringPiece url, int64 time_ms,

@@ -11,7 +11,8 @@ permissions:
   contents: read
 jobs:
   pr:
+    if: ${{ github.ref == 'refs/heads/ci-dev' }}
     uses: We-Amp/mod_pagespeed/.github/workflows/pipeline.yml@ci-dev
   full:
-    if: ${{ inputs.full }}
+    if: ${{ inputs.full && github.ref == 'refs/heads/ci-dev' }}
     uses: We-Amp/mod_pagespeed/.github/workflows/pipeline-full.yml@ci-dev

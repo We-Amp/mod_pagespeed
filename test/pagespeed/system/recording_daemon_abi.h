@@ -254,6 +254,114 @@ class RecordingDaemonAbi : public DaemonAbi {
     inner_->ServeStatsClose(h);
   }
 
+  // The HTML serve set, forwarded like everything else; the sited calls
+  // also record their site.
+  bool HasHtmlServeSet() const override {
+    return Count(), inner_->HasHtmlServeSet();
+  }
+  GoogleString HtmlServeSetUnavailableReason() const override {
+    return Count(), inner_->HtmlServeSetUnavailableReason();
+  }
+  int HtmlServeClassify(const PsHtmlServeRequest* request,
+                        const PsHtmlStoredFacts* facts,
+                        PsHtmlServeVerdict* out) const override {
+    return Count(), inner_->HtmlServeClassify(request, facts, out);
+  }
+  const char* HtmlServeReasonName(int reason) const override {
+    return Count(), inner_->HtmlServeReasonName(reason);
+  }
+  int HtmlStoreWriteParams(int action, uint32_t lifetime_s,
+                           uint32_t store_flags, uint16_t cc_flags,
+                           int sidecar_stored, int64_t capture_start_ms,
+                           const char* const* age_lines, size_t age_count,
+                           uint64_t content_length, const char* origin_ct,
+                           PsWriteParams* params) const override {
+    return Count(), inner_->HtmlStoreWriteParams(
+                        action, lifetime_s, store_flags, cc_flags,
+                        sidecar_stored, capture_start_ms, age_lines, age_count,
+                        content_length, origin_ct, params);
+  }
+  int HtmlStoredFactsFromReads(const void* original, const void* markdown,
+                               const void* withheld, int sidecar_present,
+                               PsHtmlStoredFacts* out) const override {
+    return Count(), inner_->HtmlStoredFactsFromReads(
+                        original, markdown, withheld, sidecar_present, out);
+  }
+  int HtmlMarkdownEtag(const uint8_t* binding, const uint8_t* markdown,
+                       char* buf, size_t capacity,
+                       size_t* out_len) const override {
+    return Count(),
+           inner_->HtmlMarkdownEtag(binding, markdown, buf, capacity, out_len);
+  }
+  int IfNoneMatchMatchesWeak(const char* inm, const char* etag) const override {
+    return Count(), inner_->IfNoneMatchMatchesWeak(inm, etag);
+  }
+  int CacheWriteHeadersSidecarSite(void* cache,
+                                   const PsSidecarWriteParams* params,
+                                   const char* const* names,
+                                   const char* const* values, size_t count,
+                                   int* out_verdict,
+                                   int* out_stored) const override {
+    Count();
+    Site(params == nullptr ? nullptr : params->site);
+    return inner_->CacheWriteHeadersSidecarSite(cache, params, names, values,
+                                                count, out_verdict, out_stored);
+  }
+  int HeadersSidecarRead(void* cache, const char* url, const char* host,
+                         const char* scheme, const char* site,
+                         void** out) const override {
+    Count();
+    Site(site);
+    return inner_->HeadersSidecarRead(cache, url, host, scheme, site, out);
+  }
+  size_t HeaderBlockCount(const void* block) const override {
+    return Count(), inner_->HeaderBlockCount(block);
+  }
+  int HeaderBlockGet(const void* block, size_t index, const char** name,
+                     size_t* name_len, const char** value,
+                     size_t* value_len) const override {
+    return Count(), inner_->HeaderBlockGet(block, index, name, name_len, value,
+                                           value_len);
+  }
+  const uint8_t* HeaderBlockPairingHash(const void* block) const override {
+    return Count(), inner_->HeaderBlockPairingHash(block);
+  }
+  int HeaderBlockPairing(const void* block,
+                         const uint8_t* entry_hash) const override {
+    return Count(), inner_->HeaderBlockPairing(block, entry_hash);
+  }
+  void HeaderBlockFree(void* block) const override {
+    Count();
+    inner_->HeaderBlockFree(block);
+  }
+  int CacheRemoveSite(void* cache, const char* url, const char* host,
+                      const char* scheme, const char* site) const override {
+    Count();
+    Site(site);
+    return inner_->CacheRemoveSite(cache, url, host, scheme, site);
+  }
+  int CacheWriteSitePurgeEpoch(void* cache, const char* site,
+                               uint64_t epoch_s) const override {
+    Count();
+    Site(site);
+    return inner_->CacheWriteSitePurgeEpoch(cache, site, epoch_s);
+  }
+  int CacheReadSitePurgeEpoch(void* cache, const char* site,
+                              uint64_t* out) const override {
+    Count();
+    Site(site);
+    return inner_->CacheReadSitePurgeEpoch(cache, site, out);
+  }
+  int ReadSharedConfigHtmlMode(const char* path) const override {
+    return Count(), inner_->ReadSharedConfigHtmlMode(path);
+  }
+  int ReadSharedConfigAgentEntitled(const char* path) const override {
+    return Count(), inner_->ReadSharedConfigAgentEntitled(path);
+  }
+  int WantsAgentMarkdown(const char* accept) const override {
+    return Count(), inner_->WantsAgentMarkdown(accept);
+  }
+
  private:
   void Count() const { ++calls_; }
   void Site(const char* site) const {

@@ -135,6 +135,16 @@ KNOWN_LANE_FIXTURES = frozenset({
     # differ only in DaemonHtmlCache; the decision log is under
     # PAGESPEED_RULE_PACK_LOG_DIR
     "daemon_html_report",
+    # the HTML cache conformance rows' virtual host (www.example.test on port
+    # 443), rewritten by pagespeed_test_framework/daemon_html_provider_apache
+    # for every row, in front of a worker of its own in a markdown HTML mode
+    # with agent-optimize on (PAGESPEED_DHC_*)
+    "daemon_html_conformance",
+    # strip-off, strip-agent and strip-chain.example.com on
+    # PAGESPEED_STRIP_TAGS_PORT, proxying /strip_echo/ to an origin the test
+    # starts on PAGESPEED_STRIP_ECHO_PORT, and /strip_tags/plain.txt in their
+    # document root (system/test_module_entity_tags.py)
+    "strip_echo",
     # the self-fetch-access.example.com virtual host on
     # PAGESPEED_SELF_FETCH_ACCESS_PORT: a location under
     # install/mod_pagespeed_test/self_fetch_access/ open to local clients only
@@ -196,6 +206,37 @@ def require_daemon_lane_advertised(raw: str, lane_mode: str) -> None:
             "PAGESPEED_DAEMON_LANE=require but PAGESPEED_LANE_FIXTURES does not "
             f"advertise daemon_arm (got: {raw or '<none>'})"
         )
+
+
+def require_conformance_advertised(raw: str, lane_mode: str, server_type: str) -> None:
+    """PAGESPEED_DAEMON_LANE=require on a lane whose port ships an HTML cache
+    conformance provider (daemon_html_conformance.PROVIDER_PORTS) with no
+    daemon_html_conformance advertised is an error: otherwise every live row
+    would skip and the lane would read green."""
+    from pagespeed_test_framework import daemon_html_conformance as conf
+
+    if (
+        lane_mode in ("1", "require")
+        and conf.lane_port(server_type) in conf.PROVIDER_PORTS
+        and "daemon_html_conformance" not in parse_lane_fixtures(raw)
+    ):
+        raise pytest.UsageError(
+            f"PAGESPEED_DAEMON_LANE={lane_mode} on the {server_type} lane, which has an "
+            "HTML cache conformance provider, but PAGESPEED_LANE_FIXTURES does not "
+            f"advertise daemon_html_conformance (got: {raw or '<none>'})"
+        )
+
+
+KNOWN_SERVER_TYPES = frozenset(["", "auto", "apache", "nginx", "iis", "envoy"])
+
+
+def require_known_server_type(server_type: str) -> None:
+    """An unknown PAGESPEED_SERVER_TYPE is an error: it would otherwise name
+    no port, and the HTML cache conformance gate would never engage."""
+    if server_type not in KNOWN_SERVER_TYPES:
+        raise pytest.UsageError(
+            f"PAGESPEED_SERVER_TYPE={server_type!r} is not one of "
+            f"{sorted(t for t in KNOWN_SERVER_TYPES if t)}")
 
 
 def wait_until_second_after(
@@ -733,6 +774,12 @@ def pytest_configure(config):
     require_daemon_lane_advertised(
         os.environ.get("PAGESPEED_LANE_FIXTURES", ""), os.environ.get("PAGESPEED_DAEMON_LANE", "")
     )
+    require_known_server_type(os.environ.get("PAGESPEED_SERVER_TYPE", "auto"))
+    require_conformance_advertised(
+        os.environ.get("PAGESPEED_LANE_FIXTURES", ""),
+        os.environ.get("PAGESPEED_DAEMON_LANE", ""),
+        os.environ.get("PAGESPEED_SERVER_TYPE", ""),
+    )
 
     # Scale pytest's per-test timeout past fetch_until's worst-case wall
     # clock: ini timeout x PAGESPEED_TEST_TIMEOUT_MULTIPLIER x
@@ -831,6 +878,135 @@ def pytest_collection_modifyitems(config, items):
             + "\n".join(errors)
             + f"\nknown: {sorted(KNOWN_LANE_FIXTURES)}"
         )
+    deselect_conformance_rows(config, items)
+
+
+# ---------------------------------------------------------------------------
+# HTML cache conformance table (system/test_daemon_html_conformance.py)
+# ---------------------------------------------------------------------------
+# The Apache lane runs every row whose ports include it and allows no skip;
+# the nginx lane may skip only rows whose ports leave nginx out
+# (daemon_html_conformance.lane_rows and skip_violations). The rows for other
+# ports are deselected on the Apache lane. Once the lane provides the
+# daemon_html_conformance fixture (or requires the daemon lane), a skip
+# outside those rules fails the run even when every test passed, and the
+# terminal summary prints the table's counts. On such a lane every row the
+# lane keeps must run once the table's module is collected: a -k or
+# --deselect that leaves rows out fails the run too, unless
+# PAGESPEED_DHC_PARTIAL=1 says the run is a deliberate local subset.
+CONFORMANCE_NODE = "test_daemon_html_conformance.py::test_live_row["
+_CONFORMANCE = {"port": None, "deselected": 0, "ours": set(), "others": set(), "kept": 0,
+                "skipped": {}, "outcomes": {}, "violations": []}
+
+
+def conformance_row_id(nodeid: str) -> Optional[str]:
+    """The row id of a conformance table test, or None for any other test."""
+    if CONFORMANCE_NODE not in nodeid or not nodeid.endswith("]"):
+        return None
+    return nodeid.split(CONFORMANCE_NODE, 1)[1][:-1]
+
+
+def conformance_skips_enforced(raw_fixtures: str, lane_mode: str) -> bool:
+    """A lane that can run the table: it provides the fixture, or turns the
+    daemon lane on (which conftest fails up front without the fixture)."""
+    return "daemon_html_conformance" in parse_lane_fixtures(raw_fixtures) or lane_mode in (
+        "1", "require")
+
+
+def deselect_conformance_rows(config, items) -> None:
+    from pagespeed_test_framework import daemon_html_conformance as conf
+
+    port = conf.lane_port(os.environ.get("PAGESPEED_SERVER_TYPE", "auto"))
+    _CONFORMANCE["port"] = port
+    rows = {r["id"]: r for r in conf.live_rows(conf.load_cases())}
+    lane_kept, left = conf.lane_rows(list(rows.values()), port)
+    _CONFORMANCE["kept"] = len(lane_kept)
+    left_ids = {r["id"] for r in left}
+    if not left_ids:
+        return
+    kept, dropped = [], []
+    for item in items:
+        (dropped if conformance_row_id(item.nodeid) in left_ids else kept).append(item)
+    if dropped:
+        _CONFORMANCE["ours"] = {conformance_row_id(i.nodeid) for i in dropped}
+        config.hook.pytest_deselected(items=dropped)
+        items[:] = kept
+        _CONFORMANCE["deselected"] = len(dropped)
+
+
+def pytest_deselected(items):
+    """Conformance rows left out by anything but the lane's own port rule
+    (-k, --deselect, a marker expression)."""
+    for item in items:
+        rid = conformance_row_id(item.nodeid)
+        if rid is not None:
+            _CONFORMANCE["others"].add(rid)
+
+
+def pytest_runtest_logreport(report):
+    rid = conformance_row_id(report.nodeid)
+    if rid is None:
+        return
+    if report.skipped:
+        longrepr = report.longrepr
+        reason = longrepr[2] if isinstance(longrepr, tuple) and len(longrepr) == 3 else str(longrepr)
+        _CONFORMANCE["skipped"][rid] = reason
+        _CONFORMANCE["outcomes"][rid] = "skipped"
+    elif report.failed:
+        _CONFORMANCE["outcomes"][rid] = "failed"
+    elif report.when == "call":
+        _CONFORMANCE["outcomes"].setdefault(rid, "passed")
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_sessionfinish(session, exitstatus):
+    from pagespeed_test_framework import daemon_html_conformance as conf
+
+    port = _CONFORMANCE["port"]
+    others = _CONFORMANCE["others"] - _CONFORMANCE["ours"]
+    ran = _CONFORMANCE["outcomes"]
+    if port is None or not (ran or others):
+        return  # The table's module was not part of this run.
+    if not conformance_skips_enforced(
+        os.environ.get("PAGESPEED_LANE_FIXTURES", ""), os.environ.get("PAGESPEED_DAEMON_LANE", "")
+    ):
+        return
+    rows = {r["id"]: r for r in conf.live_rows(conf.load_cases())}
+    violations = conf.skip_violations(port, _CONFORMANCE["skipped"], rows)
+    if os.environ.get("PAGESPEED_DHC_PARTIAL") != "1" and (others or len(ran) != _CONFORMANCE["kept"]):
+        violations.append(
+            f"{len(ran)} of the {_CONFORMANCE['kept']} rows the {port} lane keeps ran "
+            f"({len(others)} deselected by the run's own selection); the lane runs the "
+            "whole table (PAGESPEED_DHC_PARTIAL=1 marks a deliberate local subset)")
+    _CONFORMANCE["violations"] = violations
+    if violations and session.exitstatus == pytest.ExitCode.OK:
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
+def pytest_terminal_summary(terminalreporter):
+    outcomes = _CONFORMANCE["outcomes"]
+    if not outcomes:
+        return
+    counts = {k: sum(1 for v in outcomes.values() if v == k) for k in ("passed", "failed", "skipped")}
+    terminalreporter.write_line(
+        f"HTML cache conformance on the {_CONFORMANCE['port']} lane: {len(outcomes)} rows, "
+        f"{counts['passed']} passed, {counts['failed']} failed, {counts['skipped']} skipped, "
+        f"{_CONFORMANCE['deselected']} for other ports deselected"
+    )
+    from pagespeed_test_framework import daemon_html_conformance as conf
+
+    for w in conf.WINDOW_LOG:
+        last = "none" if w["last_stale_s"] is None else f"last sent at {w['last_stale_s']:.2f} s"
+        first = "none" if w["first_miss_s"] is None else f"{w['first_miss_s']:.2f} s"
+        terminalreporter.write_line(
+            f"HTML cache conformance window {w['row']} step {w['step']}: "
+            f"{w['stale']} pre-purge answers ({last}), {w['miss']} misses (first sent at {first})"
+        )
+    for line in _CONFORMANCE["violations"]:
+        terminalreporter.write_line(f"HTML cache conformance skip not allowed: {line}", red=True)
+    if _CONFORMANCE["violations"]:
+        terminalreporter.write_line(
+            "HTML cache conformance: the run fails on the skips above", red=True, bold=True)
 
 
 # Skip tests based on server configuration

@@ -147,7 +147,8 @@ StringPiece str_to_string_piece(ngx_str_t s);
 // over.  Returns NULL if we can't get memory.
 char* string_piece_to_pool_string(ngx_pool_t* pool, StringPiece sp);
 
-class DaemonHtmlCapture;
+class DaemonHtmlRecording;
+struct PsDaemonHtmlRequest;
 
 struct ps_request_ctx_t {
   NgxBaseFetch* base_fetch;
@@ -175,10 +176,16 @@ struct ps_request_ctx_t {
   // handed to the low-priority pool rather than run inline, and the s-maxage
   // rewrite stays off.  record_body_bytes accumulates the streamed body size
   // of either record arm for the completion queue's byte cap.
-  // DaemonHtmlCache report-only: the capture of this HTML response, or nullptr
-  // in any other mode.  Finished at the end of the body, or at the latest when
-  // this context is released (a response with no body filter pass).
-  DaemonHtmlCapture* daemon_html_capture = nullptr;
+  // DaemonHtmlCache: the HTML cache engine's recording of this HTML response,
+  // or nullptr when the option is off.  Finished at the end of the body, or
+  // at the latest when this context is released (a response with no body
+  // filter pass).
+  DaemonHtmlRecording* daemon_html_recording = nullptr;
+  // DaemonHtmlCache: the rest of this request's HTML cache state (the
+  // origin's lines taken at the first header filter, the port the
+  // recording stores through, the Markdown answer being sent).  Owned;
+  // released after the recording, which borrows its port.
+  PsDaemonHtmlRequest* daemon_html = nullptr;
 
   bool daemon_record_pending;
   bool daemon_recorder;

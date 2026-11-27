@@ -38,6 +38,7 @@ Get-Process w3wp -ErrorAction SilentlyContinue | ForEach-Object { $_ | Wait-Proc
 
 # 2. Remove the site-level module enablement (location tag in applicationHost.config)
 & $ac set config "$SiteName/" -section:system.webServer/modules "/-[name='$ModuleName']" /commit:apphost 2>$null
+& $ac set config "$SiteName/" -section:system.webServer/modules "/-[name='PageSpeedFinalView']" /commit:apphost 2>$null
 Write-Host "site-level ASan module removal exit: $LASTEXITCODE"
 
 # 3. Delete site + pool
@@ -52,6 +53,10 @@ if ($gm) {
   & $ac set config -section:system.webServer/globalModules "/-[name='$ModuleName']" /commit:apphost 2>$null
 }
 
+# The ASan image's second registration (setup step 9).
+& $ac uninstall module PageSpeedFinalView 2>$null
+Write-Host "uninstall ASan PageSpeedFinalView exit: $LASTEXITCODE"
+
 # 5. Restore the CI PageSpeedModule from the snapshotted image path
 $snap = "$RigDir\ci-module-image.txt"
 if (Test-Path $snap) {
@@ -59,6 +64,9 @@ if (Test-Path $snap) {
   if ($ciImage) {
     & $ac install module /name:PageSpeedModule /image:"$ciImage" /add:true 2>$null
     Write-Host "restore CI PageSpeedModule (/image:$ciImage) exit: $LASTEXITCODE"
+    & $ac install module /name:PageSpeedFinalView /image:"$ciImage" /add:false 2>$null
+    & $ac set config -section:system.webServer/modules "/+[@start,name='PageSpeedFinalView']" /commit:apphost 2>$null
+    Write-Host "restore CI PageSpeedFinalView first in modules exit: $LASTEXITCODE"
     $ok = (& $ac list config -section:system.webServer/globalModules) | Select-String "name=`"PageSpeedModule`""
     if (-not $ok) {
       Write-Error "FAILED to restore CI PageSpeedModule from $ciImage -- runner needs manual check (next iis-sys-tests run reinstalls it, but verify)."

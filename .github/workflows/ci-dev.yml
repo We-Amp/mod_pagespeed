@@ -22,7 +22,11 @@ concurrency:
 permissions: {}
 
 jobs:
+  # Both jobs run only on a dispatch from the ci-dev branch
+  # (`gh workflow run ci-dev.yml --ref ci-dev`, docs/ci/pipelines.md), so the
+  # pipelines @ci-dev never run under another ref's name.
   pr:
+    if: ${{ github.ref == 'refs/heads/ci-dev' }}
     # The called pipeline requests pull-requests: read for the release-note
     # gate, contents: write for its lock-push job alone (pushes a
     # regenerated MODULE.bazel.lock to a same-repository PR branch; it never
@@ -41,8 +45,24 @@ jobs:
   # branch; actions: read is for its path filter (reads the push runs of the
   # default branch), and a called workflow cannot exceed what its caller grants.
   full:
-    if: ${{ inputs.full }}
+    if: ${{ inputs.full && github.ref == 'refs/heads/ci-dev' }}
     permissions:
       actions: read
       contents: read
     uses: We-Amp/mod_pagespeed/.github/workflows/pipeline-full.yml@ci-dev
+
+  # A dispatch on any other ref skips both jobs above; this job turns such a
+  # run red instead of a green run where everything was skipped.
+  ref-check:
+    name: Dispatched on ci-dev
+    permissions: {}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: The run's ref is refs/heads/ci-dev
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          [ "${REF}" = refs/heads/ci-dev ] || { echo "::error::dispatch ci-dev.yml on the ci-dev branch (gh workflow run ci-dev.yml --ref ci-dev), not on '${REF}'; nothing ran"; exit 1; }
+          echo "dispatch on ${REF}"

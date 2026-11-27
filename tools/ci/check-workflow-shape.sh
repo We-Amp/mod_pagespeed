@@ -74,6 +74,11 @@
 #       needs.version.outputs.rehearsal != 'true', so a dry run, a candidate
 #       run and a rehearsal (which run on master) never reach the
 #       environment even if its tag policy were loosened;
+#       in nginx-org-rebuild.yml (dispatched on master, so the environment
+#       admits master for it): each job with `environment: release` carries
+#       needs.plan.outputs.dry_run == 'false' in its if:, and the lane's own
+#       event guard, module_tag and checkouts are pinned (see "release-env,
+#       the nginx.org lane" below);
 #   (adopt-shape) in pipeline-release-module.yml, when it has an `adopt` job:
 #       the jobs whose if: contains needs.adopt.outputs.adopted != 'true' are
 #       exactly the adoptable jobs of `release_adopt.py schema --print` (a new
@@ -95,6 +100,30 @@
 #       steps of these jobs and must run before any secret is readable; a
 #       secret at job level (env:, with:) or in an earlier step would be
 #       readable by them;
+#   (env-tag-ref) in every workflow: a job that names an environment does so
+#       on one line with a literal name (no mapping form, no expression), and
+#       each job with `environment: release` has a one-line if: with no ||,
+#       always(, failure( or cancelled( (bar !cancelled()), no group right
+#       after ${{ and no compared group (`(...) == false`), that carries
+#       startsWith(github.ref, 'refs/tags/ in its one-line if:, so a run on a
+#       branch never requests the environment (in pipeline-release-module.yml
+#       also github.ref == format('refs/tags/{0}', needs.version.outputs.tag),
+#       and the if: starts with ${{ !cancelled() && );
+#       the one exception is nginx-org-rebuild.yml, whose release jobs run on
+#       the ref its event-guard job pins (a module-v* tag, or exactly
+#       refs/heads/master); an environment spelled release in another case
+#       is refused (GitHub matches the names without regard to case); and such
+#       a workflow (and nginx-org-rebuild.yml) has no workflow-level
+#       defaults: and only standard shells (bash, pwsh, powershell, sh, cmd,
+#       python), so no custom shell can skip a guard script;
+#   (repo-ref) in every workflow: a `uses:` of this repository
+#       (We-Amp/mod_pagespeed/..., owner and name in any case), at job or step
+#       level, names @master or @ci-dev and no other ref; @ci-dev only in a job
+#       whose one-line if: carries github.ref == 'refs/heads/ci-dev' as a term
+#       of its own (between ${{ or && and && or }}), with no ||, no negation
+#       other than !cancelled() and !=, and no always(, failure( or bare
+#       cancelled(. A called workflow runs under its caller's ref, so a
+#       ci-dev callee may run only under refs/heads/ci-dev, never as master;
 #   (yaml-alias) in every workflow's jobs: section, no YAML anchor or alias
 #       on a job or on a job-level key other than steps: and env:, and no
 #       `<<:` merge key: the gate reads the text and cannot resolve them;
@@ -108,6 +137,22 @@
 #       `--add-host=bazel-remote-cache` elsewhere fails, except on a line
 #       marked `# predates remote-cache-docker-args.sh` (the fallback for a
 #       release tag cut before the helper existed).
+#   (slsa) the one reusable workflow from outside this repository: a job
+#       whose uses: names slsa-framework/slsa-github-generator must name
+#       exactly .github/workflows/generator_generic_slsa3.yml@v<X.Y.Z> (a
+#       version tag, not a commit: the generator checks its own ref and
+#       refuses anything else) and sit in a file of SLSA_CALLERS (the release
+#       lanes). The job has only the keys name, needs, if, permissions, uses
+#       and with (no secrets:, no continue-on-error); its permissions are
+#       exactly actions: read, id-token: write and contents: write (what the
+#       generator's jobs declare), as a block; its with: keys are only
+#       base64-subjects (required), provenance-name and upload-assets, which
+#       must be false, so the provenance reaches a release only through the
+#       lane's own release job. Such a job may hold those write permissions
+#       (rule f) and is exempt from rule b (the nginx.org lane is a caller):
+#       the generator's jobs run on GitHub-hosted runners, never on the
+#       fleet. The adopt-shape rule counts the artifact named by its
+#       provenance-name input as one it uploads.
 #
 # Rule (e) exclusions (same pattern as the public-tree hygiene gate, which
 # excludes its own rules file):
@@ -297,6 +342,80 @@ release_env_if_records() {
   ' "$1"
 }
 
+# Facts for the env-tag-ref rule, one per line, tab separated: "<job> <line>
+# <kind>", kind being "form" (an environment that is not a one-line literal
+# name), "noref" (environment: release without the tag-ref term in its if:)
+# or "notag" (pipeline-release-module.yml: without the term that binds the
+# ref to the version job's tag).
+env_tag_ref_records() { # FILE MODULE_LANE(0|1)
+  awk -v tab="${TAB}" -v lane="$2" '
+    function flush() {
+      if (job != "" && rel_line > 0) {
+        if (bypass) printf "%s%s%d%sbypass\n", job, tab, rel_line, tab
+        if (!has_ref) printf "%s%s%d%snoref\n", job, tab, rel_line, tab
+        else if (lane == 1 && !has_tag) printf "%s%s%d%snotag\n", job, tab, rel_line, tab
+      }
+    }
+    /^[[:space:]]*#/ { next }
+    /^jobs:[[:space:]]*$/ { injobs=1; next }
+    injobs && /^[^[:space:]#]/ { flush(); injobs=0; job="" }
+    injobs && /^  [^[:space:]]/ { flush(); job=$1; sub(/:$/, "", job); rel_line=0; has_ref=0; has_tag=0; bypass=0; next }
+    injobs && /^    ["\047]?environment["\047]?[[:space:]]*:/ {
+      v=$0; sub(/^[^:]*:[[:space:]]*/, "", v); sub(/[[:space:]]+#.*$/, "", v)
+      if (v == "" || index(v, "${{") || index(v, "{") || v !~ /^["\047]?[A-Za-z0-9_-]+["\047]?$/) { printf "%s%s%d%sform\n", job, tab, NR, tab; next }
+      gsub(/["\047]/, "", v)
+      # GitHub matches environment names without regard to case: any other
+      # spelling of release would be the same environment under a name the
+      # rules below do not see.
+      if (tolower(v) == "release" && v != "release") { printf "%s%s%d%sform\n", job, tab, NR, tab; next }
+      if (v == "release") rel_line=NR
+    }
+    injobs && /^    if:/ {
+      # Each term stands on its own between ${{ or && and && or }}, so a
+      # negation or a wider expression around it does not count.
+      if ($0 ~ /(\$\{\{ |&& )startsWith\(github\.ref, \047refs\/tags\/[A-Za-z0-9._-]*\047\)( &&| \}\})/) has_ref=1
+      if ($0 ~ /&& github\.ref == format\(\047refs\/tags\/\{0\}\047, needs\.version\.outputs\.tag\)( &&| \}\})/) has_tag=1
+      # The terms must all hold: no ||, no negation (!cancelled() and != aside)
+      # and no status function that runs the job whatever they say
+      # (!cancelled() only adds a condition).
+      c=$0; gsub(/[[:space:]]+/, "", c); gsub(/!cancelled\(\)/, "", c); gsub(/!=/, "", c)
+      if (index(c, "||") || index(c, "!") || index(c, "always(") || index(c, "failure(") || index(c, "cancelled(")) bypass=1
+      # No wrapper around the terms: nothing opens a group right after ${{,
+      # and no group is compared (`(... && true) == false` inverts them).
+      if (index(c, "${{(") || index(c, ")==") || index(c, ")!=")) bypass=1
+      # The module lane: the condition starts with ${{ !cancelled() && .
+      if (lane == 1 && $0 !~ /^    if: \$\{\{ !cancelled\(\) && .* \}\}[[:space:]]*$/) bypass=1
+    }
+    END { flush() }
+  ' "$1"
+}
+
+# Facts for the repo-ref rule, one per line, tab separated: "<job> <line>
+# <uses value> <guarded 0|1>" for each uses: (job or step level) of a job,
+# guarded being 1 when the job's one-line if: carries the ci-dev ref term
+# (see the rule above).
+repo_ref_records() {
+  awk -v tab="${TAB}" '
+    function flush(   i) { for (i = 1; i <= n; i++) printf "%s%s%s%s%s%s%d\n", job, tab, ln[i], tab, val[i], tab, guarded }
+    /^[[:space:]]*#/ { next }
+    /^jobs:[[:space:]]*$/ { injobs=1; next }
+    injobs && /^[^[:space:]#]/ { flush(); injobs=0; job=""; n=0 }
+    injobs && /^  [^[:space:]]/ { flush(); job=$1; sub(/:$/, "", job); n=0; guarded=0; next }
+    injobs && /^    ["\047]?if["\047]?[[:space:]]*:/ {
+      g = ($0 ~ /(\$\{\{ |&& )github\.ref == \047refs\/heads\/ci-dev\047( &&| \}\})/)
+      c=$0; gsub(/[[:space:]]+/, "", c); gsub(/!cancelled\(\)/, "", c); gsub(/!=/, "", c)
+      if (index(c, "||") || index(c, "!") || index(c, "always(") || index(c, "failure(") || index(c, "cancelled(")) g = 0
+      if (index(c, "${{(") || index(c, ")==") || index(c, ")!=")) g = 0
+      guarded = g
+    }
+    injobs && /^[[:space:]]+(-[[:space:]]+)?["\047]?uses["\047]?[[:space:]]*:/ {
+      v=$0; sub(/^[^:]*:[[:space:]]*/, "", v); sub(/[[:space:]]+#.*$/, "", v); gsub(/["\047]/, "", v)
+      n++; ln[n]=NR; val[n]=v
+    }
+    END { flush() }
+  ' "$1"
+}
+
 # Facts for the adopt-shape rule, one per line, tab separated: "J <job> <gated>"
 # for each job (gated is 1 when its if: contains the adoption condition), "D
 # <job> <name or pattern>" for each artifact a job downloads and "U <job>
@@ -321,6 +440,10 @@ adopt_records() {
     /uses:[[:space:]]*actions\/download-artifact@/ { step="D" }
     /uses:[[:space:]]*actions\/upload-artifact@/ { step="U" }
     /^          (name|pattern):/ && step != "" { print step tab job tab val($0); next }
+    # A call of the SLSA generator uploads the artifact its provenance-name
+    # input names (the slsa rule; uses: before with:).
+    /^    uses:[[:space:]]*slsa-framework\/slsa-github-generator\// { slsa[job]=1; next }
+    /^      provenance-name:/ && slsa[job] { print "U" tab job tab val($0); next }
     /^      [a-z_]+_artifact:/ { print "D" tab job tab val($0) }
     END { for (i = 1; i <= n; i++) print "J" tab order[i] tab gated[order[i]] }
   ' "$1"
@@ -463,6 +586,60 @@ sign_secret_problems() { # workflow file
 # of this repository whose every job that reads a secret runs on a hosted label
 # (rule g checks that file too). The two fleet-hyperv gates get none.
 SECRET_CALLEES="pipeline-release-module.yml"
+
+# The (slsa) rule: the SLSA generic generator, by version tag, and the files
+# that may call it.
+SLSA_GENERATOR_RE='^slsa-framework/slsa-github-generator/\.github/workflows/generator_generic_slsa3\.yml@v[0-9]+\.[0-9]+\.[0-9]+$'
+SLSA_CALLERS="pipeline-release-module.yml nginx-org-rebuild.yml"
+is_slsa_call() { # a `uses:` value
+  printf '%s' "$1" | grep -qE "${SLSA_GENERATOR_RE}"
+}
+is_slsa_caller() { # a workflow file name
+  local c
+  for c in ${SLSA_CALLERS}; do [ "$1" = "${c}" ] && return 0; done
+  return 1
+}
+
+# Problems with a call job of the SLSA generator (the slsa rule), one per
+# line: the job's keys are only name, needs, if, permissions, uses and with
+# (so no secrets:, continue-on-error, strategy or timeout); its permissions
+# are exactly actions: read, id-token: write and contents: write (what the
+# generator's jobs declare); its with: keys are only base64-subjects,
+# provenance-name and upload-assets, base64-subjects is given and
+# upload-assets is false. Line-oriented: job keys at four spaces, their
+# values at six.
+slsa_job_problems() { # workflow file, job id
+  awk -v j="  $2:" '
+    /^  [A-Za-z0-9_-]+:[ ]*$/ { inj = ($0 == j); next }
+    !inj { next }
+    /^[[:space:]]*#/ || /^[[:space:]]*$/ { next }
+    /^    [^ ]/ {
+      key = $0; sub(/^    /, "", key); sub(/[ \t]*:.*$/, "", key); gsub(/["\047]/, "", key)
+      blk = key
+      if (key !~ /^(name|needs|if|permissions|uses|with)$/) print "job key \047" key "\047 is not allowed on a call of the SLSA generator"
+      if (key == "permissions" || key == "with") {
+        v = $0; sub(/^    [^:]*:[[:space:]]*/, "", v); sub(/[[:space:]]+#.*$/, "", v)
+        if (v != "") print key ": must be a block of one key per line"
+      }
+      next
+    }
+    /^      [^ ]/ && (blk == "permissions" || blk == "with") {
+      line = $0; sub(/^      /, "", line); sub(/[[:space:]]+#.*$/, "", line); gsub(/["\047]/, "", line)
+      k = line; sub(/[ \t]*:.*$/, "", k); v = line; sub(/^[^:]*:[[:space:]]*/, "", v)
+      if (blk == "permissions") perm[k] = v
+      else { w[k] = v; if (k !~ /^(base64-subjects|provenance-name|upload-assets)$/) print "with: key \047" k "\047 is not allowed" }
+      next
+    }
+    END {
+      np = 0; for (k in perm) np++
+      if (np != 3 || perm["actions"] != "read" || perm["id-token"] != "write" || perm["contents"] != "write")
+        print "permissions must be exactly actions: read, id-token: write and contents: write"
+      if (!("base64-subjects" in w)) print "with: lacks base64-subjects"
+      if (w["upload-assets"] != "false") print "with: lacks upload-assets: false; the lane'"'"'s release job attaches the provenance"
+    }
+  ' "$1"
+}
+
 is_secret_callee() { # a `uses:` value
   local f c
   f="${1##*/}"; f="${f%%@*}"
@@ -761,6 +938,11 @@ EOF
         continue
       fi
       wruns="$(printf '%s\n' "${records}" | awk -F"${TAB}" -v j="${wjob}" '$1=="KEY" && $2==j && $3=="runs-on" {print $5}')"
+      wuses="$(printf '%s\n' "${records}" | awk -F"${TAB}" -v j="${wjob}" '$1=="KEY" && $2==j && $3=="uses" {print $5}')"
+      # The SLSA generator's jobs run on hosted runners (the slsa rule).
+      if [ -z "${wruns}" ] && is_slsa_call "${wuses}"; then
+        continue
+      fi
       if ! is_hosted_label "${wruns}"; then
         err "${wf}:${wline}: job '${wjob}' holds a write permission but does not run on a hosted label (rule f)"
       fi
@@ -798,6 +980,46 @@ EOF
 $(release_env_if_records "${wf}")
 EOF
   fi
+  # (env-tag-ref) a job of the release environment refuses a branch ref in its
+  # if:, so no deployment is requested from one. nginx-org-rebuild.yml runs its
+  # release jobs on the ref its event guard pins instead.
+  et_lane=0
+  [ "${base}" != "pipeline-release-module.yml" ] || et_lane=1
+  et_guarded=0
+  if [ "${base}" = "nginx-org-rebuild.yml" ]; then
+    # The ref pin must be in the event-guard job itself.
+    et_eg="$(awk '/^  [A-Za-z0-9_-]+:[ ]*$/ { inj = ($1 == "event-guard:") } /^[^[:space:]#]/ { inj = 0 } inj && !/^[[:space:]]*#/ { print }' "${wf}")"
+    # shellcheck disable=SC2016  # literal workflow text
+    if printf '%s\n' "${et_eg}" | grep -qF '          [[ "$REF" =~ ^refs/tags/module-v[0-9]+\.[0-9]+\.[0-9]+$ ]] \' \
+      || { printf '%s\n' "${et_eg}" | grep -qxF '          ALLOWED_REFS: "refs/heads/master"' \
+           && printf '%s\n' "${et_eg}" | grep -qE '^          \[ "\$REF" = "\$ALLOWED_REFS" \] \|\| \{ .*exit 1; \}$'; }; then
+      et_guarded=1
+    fi
+  fi
+  # A workflow with a job of the release environment, and the nginx.org lane,
+  # take no workflow-level defaults: and no shell other than the standard
+  # ones: a custom shell (`shell: 'true {0}'`) would skip every guard script.
+  if [ "${base}" = "nginx-org-rebuild.yml" ] \
+    || grep -qiE '^    ["'"'"']?environment["'"'"']?[[:space:]]*:[[:space:]]*["'"'"']?release["'"'"']?[[:space:]]*(#.*)?$' "${wf}"; then
+    if grep -qE '^["'"'"']?defaults["'"'"']?[[:space:]]*:' "${wf}"; then
+      err "${wf}: a workflow with a job of the release environment takes no workflow-level defaults: (rule env-tag-ref)"
+    fi
+    et_sh="$(grep -nE '^[[:space:]]+["'"'"']?shell["'"'"']?[[:space:]]*:' "${wf}" | grep -vE '^[0-9]+:[[:space:]]+shell:[[:space:]]*(bash|pwsh|powershell|sh|cmd|python)[[:space:]]*(#.*)?$' || true)"
+    [ -z "${et_sh}" ] || err "${wf}: a workflow with a job of the release environment runs only the standard shells (bash, pwsh, powershell, sh, cmd, python): ${et_sh} (rule env-tag-ref)"
+  fi
+  while IFS=$'\t' read -r sjob sline skind; do
+    [ -n "${sjob}" ] || continue
+    case "${skind}" in
+      form) err "${wf}:${sline}: job '${sjob}' names its environment in a form the gate cannot read; write \`environment: <name>\` on one line, and the release environment as \`release\` in lower case (rule env-tag-ref)" ;;
+      noref)
+        [ "${et_guarded}" = 1 ] && continue
+        err "${wf}:${sline}: job '${sjob}' names environment release but its if: lacks startsWith(github.ref, 'refs/tags/...') (rule env-tag-ref)" ;;
+      bypass) err "${wf}:${sline}: job '${sjob}' names environment release but its if: has ||, a negation, always(, failure( or cancelled( (other than !cancelled() and !=), a group right after \${{ or a compared group, or (in the module lane) does not start with \${{ !cancelled() && , any of which can bypass its ref terms (rule env-tag-ref)" ;;
+      notag) err "${wf}:${sline}: job '${sjob}' names environment release but its if: lacks github.ref == format('refs/tags/{0}', needs.version.outputs.tag) (rule env-tag-ref)" ;;
+    esac
+  done <<EOF
+$(env_tag_ref_records "${wf}" "${et_lane}")
+EOF
   if [ "${base}" = "pipeline-release-module.yml" ] && grep -q '^  adopt:[[:space:]]*$' "${wf}"; then
     while IFS= read -r aprob; do
       [ -n "${aprob}" ] || continue
@@ -831,6 +1053,46 @@ EOF
 $(toplevel_secret_lines "${wf}")
 EOF
 
+  # (repo-ref) every workflow: this repository's workflows and actions by
+  # @master, or by @ci-dev only under refs/heads/ci-dev.
+  while IFS="${TAB}" read -r rjob rline rval rguard; do
+    [ -n "${rjob}" ] || continue
+    rlow="$(printf '%s' "${rval}" | tr '[:upper:]' '[:lower:]')"
+    case "${rlow}" in we-amp/mod_pagespeed/*|we-amp/mod_pagespeed@*) ;; *) continue ;; esac
+    case "${rval}" in
+      *@master) ;;
+      *@ci-dev)
+        [ "${rguard}" = 1 ] || err "${wf}:${rline}: job '${rjob}' uses '${rval}' but its if: does not carry github.ref == 'refs/heads/ci-dev' as a term of its own (no ||, no negation): a ci-dev callee must never run under another ref (rule repo-ref)" ;;
+      *) err "${wf}:${rline}: job '${rjob}' uses '${rval}': this repository's workflows and actions are named @master, or @ci-dev under refs/heads/ci-dev, never another ref (rule repo-ref)" ;;
+    esac
+  done <<EOF
+$(repo_ref_records "${wf}")
+EOF
+
+  # (slsa) every workflow: a call of the SLSA generator names the generic
+  # generator by version tag, from a release lane, and never uploads itself.
+  while IFS="${TAB}" read -r kind job key lineno val; do
+    { [ "${kind}" = "KEY" ] && [ "${key}" = "uses" ]; } || continue
+    case "${val}" in
+      *slsa-framework/slsa-github-generator/*) ;;
+      *) continue ;;
+    esac
+    if ! is_slsa_call "${val}"; then
+      err "${wf}:${lineno}: job '${job}' uses '${val}'; only .github/workflows/generator_generic_slsa3.yml@v<X.Y.Z> of the SLSA generator is allowed, by version tag (slsa)"
+    elif ! is_slsa_caller "${base}"; then
+      err "${wf}:${lineno}: job '${job}' calls the SLSA generator, which only the release lanes (${SLSA_CALLERS}) may call (slsa)"
+    else
+      while IFS= read -r sprob; do
+        [ -n "${sprob}" ] || continue
+        err "${wf}:${lineno}: job '${job}' calls the SLSA generator: ${sprob} (slsa)"
+      done <<EOT
+$(slsa_job_problems "${wf}" "${job}")
+EOT
+    fi
+  done <<EOF
+${records}
+EOF
+
   if printf '%s\n' "${triggers}" | grep -qvx 'workflow_call'; then
     # Caller workflow. (b) unless allowlisted.
     if ! is_allowlisted "${base}"; then
@@ -841,7 +1103,9 @@ EOF
         has_steps="$(printf '%s\n' "${records}" | awk -F"${TAB}" -v j="${job}" '$1=="KEY" && $2==j && $3=="steps" {print "1"}')"
         jline="$(printf '%s\n' "${records}" | awk -F"${TAB}" -v j="${job}" '$1=="JOB" && $2==j {print $3}')"
         if [ -n "${uses_val}" ]; then
-          if ! printf '%s' "${uses_val}" | grep -qE '^We-Amp/mod_pagespeed/\.github/workflows/[A-Za-z0-9._-]+\.yml@(master|ci-dev)$'; then
+          # The SLSA generator is checked by the slsa rule.
+          if ! printf '%s' "${uses_val}" | grep -qE '^We-Amp/mod_pagespeed/\.github/workflows/[A-Za-z0-9._-]+\.yml@(master|ci-dev)$' \
+             && ! is_slsa_call "${uses_val}"; then
             err "${wf}:${jline}: caller job '${job}' uses '${uses_val}', not this repository's reusable workflow @master/@ci-dev (rule b)"
           fi
           if [ -n "${runson_val}" ] || [ -n "${has_steps}" ]; then
@@ -1366,6 +1630,7 @@ eg_allowed_for() { # workflow file base name
     pipeline-nightly.yml) printf '%s' "schedule workflow_dispatch" ;;
     pipeline-tidy-sweep.yml) printf '%s' "workflow_dispatch" ;;
     gate-*.yml|pipeline-release-*.yml) printf '%s' "push workflow_dispatch schedule" ;;
+    nginx-org-rebuild.yml) printf '%s' "workflow_dispatch" ;;
     *) printf '%s' "" ;;
   esac
 }
@@ -1374,6 +1639,9 @@ eg_refs_for() { # workflow file base name
     pipeline-full.yml) printf '%s' "refs/heads/${EG_DEFAULT_BRANCH} refs/heads/ci-dev refs/pull/*/merge" ;;
     pipeline-nightly.yml|pipeline-tidy-sweep.yml) printf '%s' "refs/heads/${EG_DEFAULT_BRANCH}" ;;
     gate-*.yml|pipeline-release-*.yml) printf '%s' "refs/tags/* refs/heads/${EG_DEFAULT_BRANCH}" ;;
+    # The nginx.org lane: a dispatch on master only, never on a tag (rule
+    # release-env reads this entry; the lane has no fleet job).
+    nginx-org-rebuild.yml) printf '%s' "refs/heads/${EG_DEFAULT_BRANCH}" ;;
     *) printf '%s' "" ;;
   esac
 }
@@ -1529,6 +1797,128 @@ eg_unreached() { # workflow file, 1 if it is a workflow_call file (rule d pins i
     }
   ' "$1"
 }
+
+
+# --- release-env, the nginx.org lane ----------------------------------------
+# nginx-org-rebuild.yml is dispatched on master and names the module release
+# in its module_tag input, so the `release` environment admits master for it.
+# What keeps a master run from signing anything it should not is pinned here.
+# All its jobs are hosted, so the fleet event-guard form above does not apply;
+# the lane's own guard is checked instead (rule release-env):
+#   - on: is workflow_dispatch alone, and it has a module_tag input;
+#   - the event-guard job is exactly the text of nginxorg_eg_expected (comment
+#     and blank lines aside): one step, no if: or continue-on-error at job or
+#     step level, ALLOWED_REFS from the ref table (eg_refs_for
+#     nginx-org-rebuild.yml: exact refs/heads refs, no glob, no tag), and the
+#     script that refuses another event, an app or bot actor, another ref and
+#     a module_tag outside ^module-v[0-9]+\.[0-9]+\.[0-9]+$;
+#   - plan needs event-guard and has no if: or continue-on-error; every other
+#     job needs plan;
+#   - each job with `environment: release` has a one-line if: of the form
+#     ${{ !cancelled() && <term> && ... }}, each term being
+#     needs.<job>.result == 'success' or needs.plan.outputs.dry_run == 'false'
+#     (which must be one of them), and nothing else: no ||, no other status
+#     function;
+#   - inputs.module_tag appears only as a step env value
+#     (`MODULE_TAG: ${{ inputs.module_tag }}`), never in a run: block, and
+#     github.ref_name appears nowhere (the release is module_tag, not the
+#     run's ref);
+#   - every checkout ref: is ${{ github.sha }}, so the plan, the approval and
+#     the signing jobs run the one commit the dispatch was made at.
+nginxorg_eg_expected() { # ALLOWED_REFS value
+  # shellcheck disable=SC2016  # the text to match carries literal ${{ ... }} and $VAR
+  printf '%s\n' \
+    '  event-guard:' \
+    '    name: Event guard' \
+    '    runs-on: ubuntu-24.04' \
+    '    timeout-minutes: 5' \
+    '    steps:' \
+    "      - name: A person's dispatch on master for a module release tag" \
+    '        env:' \
+    '          EVENT: ${{ github.event_name }}' \
+    '          REF: ${{ github.ref }}' \
+    '          ACTOR: ${{ github.actor }}' \
+    '          TRIGGERING_ACTOR: ${{ github.triggering_actor }}' \
+    '          MODULE_TAG: ${{ inputs.module_tag }}' \
+    "          ALLOWED_REFS: \"$1\"" \
+    '        run: |' \
+    '          set -euo pipefail' \
+    '          [ "$EVENT" = workflow_dispatch ] || { echo "::error::only a dispatch runs this lane"; exit 1; }' \
+    '          for a in "$ACTOR" "$TRIGGERING_ACTOR"; do' \
+    '            case "$a" in *"[bot]") echo "::error::a dispatch or re-run by an app or bot account ($a) is not allowed"; exit 1 ;; esac' \
+    '          done' \
+    '          [ "$REF" = "$ALLOWED_REFS" ] || { echo "::error::dispatch this lane on master (--ref master -f module_tag=module-vX.Y.Z), not on '"'"'$REF'"'"'"; exit 1; }' \
+    '          [[ "$MODULE_TAG" =~ ^module-v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::module_tag must be module-vX.Y.Z"; exit 1; }' \
+    '          echo "dispatch on ${REF} for ${MODULE_TAG} by ${ACTOR} accepted"'
+}
+# Jobs with environment: release whose if: is not the pinned form, one per
+# line: "<job> <tab> <line> <tab> <if: text or -none->".
+nginxorg_env_if_records() {
+  awk -v tab="${TAB}" '
+    function ok(c,   t, n, i, dry) {
+      if (c !~ /^\$\{\{ .* \}\}$/) return 0
+      c = substr(c, 5, length(c) - 7)
+      n = split(c, t, / && /)
+      if (t[1] != "!cancelled()") return 0
+      dry = 0
+      for (i = 2; i <= n; i++) {
+        if (t[i] == "needs.plan.outputs.dry_run == \047false\047") { dry = 1; continue }
+        if (t[i] !~ /^needs\.[A-Za-z0-9_-]+\.result == \047success\047$/) return 0
+      }
+      return dry
+    }
+    function flush() { if (job != "" && env_line > 0 && !ok(cond)) printf "%s%s%d%s%s\n", job, tab, env_line, tab, (cond == "" ? "-none-" : cond) }
+    /^[[:space:]]*#/ { next }
+    /^jobs:[[:space:]]*$/ { injobs=1; next }
+    injobs && /^[^[:space:]#]/ { flush(); injobs=0; job="" }
+    injobs && /^  [^[:space:]]/ { flush(); job=$1; sub(/:$/, "", job); env_line=0; cond=""; next }
+    injobs && /^    environment:[[:space:]]*["\047]?release["\047]?[[:space:]]*$/ { env_line=NR }
+    injobs && /^    ["\047]?if["\047]?[[:space:]]*:/ { cond=$0; sub(/^[^:]*:[[:space:]]*/, "", cond); sub(/[[:space:]]+$/, "", cond) }
+    END { flush() }
+  ' "$1"
+}
+for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
+  [ -n "${wf}" ] || continue
+  [ "$(basename "${wf}")" = "nginx-org-rebuild.yml" ] || continue
+  ng_refs="$(eg_refs_for nginx-org-rebuild.yml)"
+  ng_err() { err "${wf}: $* (rule release-env)"; }
+  [ "$(on_triggers "${wf}" | tr '\n' ' ')" = "workflow_dispatch " ] || ng_err "on: must be workflow_dispatch alone"
+  grep -qE '^      module_tag:[[:space:]]*$' "${wf}" || ng_err "the dispatch needs a module_tag input"
+  case "${ng_refs}" in *[*?[]*|*refs/tags/*|"") ng_err "ALLOWED_REFS of the lane must be exact refs/heads refs" ;; esac
+  # The job's text, comment lines, blank lines and the runner pin note aside.
+  ng_eg="$(awk '/^  [A-Za-z0-9_-]+:[ ]*$/ { inj = ($1 == "event-guard:") } /^[^[:space:]#]/ { inj = 0 } inj && !/^[[:space:]]*#/ && !/^[[:space:]]*$/ { print }' "${wf}")"
+  if [ -z "${ng_eg}" ]; then
+    ng_err "the lane needs the job 'event-guard'"
+  elif [ "${ng_eg}" != "$(nginxorg_eg_expected "${ng_refs}")" ]; then
+    ng_err "the event-guard job must match its pinned text exactly (nginxorg_eg_expected): one step, no if: or continue-on-error, no other line"
+  fi
+  ng_jobs="$(job_records "${wf}")"
+  if printf '%s\n' "${ng_jobs}" | awk -F"${TAB}" '$1=="KEY" && $2=="plan" && ($3=="if" || $3=="continue-on-error") {f=1} END {exit !f}'; then
+    ng_err "the plan job takes no if: or continue-on-error: it runs only after a passed event guard"
+  fi
+  while IFS="${TAB}" read -r ng_kind ng_job _; do
+    [ "${ng_kind}" = JOB ] || continue
+    [ "${ng_job}" != event-guard ] || continue
+    ng_needs="$(printf '%s\n' "${ng_jobs}" | awk -F"${TAB}" -v j="${ng_job}" '$1=="KEY" && $2==j && $3=="needs" {print $5}' | tr -d '[],' )"
+    ng_want=plan
+    [ "${ng_job}" != plan ] || ng_want=event-guard
+    case " ${ng_needs} " in *" ${ng_want} "*) ;; *) ng_err "job '${ng_job}' must need ${ng_want}" ;; esac
+  done <<EOT
+${ng_jobs}
+EOT
+  while IFS="${TAB}" read -r ng_job ng_l ng_c; do
+    [ -n "${ng_job}" ] || continue
+    err "${wf}:${ng_l}: job '${ng_job}' names environment release but its if: is not \${{ !cancelled() && <needs.<job>.result == 'success' terms> && needs.plan.outputs.dry_run == 'false' }} (got ${ng_c}) (rule release-env)"
+  done <<EOT
+$(nginxorg_env_if_records "${wf}")
+EOT
+  ng_bad="$(grep -nE 'github\.ref_name' "${wf}" | grep -vE '^[0-9]+:[[:space:]]*#' || true)"
+  [ -z "${ng_bad}" ] || ng_err "github.ref_name is used; the module release is the validated module_tag: ${ng_bad}"
+  ng_bad="$(grep -nE 'inputs\.module_tag' "${wf}" | grep -vE '^[0-9]+:[[:space:]]*#' | grep -vE '^[0-9]+:          MODULE_TAG: \$\{\{ inputs\.module_tag \}\}$' || true)"
+  [ -z "${ng_bad}" ] || ng_err "inputs.module_tag may appear only as a step's 'MODULE_TAG: \${{ inputs.module_tag }}': ${ng_bad}"
+  ng_bad="$(grep -nE '^[[:space:]]+ref:' "${wf}" | grep -vE '^[0-9]+:[[:space:]]+ref: \$\{\{ github\.sha \}\}$' || true)"
+  [ -z "${ng_bad}" ] || ng_err "every checkout ref: must be \${{ github.sha }}: ${ng_bad}"
+done
 
 for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
   [ -n "${wf}" ] || continue

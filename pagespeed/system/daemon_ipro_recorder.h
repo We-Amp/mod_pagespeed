@@ -155,6 +155,11 @@ class DaemonIproRecorder : public IproRecorder {
 
   void Fail() override { failure_ = true; }
   bool failed() const override { return failure_; }
+  // False for HTML decided at the headers, a body past the cap and a failed
+  // recording: the three states in which Write keeps nothing.
+  bool wants_body() const override {
+    return !(failure_ || over_cap_ || html_at_headers_);
+  }
 
   MessageHandler* handler() override { return handler_; }
   const HttpOptions& http_options() const override { return http_options_; }

@@ -291,6 +291,63 @@ const char* const RewriteStats::kDaemonHtmlRefusedReasons[] = {
     nullptr,
 };
 
+// The HTML cache engine.  stored counts entries written and kept (a store
+// removed again for a purge race is purge_race_refused instead); removed
+// counts every removal call that succeeded, of which removed_on_refusal and
+// the purge race are parts.  serve_unavailable counts HTML responses in the
+// serve-variants mode while the library or the worker does not allow
+// serving.  markdown_served and markdown_not_modified count 200 and 304
+// answers; served_without_preference and transport_conflict must stay 0.
+const char* const RewriteStats::kDaemonHtmlEngineCounters[] = {
+    "daemon_html_stored",
+    "daemon_html_refused_budget",
+    "daemon_html_refused_url_disagree",
+    "daemon_html_sidecar_write_failed",
+    "daemon_html_sidecar_unpaired_stale",
+    "daemon_html_purge_race_refused",
+    "daemon_html_removed",
+    "daemon_html_removed_on_refusal",
+    "daemon_html_restore_skipped",
+    "daemon_html_epoch_write_failed",
+    "daemon_html_purge_remove_failed",
+    "daemon_html_serve_unavailable",
+    "daemon_html_notify_sent",
+    "daemon_html_notify_limited",
+    "daemon_markdown_served",
+    "daemon_markdown_not_modified",
+    "daemon_markdown_served_without_preference",
+    "daemon_markdown_transport_conflict",
+    nullptr,
+};
+
+const char* const RewriteStats::kDaemonMarkdownFallthroughReasons[] = {
+    // ps_html_serve_reason_name, in the library's order.
+    "fresh",
+    "mode",
+    "auth_request",
+    "cookie_request",
+    "client_no_cache",
+    "needs_validation",
+    "stale",
+    "headers_not_reproducible",
+    "sidecar_missing",
+    "purged",
+    "absent",
+    "binding_stale",
+    "parent_stale",
+    "method",
+    "range",
+    "cors",
+    "no_transform",
+    "withheld",
+    "skew",
+    // The engine's own.
+    "sidecar_unpaired",
+    "url_disagree",
+    "other",
+    nullptr,
+};
+
 void RewriteStats::InitStats(Statistics* statistics) {
   statistics->AddVariable(kResourceUrlDomainAcceptances);
   statistics->AddVariable(kResourceUrlDomainRejections);
@@ -330,6 +387,14 @@ void RewriteStats::InitStats(Statistics* statistics) {
   for (const char* const* reason = kDaemonHtmlRefusedReasons;
        *reason != nullptr; ++reason) {
     statistics->AddVariable(StrCat("daemon_html_refused_", *reason));
+  }
+  for (const char* const* counter = kDaemonHtmlEngineCounters;
+       *counter != nullptr; ++counter) {
+    statistics->AddVariable(*counter);
+  }
+  for (const char* const* reason = kDaemonMarkdownFallthroughReasons;
+       *reason != nullptr; ++reason) {
+    statistics->AddVariable(StrCat("daemon_markdown_fallthrough_", *reason));
   }
   statistics->AddVariable(kIproDaemonServed);
   statistics->AddVariable(kIproDaemonServedOriginal);

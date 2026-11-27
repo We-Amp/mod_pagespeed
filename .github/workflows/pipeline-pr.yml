@@ -240,12 +240,13 @@ jobs:
             # The ported servers' system tests: the port's sources and tests,
             # the shared daemon adapter and serve arm, the test sets and
             # fixtures both runners use, the run and rig scripts and the
-            # diagnostics collector. Not ${wf}: a pull request never runs its
+            # diagnostics collector, and the optimizer test pin and the lane
+            # script that builds it. Not ${wf}: a pull request never runs its
             # own pipeline edit, so that is proven by the ci-dev dispatch.
-            if grep -qE "^(pagespeed/nginx/|test/pagespeed/nginx/|test/system/nginx/|test/system/automatic/|test/system/system/|pagespeed/system/|test/system/run_nginx_tests\.sh|test/system/pagespeed_test_framework/|test/system/conftest\.py|test/system/pytest\.ini|test/system/requirements\.txt|install/mod_pagespeed_test/|install/mod_pagespeed_example/|install/do_not_modify/|tools/ci/collect-systest-diagnostics\.sh)" "${changed}"; then
+            if grep -qE "^(pagespeed/nginx/|test/pagespeed/nginx/|test/system/nginx/|test/system/automatic/|test/system/system/|pagespeed/system/|test/system/run_nginx_tests\.sh|test/system/optimizer-test-pin\.json|test/system/optimizer_lane\.sh|test/system/pagespeed_test_framework/|test/system/conftest\.py|test/system/pytest\.ini|test/system/requirements\.txt|install/mod_pagespeed_test/|install/mod_pagespeed_example/|install/do_not_modify/|tools/ci/collect-systest-diagnostics\.sh)" "${changed}"; then
               nginx_sys=true
             fi
-            if grep -qE "^(pagespeed/apache/|test/pagespeed/apache/|test/system/automatic/|test/system/system/|pagespeed/system/|test/system/run_system_tests\.sh|test/system/setup_apache_test\.sh|test/system/pagespeed_test_framework/|test/system/conftest\.py|test/system/pytest\.ini|test/system/requirements\.txt|install/mod_pagespeed_test/|install/mod_pagespeed_example/|install/do_not_modify/|install/debug\.conf\.template|tools/ci/collect-systest-diagnostics\.sh)" "${changed}"; then
+            if grep -qE "^(pagespeed/apache/|test/pagespeed/apache/|test/system/automatic/|test/system/system/|pagespeed/system/|test/system/run_system_tests\.sh|test/system/setup_apache_test\.sh|test/system/optimizer-test-pin\.json|test/system/optimizer_lane\.sh|test/system/pagespeed_test_framework/|test/system/conftest\.py|test/system/pytest\.ini|test/system/requirements\.txt|install/mod_pagespeed_test/|install/mod_pagespeed_example/|install/do_not_modify/|install/debug\.conf\.template|tools/ci/collect-systest-diagnostics\.sh)" "${changed}"; then
               apache_sys=true
             fi
           fi
@@ -347,6 +348,21 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 tools/ci/check_optimizer_pin_pair.py --self-test
 
+      # The system-test lanes build the optimizer at the test pin; it must
+      # link the cache library this module links, or the lanes' web servers
+      # refuse the worker's volume.
+      - name: Optimizer test pin links our cache library
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          PIN=test/system/optimizer-test-pin.json
+          COMMIT=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['optimizer_commit'])" "$PIN")
+          bash tools/ci/fetch_retry.sh \
+            "https://raw.githubusercontent.com/We-Amp/pagespeed-optimizer/${COMMIT}/MODULE.bazel" \
+            "${RUNNER_TEMP}/optimizer-test-pin-MODULE.bazel"
+          python3 tools/ci/check_optimizer_pin_pair.py "$PIN" \
+            "${RUNNER_TEMP}/optimizer-test-pin-MODULE.bazel" bazel/repositories.bzl
+
       - name: Changelog fragment tools - self-tests
         if: ${{ !cancelled() }}
         run: |
@@ -398,6 +414,26 @@ jobs:
           bash tools/ci/fetch_retry.sh "${BASE}/lib/cache/vary_emission.cc" "${RUNNER_TEMP}/vary_emission.cc"
           python3 tools/ci/check_image_selection_vary.py pagespeed/system/daemon_abi.h \
             "${RUNNER_TEMP}/capability_mask.h" "${RUNNER_TEMP}/vary_emission.cc"
+
+      # daemon_abi.h mirrors the optimizer's C API by hand (constants, struct
+      # layouts, and the minor that publishes the optional HTML serve set).
+      # Compared with the optimizer at the test pin, which is what the
+      # daemon lanes load.
+      - name: Optimizer C API mirrors match the optimizer - self-test
+        if: ${{ !cancelled() }}
+        run: python3 tools/ci/check_daemon_abi_mirrors.py --self-test
+      - name: Optimizer C API mirrors match the optimizer
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          COMMIT=$(python3 -c "import json;print(json.load(open('test/system/optimizer-test-pin.json'))['optimizer_commit'])")
+          BASE="https://raw.githubusercontent.com/We-Amp/pagespeed-optimizer/${COMMIT}"
+          bash tools/ci/fetch_retry.sh "${BASE}/lib/pagespeed/pagespeed.h" "${RUNNER_TEMP}/opt-pagespeed.h"
+          bash tools/ci/fetch_retry.sh "${BASE}/lib/classify/alternate_id.h" "${RUNNER_TEMP}/opt-alternate_id.h"
+          bash tools/ci/fetch_retry.sh "${BASE}/lib/pagespeed/symbols.lds" "${RUNNER_TEMP}/opt-symbols.lds"
+          python3 tools/ci/check_daemon_abi_mirrors.py pagespeed/system/daemon_abi.h \
+            pagespeed/system/daemon_abi.cc "${RUNNER_TEMP}/opt-pagespeed.h" \
+            "${RUNNER_TEMP}/opt-alternate_id.h" "${RUNNER_TEMP}/opt-symbols.lds"
 
       - name: Legacy-docs guard - self-test
         if: ${{ !cancelled() }}
@@ -3334,6 +3370,8 @@ jobs:
           & $bazel $root test @common --test_output=errors --keep_going -- `
             //test/pagespeed/iis/... `
             //test/pagespeed/system:daemon_adapter_test `
+            //test/pagespeed/system:daemon_abi_test `
+            //test/pagespeed/system:injected_verdict_daemon_abi_test `
             //test/pagespeed/kernel/image:avif_test `
             //test/pagespeed/kernel/packs/... `
             //third_party/css_parser:css_parser_test
@@ -3394,7 +3432,9 @@ jobs:
     needs: [changes, windows-build, windows-unit-tests]
     runs-on: ${{ ((github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'windows-2022' || 'fleet-iis' }}
     if: ${{ (vars.FLEET_ENABLED != 'false' && vars.FLEET_IIS_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && needs.changes.outputs.route == 'fleet') && needs.changes.outputs.iis == 'true' }}
-    timeout-minutes: 50
+    # Room for the optimizer lane's build on the first run of a new pin on
+    # a host; later runs reuse it.
+    timeout-minutes: 65
     outputs:
       failure_class: ${{ steps.classify.outputs.class }}
       failure_reason: ${{ steps.classify.outputs.reason }}
@@ -3636,9 +3676,29 @@ jobs:
           & .\tools\ci\Set-WerLocalDumps.ps1 -Enable -DumpDir $env:PAGESPEED_DUMP_DIR | Out-Null
           if ($LASTEXITCODE -ne 0) { Write-Host "::error::could not arm crash dumps"; exit 1 }
 
-      # The optimizer worker the module's daemon paths talk to: the pinned
-      # optimizer release's Windows zip, fetched and verified the way the
-      # installer does it, started as a background process with its volume
+      # The optimizer worker and client library the module's daemon paths
+      # use, built from the optimizer commit test/system/optimizer-test-pin.json
+      # names, as on the Apache and nginx lanes (the release lane keeps the
+      # release pin). A host builds each pin and recipe once and reuses the
+      # checked build after that (tools/ci/Build-OptimizerPin.ps1: SHA256SUMS,
+      # optimizer-commit.txt, owner and ACL checked before every reuse); the
+      # self-test of that check runs first. The step fails when the build
+      # cannot be provided; nothing is skipped.
+      # The limit is above the lane's 15-minute lock wait plus a cold build
+      # (about 2 minutes measured), and with the tests' 35 minutes it fits
+      # the job's limit.
+      - name: Optimizer lane
+        if: ${{ steps.role.outputs.role == 'test' }}
+        timeout-minutes: 25
+        run: |
+          $ErrorActionPreference = 'Stop'
+          powershell -NoProfile -ExecutionPolicy Bypass -File tools\ci\Build-OptimizerPin_test.ps1
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Build-OptimizerPin self-test failed (exit $LASTEXITCODE)"; exit 1 }
+          .\tools\ci\Build-OptimizerPin.ps1
+          exit $LASTEXITCODE
+
+      # The optimizer worker the module's daemon paths talk to: the build of
+      # the step above, checked again and started as a background process with its volume
       # under C:\pagespeed_optimizer and the management API on loopback
       # behind a token generated for this run. It is started in the test step
       # itself, right before the tests, and its environment reaches the test
@@ -3646,8 +3706,8 @@ jobs:
       # writes DaemonSocketPath and DaemonVolumePath into the configuration
       # of an extra site only (its URL is exported as
       # PAGESPEED_IIS_DAEMON_SITE_URL), so the main site keeps classic
-      # in-place optimization. The volume is emptied at each start. A pinned
-      # release that cannot be fetched fails the job; it is never skipped.
+      # in-place optimization. The volume is emptied at each start. The C API
+      # version of the client library is logged before the worker starts.
       # Full IIS, not IIS Express: the runner is a service, and IIS Express
       # needs an interactive desktop session.
       - name: Run the IIS system tests
@@ -3667,7 +3727,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           # A fresh start: only this run's setup may leave the host-failure marker.
           Remove-Item -LiteralPath (Join-Path $env:PAGESPEED_EVIDENCE_DIR 'infra-class.txt') -Force -ErrorAction SilentlyContinue
-          .\tools\ci\Start-OptimizerWorker.ps1 -Action start
+          .\tools\ci\Start-OptimizerWorker.ps1 -Action start -BuildDir $env:PAGESPEED_OPTIMIZER_BUILD_DIR
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           .\test\system\run_iis_tests.ps1 -SkipBuild -UseFullIIS -Verbose -TestFilter 'not slow_recovery'
           exit $LASTEXITCODE
@@ -3762,7 +3822,7 @@ jobs:
     needs: [changes, windows-build, windows-unit-tests, iis-sys-tests]
     runs-on: ${{ ((github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'windows-2022' || 'fleet-iis' }}
     if: ${{ (vars.FLEET_ENABLED != 'false' && vars.FLEET_IIS_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && needs.changes.outputs.route == 'fleet') && needs.iis-sys-tests.outputs.failure_class == 'infra' }}
-    timeout-minutes: 50
+    timeout-minutes: 65
     strategy:
       fail-fast: false
       matrix:
@@ -3912,10 +3972,79 @@ jobs:
           echo "dev:x:${u}:${g}::/workspace:/bin/bash" > "${RUNNER_TEMP}/ci-passwd"
           cat /etc/passwd >> "${RUNNER_TEMP}/ci-passwd"
 
+      # The daemon lane: the optimizer worker and client library built from
+      # the commit test/system/optimizer-test-pin.json names, so the daemon
+      # cases run against the real library. On a build runner they are built
+      # in a container of their own, as the container identity, into a
+      # runner-local directory that keeps one build per pin and recipe
+      # (test/system/optimizer_lane.sh), with the remote cache where the host
+      # has one, so a host builds a pin once. The test container gets that
+      # one build read-only. A hosted runner has neither, and leaves the lane
+      # out (the daemon cases skip there).
+      - name: Optimizer lane
+        run: |
+          set -euo pipefail
+          if [ "${RUNNER_ENVIRONMENT:-}" = github-hosted ]; then
+            echo "::notice::hosted runner: the daemon lane (optimizer built from the test pin) is left out"
+            echo "PAGESPEED_DAEMON_LANE=0" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          eval "$(sh tools/ci/container-identity.sh)"
+          source tools/ci/slot-budget.sh
+          slot_budget 8g || exit 1
+          dir="${CI_OPTIMIZER_LANE_DIR:-${HOME}/.cache/pagespeed-optimizer-lane}"
+          mkdir -p "${dir}"
+          out="${RUNNER_TEMP}/optimizer-lane"
+          rm -rf "${out}" && mkdir -p "${out}/home"
+          u="${CONTAINER_USER%:*}"; g="${CONTAINER_USER##*:}"
+          { echo "lane:x:${u}:${g}::/tmp/lane-home:/bin/bash"; cat /etc/passwd; } > "${out}/passwd"
+          ARGS=()
+          source tools/ci/remote-cache-docker-args.sh
+          remote_cache_docker_args ARGS
+          NAME="ci-optimizer-lane-pr-apache-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker rm -f "${NAME}" >/dev/null 2>&1 || true
+          rc=0
+          docker run --rm --init --name "${NAME}" "${ARGS[@]}" \
+            --user "${CONTAINER_USER}" \
+            -v "${out}/passwd:/etc/passwd:ro" \
+            ${SLOT_CPUS:+--cpus="${SLOT_CPUS}"} \
+            --memory="${SLOT_MEM_GB}g" --memory-swap="${SLOT_MEM_GB}g" \
+            -e HOME=/tmp/lane-home -e USER=lane \
+            -e PAGESPEED_DAEMON_ARTIFACT_DIR=/optimizer-lane \
+            -e PAGESPEED_OPTIMIZER_LANE_IMAGE="${DOCKER_IMAGE}" \
+            -e PAGESPEED_OPTIMIZER_BAZEL_JOBS="${CI_SLOT_CPUS:-}" \
+            -e PAGESPEED_OPTIMIZER_BAZEL_RAM_MB="$((SLOT_MEM_GB * 1024 * 3 / 4))" \
+            -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -v "${dir}:/optimizer-lane" \
+            -v "${out}:/out" \
+            -v "${GITHUB_WORKSPACE}:/workspace:ro" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" \
+            bash test/system/optimizer_lane.sh build /out/build.log /out/result || rc=$?
+          if [ "${rc}" -ne 0 ]; then
+            echo "::error::the optimizer lane build failed (exit ${rc}); the build log tail is above"
+            exit 1
+          fi
+          built="$(cat "${out}/result")"
+          case "${built}" in
+            /optimizer-lane/*) ;;
+            *) echo "::error::the optimizer lane build named an unexpected directory"; exit 1 ;;
+          esac
+          { echo "PAGESPEED_DAEMON_LANE=require"
+            echo "OPTIMIZER_LANE_BUILD=${dir}/${built#/optimizer-lane/}"
+            echo "OPTIMIZER_LANE_OWNER=${u}"; } >> "$GITHUB_ENV"
+
       - name: Run Apache system tests
         id: systest
         run: |
           NAME="ci-systest-pr-apache-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          # The daemon lane's build, read-only (the Optimizer lane step).
+          LANE=()
+          if [ -n "${OPTIMIZER_LANE_BUILD:-}" ]; then
+            LANE=(-v "${OPTIMIZER_LANE_BUILD}:/optimizer-lane-build:ro"
+                  -e PAGESPEED_DAEMON_ARTIFACT_PIN_DIR=/optimizer-lane-build
+                  -e PAGESPEED_DAEMON_ARTIFACT_OWNER="${OPTIMIZER_LANE_OWNER}")
+          fi
           docker rm -f "${NAME}" 2>/dev/null || true
           docker run --rm --init \
             --name "${NAME}" \
@@ -3925,6 +4054,8 @@ jobs:
             --sysctl net.ipv4.ip_unprivileged_port_start=0 \
             -e HOME=/workspace -e USER=dev \
             -e SYSTEST_DIAG_TAG \
+            -e PAGESPEED_DAEMON_LANE \
+            "${LANE[@]}" \
             -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
             -v "${GITHUB_WORKSPACE}:/workspace" \
             -w /workspace \
@@ -4050,10 +4181,79 @@ jobs:
           echo "dev:x:${u}:${g}::/workspace:/bin/bash" > "${RUNNER_TEMP}/ci-passwd"
           cat /etc/passwd >> "${RUNNER_TEMP}/ci-passwd"
 
+      # The daemon lane: the optimizer worker and client library built from
+      # the commit test/system/optimizer-test-pin.json names, so the daemon
+      # cases run against the real library. On a build runner they are built
+      # in a container of their own, as the container identity, into a
+      # runner-local directory that keeps one build per pin and recipe
+      # (test/system/optimizer_lane.sh), with the remote cache where the host
+      # has one, so a host builds a pin once. The test container gets that
+      # one build read-only. A hosted runner has neither, and leaves the lane
+      # out (the daemon cases skip there).
+      - name: Optimizer lane
+        run: |
+          set -euo pipefail
+          if [ "${RUNNER_ENVIRONMENT:-}" = github-hosted ]; then
+            echo "::notice::hosted runner: the daemon lane (optimizer built from the test pin) is left out"
+            echo "PAGESPEED_DAEMON_LANE=0" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          eval "$(sh tools/ci/container-identity.sh)"
+          source tools/ci/slot-budget.sh
+          slot_budget 8g || exit 1
+          dir="${CI_OPTIMIZER_LANE_DIR:-${HOME}/.cache/pagespeed-optimizer-lane}"
+          mkdir -p "${dir}"
+          out="${RUNNER_TEMP}/optimizer-lane"
+          rm -rf "${out}" && mkdir -p "${out}/home"
+          u="${CONTAINER_USER%:*}"; g="${CONTAINER_USER##*:}"
+          { echo "lane:x:${u}:${g}::/tmp/lane-home:/bin/bash"; cat /etc/passwd; } > "${out}/passwd"
+          ARGS=()
+          source tools/ci/remote-cache-docker-args.sh
+          remote_cache_docker_args ARGS
+          NAME="ci-optimizer-lane-pr-nginx-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker rm -f "${NAME}" >/dev/null 2>&1 || true
+          rc=0
+          docker run --rm --init --name "${NAME}" "${ARGS[@]}" \
+            --user "${CONTAINER_USER}" \
+            -v "${out}/passwd:/etc/passwd:ro" \
+            ${SLOT_CPUS:+--cpus="${SLOT_CPUS}"} \
+            --memory="${SLOT_MEM_GB}g" --memory-swap="${SLOT_MEM_GB}g" \
+            -e HOME=/tmp/lane-home -e USER=lane \
+            -e PAGESPEED_DAEMON_ARTIFACT_DIR=/optimizer-lane \
+            -e PAGESPEED_OPTIMIZER_LANE_IMAGE="${DOCKER_IMAGE}" \
+            -e PAGESPEED_OPTIMIZER_BAZEL_JOBS="${CI_SLOT_CPUS:-}" \
+            -e PAGESPEED_OPTIMIZER_BAZEL_RAM_MB="$((SLOT_MEM_GB * 1024 * 3 / 4))" \
+            -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -v "${dir}:/optimizer-lane" \
+            -v "${out}:/out" \
+            -v "${GITHUB_WORKSPACE}:/workspace:ro" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" \
+            bash test/system/optimizer_lane.sh build /out/build.log /out/result || rc=$?
+          if [ "${rc}" -ne 0 ]; then
+            echo "::error::the optimizer lane build failed (exit ${rc}); the build log tail is above"
+            exit 1
+          fi
+          built="$(cat "${out}/result")"
+          case "${built}" in
+            /optimizer-lane/*) ;;
+            *) echo "::error::the optimizer lane build named an unexpected directory"; exit 1 ;;
+          esac
+          { echo "PAGESPEED_DAEMON_LANE=require"
+            echo "OPTIMIZER_LANE_BUILD=${dir}/${built#/optimizer-lane/}"
+            echo "OPTIMIZER_LANE_OWNER=${u}"; } >> "$GITHUB_ENV"
+
       - name: Run Nginx system tests
         id: systest
         run: |
           NAME="ci-systest-pr-nginx-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          # The daemon lane's build, read-only (the Optimizer lane step).
+          LANE=()
+          if [ -n "${OPTIMIZER_LANE_BUILD:-}" ]; then
+            LANE=(-v "${OPTIMIZER_LANE_BUILD}:/optimizer-lane-build:ro"
+                  -e PAGESPEED_DAEMON_ARTIFACT_PIN_DIR=/optimizer-lane-build
+                  -e PAGESPEED_DAEMON_ARTIFACT_OWNER="${OPTIMIZER_LANE_OWNER}")
+          fi
           docker rm -f "${NAME}" 2>/dev/null || true
           docker run --rm --init \
             --name "${NAME}" \
@@ -4063,6 +4263,8 @@ jobs:
             --sysctl net.ipv4.ip_unprivileged_port_start=0 \
             -e HOME=/workspace -e USER=dev \
             -e SYSTEST_DIAG_TAG \
+            -e PAGESPEED_DAEMON_LANE \
+            "${LANE[@]}" \
             -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
             -v "${GITHUB_WORKSPACE}:/workspace" \
             -w /workspace \

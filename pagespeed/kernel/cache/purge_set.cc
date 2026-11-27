@@ -243,6 +243,13 @@ bool PurgeSet::IsValid(const GoogleString& key, int64 timestamp_ms) const {
           (timestamp_ms > *purge_timestamp_ms));
 }
 
+bool PurgeSet::IsValidIgnoringGlobal(const GoogleString& key,
+                                     int64 timestamp_ms) const {
+  int64* purge_timestamp_ms = lru_->GetNoFreshen(key);
+  return ((purge_timestamp_ms == nullptr) ||
+          (timestamp_ms > *purge_timestamp_ms));
+}
+
 void PurgeSet::Swap(PurgeSet* that) {
   lru_.swap(that->lru_);  // scoped_ptr::swap
   std::swap(global_invalidation_timestamp_ms_,

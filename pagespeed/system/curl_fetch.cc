@@ -288,10 +288,16 @@ bool CurlFetch::InitCurl(CurlUrlAsyncFetcher* fetcher) {
     }
   }
 
-  // Accept-Encoding for gzip
-  if (fetcher->fetch_with_gzip()) {
-    curl_easy_setopt(curl_handle_, CURLOPT_ACCEPT_ENCODING, "gzip");
-  }
+  // Hand the body on exactly as the origin sent it. With the fetcher's gzip
+  // handling on, UrlAsyncFetcher::EnableInflation has already added
+  // "Accept-Encoding: gzip" to the request headers forwarded above and put an
+  // inflater in front of this fetch, which decodes the body once and drops
+  // the Content-Encoding header. A caller that asked for gzip itself gets the
+  // compressed bytes, still labelled gzip. If libcurl decoded too
+  // (CURLOPT_ACCEPT_ENCODING), it would leave the Content-Encoding header in
+  // place: the inflater would then try to inflate plain text and fail, and a
+  // caller that asked for gzip would receive plain bytes labelled gzip.
+  curl_easy_setopt(curl_handle_, CURLOPT_HTTP_CONTENT_DECODING, 0L);
 
   if (request_headers_list_ != nullptr) {
     curl_easy_setopt(curl_handle_, CURLOPT_HTTPHEADER, request_headers_list_);

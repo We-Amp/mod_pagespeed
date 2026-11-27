@@ -92,6 +92,8 @@ cc_library(
     name = "apache_core",
     target_compatible_with = ["@platforms//os:linux"],
     srcs = [
+        "apache_conditional_stash.cc",
+        "apache_daemon_html.cc",
         "apache_fetch.cc",
         "apache_message_handler.cc",
         "apache_mmap_bucket.cc",
@@ -107,6 +109,7 @@ cc_library(
         "apr_timer.cc",
         "header_util.cc",
         "in_place_not_modified_vary_fetch.cc",
+        "in_place_record_brigade.cc",
         "instaweb_context.cc",
         "instaweb_handler.cc",
         "log_message_handler.cc",
@@ -114,6 +117,8 @@ cc_library(
         "streaming_pagespeed_resource_fetch.cc",
     ],
     hdrs = [
+        "apache_conditional_stash.h",
+        "apache_daemon_html.h",
         "apache_fetch.h",
         "apache_httpd_includes.h",
         "apache_logging_includes.h",
@@ -131,6 +136,7 @@ cc_library(
         "header_util.h",
         "html_flush_window.h",
         "in_place_not_modified_vary_fetch.h",
+        "in_place_record_brigade.h",
         "instaweb_context.h",
         "instaweb_handler.h",
         "log_message_handler.h",
@@ -162,11 +168,13 @@ cc_library(
         # binding (and its -ldl) enters the build -- not in the system library
         # every port links.
         "//pagespeed/system:daemon_adapter",
-        "//pagespeed/system:daemon_html_report",
+        "//pagespeed/system:daemon_html_engine",
+        "//pagespeed/system:daemon_html_purge_source",
         "//pagespeed/system:daemon_record_arm",
         "//pagespeed/system:daemon_serve_arm",
         "//pagespeed/system:curl_fetcher",
         "//pagespeed/system:inplace_url_agreement",
+        "//pagespeed/system:module_entity_tags",
         # apache_mpm_detection.cc and apache_rewrite_driver_factory.cc include
         # the thread-count policy header directly.
         "//pagespeed/system:optimization_thread_policy",

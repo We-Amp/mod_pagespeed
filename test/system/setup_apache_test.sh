@@ -42,6 +42,9 @@ LANE_STATE_DIR=/tmp/apache_pagespeed_test
 LANE_FIXTURES_FILE="$LANE_STATE_DIR/lane_fixtures"
 
 FLUSH_ORIGIN_PORT="${FLUSH_ORIGIN_PORT:-8093}"
+# Lane fixture "strip_echo": the origin system/test_module_entity_tags.py
+# starts itself, behind the strip-*.example.com virtual hosts.
+STRIP_ECHO_PORT="${STRIP_ECHO_PORT:-8094}"
 FLUSH_ORIGIN_PID="$LANE_STATE_DIR/flush_origin.pid"
 
 # Lane fixture "remote_config": pagespeed/system/pathological_server.py,
@@ -51,15 +54,14 @@ RCPORT_PID="$LANE_STATE_DIR/pathological_server.pid"
 
 # Lane fixture "daemon_arm": the optimizer daemon (worker) running next to
 # Apache, with in-place daemon serving configured on the rulepacks.example.com
-# virtual host and on the plain daemon.example.com virtual host. The worker is
-# the one the release pin names (install/debian/optimizer-pin.json), built
-# from its public source at that commit with the toolchain already in the dev
-# container (the released packages need a newer C library than the container
-# has, so they cannot be loaded there). The parity rig's
+# virtual host and on the plain daemon.example.com virtual host. The worker
+# and client library are built from the optimizer commit the test pin names
+# (test/system/optimizer-test-pin.json; PAGESPEED_OPTIMIZER_PIN names another
+# pin file), with the toolchain already in the dev container, and kept per
+# pinned commit (test/system/optimizer_lane.sh). The parity rig's
 # tools/parity/daemon-probe/build_daemon.sh is not reused: it builds a
 # different (private) commit in its own toolchain image, for a different
-# consumer. The built worker and client library are kept in
-# $DAEMON_ARTIFACT_DIR, keyed by the pinned commit.
+# consumer.
 #
 # PAGESPEED_DAEMON_LANE: 0 (default) leaves the lane out, so the cases that
 # need it skip; 1 provides it when it can and skips otherwise; require
@@ -67,7 +69,8 @@ RCPORT_PID="$LANE_STATE_DIR/pathological_server.pid"
 # error). The build is minutes long on a cold cache, so only the nightly
 # lane asks for it.
 DAEMON_LANE="${PAGESPEED_DAEMON_LANE:-0}"
-DAEMON_PIN_FILE="$PROJECT_ROOT/install/debian/optimizer-pin.json"
+# shellcheck source=test/system/optimizer_lane.sh
+source "$SCRIPT_DIR/optimizer_lane.sh"
 DAEMON_STATE_DIR="$LANE_STATE_DIR/daemon"
 DAEMON_SOCKET="$DAEMON_STATE_DIR/notify.sock"
 DAEMON_CACHE_ROOT="$DAEMON_STATE_DIR/cache"
@@ -80,6 +83,19 @@ DAEMON_RESTART="$LANE_STATE_DIR/restart_daemon_worker.sh"
 DAEMON_LOG="$LANE_STATE_DIR/daemon_worker.log"
 # Set once the worker answers on its socket; the vhost writers read it.
 DAEMON_READY=""
+
+# Lane fixture "daemon_html_conformance" (system/test_daemon_html_conformance.py
+# through pagespeed_test_framework/daemon_html_provider_apache.py): a second
+# optimizer worker of its own, in a markdown HTML mode with agent-optimize on,
+# behind one virtual host the provider rewrites for every row.
+DHC_STATE_DIR="$LANE_STATE_DIR/dhc"
+DHC_WORKER_DIR="$DHC_STATE_DIR/worker"
+DHC_SOCKET="$DHC_WORKER_DIR/notify.sock"
+DHC_VOLUME="$DHC_WORKER_DIR/cache/cache"
+DHC_PID="$LANE_STATE_DIR/dhc_worker.pid"
+DHC_LOG="$LANE_STATE_DIR/dhc_worker.log"
+DHC_API_PORT="${DHC_API_PORT:-8186}"
+DHC_SITE_CONF="pagespeed-test-dhc"
 
 # TLS configuration
 TLS_CERT_DIR="/tmp/apache_pagespeed_test/certs"
@@ -2387,45 +2403,8 @@ stop_remote_config_server() {
 # optimizer worker. Failing to provide it is not an error for the rest of the
 # suite: the cases that need it skip with the standard reason.
 build_daemon_worker() {
-    local commit
-    commit="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['optimizer_commit'])" "$DAEMON_PIN_FILE")" || return 1
-    if ! [[ "$commit" =~ ^[0-9a-f]{40}$ ]]; then
-        log_warn "optimizer pin does not name a full commit hash"
-        return 1
-    fi
-    DAEMON_ARTIFACT_DIR="${PAGESPEED_DAEMON_ARTIFACT_DIR:-${HOME:-/tmp}/.cache/pagespeed-daemon-lane}/${commit:0:12}"
-    if [ -x "$DAEMON_ARTIFACT_DIR/factory_worker" ] && [ -f "$DAEMON_ARTIFACT_DIR/libpagespeed.so" ]; then
-        log_info "Optimizer worker for ${commit:0:12} already built"
-        return 0
-    fi
-    log_info "Building the optimizer worker at ${commit:0:12} (first run on this host)..."
-    local src="$DAEMON_ARTIFACT_DIR.src" cfg="--config=docker"
-    rm -rf "${src:?}"
-    mkdir -p "$src" "$DAEMON_ARTIFACT_DIR"
-    git -C "$src" init -q \
-        && git -C "$src" fetch -q --depth 1 https://github.com/We-Amp/pagespeed-optimizer.git "$commit" \
-        && git -C "$src" checkout -q --detach FETCH_HEAD || { log_warn "cannot fetch the optimizer source"; return 1; }
-    # Share the CI build cache where the host provides one.
-    if getent hosts bazel-remote-cache > /dev/null 2>&1; then
-        cfg="$cfg --config=remote-cache"
-    fi
-    # The bundled image codec is configured by CMake, which the dev image
-    # does not carry; a hash-pinned user-level install keeps the image unchanged.
-    if ! command -v cmake > /dev/null 2>&1; then
-        pip3 install --user -q --require-hashes -r "$PROJECT_ROOT/tools/daemon-lane-requirements.txt" > /dev/null 2>&1 \
-            || { log_warn "cannot install cmake"; return 1; }
-    fi
-    (
-        cd "$src"
-        export PATH="$HOME/.local/bin:$PATH" CC=/usr/bin/clang-20 CXX=/usr/bin/clang++-20
-        bazel build $cfg --action_env=CC --action_env=CXX \
-            //src/worker:factory_worker //lib/pagespeed:libpagespeed.so \
-            > "$LANE_STATE_DIR/daemon_build.log" 2>&1
-    ) || { log_warn "optimizer worker build failed; see $LANE_STATE_DIR/daemon_build.log"; tail -20 "$LANE_STATE_DIR/daemon_build.log" || true; return 1; }
-    cp -L "$src/bazel-bin/src/worker/factory_worker" "$src/bazel-bin/lib/pagespeed/libpagespeed.so" "$DAEMON_ARTIFACT_DIR/" || return 1
-    # Stop the build's own bazel server before its directory goes away.
-    (cd "$src" && bazel shutdown > /dev/null 2>&1) || true
-    rm -rf "${src:?}"
+    optimizer_lane_build "$LANE_STATE_DIR/daemon_build.log" || return 1
+    optimizer_lane_report_abi || return 1
 }
 
 # The lane could not be provided: an error in require mode, a skip otherwise.
@@ -2521,6 +2500,55 @@ EOF
     fi
     log_info "Optimizer worker is listening on $DAEMON_SOCKET"
     DAEMON_READY=1
+}
+
+# The conformance fixture's worker: the lane's own worker binary and library,
+# a volume and socket of its own, HTML in markdown-static with agent-optimize.
+start_dhc_worker() {
+    [ -n "$DAEMON_READY" ] || return 0
+    stop_dhc_worker
+    sudo rm -rf "$DHC_WORKER_DIR"
+    sudo mkdir -p "$DHC_WORKER_DIR/cache"
+    sudo chown -R www-data:www-data "$DHC_WORKER_DIR"
+    sudo chmod 755 "$DHC_STATE_DIR" "$DHC_WORKER_DIR"
+    nohup sudo -u www-data "$DAEMON_ARTIFACT_DIR/factory_worker" \
+        --cache-dir "$DHC_WORKER_DIR/cache" --socket "$DHC_SOCKET" \
+        --cache-size 268435456 --log-level info \
+        --html-mode markdown-static --agent-optimize \
+        --api-port "$DHC_API_PORT" --api-no-auth \
+        > "$DHC_LOG" 2>&1 < /dev/null &
+    echo $! > "$DHC_PID"
+    local i
+    for i in $(seq 1 100); do
+        if [ -S "$DHC_SOCKET" ] && [ -n "$(sudo find "$DHC_WORKER_DIR" -name pagespeed-shared.conf 2>/dev/null)" ]; then
+            sudo chmod 666 "$DHC_SOCKET"
+            log_info "Conformance worker is listening on $DHC_SOCKET"
+            return 0
+        fi
+        sleep 0.2
+    done
+    tail -20 "$DHC_LOG" 2>/dev/null || true
+    stop_dhc_worker
+    daemon_unavailable "the conformance worker did not open its socket"
+    return 0
+}
+
+stop_dhc_worker() {
+    local pid=""
+    if [ -f "$DHC_PID" ]; then
+        pid="$(cat "$DHC_PID")"
+        # Only a process that is still this lane's conformance worker.
+        if [ -n "$pid" ] && tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q "factory_worker\|sudo"; then
+            sudo pkill -TERM -P "$pid" 2>/dev/null || true
+            sudo kill -TERM "$pid" 2>/dev/null || true
+            local i
+            for i in $(seq 1 100); do
+                [ -d "/proc/$pid" ] || break
+                sleep 0.1
+            done
+        fi
+        rm -f "$DHC_PID"
+    fi
 }
 
 stop_daemon_worker() {
@@ -2712,6 +2740,95 @@ EOF
     sudo a2ensite pagespeed-test-site-identity 2>/dev/null || true
 }
 
+# Lane fixture "strip_echo": three name-based virtual hosts on the secondary
+# port in front of the origin system/test_module_entity_tags.py starts on
+# 127.0.0.1:$STRIP_ECHO_PORT (it records the conditionals it receives), and a
+# static file the default handler answers conditionals for. strip-chain
+# proxies to strip-agent on this same server, a module in front of a module.
+configure_strip_tags_vhosts() {
+    log_info "Configuring the strip-tags vhosts on port $APACHE_SECONDARY_PORT..."
+    sudo mkdir -p /var/www/html/strip_tags
+    printf 'plain\n' | sudo tee /var/www/html/strip_tags/plain.txt > /dev/null
+    local conf="$APACHE_CONF_DIR/sites-available/pagespeed-test-strip-tags.conf"
+    sudo tee "$conf" > /dev/null << EOF
+<VirtualHost *:$APACHE_SECONDARY_PORT>
+  ServerName strip-off.example.com
+  DocumentRoot "/var/www/html"
+  ModPagespeed on
+  ModPagespeedFileCachePath "/var/cache/mod_pagespeed"
+  ModPagespeedRewriteLevel PassThrough
+  ProxyPass /strip_echo/ http://127.0.0.1:$STRIP_ECHO_PORT/
+</VirtualHost>
+
+<VirtualHost *:$APACHE_SECONDARY_PORT>
+  ServerName strip-agent.example.com
+  DocumentRoot "/var/www/html"
+  ModPagespeed on
+  ModPagespeedFileCachePath "/var/cache/mod_pagespeed"
+  ModPagespeedRewriteLevel CoreFilters
+  ModPagespeedAgentOptimize on
+  ModPagespeedDaemonHtmlCache serve-variants
+  ProxyPass /strip_echo/ http://127.0.0.1:$STRIP_ECHO_PORT/
+</VirtualHost>
+
+<VirtualHost *:$APACHE_SECONDARY_PORT>
+  ServerName strip-chain.example.com
+  DocumentRoot "/var/www/html"
+  ModPagespeed on
+  ModPagespeedFileCachePath "/var/cache/mod_pagespeed"
+  ModPagespeedRewriteLevel PassThrough
+  ProxyPreserveHost On
+  RequestHeader set Host strip-agent.example.com
+  ProxyPass /strip_echo/ http://127.0.0.1:$APACHE_SECONDARY_PORT/strip_echo/
+</VirtualHost>
+EOF
+    sudo a2ensite pagespeed-test-strip-tags 2>/dev/null || true
+    provide_fixture strip_echo
+}
+
+# Lane fixture "daemon_html_conformance": the state the provider writes each
+# row's virtual host into (document root, file cache, password file, the
+# access log it settles on, the Lua filters the third-party-filter knobs use),
+# and an empty site file it overwrites. The provider starts the origin itself.
+configure_dhc_fixture() {
+    if [ -z "$DAEMON_READY" ] || [ ! -S "$DHC_SOCKET" ]; then
+        sudo a2dissite "$DHC_SITE_CONF" > /dev/null 2>&1 || true
+        sudo rm -f "$APACHE_CONF_DIR/sites-available/$DHC_SITE_CONF.conf"
+        return 0
+    fi
+    log_info "Configuring the HTML cache conformance fixture..."
+    sudo mkdir -p "$DHC_STATE_DIR/docroot" "$DHC_STATE_DIR/filecache" "$DHC_STATE_DIR/log" "$DHC_STATE_DIR/lua"
+    sudo chown -R www-data:www-data "$DHC_STATE_DIR/filecache" "$DHC_STATE_DIR/log"
+    # u:p for the auth knob (apr1, which mod_authn_file reads).
+    printf 'u:%s\n' "$(openssl passwd -apr1 p)" | sudo tee "$DHC_STATE_DIR/htpasswd" > /dev/null
+    # A filter another module would add: one header on every response it
+    # sees. And one that marks the response encoded whatever subprocess_env
+    # says (a compressor that ignores no-gzip).
+    sudo tee "$DHC_STATE_DIR/lua/filters.lua" > /dev/null << 'LUA'
+function add_header(r)
+    r.headers_out["X-Filter"] = "1"
+    coroutine.yield()
+    while bucket do
+        coroutine.yield(bucket)
+    end
+end
+
+function mark_encoded(r)
+    r.headers_out["Content-Encoding"] = "gzip"
+    coroutine.yield()
+    while bucket do
+        coroutine.yield(bucket)
+    end
+end
+LUA
+    local conf="$APACHE_CONF_DIR/sites-available/$DHC_SITE_CONF.conf"
+    printf '# Rewritten for each conformance row.\n' | sudo tee "$conf" > /dev/null
+    sudo chmod 666 "$conf"
+    sudo a2enmod lua substitute filter auth_basic authn_file > /dev/null 2>&1 || true
+    sudo a2ensite "$DHC_SITE_CONF" > /dev/null 2>&1 || true
+    provide_fixture daemon_html_conformance
+}
+
 # Lane fixture "daemon_html_report": the pages test_daemon_html_report.py fetches.
 write_daemon_html_content() {
     local dir="$1" sudo_cmd="$2" name
@@ -2757,7 +2874,7 @@ configure_daemon_vhost() {
 </VirtualHost>
 EOF
     write_daemon_html_content /var/www/html/daemon_html sudo
-    for html_host in daemon-html-off.example.com:off daemon-html-report.example.com:report-only; do
+    for html_host in daemon-html-off.example.com:off daemon-html-report.example.com:report-only daemon-html-variants.example.com:serve-variants; do
         sudo tee -a "$conf" > /dev/null << EOF
 
 <VirtualHost *:@@APACHE_SECONDARY_PORT@@>
@@ -3088,11 +3205,13 @@ EOF
     configure_rule_pack_vhosts
     configure_self_fetch_access_vhost
     configure_daemon_vhost
+    configure_dhc_fixture
     configure_external_origin
     configure_external_origin_https
     configure_flush_origin_proxy
     configure_remote_config_vhosts
     configure_site_identity_vhosts
+    configure_strip_tags_vhosts
 
     # Enable required modules (including ssl for HTTPS)
     # reqtimeout is explicit so test_zerocopy_serve.py always exercises
@@ -3197,6 +3316,7 @@ case "${1:-start}" in
         setup_test_content
         generate_tls_certs || exit 1
         start_daemon_worker
+        start_dhc_worker
         configure_apache
         start_flush_origin || exit 1
         start_remote_config_server || exit 1
@@ -3206,6 +3326,7 @@ case "${1:-start}" in
         stop_apache
         stop_flush_origin
         stop_remote_config_server
+        stop_dhc_worker
         stop_daemon_worker
         ;;
     status)

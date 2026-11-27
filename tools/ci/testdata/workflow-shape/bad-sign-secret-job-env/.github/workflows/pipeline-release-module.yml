@@ -68,7 +68,7 @@ jobs:
           path: stage
   windows-sign:
     needs: [version, adopt]
-    if: ${{ !cancelled() && needs.adopt.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' && needs.version.outputs.rehearsal != 'true' }}
+    if: ${{ !cancelled() && needs.adopt.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' && needs.version.outputs.rehearsal != 'true' && startsWith(github.ref, 'refs/tags/module-v') && github.ref == format('refs/tags/{0}', needs.version.outputs.tag) }}
     runs-on: windows-2022
     environment: release
     env:
@@ -82,7 +82,7 @@ jobs:
         run: echo sign
   msi-sign:
     needs: [version, adopt]
-    if: ${{ !cancelled() && needs.adopt.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' && needs.version.outputs.rehearsal != 'true' }}
+    if: ${{ !cancelled() && needs.adopt.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' && needs.version.outputs.rehearsal != 'true' && startsWith(github.ref, 'refs/tags/module-v') && github.ref == format('refs/tags/{0}', needs.version.outputs.tag) }}
     runs-on: windows-2022
     environment: release
     steps:

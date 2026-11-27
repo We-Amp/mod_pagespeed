@@ -7,6 +7,13 @@ load(
 
 licenses(["notice"])  # Apache 2
 
+# The recording ABI wrapper, for a port's tests that read what its engine
+# hands to the library.
+exports_files(
+    ["recording_daemon_abi.h"],
+    visibility = ["//test/pagespeed/iis:__pkg__"],
+)
+
 cc_binary(
     name = "redis_cache_cluster_setup",
     testonly = True,
@@ -105,6 +112,7 @@ pagespeed_cc_test(
     size = "large",
     target_compatible_with = ["@platforms//os:linux"],
     deps = [
+        "//net/instaweb/http",
         "//pagespeed/system:curl_fetcher",
         "//pagespeed/kernel/http",
         "//pagespeed/kernel/util",
@@ -426,6 +434,59 @@ cc_binary(
     win_def_file = "daemon_stub_html_policy.def",
 )
 
+# A library that publishes the HTML serve set (C API 1.13 + 1.14) beside the
+# 1.12 store policy. The set is bound only when the reported minor is 14 or
+# later, so the same library stands for a 1.12, a 1.13 and a 1.14 peer.
+cc_binary(
+    name = "libdaemon_stub_html_serve.so",
+    testonly = True,
+    srcs = ["daemon_stub_lib.cc"],
+    defines = [
+        "PS_STUB_HTML_POLICY",
+        "PS_STUB_HTML_SERVE",
+    ],
+    linkopts = select({
+        "@platforms//os:linux": ["-nostdlib++"],
+        "//conditions:default": [],
+    }),
+    linkshared = True,
+    linkstatic = True,
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//visibility:public"],
+    win_def_file = "daemon_stub_html_serve.def",
+)
+
+# The HTML serve set less one entry point, while reporting 1.14. The set is
+# bound as a whole, so this library loads and none of the set is used; it is
+# what tells "bound as a set" from "bound symbol by symbol".
+cc_binary(
+    name = "libdaemon_stub_html_serve_partial.so",
+    testonly = True,
+    srcs = ["daemon_stub_lib.cc"],
+    defines = [
+        "PS_STUB_HTML_POLICY",
+        "PS_STUB_HTML_SERVE",
+        "PS_STUB_OMIT_SITE_PURGE_EPOCH_READ",
+    ],
+    linkopts = select({
+        "@platforms//os:linux": ["-nostdlib++"],
+        "//conditions:default": [],
+    }),
+    linkshared = True,
+    linkstatic = True,
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//visibility:public"],
+    win_def_file = "daemon_stub_html_serve_partial.def",
+)
+
 # A daemon package from before the per-failure explanation was published. Like
 # the two flavours above this entry point is bound OPTIONALLY, so this library
 # must still load and still work; without it "an older library is unaffected"
@@ -482,12 +543,15 @@ cc_binary(
 # The ABI floor and the published layout the module binds: a library below
 # 1.12, and a 1.12 library without the sited cache calls, are refused; the
 # notification parameters are the published 88 bytes with the site and flags
-# where the peer reads them.
+# where the peer reads them. The HTML serve set is bound only whole and only
+# from a 1.14 library, and its absence never refuses a library.
 pagespeed_cc_test(
     name = "daemon_abi_test",
     srcs = ["daemon_abi_test.cc"],
     data = [
         ":libdaemon_stub.so",
+        ":libdaemon_stub_html_serve.so",
+        ":libdaemon_stub_html_serve_partial.so",
         ":libdaemon_stub_no_site.so",
     ],
     shard_count = 1,
@@ -500,6 +564,144 @@ pagespeed_cc_test(
         "//pagespeed/system:daemon_adapter",
         "//test/pagespeed/kernel/base:kernel_test_util",
         "//test/pagespeed/system:daemon_stub_test_util",
+    ],
+)
+
+# The injected-verdict fake for the HTML cache engine's tests: every entry
+# point of the HTML serve set answers what a case injects and records its
+# arguments; everything else forwards to the stub library.
+pagespeed_cc_test(
+    name = "injected_verdict_daemon_abi_test",
+    srcs = [
+        "injected_verdict_daemon_abi.h",
+        "injected_verdict_daemon_abi_test.cc",
+        "recording_daemon_abi.h",
+    ],
+    data = [":libdaemon_stub.so"],
+    shard_count = 1,
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//pagespeed/system:daemon_adapter",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+        "//test/pagespeed/system:daemon_stub_test_util",
+    ],
+)
+
+# The HTML cache engine runner: every engine row of the conformance cases,
+# run on the real engine over the injected-verdict fake library, an
+# in-memory volume and the real PurgeSet.  No library is loaded.
+pagespeed_cc_test(
+    name = "daemon_html_conformance_test",
+    srcs = [
+        "daemon_html_conformance_test.cc",
+        "fake_daemon_volume.h",
+        "injected_verdict_daemon_abi.h",
+        "recording_daemon_abi.h",
+    ],
+    data = ["//test/system/daemon_html:conformance_cases.json"],
+    shard_count = 1,
+    deps = [
+        "//net/instaweb/rewriter",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/cache",
+        "//pagespeed/kernel/util",
+        "//pagespeed/system:daemon_html_engine",
+        "//pagespeed/system:daemon_html_purge_observer",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+        "@boringssl//:crypto",
+        "@jsoncpp",
+    ],
+)
+
+# The same runner over the degrade and fault rows, with the stub library
+# (a real binding loaded through LoadDaemonAbi) answering instead of the fake.
+pagespeed_cc_test(
+    name = "daemon_html_conformance_stub_test",
+    srcs = [
+        "daemon_html_conformance_test.cc",
+        "fake_daemon_volume.h",
+        "injected_verdict_daemon_abi.h",
+        "recording_daemon_abi.h",
+    ],
+    copts = ["-DDAEMON_HTML_CONFORMANCE_ON_STUB"],
+    data = [
+        ":libdaemon_stub_html_serve.so",
+        ":libdaemon_stub_html_serve_partial.so",
+        "//test/system/daemon_html:conformance_cases.json",
+    ],
+    shard_count = 1,
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//net/instaweb/rewriter",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/cache",
+        "//pagespeed/kernel/util",
+        "//pagespeed/system:daemon_adapter",
+        "//pagespeed/system:daemon_html_engine",
+        "//pagespeed/system:daemon_html_purge_observer",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+        "//test/pagespeed/system:daemon_stub_test_util",
+        "@boringssl//:crypto",
+        "@jsoncpp",
+    ],
+)
+
+# The purge state the HTML cache engine reads from a server's options.
+pagespeed_cc_test(
+    name = "daemon_html_purge_source_test",
+    srcs = ["daemon_html_purge_source_test.cc"],
+    shard_count = 1,
+    deps = [
+        "//net/instaweb/rewriter",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/cache",
+        "//pagespeed/kernel/util",
+        "//pagespeed/system:daemon_html_purge_source",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)
+
+# The HTML cache engine's own pieces: purge keys, the oracle's fail-closed
+# epoch and clamp, the byte budget, and the degrade path.
+pagespeed_cc_test(
+    name = "daemon_html_engine_test",
+    srcs = [
+        "daemon_html_engine_test.cc",
+        "fake_daemon_volume.h",
+        "injected_verdict_daemon_abi.h",
+        "recording_daemon_abi.h",
+    ],
+    shard_count = 1,
+    deps = [
+        "//net/instaweb/rewriter",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/cache",
+        "//pagespeed/kernel/util",
+        "//pagespeed/system:daemon_html_engine",
+        "//pagespeed/system:daemon_html_purge_observer",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+        "@boringssl//:crypto",
+    ],
+)
+
+# The HTML cache engine and live conformance cases parse and keep the
+# documented row shape.
+pagespeed_cc_test(
+    name = "daemon_html_conformance_cases_test",
+    srcs = ["daemon_html_conformance_cases_test.cc"],
+    data = ["//test/system/daemon_html:conformance_cases.json"],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+        "@jsoncpp",
     ],
 )
 
@@ -692,6 +894,18 @@ pagespeed_cc_test(
     ],
 )
 
+# The module entity tag rule every port applies to upstream conditionals.
+pagespeed_cc_test(
+    name = "module_entity_tags_test",
+    srcs = ["module_entity_tags_test.cc"],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/system:module_entity_tags",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)
+
 # The in-place URL agreement shared by the nginx and Apache ports, with the
 # readings each server produces.
 pagespeed_cc_test(
@@ -822,19 +1036,27 @@ pagespeed_cc_test(
     ],
 )
 
-# DaemonHtmlCache report-only: what the module does with the policy's answers,
-# against the dlopen-able stand-in.
+# DaemonHtmlCache report-only through the HTML cache engine: what the module
+# does with the policy's answers, against the dlopen-able stand-in, and the
+# decision line's vhost_added.
 pagespeed_cc_test(
     name = "daemon_html_report_test",
-    srcs = ["daemon_html_report_test.cc"],
-    data = [":libdaemon_stub_html_policy.so"],
+    srcs = [
+        "daemon_html_report_test.cc",
+        "recording_daemon_abi.h",
+    ],
+    data = [
+        ":libdaemon_stub.so",
+        ":libdaemon_stub_html_policy.so",
+    ],
     shard_count = 1,
     target_compatible_with = ["@platforms//os:linux"],
     deps = [
         ":daemon_stub_test_util",
         "//net/instaweb/rewriter",
         "//pagespeed/kernel/util",
-        "//pagespeed/system:daemon_html_report",
+        "//pagespeed/system:daemon_html_decision_log",
+        "//pagespeed/system:daemon_html_engine",
         "//test/pagespeed/kernel/base:kernel_test_util",
     ],
 )
@@ -842,8 +1064,8 @@ pagespeed_cc_test(
 # The decision log writer thread failing to start: the line is dropped and the
 # next one starts it. A binary of its own, so no earlier test has started it.
 pagespeed_cc_test(
-    name = "daemon_html_report_writer_start_test",
-    srcs = ["daemon_html_report_writer_start_test.cc"],
+    name = "daemon_html_decision_log_writer_start_test",
+    srcs = ["daemon_html_decision_log_writer_start_test.cc"],
     data = [":libdaemon_stub_html_policy.so"],
     shard_count = 1,
     target_compatible_with = ["@platforms//os:linux"],
@@ -851,7 +1073,8 @@ pagespeed_cc_test(
         ":daemon_stub_test_util",
         "//net/instaweb/rewriter",
         "//pagespeed/kernel/util",
-        "//pagespeed/system:daemon_html_report",
+        "//pagespeed/system:daemon_html_decision_log",
+        "//pagespeed/system:daemon_html_engine",
         "//test/pagespeed/kernel/base:kernel_test_util",
     ],
 )

@@ -23,13 +23,19 @@ extern "C" {
 #include <ngx_http.h>
 }
 
+#include <algorithm>
+#include <utility>
+
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "ngx_message_handler.h"
 #include "ngx_pagespeed.h"
 #include "ngx_rewrite_driver_factory.h"
 #include "ngx_rewrite_options.h"
 #include "pagespeed/system/add_headers_fetcher.h"
+#include "pagespeed/system/daemon_html_purge_source.h"
 #include "pagespeed/system/loopback_route_fetcher.h"
+#include "pagespeed/system/site_cache_fragment.h"
+#include "pagespeed/system/system_cache_path.h"
 #include "pagespeed/system/system_request_context.h"
 #include "pagespeed/system/uds_daemon_reader.h"
 
@@ -41,7 +47,7 @@ NgxServerContext::NgxServerContext(NgxRewriteDriverFactory* factory,
       ngx_factory_(factory),
       ngx_http2_variable_index_(NGX_ERROR) {}
 
-NgxServerContext::~NgxServerContext() {}
+NgxServerContext::~NgxServerContext() { ShutDownDaemonHtmlEngine(); }
 
 NgxRewriteOptions* NgxServerContext::config() {
   return NgxRewriteOptions::DynamicCast(global_options());
@@ -84,15 +90,129 @@ DaemonReader* NgxServerContext::NewDaemonReader() {
                              message_handler());
 }
 
-DaemonHtmlReporter* NgxServerContext::daemon_html_reporter() {
-  std::call_once(daemon_html_reporter_once_, [this] {
+namespace {
+
+DaemonHtmlMode DaemonHtmlModeFor(RewriteOptions::DaemonHtmlCacheMode mode) {
+  switch (mode) {
+    case RewriteOptions::kDaemonHtmlCacheOff:
+      return DaemonHtmlMode::kOff;
+    case RewriteOptions::kDaemonHtmlCacheReportOnly:
+      return DaemonHtmlMode::kReportOnly;
+    case RewriteOptions::kDaemonHtmlCacheServeVariants:
+      return DaemonHtmlMode::kServeVariants;
+  }
+  return DaemonHtmlMode::kOff;
+}
+
+}  // namespace
+
+void NgxServerContext::InitDaemonHtmlEngine(
+    const ConfiguredHostNames& host_names,
+    std::vector<GoogleString> epoch_sites, DaemonHtmlBlockingRunner* runner,
+    DaemonHtmlByteBudget* budget) {
+  std::call_once(daemon_html_engine_once_, [&] {
+    const RewriteOptions* options = global_options();
+    const SystemRewriteOptions* system_options =
+        SystemRewriteOptions::DynamicCast(options);
+    if (options->daemon_html_cache() == RewriteOptions::kDaemonHtmlCacheOff ||
+        system_options == nullptr) {
+      return;
+    }
+    const GoogleString& log_dir = system_options->log_dir();
+    if (log_dir.empty()) {
+      message_handler()->Message(
+          kWarning, "DaemonHtmlCache decision log is off: LogDir is not set");
+    }
+    daemon_html_purge_source_ = std::make_unique<SystemDaemonHtmlPurgeSource>(
+        options, file_system(),
+        DaemonHtmlCacheFlushPath(system_options->cache_flush_filename(),
+                                 system_options->file_cache_path()));
+    DaemonHtmlEngine::Config config;
+    config.mode = DaemonHtmlModeFor(options->daemon_html_cache());
+    config.max_bytes = options->daemon_html_max_bytes();
+    config.agent_optimize = options->agent_optimize();
+    config.host_names = host_names;
+    config.site = SiteIdFromServerFragment(options->cache_fragment());
+    config.epoch_sites = std::move(epoch_sites);
+    DaemonHtmlEngine::Deps deps;
+    DaemonAdapter* adapter = daemon_adapter_.get();
+    if (adapter != nullptr) {
+      deps.substrate.abi = adapter->abi();
+      // The handle this process holds now: none until the volume is open,
+      // and the new one once the worker replaced its volume.  Never opens,
+      // never waits (see DaemonAdapter::RecordCacheIfOpen).
+      deps.substrate.cache_source = [adapter]() -> void* {
+        return adapter->health() == DaemonHealth::kReady
+                   ? adapter->RecordCacheIfOpen()
+                   : nullptr;
+      };
+      deps.substrate.cache_path = adapter->volume_path();
+      deps.substrate.notify_socket = adapter->socket_path();
+    }
+    deps.purge_source = daemon_html_purge_source_.get();
+    deps.statistics = statistics();
+    deps.timer = timer();
+    deps.handler = message_handler();
+    deps.limiter = ProcessDaemonHealNotifyLimiter();
+    deps.budget = budget;
+    deps.runner = runner;
+    deps.log_dir = log_dir;
+    daemon_html_engine_ =
+        std::make_unique<DaemonHtmlEngine>(std::move(config), std::move(deps));
+    if (cache_path() != nullptr) {
+      cache_path()->AddPurgeObserver(daemon_html_engine_.get());
+      daemon_html_observing_ = true;
+    }
+  });
+}
+
+void NgxServerContext::ShutDownDaemonHtmlEngine() {
+  if (daemon_html_observing_ && cache_path() != nullptr) {
+    cache_path()->RemovePurgeObserver(daemon_html_engine_.get());
+  }
+  daemon_html_observing_ = false;
+  daemon_html_engine_.reset();
+  daemon_html_purge_source_.reset();
+}
+
+void NgxServerContext::MaybeTickDaemonHtmlEngine(
+    DaemonHtmlBlockingRunner* runner) {
+  DaemonHtmlEngine* engine = daemon_html_engine_.get();
+  if (engine == nullptr || runner == nullptr ||
+      engine->config().mode < DaemonHtmlMode::kServeVariants) {
+    return;
+  }
+  const int64 now_ms = timer()->NowMs();
+  const int64 poll_ms =
+      std::max<int64>(
+          1, global_system_rewrite_options()->cache_flush_poll_interval_sec()) *
+      Timer::kSecondMs;
+  int64 last = daemon_html_last_poll_tick_ms_.load();
+  if (now_ms - last >= poll_ms &&
+      daemon_html_last_poll_tick_ms_.compare_exchange_strong(last, now_ms)) {
+    runner->RunBlocking(
+        DaemonHtmlCommit([engine] { engine->OnPurgePollTick(); }));
+  }
+  last = daemon_html_last_stats_tick_ms_.load();
+  if (now_ms - last >= kDaemonHtmlStatisticsTickMs &&
+      daemon_html_last_stats_tick_ms_.compare_exchange_strong(last, now_ms)) {
+    runner->RunBlocking(
+        DaemonHtmlCommit([engine] { engine->OnStatisticsTick(); }));
+  }
+}
+
+DaemonHtmlEngine* NgxServerContext::daemon_html_engine() {
+  std::call_once(daemon_html_engine_once_, [this] {
     const SystemRewriteOptions* options =
         SystemRewriteOptions::DynamicCast(global_options());
-    daemon_html_reporter_ = std::make_unique<DaemonHtmlReporter>(
-        statistics(), timer(), options == nullptr ? "" : options->log_dir(),
-        message_handler());
+    daemon_html_engine_ = NewDaemonHtmlEngineForPort(
+        global_options()->daemon_html_cache(),
+        global_options()->daemon_html_max_bytes(),
+        options == nullptr ? GoogleString() : options->log_dir(),
+        daemon_adapter_ == nullptr ? nullptr : daemon_adapter_->abi(),
+        statistics(), timer(), message_handler());
   });
-  return daemon_html_reporter_.get();
+  return daemon_html_engine_.get();
 }
 
 SystemRequestContext* NgxServerContext::NewRequestContext(

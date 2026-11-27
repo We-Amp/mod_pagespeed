@@ -131,6 +131,42 @@ are attested in the
 [pagespeed-optimizer](https://github.com/We-Amp/pagespeed-optimizer)
 repository; verify them with the commands of its `RELEASING.md`.
 
+### SLSA provenance
+
+A release that carries `multiple.intoto.jsonl` also has an SLSA build
+provenance statement, made by the SLSA project's generic generator, for every
+module file, `SHA256SUMS` and `manifest.json` (for an `nginxorg-v*` release:
+every file and `SHA256SUMS`). As above, the `pagespeed-optimizer` packages
+are covered in their own repository. Verify a file
+with [slsa-verifier](https://github.com/slsa-framework/slsa-verifier):
+
+```
+slsa-verifier verify-artifact <file> \
+  --provenance-path multiple.intoto.jsonl \
+  --source-uri github.com/We-Amp/mod_pagespeed \
+  --source-tag module-v<version>
+```
+
+For an `nginxorg-v<version>-ngx<nginx version>` release, the lane runs on
+`master` and builds the source tarball of the module release `module-v<version>`,
+so its provenance names the branch, not the tag. Verify it with
+`--source-branch master` in place of `--source-tag`:
+
+```
+slsa-verifier verify-artifact <file> \
+  --provenance-path multiple.intoto.jsonl \
+  --source-uri github.com/We-Amp/mod_pagespeed \
+  --source-branch master
+```
+
+What binds the files to the module release is the release's `manifest.json`:
+its `source_sha` is the commit of `module-v<version>`, the lane checks that
+the source tarball it built from carries that commit, and the release's tag
+`nginxorg-v<version>-ngx<nginx version>` points at that commit. Check it with
+`jq -r .source_sha manifest.json` against `git rev-parse module-v<version>^{commit}`.
+The lane releases made before this change (`nginxorg-v2.9.2-ngx1.30.7`) ran on
+the module release tag; verify those with `--source-tag module-v<version>`.
+
 ## Disclosure policy
 
 We follow coordinated disclosure. Once a vulnerability is reported:

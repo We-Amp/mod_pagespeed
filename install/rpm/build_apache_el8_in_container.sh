@@ -103,10 +103,15 @@ fi
 #    below, not by a Bazel flag, which would trip the absolute-path guard.
 # ---------------------------------------------------------------------------
 export PATH="${GCC13_PREFIX}/bin:${PATH}"
-mkdir -p /usr/include/c++ /usr/lib/gcc/x86_64-linux-gnu /usr/include/x86_64-linux-gnu/c++
+# The triplets come from the container's arch: gcc-toolset names its target
+# subdir <arch>-redhat-linux, the multiarch paths are <arch>-linux-gnu.
+EL_ARCH="$(rpm --eval '%{_arch}')"
+RH_TRIPLET="${EL_ARCH}-redhat-linux"
+DEB_TRIPLET="${EL_ARCH}-linux-gnu"
+mkdir -p /usr/include/c++ "/usr/lib/gcc/${DEB_TRIPLET}" "/usr/include/${DEB_TRIPLET}/c++"
 ln -sfn "${GCC13_PREFIX}/include/c++/13" /usr/include/c++/13
-ln -sfn "${GCC13_PREFIX}/lib/gcc/x86_64-redhat-linux/13" /usr/lib/gcc/x86_64-linux-gnu/13
-ln -sfn "${GCC13_PREFIX}/include/c++/13/x86_64-redhat-linux" /usr/include/x86_64-linux-gnu/c++/13
+ln -sfn "${GCC13_PREFIX}/lib/gcc/${RH_TRIPLET}/13" "/usr/lib/gcc/${DEB_TRIPLET}/13"
+ln -sfn "${GCC13_PREFIX}/include/c++/13/${RH_TRIPLET}" "/usr/include/${DEB_TRIPLET}/c++/13"
 
 # Pin clang to gcc-toolset-13. AlmaLinux 8.10's clang ships config files
 # (/etc/clang/*-redhat-linux-gnu-clang*.cfg) whose --gcc-install-dir names
@@ -118,7 +123,7 @@ ln -sfn "${GCC13_PREFIX}/include/c++/13/x86_64-redhat-linux" /usr/include/x86_64
 # ("absolute path inclusion(s) found", see build_module_in_container.sh's el9
 # leg). The rewrite also covers exec-config tools, rules_foreign_cc builds and
 # cc_configure itself. The container is ephemeral, as for the edits above.
-GCC13_INSTALL_DIR="${GCC13_PREFIX}/lib/gcc/x86_64-redhat-linux/13"
+GCC13_INSTALL_DIR="${GCC13_PREFIX}/lib/gcc/${RH_TRIPLET}/13"
 if [ ! -d "${GCC13_INSTALL_DIR}" ]; then
   echo "ERROR: gcc-toolset-13 install dir not found: ${GCC13_INSTALL_DIR}" >&2
   exit 1
@@ -166,7 +171,7 @@ done
 
 # Binding pre-check (R3 in the briefing): gcc-toolset-13 libstdc++.a vs el8 glibc
 # 2.28 should have NO __isoc23_* refs (those would push the floor to 2.38).
-LIBA="${GCC13_PREFIX}/lib/gcc/x86_64-redhat-linux/13/libstdc++.a"
+LIBA="${GCC13_PREFIX}/lib/gcc/${RH_TRIPLET}/13/libstdc++.a"
 if [ -f "${LIBA}" ]; then
   ISOC23="$(objdump -T "${LIBA}" 2>/dev/null | grep -c '__isoc23' || true)"
   echo "    libstdc++.a __isoc23 refs: ${ISOC23} (expect 0 on el8 gcc-toolset-13)"

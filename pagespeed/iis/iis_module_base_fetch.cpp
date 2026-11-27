@@ -2,6 +2,8 @@
 // Copyright (c) 2024-2026 We-Amp B.V.
 
 #include "pagespeed/iis/iis_module_base_fetch.h"
+#include "pagespeed/iis/iis_daemon_html_serve.h"
+#include "pagespeed/iis/iis_server_context.h"
 #include "base/logging.h"
 #include "pagespeed/iis/iis_global_constants.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -1095,6 +1097,24 @@ int IisModuleBaseFetch::CollectHeaders()
 				ucp->SecondsToLive = 0;
 			}
 		} 
+		// DaemonHtmlCache serve-variants with AgentOptimize: the page can be
+		// answered with its Markdown copy, so the HTML depends on Accept.
+		// The rewriter's own filter adds the token too late on this port:
+		// the headers are taken at IIS's first send, before the document is
+		// parsed.
+		if (ctx_ != nullptr && ctx_->server_context()->daemon_html_serves_variants()) {
+			USHORT vary_length = 0;
+			PCSTR vary = r->GetHeader(HttpHeaderVary, &vary_length);
+			const GoogleString with_accept = IisVaryWithAccept(
+				vary == nullptr ? StringPiece() : StringPiece(vary, vary_length));
+			r->SetHeader(HttpHeaderVary, with_accept.c_str(),
+				static_cast<USHORT>(with_accept.size()), TRUE);
+		}
+		// The module's own header edits are done: what changes after this
+		// is the server's, which the HTML cache's final view reads.
+		if (ctx_ != nullptr) {
+			ctx_->NoteDaemonHtmlModuleView(r);
+		}
 	}
 	
   return 0; 

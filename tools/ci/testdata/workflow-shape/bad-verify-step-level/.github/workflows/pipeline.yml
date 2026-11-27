@@ -234,6 +234,7 @@ jobs:
       - run: echo filtered iis
   sign:
     runs-on: windows-2022
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
     environment: release
     steps:
       - run: echo sign

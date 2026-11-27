@@ -191,6 +191,22 @@ run_tests() {
     # Lane fixtures rule_packs / rule_pack_log: the rulepacks*.example.com
     # vhosts are on the secondary port, and the decision log is under LogDir.
     export PAGESPEED_RULE_PACKS_PORT="${PAGESPEED_RULE_PACKS_PORT:-$PAGESPEED_SECONDARY_PORT}"
+    # Lane fixture strip_echo (setup_apache_test.sh): the strip-*.example.com
+    # virtual hosts and the port of the origin the test starts behind them.
+    export PAGESPEED_STRIP_TAGS_PORT="${PAGESPEED_STRIP_TAGS_PORT:-$PAGESPEED_SECONDARY_PORT}"
+    export PAGESPEED_STRIP_ECHO_PORT="${PAGESPEED_STRIP_ECHO_PORT:-${STRIP_ECHO_PORT:-8094}}"
+    # Lane fixture daemon_html_conformance (setup_apache_test.sh): the state
+    # directory and site file the Apache provider writes each row's virtual
+    # host into, the conformance worker's socket and volume, and the ports of
+    # the origin the provider runs and of a module-in-front-of-a-module host.
+    export PAGESPEED_DHC_DIR="${PAGESPEED_DHC_DIR:-/tmp/apache_pagespeed_test/dhc}"
+    export PAGESPEED_DHC_SITE_CONF="${PAGESPEED_DHC_SITE_CONF:-/etc/apache2/sites-available/pagespeed-test-dhc.conf}"
+    export PAGESPEED_DHC_SOCKET="${PAGESPEED_DHC_SOCKET:-/tmp/apache_pagespeed_test/dhc/worker/notify.sock}"
+    export PAGESPEED_DHC_VOLUME="${PAGESPEED_DHC_VOLUME:-/tmp/apache_pagespeed_test/dhc/worker/cache/cache}"
+    export PAGESPEED_DHC_ORIGIN_PORT="${PAGESPEED_DHC_ORIGIN_PORT:-8185}"
+    export PAGESPEED_DHC_INNER_PORT="${PAGESPEED_DHC_INNER_PORT:-8187}"
+    export PAGESPEED_DHC_TLS_CERT="${PAGESPEED_DHC_TLS_CERT:-/tmp/apache_pagespeed_test/certs/server.crt}"
+    export PAGESPEED_DHC_TLS_KEY="${PAGESPEED_DHC_TLS_KEY:-/tmp/apache_pagespeed_test/certs/server.key}"
     # Lane fixture self_fetch_access: the self-fetch-access.example.com vhost
     # is on the secondary port too.
     export PAGESPEED_SELF_FETCH_ACCESS_PORT="${PAGESPEED_SELF_FETCH_ACCESS_PORT:-$PAGESPEED_SECONDARY_PORT}"

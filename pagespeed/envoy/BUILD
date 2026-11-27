@@ -110,6 +110,7 @@ envoy_cc_library(
         "//pagespeed/system:circuit_breaker",
         "//pagespeed/system:circuit_breaker_fetcher",
         "//pagespeed/system:curl_fetcher",
+        "//pagespeed/system:module_entity_tags",
         # Minimal Envoy deps - use filter_config_interface instead of main_common_lib
         # to avoid pulling in QUIC, HTTP/3, gRPC implementations (reduces from 137 to 52 packages)
         "@envoy//envoy/server:filter_config_interface",

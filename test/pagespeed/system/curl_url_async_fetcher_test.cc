@@ -31,6 +31,7 @@
 #include "base/logging.h"
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/http/public/request_context.h"
+#include "net/instaweb/http/public/url_async_fetcher_stats.h"
 #include "net/instaweb/public/global_constants.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
@@ -1466,14 +1467,34 @@ class CurlOriginalContentLengthTest : public CurlUrlAsyncFetcherTest {
     return gzipped;
   }
 
-  static GoogleString BuildResponse(const Case& c) {
-    const GoogleString body = c.gzip_origin ? GzipBody() : PlainBody();
+  static GoogleString DeflateBody() {
+    GoogleString deflated;
+    StringWriter writer(&deflated);
+    EXPECT_TRUE(
+        GzipInflater::Deflate(PlainBody(), GzipInflater::kDeflate, &writer));
+    return deflated;
+  }
+
+  // For a case with gzip_origin set, the coding the origin uses instead of
+  // gzip when deflate_origin_ is set, or the body it sends instead of the
+  // compressed one when corrupt_origin_body_ is set.
+  GoogleString BuildResponse(const Case& c) const {
+    GoogleString body = PlainBody();
+    if (c.gzip_origin) {
+      if (!corrupt_origin_body_.empty()) {
+        body = corrupt_origin_body_;
+      } else {
+        body = deflate_origin_ ? DeflateBody() : GzipBody();
+      }
+    }
     GoogleString response =
         "HTTP/1.1 200 OK\r\n"
         "Content-Type: text/css\r\n"
         "Connection: close\r\n";
     if (c.gzip_origin) {
-      StrAppend(&response, "Content-Encoding: gzip\r\n");
+      StrAppend(&response,
+                "Content-Encoding: ", deflate_origin_ ? "deflate" : "gzip",
+                "\r\n");
     }
     if (c.origin_original_length != nullptr) {
       StrAppend(&response,
@@ -1512,7 +1533,13 @@ class CurlOriginalContentLengthTest : public CurlUrlAsyncFetcherTest {
       request_headers(index)->Add(HttpAttributes::kAcceptEncoding,
                                   HttpAttributes::kGzip);
     }
-    StartFetch(index);
+    if (fetcher_for_fetch_case_ != nullptr) {
+      fetches_[index]->Reset();
+      fetcher_for_fetch_case_->Fetch(urls_[index], &message_handler_,
+                                     fetches_[index]);
+    } else {
+      StartFetch(index);
+    }
     EXPECT_EQ(1, WaitTillDone(index, index));
     server.ShutDown();
     last_request_ = server.request();
@@ -1537,6 +1564,12 @@ class CurlOriginalContentLengthTest : public CurlUrlAsyncFetcherTest {
   }
 
   GoogleString last_request_;
+  bool deflate_origin_ = false;
+  GoogleString corrupt_origin_body_;
+
+  // When set, FetchCase fetches through this fetcher instead of the curl
+  // fetcher directly.
+  UrlAsyncFetcher* fetcher_for_fetch_case_ = nullptr;
 
   // The recorded original content length, or -1 when there is none.
   int64 RecordedOriginalLength(int index) {
@@ -1570,20 +1603,17 @@ TEST_F(CurlOriginalContentLengthTest, PlainOriginRecordsBodySize) {
   }
 }
 
-// KNOWN DEFECT, tracked in issue #894, pinned as it is today; the fix for
-// that issue inverts this test (the fetch then succeeds and delivers the
-// uncompressed body).  A gzip-compressed origin fetched with the
-// fetcher's own gzip handling on does not arrive.  The transfer is decoded
-// once by the HTTP library, and the result, still labelled gzip, is then
-// handed to the inflater that the same setting installs in front of the
-// fetch.  That second inflation fails, so the fetch is reported as failed
-// and delivers no body.  The length recorded for it is the uncompressed
-// size, counted after the first decoding.  (A setup in which another layer
-// asks for gzip and inflates, the next test, is not affected.)
+// A gzip-compressed origin fetched with the fetcher's own gzip handling on
+// (issue #894): the fetcher asks for gzip and the body is inflated exactly
+// once, by the inflater the same setting installs in front of the fetch.  The
+// caller receives the uncompressed body without a Content-Encoding header.
+// The bytes counted are the compressed transfer, as in the next test, so the
+// recorded length is the compressed size either way.
 TEST_F(CurlOriginalContentLengthTest,
-       CompressedOriginWithFetcherGzipIsDecodedTwiceAndFails) {
+       CompressedOriginWithFetcherGzipIsInflatedOnce) {
   const int64 plain_size = PlainBody().size();
-  ASSERT_LT(static_cast<int64>(GzipBody().size()), plain_size);
+  const int64 gzip_size = GzipBody().size();
+  ASSERT_LT(gzip_size, plain_size);
   const Case cases[] = {
       {"sized", true, false, true, false, nullptr},
       {"chunked", true, true, true, false, nullptr},
@@ -1593,11 +1623,141 @@ TEST_F(CurlOriginalContentLengthTest,
     int index = -1;
     ASSERT_NO_FATAL_FAILURE(FetchCase(c, &index));
     EXPECT_STREQ("gzip", LastRequestHeader("Accept-Encoding"));
-    EXPECT_FALSE(fetches_[index]->success());
+    ASSERT_TRUE(fetches_[index]->success());
     EXPECT_EQ(200, response_headers(index)->status_code());
-    EXPECT_STREQ("", contents(index));
-    EXPECT_EQ(plain_size, RecordedOriginalLength(index));
+    EXPECT_FALSE(response_headers(index)->IsGzipped());
+    EXPECT_FALSE(
+        response_headers(index)->Has(HttpAttributes::kContentEncoding));
+    EXPECT_EQ(PlainBody(), contents(index));
+    EXPECT_EQ(gzip_size, RecordedOriginalLength(index));
   }
+  GoogleString text;
+  StringWriter text_writer(&text);
+  message_handler_.Dump(&text_writer);
+  EXPECT_EQ(GoogleString::npos, text.find("inflation failure")) << text;
+}
+
+// A gzip-compressed origin fetched with the fetcher's own gzip handling on, by
+// a caller that asked for gzip itself: the caller receives the compressed
+// bytes exactly as the origin sent them, still labelled gzip, and they
+// inflate to the plain body.  Nothing in the fetch path decodes them.
+TEST_F(CurlOriginalContentLengthTest,
+       CompressedOriginWithFetcherGzipAndCallerGzipKeepsLabelledBytes) {
+  const GoogleString gzipped = GzipBody();
+  const Case cases[] = {
+      {"sized", true, false, true, true, nullptr},
+      {"chunked", true, true, true, true, nullptr},
+  };
+  for (const Case& c : cases) {
+    SCOPED_TRACE(c.name);
+    int index = -1;
+    ASSERT_NO_FATAL_FAILURE(FetchCase(c, &index));
+    EXPECT_STREQ("gzip", LastRequestHeader("Accept-Encoding"));
+    ASSERT_TRUE(fetches_[index]->success());
+    EXPECT_TRUE(response_headers(index)->IsGzipped());
+    EXPECT_EQ(gzipped, contents(index));
+    GoogleString inflated;
+    StringWriter inflated_writer(&inflated);
+    ASSERT_TRUE(GzipInflater::Inflate(contents(index), GzipInflater::kGzip,
+                                      &inflated_writer));
+    EXPECT_EQ(PlainBody(), inflated);
+    EXPECT_EQ(static_cast<int64>(gzipped.size()),
+              RecordedOriginalLength(index));
+  }
+}
+
+// Passes every fetch on to another fetcher and has no gzip handling of its
+// own, like the rate-controlling fetcher that sits between the statistics
+// wrapper and the curl fetcher in the default configuration.
+class ForwardingFetcher : public UrlAsyncFetcher {
+ public:
+  explicit ForwardingFetcher(UrlAsyncFetcher* base) : base_(base) {}
+  bool SupportsHttps() const override { return base_->SupportsHttps(); }
+  void Fetch(const GoogleString& url, MessageHandler* message_handler,
+             AsyncFetch* fetch) override {
+    base_->Fetch(url, message_handler, fetch);
+  }
+
+ private:
+  UrlAsyncFetcher* base_;
+};
+
+// The same as the two tests above, with the fetcher wrapped the way it is
+// when per-virtual-host statistics are on: the statistics wrapper has the
+// gzip handling and does the inflating.  The server context turns the gzip
+// handling off on the fetcher it wraps.  With fetch rate limiting off that is
+// the curl fetcher itself; with it on (the default) it is the rate-limiting
+// wrapper, and the curl fetcher keeps the setting.  Both are covered: the
+// results are the same as with the curl fetcher alone.
+TEST_F(CurlOriginalContentLengthTest,
+       CompressedOriginThroughStatsFetcherMatchesFetcherGzip) {
+  const GoogleString gzipped = GzipBody();
+  UrlAsyncFetcherStats::InitStats("test_", statistics_.get());
+  for (const bool curl_keeps_gzip : {false, true}) {
+    SCOPED_TRACE(curl_keeps_gzip ? "curl fetcher keeps gzip handling"
+                                 : "curl fetcher gzip handling off");
+    ForwardingFetcher forwarding_fetcher(curl_fetcher_.get());
+    UrlAsyncFetcherStats stats_fetcher("test_", &forwarding_fetcher,
+                                       timer_.get(), statistics_.get());
+    stats_fetcher.set_fetch_with_gzip(true);
+    fetcher_for_fetch_case_ = &stats_fetcher;
+    const Case cases[] = {
+        {"sized", true, false, curl_keeps_gzip, false, nullptr},
+        {"chunked", true, true, curl_keeps_gzip, false, nullptr},
+        {"sized, caller gzip", true, false, curl_keeps_gzip, true, nullptr},
+        {"chunked, caller gzip", true, true, curl_keeps_gzip, true, nullptr},
+    };
+    for (const Case& c : cases) {
+      SCOPED_TRACE(c.name);
+      int index = -1;
+      ASSERT_NO_FATAL_FAILURE(FetchCase(c, &index));
+      EXPECT_STREQ("gzip", LastRequestHeader("Accept-Encoding"));
+      ASSERT_TRUE(fetches_[index]->success());
+      EXPECT_EQ(c.request_gzip, response_headers(index)->IsGzipped());
+      EXPECT_EQ(c.request_gzip ? gzipped : PlainBody(), contents(index));
+      EXPECT_EQ(static_cast<int64>(gzipped.size()),
+                RecordedOriginalLength(index));
+    }
+    fetcher_for_fetch_case_ = nullptr;
+  }
+}
+
+// A deflate-compressed origin, fetched with the fetcher's own gzip handling
+// on, is inflated once as well; a caller that asked for compression gets the
+// deflate bytes, labelled deflate.
+TEST_F(CurlOriginalContentLengthTest, DeflateOriginWithFetcherGzip) {
+  const GoogleString deflated = DeflateBody();
+  deflate_origin_ = true;
+  const Case cases[] = {
+      {"sized", true, false, true, false, nullptr},
+      {"chunked", true, true, true, false, nullptr},
+      {"sized, caller gzip", true, false, true, true, nullptr},
+  };
+  for (const Case& c : cases) {
+    SCOPED_TRACE(c.name);
+    int index = -1;
+    ASSERT_NO_FATAL_FAILURE(FetchCase(c, &index));
+    ASSERT_TRUE(fetches_[index]->success());
+    if (c.request_gzip) {
+      EXPECT_STREQ("deflate", response_headers(index)->Lookup1(
+                                  HttpAttributes::kContentEncoding));
+      EXPECT_EQ(deflated, contents(index));
+    } else {
+      EXPECT_FALSE(
+          response_headers(index)->Has(HttpAttributes::kContentEncoding));
+      EXPECT_EQ(PlainBody(), contents(index));
+    }
+  }
+}
+
+// An origin that labels a body gzip which is not: with the fetcher's own gzip
+// handling on, the inflater rejects it and the fetch fails.
+TEST_F(CurlOriginalContentLengthTest, CorruptGzipOriginWithFetcherGzipFails) {
+  corrupt_origin_body_ = PlainBody();
+  const Case c = {"corrupt", true, false, true, false, nullptr};
+  int index = -1;
+  ASSERT_NO_FATAL_FAILURE(FetchCase(c, &index));
+  EXPECT_FALSE(fetches_[index]->success());
   GoogleString text;
   StringWriter text_writer(&text);
   message_handler_.Dump(&text_writer);

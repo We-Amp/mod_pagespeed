@@ -70,11 +70,11 @@ tier.
 | `js-minify-corpus` | `fleet-heavy` | `changes`, `vendor` | JS minifier oracles and goldens freshness gate |
 | `html-parse-corpus` | `fleet-heavy` | `changes`, `vendor` | HTML parse goldens freshness gate |
 | `fuzz-smoke` | `fleet-heavy` | `changes`, `vendor` | CSS, HTML, rule-pack and JS fuzz harnesses: deterministic replay plus 60 s libFuzzer runs (path-filtered) |
-| `nginx-sys-tests` | `fleet-light` | `changes`, `linux-build` | the nginx system tests (`test/system/run_nginx_tests.sh`) against the module from the `ci-artifacts-linux-x64` bundle, x64 only, with the same container, capabilities and failure diagnostics as the full tier's job (container and diagnostics names carry a `pr` prefix so the two tiers cannot collide in one run). Runs only when the `nginx_sys` path filter fires: `pagespeed/nginx/`, `test/pagespeed/nginx/`, `test/system/nginx/`, `pagespeed/system/`, the test sets and fixtures both runners use (`test/system/automatic/`, `test/system/system/`, `test/system/pagespeed_test_framework/`, `conftest.py`, `pytest.ini`, `requirements.txt`, `install/mod_pagespeed_test/`, `install/mod_pagespeed_example/`, `install/do_not_modify/`), the nginx run script and the diagnostics collector. Skipped otherwise, and with `linux-build` when the fleet scope skips the build runner legs. Runs on the merge queue as well as on the pull request. The optimizer daemon lane is off, so the daemon adapter's serve arm is not covered here (the nightly tier covers it). A fork pull request runs it on a hosted runner with a cold dev image build (degraded mode, not yet exercised) |
+| `nginx-sys-tests` | `fleet-light` | `changes`, `linux-build` | the nginx system tests (`test/system/run_nginx_tests.sh`) against the module from the `ci-artifacts-linux-x64` bundle, x64 only, with the same container, capabilities and failure diagnostics as the full tier's job (container and diagnostics names carry a `pr` prefix so the two tiers cannot collide in one run). Runs only when the `nginx_sys` path filter fires: `pagespeed/nginx/`, `test/pagespeed/nginx/`, `test/system/nginx/`, `pagespeed/system/`, the test sets and fixtures both runners use (`test/system/automatic/`, `test/system/system/`, `test/system/pagespeed_test_framework/`, `conftest.py`, `pytest.ini`, `requirements.txt`, `install/mod_pagespeed_test/`, `install/mod_pagespeed_example/`, `install/do_not_modify/`), the nginx run script and the diagnostics collector. Skipped otherwise, and with `linux-build` when the fleet scope skips the build runner legs. Runs on the merge queue as well as on the pull request. The optimizer daemon lane is required on build runners: an `Optimizer lane` step builds (or reuses) the worker and client library at the commit `test/system/optimizer-test-pin.json` names in a container of its own (`test/system/optimizer_lane.sh`) and hands that build read-only to the test container. Hosted runners leave the daemon lane out and say so in a notice. A fork pull request runs it on a hosted runner with a cold dev image build (degraded mode, not yet exercised) |
 | `apache-sys-tests` | `fleet-light` | `changes`, `linux-build` | the same for the Apache module (`test/system/run_system_tests.sh`). Runs only when the `apache_sys` path filter fires: `pagespeed/apache/`, `test/pagespeed/apache/`, `pagespeed/system/`, the test sets and fixtures both runners use (`test/system/automatic/`, `test/system/system/`, `test/system/pagespeed_test_framework/`, `conftest.py`, `pytest.ini`, `requirements.txt`, `install/mod_pagespeed_test/`, `install/mod_pagespeed_example/`, `install/do_not_modify/`), `install/debug.conf.template`, the Apache run script, `test/system/setup_apache_test.sh` and the diagnostics collector |
 | `windows-build` | `fleet-windows` (`windows-2022` for forks and hosted-routed merge groups) | `changes`, `vendor` | builds the IIS module with clang-cl, uploads the `ci-artifacts-win-x64` bundle |
 | `windows-unit-tests` | `fleet-windows` (`windows-2022` for forks and hosted-routed merge groups) | `changes`, `vendor`, `windows-build` | Windows unit tests. Before `bazel test` it removes every test runfiles tree in the runner's output base (`tools/ci/Remove-StaleToolRunfiles.ps1`, always master's copy): on Windows Bazel fills those trees with copies and does not rebuild one whose manifest is unchanged, so a persistent output base otherwise runs an earlier job's test binary. The `CI_WIN_TEST_RESULTS_EPOCH` test environment value keys the cached test results; bump it when cached Windows results must not be reused |
-| `iis-sys-tests` | `fleet-iis`, no hosted side | `changes`, `windows-build`, `windows-unit-tests` | the IIS system tests against the module from the `windows-build` bundle, on the host's full IIS, with the pinned optimizer worker running beside it (fetched and verified like the installer does, loopback management API behind a per-run token; an extra site, with its own file cache directory and a one-hour client cache lifetime, gets `DaemonSocketPath` and `DaemonVolumePath`; the job waits until it answers, and its base URL is exported as `PAGESPEED_IIS_DAEMON_SITE_URL`. The main site keeps classic in-place optimization. Nothing sends requests to the extra site until the full purge test is changed to use that URL, and that test skips until the pinned optimizer carries the purge fixes; an unreachable pinned release fails the job; the worker volume is emptied at each start). Skipped (not failed) for fork and Dependabot pull requests, for a merge group routed to hosted runners, while `FLEET_ENABLED` is `false` and while `FLEET_IIS_ENABLED` is not `true`, and when the `iis` path filter finds no IIS-relevant change; carries the "only" guard below |
+| `iis-sys-tests` | `fleet-iis`, no hosted side | `changes`, `windows-build`, `windows-unit-tests` | the IIS system tests against the module from the `windows-build` bundle, on the host's full IIS, with an optimizer worker running beside it, built from the commit `test/system/optimizer-test-pin.json` names (`tools/ci/Build-OptimizerPin.ps1`: once per host, pin and recipe, then reused after its checksums, commit file, owner and ACL are checked; the C API version of its client library is logged; loopback management API behind a per-run token; an extra site, with its own file cache directory and a one-hour client cache lifetime, gets `DaemonSocketPath` and `DaemonVolumePath`; the job waits until it answers, and its base URL is exported as `PAGESPEED_IIS_DAEMON_SITE_URL`. The main site keeps classic in-place optimization. Nothing sends requests to the extra site until the full purge test is changed to use that URL, and that test skips until the pinned optimizer carries the purge fixes; a pinned build that cannot be provided fails the job; the worker volume is emptied at each start). Skipped (not failed) for fork and Dependabot pull requests, for a merge group routed to hosted runners, while `FLEET_ENABLED` is `false` and while `FLEET_IIS_ENABLED` is not `true`, and when the `iis` path filter finds no IIS-relevant change; carries the "only" guard below |
 | `iis-sys-tests-retry` | `fleet-iis`, no hosted side | `changes`, `windows-build`, `windows-unit-tests`, `iis-sys-tests` | runs only when `iis-sys-tests` failed for a reason of the host (see "IIS infrastructure failures"): two legs, `IIS System Tests (retry 1)` and `(retry 2)`; the leg that lands on the runner that just failed holds it until the other has a runner, so the tests run once more on a different one. Skipped otherwise |
 | `fleet-off-notice` | hosted | | runs only while `FLEET_ENABLED` is `false` and says what the switch changed |
 | `fleet-only-skip-check` | hosted | `windows-build`, `windows-unit-tests`, `iis-sys-tests` | fails when `iis-sys-tests` was skipped for none of the allowed reasons (switch off, fork or Dependabot, a merge group routed to hosted runners, `FLEET_IIS_ENABLED` not `true`, the `iis` path filter false, a failed prerequisite) |
@@ -740,7 +740,12 @@ that commit. The run never enters the `release` environment, and ends with a
 seal of its artifacts (docs/ci/release.md, "A candidate run").
 `tools/ci/check-workflow-shape.sh` requires every `environment: release` job
 of the module lane to refuse a dry run, a candidate and a rehearsal in its
-`if:`.
+`if:`. The nginx.org lane (`nginx-org-rebuild.yml`) is dispatched on master
+for the module release in its `module_tag` input; the same rule (release-env)
+requires its `release` jobs to refuse a dry run, its event guard to admit
+exactly `refs/heads/master` (the `eg_refs_for` entry), a person and a
+`module-vX.Y.Z` tag, and every checkout to be the run's own commit
+(docs/ci/release.md, "The nginx.org rebuild lane").
 
 A real run of a tag whose message names a candidate run (the
 `Release-Candidate-*` trailers) adopts that run's artifacts instead of
@@ -1192,8 +1197,9 @@ pull request (the callers pin `@master`). To exercise it before merge:
    based on the current `master`, so it carries the queue and event guards.
 2. Dispatch the `CI (ci-dev)` workflow (`ci-dev.yml`) from the Actions tab or
    with `gh workflow run ci-dev.yml --ref ci-dev`. It calls `pipeline-pr.yml@ci-dev`.
-   Use `--ref ci-dev`: the event guard of the full-tier pipeline accepts
-   a dispatch only on `master` or `ci-dev`. To run the full tier as well,
+   Use `--ref ci-dev` (in the Actions tab, pick the `ci-dev` branch): both
+   jobs of `ci-dev.yml` run only when `github.ref` is `refs/heads/ci-dev`, and
+   are skipped on any other ref, where its `ref-check` job fails the run. To run the full tier as well,
    set the `full` input: `gh workflow run ci-dev.yml --ref ci-dev -f full=true`
    (or tick `full` in the Actions tab). The `full` job then calls
    `pipeline-full.yml@ci-dev`.
@@ -1270,6 +1276,16 @@ and fails the build when the shape breaks:
 - **(f)** a reusable workflow has a top-level `permissions:` block with no
   write access, and a `write` permission at job level is allowed only on a
   job with a hosted `runs-on`;
+- **(slsa)** the one reusable workflow from outside this repository is the
+  SLSA project's generic provenance generator,
+  `slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v<X.Y.Z>`.
+  It is referenced by its version tag, not a commit (the generator verifies
+  its own ref and refuses a commit SHA), only from the release lanes
+  (`pipeline-release-module.yml`, `nginx-org-rebuild.yml`), and always with
+  `upload-assets: false`, so the provenance reaches a release only through
+  the lane's own `create-release` job. Its jobs run on GitHub-hosted
+  runners, so the call job may hold the permissions they declare (an
+  exception to (b) and (f)); it is passed no secret;
 - **(queue-route)** in `pipeline-pr.yml`: the `changes` job holds the step
   `Decide the runner route` right after `Decide the fleet scope`, in exactly
   its spec text, and publishes `route`; no other job defines a `route`

@@ -21,11 +21,17 @@
 // the in-place arms make is sited, so a library older than 1.12, or a 1.12
 // library without the sited cache entry points, is refused at load, and the
 // notification parameters are the published 1.12 layout field for field.
+//
+// The HTML serve set (1.13 + 1.14) is optional and bound as a whole: a
+// library below 1.14, or one that lacks any entry point of the set, still
+// loads, and then no entry point of the set is used.
 
 #include "pagespeed/system/daemon_abi.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <memory>
 
 #include "pagespeed/kernel/base/string.h"
@@ -116,7 +122,303 @@ TEST_F(DaemonAbiTest, TheInitializerIsToldTheFullSize) {
 TEST_F(DaemonAbiTest, TheFlagsAreThePublishedBits) {
   EXPECT_EQ(0x1u, kPsNotifyFlagHostVouched);
   EXPECT_EQ(0x2u, kPsNotifyFlagFromModule);
+  EXPECT_EQ(0x8u, kPsNotifyFlagHtmlStored);
   EXPECT_EQ(64u, kPsSiteIdChars);
+}
+
+// --- The HTML serve set (C API 1.13 + 1.14), bound optionally -------------
+
+TEST_F(DaemonAbiTest, TheWriteParametersCarryTheContentHash) {
+  // 1.13 appended the content binding.  A peer older than that snaps the
+  // declared size down to the 1.12 shape and never reads the field.
+  EXPECT_EQ(88u, sizeof(PsWriteParams));
+  EXPECT_EQ(72u, offsetof(PsWriteParams, origin_cc_flags));
+  EXPECT_EQ(80u, offsetof(PsWriteParams, origin_html_hash));
+}
+
+TEST_F(DaemonAbiTest, TheServeSetLayoutsAreThePublishedOnes) {
+  EXPECT_EQ(48u, sizeof(PsSidecarWriteParams));
+  EXPECT_EQ(8u, offsetof(PsSidecarWriteParams, url));
+  EXPECT_EQ(32u, offsetof(PsSidecarWriteParams, site));
+  EXPECT_EQ(40u, offsetof(PsSidecarWriteParams, origin_html_hash));
+
+  EXPECT_EQ(64u, sizeof(PsHtmlServeRequest));
+  EXPECT_EQ(8u, offsetof(PsHtmlServeRequest, mode));
+  EXPECT_EQ(16u, offsetof(PsHtmlServeRequest, method));
+  EXPECT_EQ(48u, offsetof(PsHtmlServeRequest, if_none_match));
+  EXPECT_EQ(56u, offsetof(PsHtmlServeRequest, request_flags));
+  EXPECT_EQ(60u, offsetof(PsHtmlServeRequest, now_seconds));
+
+  EXPECT_EQ(96u, sizeof(PsHtmlStoredFacts));
+  EXPECT_EQ(8u, offsetof(PsHtmlStoredFacts, flags));
+  EXPECT_EQ(24u, offsetof(PsHtmlStoredFacts, render_ttl_s));
+  EXPECT_EQ(28u, offsetof(PsHtmlStoredFacts, withheld_reason));
+  EXPECT_EQ(32u, offsetof(PsHtmlStoredFacts, binding_hash));
+  EXPECT_EQ(64u, offsetof(PsHtmlStoredFacts, markdown_hash));
+
+  EXPECT_EQ(64u, sizeof(PsHtmlServeVerdict));
+  EXPECT_EQ(8u, offsetof(PsHtmlServeVerdict, action));
+  EXPECT_EQ(28u, offsetof(PsHtmlServeVerdict, not_modified));
+  EXPECT_EQ(32u, offsetof(PsHtmlServeVerdict, etag));
+  EXPECT_EQ(kPsHtmlMarkdownEtagChars + 8, sizeof(PsHtmlServeVerdict::etag));
+}
+
+TEST_F(DaemonAbiTest, TheServeSetConstantsAreThePublishedValues) {
+  EXPECT_EQ(14, kHtmlServeSetMinor);
+  EXPECT_EQ(0x3C, kPsSentinelContentHash);
+  EXPECT_EQ(0x7C, kPsSentinelAgentMarkdown);
+  EXPECT_EQ(0xCC, kPsSentinelMarkdownWithheld);
+  EXPECT_EQ(0x10, kPsFlagHeadersClassified);
+  EXPECT_EQ(0x20, kPsFlagHeadersSidecarRequired);
+  EXPECT_EQ(0, kPsSidecarUnpaired);
+  EXPECT_EQ(1, kPsSidecarPaired);
+  EXPECT_EQ(2, kPsHtmlCacheServeVariants);
+  EXPECT_EQ(2, kPsHtmlServeActionServeMarkdown);
+  EXPECT_EQ(0x200u, kPsHtmlFactsBindingLive);
+  EXPECT_EQ(0x800u, kPsHtmlFactsWithheld);
+  EXPECT_EQ(1, kPsHtmlModeMarkdownStatic);
+  EXPECT_EQ(32u, kPsHtmlHashBytes);
+  // Every Cache-Control bit the peer's parser reports.
+  EXPECT_EQ(0x0001u, kPsCcOriginNoCache);
+  EXPECT_EQ(0x0008u, kPsCcOriginPrivate);
+  EXPECT_EQ(0x4000u, kPsCcOriginSMaxageRepeated);
+  // The sentinel-shaped ids sit in the reserved viewport.
+  for (uint8_t id : {kPsSentinelContentHash, kPsSentinelAgentMarkdown,
+                     kPsSentinelMarkdownWithheld}) {
+    EXPECT_EQ(kPsViewportSentinel,
+              (id >> kPsMaskViewportShift) & kPsMaskViewportBits);
+  }
+}
+
+class HtmlServeSetTest : public DaemonAbiTest {
+ protected:
+  std::unique_ptr<DaemonAbi> Load(const char* minor, const char* library) {
+    setenv("PS_STUB_MINOR", minor, 1);
+    return std::unique_ptr<DaemonAbi>(
+        LoadDaemonAbi(StubLibraryPath(library), &error_));
+  }
+
+  // No call into an unbound set reaches anything, and every one answers the
+  // fail-closed value.
+  void ExpectUnboundAnswers(const DaemonAbi& abi) {
+    PsHtmlServeRequest request = {};
+    request.struct_size = sizeof(request);
+    request.method = "GET";
+    PsHtmlStoredFacts facts = {};
+    facts.struct_size = sizeof(facts);
+    PsHtmlServeVerdict verdict = {};
+    verdict.struct_size = sizeof(verdict);
+    EXPECT_EQ(-1, abi.HtmlServeClassify(&request, &facts, &verdict));
+    EXPECT_EQ(nullptr, abi.HtmlServeReasonName(0));
+    PsWriteParams params = {};
+    params.struct_size = sizeof(params);
+    EXPECT_EQ(-1, abi.HtmlStoreWriteParams(1, 60, 0, 0, 1, 1000000, nullptr, 0,
+                                           10, "text/html", &params));
+    EXPECT_EQ(
+        -1, abi.HtmlStoredFactsFromReads(nullptr, nullptr, nullptr, 0, &facts));
+    uint8_t hash[kPsHtmlHashBytes] = {1};
+    char etag[64];
+    size_t len = 0;
+    EXPECT_EQ(-1, abi.HtmlMarkdownEtag(hash, hash, etag, sizeof(etag), &len));
+    EXPECT_EQ(-1, abi.IfNoneMatchMatchesWeak("*", "W/\"psm-0\""));
+    int cache = 0;
+    PsSidecarWriteParams sidecar = {};
+    sidecar.struct_size = sizeof(sidecar);
+    int verdict_out = 0;
+    int stored = 0;
+    EXPECT_EQ(kPsErrInvalidArg, abi.CacheWriteHeadersSidecarSite(
+                                    &cache, &sidecar, nullptr, nullptr, 0,
+                                    &verdict_out, &stored));
+    void* block = &cache;
+    EXPECT_EQ(kPsErrInvalidArg, abi.HeadersSidecarRead(&cache, "http://a/", "a",
+                                                       "http", kSite, &block));
+    EXPECT_EQ(nullptr, block);
+    EXPECT_EQ(0u, abi.HeaderBlockCount(nullptr));
+    EXPECT_EQ(-1, abi.HeaderBlockPairing(nullptr, hash));
+    EXPECT_EQ(nullptr, abi.HeaderBlockPairingHash(nullptr));
+    abi.HeaderBlockFree(nullptr);
+    // Never NOT_FOUND: a caller treats that as a removal that succeeded.
+    EXPECT_EQ(kPsErrInvalidArg,
+              abi.CacheRemoveSite(&cache, "http://a/", "a", "http", kSite));
+    EXPECT_EQ(kPsErrInvalidArg, abi.CacheWriteSitePurgeEpoch(&cache, kSite, 1));
+    uint64_t epoch = 77;
+    EXPECT_EQ(kPsErrInvalidArg,
+              abi.CacheReadSitePurgeEpoch(&cache, kSite, &epoch));
+    EXPECT_EQ(77u, epoch);
+    EXPECT_EQ(-1, abi.ReadSharedConfigHtmlMode("/unused"));
+    EXPECT_EQ(-1, abi.ReadSharedConfigAgentEntitled("/unused"));
+    EXPECT_EQ(0, abi.WantsAgentMarkdown("text/markdown"));
+  }
+
+  static constexpr char kSite[] =
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+};
+
+TEST_F(HtmlServeSetTest, AFourteenLibraryWithTheWholeSetBindsIt) {
+  std::unique_ptr<DaemonAbi> abi = Load("14", "libdaemon_stub_html_serve.so");
+  ASSERT_TRUE(abi != nullptr) << error_;
+  EXPECT_TRUE(abi->HasHtmlServeSet());
+  EXPECT_EQ("", abi->HtmlServeSetUnavailableReason());
+  // Every entry point reaches the library, not a default.
+  EXPECT_STREQ("fresh", abi->HtmlServeReasonName(0));
+  EXPECT_STREQ("skew", abi->HtmlServeReasonName(18));
+  EXPECT_EQ(nullptr, abi->HtmlServeReasonName(19));
+  EXPECT_EQ(1, abi->WantsAgentMarkdown("text/markdown, text/html;q=0.9"));
+  EXPECT_EQ(0, abi->WantsAgentMarkdown("text/html"));
+  EXPECT_EQ(kPsHtmlModeMarkdownStatic, abi->ReadSharedConfigHtmlMode("/c"));
+  EXPECT_EQ(1, abi->ReadSharedConfigAgentEntitled("/c"));
+  EXPECT_EQ(1, abi->IfNoneMatchMatchesWeak("*", "W/\"psm-0\""));
+
+  PsHtmlServeRequest request = {};
+  request.struct_size = sizeof(request);
+  request.mode = kPsHtmlCacheServeVariants;
+  request.method = "GET";
+  PsHtmlStoredFacts facts = {};
+  // A facts struct with no size is a malformed call.
+  EXPECT_EQ(
+      -1, abi->HtmlStoredFactsFromReads(nullptr, nullptr, nullptr, 0, &facts));
+  facts.struct_size = sizeof(facts);
+  ASSERT_EQ(
+      0, abi->HtmlStoredFactsFromReads(nullptr, nullptr, nullptr, 0, &facts));
+  PsHtmlServeVerdict verdict = {};
+  verdict.struct_size = sizeof(verdict);
+  ASSERT_EQ(0, abi->HtmlServeClassify(&request, &facts, &verdict));
+  EXPECT_EQ(kPsHtmlServeActionFallThrough, verdict.action);
+  EXPECT_STREQ("absent", abi->HtmlServeReasonName(verdict.reason));
+
+  uint8_t binding[kPsHtmlHashBytes] = {1};
+  uint8_t markdown[kPsHtmlHashBytes] = {2};
+  char etag[kPsHtmlMarkdownEtagChars + 1];
+  size_t len = 0;
+  ASSERT_EQ(0,
+            abi->HtmlMarkdownEtag(binding, markdown, etag, sizeof(etag), &len));
+  EXPECT_EQ(kPsHtmlMarkdownEtagChars, len);
+  EXPECT_EQ(0, strncmp(etag, "W/\"psm-", 7)) << etag;
+
+  PsWriteParams params;
+  abi->WriteParamsInit(&params);
+  const char* age[] = {"30"};
+  ASSERT_EQ(0, abi->HtmlStoreWriteParams(kPsHtmlStoreActionStore, 60, 0, 0, 1,
+                                         int64_t{100000} * 1000 + 999, age, 1,
+                                         42, "text/html", &params));
+  EXPECT_EQ(100000u - 30u, params.cache_inserted_at);
+  EXPECT_EQ(42u, params.content_length);
+  EXPECT_EQ(sizeof(PsWriteParams), params.struct_size);
+}
+
+TEST_F(HtmlServeSetTest, TheSidecarEpochAndRemovalReachTheLibrary) {
+  std::unique_ptr<DaemonAbi> abi = Load("14", "libdaemon_stub_html_serve.so");
+  ASSERT_TRUE(abi != nullptr) << error_;
+  ASSERT_TRUE(abi->HasHtmlServeSet());
+  void* cache = nullptr;
+  alignas(
+      std::max_align_t) unsigned char config_storage[kCacheConfigProbeBytes];
+  PsCacheConfig* config = reinterpret_cast<PsCacheConfig*>(config_storage);
+  abi->CacheConfigInit(config);
+  ASSERT_EQ(kPsOk, abi->CacheOpen(config, &cache));
+
+  uint8_t hash[kPsHtmlHashBytes];
+  memset(hash, 0xAB, sizeof(hash));
+  PsSidecarWriteParams sidecar = {};
+  sidecar.struct_size = sizeof(sidecar);
+  sidecar.url = "http://a.example/p";
+  sidecar.hostname = "a.example";
+  sidecar.scheme = "http";
+  sidecar.site = kSite;
+  sidecar.origin_html_hash = hash;
+  const char* names[] = {"Content-Language"};
+  const char* values[] = {"en"};
+  int verdict = -1;
+  int stored = -1;
+  ASSERT_EQ(kPsOk, abi->CacheWriteHeadersSidecarSite(
+                       cache, &sidecar, names, values, 1, &verdict, &stored));
+  EXPECT_EQ(1, stored);
+
+  void* block = nullptr;
+  ASSERT_EQ(kPsOk, abi->HeadersSidecarRead(cache, sidecar.url, "a.example",
+                                           "http", kSite, &block));
+  ASSERT_TRUE(block != nullptr);
+  ASSERT_EQ(1u, abi->HeaderBlockCount(block));
+  const char* name = nullptr;
+  const char* value = nullptr;
+  size_t name_len = 0;
+  size_t value_len = 0;
+  ASSERT_EQ(kPsOk, abi->HeaderBlockGet(block, 0, &name, &name_len, &value,
+                                       &value_len));
+  EXPECT_STREQ("Content-Language", name);
+  EXPECT_EQ(2u, value_len);
+  ASSERT_TRUE(abi->HeaderBlockPairingHash(block) != nullptr);
+  EXPECT_EQ(kPsSidecarPaired, abi->HeaderBlockPairing(block, hash));
+  uint8_t other[kPsHtmlHashBytes] = {7};
+  EXPECT_EQ(kPsSidecarUnpaired, abi->HeaderBlockPairing(block, other));
+  abi->HeaderBlockFree(block);
+
+  // Another site's keyspace holds nothing.
+  block = &cache;
+  EXPECT_EQ(kPsErrNotFound,
+            abi->HeadersSidecarRead(cache, sidecar.url, "a.example", "http",
+                                    "f123456789abcdef0123456789abcdef"
+                                    "0123456789abcdef0123456789abcdef",
+                                    &block));
+  EXPECT_EQ(nullptr, block);
+
+  EXPECT_EQ(kPsOk, abi->CacheRemoveSite(cache, sidecar.url, "a.example", "http",
+                                        kSite));
+  EXPECT_EQ(kPsErrNotFound, abi->CacheRemoveSite(cache, sidecar.url,
+                                                 "a.example", "http", kSite));
+
+  uint64_t epoch = 99;
+  ASSERT_EQ(kPsOk, abi->CacheReadSitePurgeEpoch(cache, kSite, &epoch));
+  EXPECT_EQ(0u, epoch);
+  ASSERT_EQ(kPsOk, abi->CacheWriteSitePurgeEpoch(cache, kSite, 1000));
+  ASSERT_EQ(kPsOk, abi->CacheWriteSitePurgeEpoch(cache, kSite, 500));
+  ASSERT_EQ(kPsOk, abi->CacheReadSitePurgeEpoch(cache, kSite, &epoch));
+  EXPECT_EQ(1000u, epoch);  // a max-merge never decreases
+  abi->CacheClose(cache);
+}
+
+TEST_F(HtmlServeSetTest, AThirteenLibraryDoesNotBindTheSet) {
+  // The 1.13 half alone is not the set: the serve verdict is 1.14.
+  std::unique_ptr<DaemonAbi> abi = Load("13", "libdaemon_stub_html_serve.so");
+  ASSERT_TRUE(abi != nullptr) << error_;
+  EXPECT_FALSE(abi->HasHtmlServeSet());
+  const GoogleString reason = abi->HtmlServeSetUnavailableReason();
+  EXPECT_NE(GoogleString::npos, reason.find("1.13")) << reason;
+  EXPECT_NE(GoogleString::npos, reason.find("1.14")) << reason;
+  ExpectUnboundAnswers(*abi);
+  // The 1.12 store policy is unaffected.
+  EXPECT_TRUE(abi->PublishesHtmlStorePolicy());
+}
+
+TEST_F(HtmlServeSetTest, ATwelveLibraryDoesNotBindTheSet) {
+  std::unique_ptr<DaemonAbi> abi = Load("12", "libdaemon_stub_html_serve.so");
+  ASSERT_TRUE(abi != nullptr) << error_;
+  EXPECT_FALSE(abi->HasHtmlServeSet());
+  EXPECT_NE(GoogleString::npos,
+            abi->HtmlServeSetUnavailableReason().find("1.12"));
+  ExpectUnboundAnswers(*abi);
+}
+
+TEST_F(HtmlServeSetTest, OneMissingSymbolLeavesTheWholeSetUnbound) {
+  // A library that reports 1.14 but lacks one entry point of the set still
+  // loads -- the set is optional -- and none of the set is used, not even
+  // the entry points it does export.
+  std::unique_ptr<DaemonAbi> abi =
+      Load("14", "libdaemon_stub_html_serve_partial.so");
+  ASSERT_TRUE(abi != nullptr) << error_;
+  EXPECT_FALSE(abi->HasHtmlServeSet());
+  const GoogleString reason = abi->HtmlServeSetUnavailableReason();
+  EXPECT_NE(GoogleString::npos, reason.find("ps_cache_read_site_purge_epoch"))
+      << reason;
+  ExpectUnboundAnswers(*abi);
+}
+
+TEST_F(HtmlServeSetTest, ALibraryWithoutTheSetStillLoads) {
+  std::unique_ptr<DaemonAbi> abi = Load("14", "libdaemon_stub.so");
+  ASSERT_TRUE(abi != nullptr) << error_;
+  EXPECT_FALSE(abi->HasHtmlServeSet());
+  EXPECT_FALSE(abi->HtmlServeSetUnavailableReason().empty());
+  ExpectUnboundAnswers(*abi);
 }
 
 }  // namespace
