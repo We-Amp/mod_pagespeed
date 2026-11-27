@@ -184,6 +184,10 @@ jobs:
         run: tools/ci/test_check_ci_rot.sh
       - name: Hygiene gate credential-rule fixtures
         run: tools/ci/test_check_public_hygiene.sh
+      # Container build scripts run on x86_64 and aarch64: no literal
+      # <arch>-linux-gnu / <arch>-redhat-linux paths (fixtures, then the tree).
+      - name: Container build scripts derive the arch
+        run: tools/ci/test_check_arch_paths.sh
 
   ci-tooling-tests:
     permissions:

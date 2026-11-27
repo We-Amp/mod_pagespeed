@@ -1199,10 +1199,14 @@ elif [ "${DISTRO}" = "el10" ]; then
   # modules` runs in a subshell that does not re-export PATH, so toolset-15 must
   # be on PATH globally or make picks base gcc-14 (wrong toolchain / ABI drift).
   export PATH="${GCC15_PREFIX}/bin:${PATH}"
-  mkdir -p /usr/include/c++ /usr/lib/gcc/x86_64-linux-gnu /usr/include/x86_64-linux-gnu/c++
+  # ARCH: derive both triplets as the el9 arm does, so el10-arm64 wires the
+  # aarch64 paths (gcc-toolset-15 names its target subdir <arch>-redhat-linux).
+  EL10_DEB_TRIPLET="$(deb_triplet)"
+  EL10_RH_TRIPLET="$(rpm --eval '%{_arch}')-redhat-linux"
+  mkdir -p /usr/include/c++ "/usr/lib/gcc/${EL10_DEB_TRIPLET}" "/usr/include/${EL10_DEB_TRIPLET}/c++"
   ln -sfn "${GCC15_PREFIX}/include/c++/15" /usr/include/c++/15
-  ln -sfn "${GCC15_PREFIX}/lib/gcc/x86_64-redhat-linux/15" /usr/lib/gcc/x86_64-linux-gnu/15
-  ln -sfn "${GCC15_PREFIX}/include/c++/15/x86_64-redhat-linux" /usr/include/x86_64-linux-gnu/c++/15
+  ln -sfn "${GCC15_PREFIX}/lib/gcc/${EL10_RH_TRIPLET}/15" "/usr/lib/gcc/${EL10_DEB_TRIPLET}/15"
+  ln -sfn "${GCC15_PREFIX}/include/c++/15/${EL10_RH_TRIPLET}" "/usr/include/${EL10_DEB_TRIPLET}/c++/15"
   BAZEL_FLAGS+=(
     "--config=clang-libstdcxx15"
     "--features=-layering_check"
