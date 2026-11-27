@@ -4,9 +4,10 @@
 # guest_iis_serve_html_probe.ps1 - The guest half of the IIS probe for
 # serving a stored origin page (probe_iis_html_cache_pipeline.ps1
 # -Matrix serve-html runs it over PowerShell Direct). Run in a lab guest
-# that has IIS 10, the PageSpeed MSI with its optimizer, the features
-# Web-Dyn-Compression, Web-Stat-Compression, Web-Http-Tracing and
-# Web-Asp-Net45, and the probe DLL at C:\pipeprobe\bin\iis_pipeline_probe.dll.
+# that has IIS 10, the PageSpeed MSI with its optimizer and the probe DLL at
+# C:\pipeprobe\bin\iis_pipeline_probe.dll. Setup installs the features
+# Web-Asp-Net45, Web-Dyn-Compression, Web-Stat-Compression and
+# Web-Http-Tracing when they are missing (they stay installed).
 # The URL Rewrite module is used when it is installed, or when its
 # installer is at C:\pipeprobe\bin\url-rewrite.msi.
 #
@@ -307,6 +308,8 @@ function Setup {
         throw "the IIS backup $Backup exists from an earlier run; restore and delete it first"
     }
     if (-not (Get-Service -Name $Service -ErrorAction SilentlyContinue)) { throw "the optimizer service is not installed (an MSI built with its optimizer is needed)" }
+    $r = Install-WindowsFeature -Name Web-Asp-Net45, Web-Dyn-Compression, Web-Stat-Compression, Web-Http-Tracing
+    Write-Output ("SETUP | features | success={0} restart={1}" -f $r.Success, $r.RestartNeeded)
     if (-not (Rewrite-Installed) -and (Test-Path "$Root\bin\url-rewrite.msi")) {
         $p = Start-Process msiexec.exe -ArgumentList "/i `"$Root\bin\url-rewrite.msi`" /qn /norestart" -Wait -PassThru
         Write-Output ("SETUP | url rewrite install | exit {0}" -f $p.ExitCode)

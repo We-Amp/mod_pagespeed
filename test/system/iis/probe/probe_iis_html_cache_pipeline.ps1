@@ -93,7 +93,8 @@ try {
         if (Test-Path "$env:windir\system32\inetsrv\backup\pipeprobe-before") {
             return "an earlier run left the IIS backup pipeprobe-before: restore it (appcmd restore backup pipeprobe-before), delete it, then run again"
         }
-        foreach ($f in @("Web-Dyn-Compression", "Web-Stat-Compression", "Web-Http-Tracing", "Web-Asp-Net45")) {
+        # The serve-html matrix installs the features it needs itself.
+        foreach ($f in @($(if ($Matrix -ne "serve-html") { @("Web-Dyn-Compression", "Web-Stat-Compression", "Web-Http-Tracing", "Web-Asp-Net45") }))) {
             $w = Get-WindowsFeature -Name $f
             if ($w -eq $null -or -not $w.Installed) { return "feature $f not installed" }
         }
