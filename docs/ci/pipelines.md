@@ -1194,7 +1194,7 @@ pull request (the callers pin `@master`). To exercise it before merge:
    with `gh workflow run ci-dev.yml --ref ci-dev`. It calls `pipeline-pr.yml@ci-dev`.
    Use `--ref ci-dev` (in the Actions tab, pick the `ci-dev` branch): both
    jobs of `ci-dev.yml` run only when `github.ref` is `refs/heads/ci-dev`, and
-   are skipped on any other ref. To run the full tier as well,
+   are skipped on any other ref, where its `ref-check` job fails the run. To run the full tier as well,
    set the `full` input: `gh workflow run ci-dev.yml --ref ci-dev -f full=true`
    (or tick `full` in the Actions tab). The `full` job then calls
    `pipeline-full.yml@ci-dev`.

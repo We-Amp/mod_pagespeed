@@ -98,10 +98,12 @@
 #   (env-tag-ref) in every workflow: a job that names an environment does so
 #       on one line with a literal name (no mapping form, no expression), and
 #       each job with `environment: release` has a one-line if: with no ||,
-#       always(, failure( or cancelled( (bar !cancelled()) that carries
+#       always(, failure( or cancelled( (bar !cancelled()), no group right
+#       after ${{ and no compared group (`(...) == false`), that carries
 #       startsWith(github.ref, 'refs/tags/ in its one-line if:, so a run on a
 #       branch never requests the environment (in pipeline-release-module.yml
-#       also github.ref == format('refs/tags/{0}', needs.version.outputs.tag));
+#       also github.ref == format('refs/tags/{0}', needs.version.outputs.tag),
+#       and the if: starts with ${{ !cancelled() && );
 #       the one exception is nginx-org-rebuild.yml, whose release jobs run on
 #       the ref its event-guard job pins (a module-v* tag, or exactly
 #       refs/heads/master); an environment spelled release in another case
@@ -109,6 +111,14 @@
 #       a workflow (and nginx-org-rebuild.yml) has no workflow-level
 #       defaults: and only standard shells (bash, pwsh, powershell, sh, cmd,
 #       python), so no custom shell can skip a guard script;
+#   (repo-ref) in every workflow: a `uses:` of this repository
+#       (We-Amp/mod_pagespeed/..., owner and name in any case), at job or step
+#       level, names @master or @ci-dev and no other ref; @ci-dev only in a job
+#       whose one-line if: carries github.ref == 'refs/heads/ci-dev' as a term
+#       of its own (between ${{ or && and && or }}), with no ||, no negation
+#       other than !cancelled() and !=, and no always(, failure( or bare
+#       cancelled(. A called workflow runs under its caller's ref, so a
+#       ci-dev callee may run only under refs/heads/ci-dev, never as master;
 #   (yaml-alias) in every workflow's jobs: section, no YAML anchor or alias
 #       on a job or on a job-level key other than steps: and env:, and no
 #       `<<:` merge key: the gate reads the text and cannot resolve them;
@@ -365,6 +375,37 @@ env_tag_ref_records() { # FILE MODULE_LANE(0|1)
       # (!cancelled() only adds a condition).
       c=$0; gsub(/[[:space:]]+/, "", c); gsub(/!cancelled\(\)/, "", c); gsub(/!=/, "", c)
       if (index(c, "||") || index(c, "!") || index(c, "always(") || index(c, "failure(") || index(c, "cancelled(")) bypass=1
+      # No wrapper around the terms: nothing opens a group right after ${{,
+      # and no group is compared (`(... && true) == false` inverts them).
+      if (index(c, "${{(") || index(c, ")==") || index(c, ")!=")) bypass=1
+      # The module lane: the condition starts with ${{ !cancelled() && .
+      if (lane == 1 && $0 !~ /^    if: \$\{\{ !cancelled\(\) && .* \}\}[[:space:]]*$/) bypass=1
+    }
+    END { flush() }
+  ' "$1"
+}
+
+# Facts for the repo-ref rule, one per line, tab separated: "<job> <line>
+# <uses value> <guarded 0|1>" for each uses: (job or step level) of a job,
+# guarded being 1 when the job's one-line if: carries the ci-dev ref term
+# (see the rule above).
+repo_ref_records() {
+  awk -v tab="${TAB}" '
+    function flush(   i) { for (i = 1; i <= n; i++) printf "%s%s%s%s%s%s%d\n", job, tab, ln[i], tab, val[i], tab, guarded }
+    /^[[:space:]]*#/ { next }
+    /^jobs:[[:space:]]*$/ { injobs=1; next }
+    injobs && /^[^[:space:]#]/ { flush(); injobs=0; job=""; n=0 }
+    injobs && /^  [^[:space:]]/ { flush(); job=$1; sub(/:$/, "", job); n=0; guarded=0; next }
+    injobs && /^    ["\047]?if["\047]?[[:space:]]*:/ {
+      g = ($0 ~ /(\$\{\{ |&& )github\.ref == \047refs\/heads\/ci-dev\047( &&| \}\})/)
+      c=$0; gsub(/[[:space:]]+/, "", c); gsub(/!cancelled\(\)/, "", c); gsub(/!=/, "", c)
+      if (index(c, "||") || index(c, "!") || index(c, "always(") || index(c, "failure(") || index(c, "cancelled(")) g = 0
+      if (index(c, "${{(") || index(c, ")==") || index(c, ")!=")) g = 0
+      guarded = g
+    }
+    injobs && /^[[:space:]]+(-[[:space:]]+)?["\047]?uses["\047]?[[:space:]]*:/ {
+      v=$0; sub(/^[^:]*:[[:space:]]*/, "", v); sub(/[[:space:]]+#.*$/, "", v); gsub(/["\047]/, "", v)
+      n++; ln[n]=NR; val[n]=v
     }
     END { flush() }
   ' "$1"
@@ -968,7 +1009,7 @@ EOF
       noref)
         [ "${et_guarded}" = 1 ] && continue
         err "${wf}:${sline}: job '${sjob}' names environment release but its if: lacks startsWith(github.ref, 'refs/tags/...') (rule env-tag-ref)" ;;
-      bypass) err "${wf}:${sline}: job '${sjob}' names environment release but its if: has ||, a negation, always(, failure( or cancelled( (other than !cancelled() and !=), which can bypass its ref terms (rule env-tag-ref)" ;;
+      bypass) err "${wf}:${sline}: job '${sjob}' names environment release but its if: has ||, a negation, always(, failure( or cancelled( (other than !cancelled() and !=), a group right after \${{ or a compared group, or (in the module lane) does not start with \${{ !cancelled() && , any of which can bypass its ref terms (rule env-tag-ref)" ;;
       notag) err "${wf}:${sline}: job '${sjob}' names environment release but its if: lacks github.ref == format('refs/tags/{0}', needs.version.outputs.tag) (rule env-tag-ref)" ;;
     esac
   done <<EOF
@@ -1005,6 +1046,22 @@ EOF
     err "${wf}:${sline}: a secret in a workflow-level expression (outside jobs); read secrets in a hosted job (rule g)"
   done <<EOF
 $(toplevel_secret_lines "${wf}")
+EOF
+
+  # (repo-ref) every workflow: this repository's workflows and actions by
+  # @master, or by @ci-dev only under refs/heads/ci-dev.
+  while IFS="${TAB}" read -r rjob rline rval rguard; do
+    [ -n "${rjob}" ] || continue
+    rlow="$(printf '%s' "${rval}" | tr '[:upper:]' '[:lower:]')"
+    case "${rlow}" in we-amp/mod_pagespeed/*|we-amp/mod_pagespeed@*) ;; *) continue ;; esac
+    case "${rval}" in
+      *@master) ;;
+      *@ci-dev)
+        [ "${rguard}" = 1 ] || err "${wf}:${rline}: job '${rjob}' uses '${rval}' but its if: does not carry github.ref == 'refs/heads/ci-dev' as a term of its own (no ||, no negation): a ci-dev callee must never run under another ref (rule repo-ref)" ;;
+      *) err "${wf}:${rline}: job '${rjob}' uses '${rval}': this repository's workflows and actions are named @master, or @ci-dev under refs/heads/ci-dev, never another ref (rule repo-ref)" ;;
+    esac
+  done <<EOF
+$(repo_ref_records "${wf}")
 EOF
 
   # (slsa) every workflow: a call of the SLSA generator names the generic

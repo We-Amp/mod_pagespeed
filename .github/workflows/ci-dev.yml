@@ -50,3 +50,19 @@ jobs:
       actions: read
       contents: read
     uses: We-Amp/mod_pagespeed/.github/workflows/pipeline-full.yml@ci-dev
+
+  # A dispatch on any other ref skips both jobs above; this job turns such a
+  # run red instead of a green run where everything was skipped.
+  ref-check:
+    name: Dispatched on ci-dev
+    permissions: {}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: The run's ref is refs/heads/ci-dev
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          [ "${REF}" = refs/heads/ci-dev ] || { echo "::error::dispatch ci-dev.yml on the ci-dev branch (gh workflow run ci-dev.yml --ref ci-dev), not on '${REF}'; nothing ran"; exit 1; }
+          echo "dispatch on ${REF}"
