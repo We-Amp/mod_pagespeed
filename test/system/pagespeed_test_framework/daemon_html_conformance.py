@@ -360,7 +360,18 @@ def required_keys(live: dict) -> Set[str]:
 
 
 def live_rows(cases: dict) -> List[dict]:
-    return [r for r in cases["rows"] if "live" in r.get("runners", [])]
+    """The live rows a lane runs. A pending row (one whose support is not
+    built yet) is never run and never counted as a skip: see pending_rows."""
+    return [r for r in cases["rows"]
+            if "live" in r.get("runners", []) and "pending" not in r]
+
+
+def pending_rows(cases: dict) -> List[dict]:
+    """The live rows held back as pending, counted apart from the lane's
+    run and skip counts. The change that adds their support removes the
+    markers."""
+    return [r for r in cases["rows"]
+            if "live" in r.get("runners", []) and "pending" in r]
 
 
 def skip_reason(row: dict, port: str) -> Optional[str]:
