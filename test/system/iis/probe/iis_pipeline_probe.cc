@@ -13,11 +13,15 @@
 // priorities (RQ_RESOLVE_REQUEST_CACHE at PRIORITY_ALIAS_FIRST,
 // RQ_SEND_RESPONSE at PRIORITY_ALIAS_LAST), so a copy placed beside the
 // PageSpeed module in <modules> sees what the PageSpeed module sees. A copy
-// whose name ends in "F" or "G" registers RQ_SEND_RESPONSE at
+// whose name ends in "F", "G" or "H" registers RQ_SEND_RESPONSE at
 // PRIORITY_ALIAS_FIRST instead, to show what the other end of the send
 // order sees. IIS calls RegisterModule once per module entry, so two
-// entries may name one image (the probe script registers "G" on A's image)
-// and each registration keeps its own name and priorities.
+// entries may name one image (the probe scripts register "G" on A's image,
+// and the serve-cached-html matrix "H" on B's). Each registration keeps its
+// own name and priorities. Whether two entries of one image get distinct
+// module ids is not assumed: the register line and every send record the
+// ids (IIS is documented by the PageSpeed module itself to give both
+// entries of one image the same id).
 //
 // Every notification is written as one line to
 //   C:\pipeprobe\log\<module name>-<pid>.log
@@ -31,7 +35,7 @@
 //             module answers from its cache (cache disarm, SetHeader,
 //             WriteEntityChunks, FINISH_REQUEST)
 //   serve304  as serve, with a 304 carrying ETag, Cache-Control and Vary
-//   nodisarm  with serve: leave IIS's response caches armed
+//   nodisarm  with serve or serve_html: leave IIS's response caches armed
 //   strip     at the first send that carries headers: delete every header
 //             outside the Markdown allowlist from the response
 //   nc_ae     at RESOLVE_REQUEST_CACHE: delete the request's
@@ -50,6 +54,21 @@
 //   bindings  at RESOLVE_REQUEST_CACHE: read system.applicationHost/sites
 //             through the admin manager and record every site and binding
 //             this worker process can see
+//   capture   at every send: copy the entity this copy sees (memory and
+//             file chunks) and, at the first send that carries headers,
+//             the header table; after the last send write them to
+//             C:\pipeprobe\stored\<name>.body and <name>.hdrs, where
+//             <name> is the request header X-Probe-Stored
+//   serve_html at RESOLVE_REQUEST_CACHE: answer with status 200, the
+//             header lines of C:\pipeprobe\stored\<name>.replay and the
+//             bytes of <name>.body (none for HEAD), then FINISH_REQUEST:
+//             the way a module answers with a stored page that the rest of
+//             the send path, the PageSpeed module's rewriter included, is
+//             meant to see as an origin response. Content-Length is the
+//             body's size. Disarms IIS's response caches unless nodisarm
+//   ctx       at RESOLVE_REQUEST_CACHE: set a module context under this
+//             registration's own id. Every send records whether this
+//             registration's context and copy B's context are present
 //
 // Windows only; built with the Visual C++ toolchain by the probe script (no
 // Bazel target). ASCII only.
@@ -78,8 +97,49 @@ struct ModInfo {
   char name[64];
   char letter;
   bool send_first;
+  HTTP_MODULE_ID id;
 };
 thread_local const ModInfo* t_mod = nullptr;
+// Each registration's module id, by letter, for the ctx action.
+std::atomic<HTTP_MODULE_ID> g_ids[26];
+
+HTTP_MODULE_ID IdOf(char letter) {
+  if (letter < 'A' || letter > 'Z') return nullptr;
+  return g_ids[letter - 'A'].load();
+}
+
+class ProbeContext : public IHttpStoredContext {
+ public:
+  void CleanupStoredContext() override { delete this; }
+};
+
+bool HasContext(IHttpContext* ctx, HTTP_MODULE_ID id) {
+  if (id == nullptr) return false;
+  IHttpModuleContextContainer* c = ctx->GetModuleContextContainer();
+  return c != nullptr && c->GetModuleContext(id) != nullptr;
+}
+
+// A stored-page name from the request: [a-z0-9_-] only, else empty.
+std::string StoredName(IHttpContext* ctx);
+
+bool ReadWholeFile(const std::string& path, std::string* out) {
+  FILE* f = nullptr;
+  if (fopen_s(&f, path.c_str(), "rb") != 0 || f == nullptr) return false;
+  char buf[4096];
+  size_t n;
+  out->clear();
+  while ((n = fread(buf, 1, sizeof(buf), f)) > 0) out->append(buf, n);
+  fclose(f);
+  return true;
+}
+
+bool WriteWholeFile(const std::string& path, const std::string& data) {
+  FILE* f = nullptr;
+  if (fopen_s(&f, path.c_str(), "wb") != 0 || f == nullptr) return false;
+  fwrite(data.data(), 1, data.size(), f);
+  fclose(f);
+  return true;
+}
 
 BOOL CALLBACK InitLogLock(PINIT_ONCE, PVOID, PVOID*) {
   InitializeCriticalSection(&g_log_lock);
@@ -174,6 +234,70 @@ bool HasAction(IHttpContext* ctx, const char* action) {
   return false;
 }
 
+std::string StoredName(IHttpContext* ctx) {
+  std::string n = RequestHeader(ctx, "X-Probe-Stored");
+  if (n.empty() || n.size() > 40) return std::string();
+  for (char c : n) {
+    if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' ||
+          c == '-')) {
+      return std::string();
+    }
+  }
+  return n;
+}
+
+std::string ServerVariable(IHttpContext* ctx, PCSTR name) {
+  PCWSTR v = nullptr;
+  DWORD len = 0;
+  std::string out;
+  if (SUCCEEDED(ctx->GetServerVariable(name, &v, &len)) && v != nullptr) {
+    for (DWORD i = 0; i < len && v[i]; ++i) {
+      out.push_back(v[i] < 0x80 ? static_cast<char>(v[i]) : '?');
+    }
+  } else {
+    out = "(none)";
+  }
+  return out;
+}
+
+// The whole byte range of a file chunk, read at explicit OVERLAPPED
+// offsets. On a handle opened for overlapped I/O no file pointer moves; on
+// a synchronous one ReadFile does move it, which is harmless because
+// http.sys sends a file chunk by its own ByteRange.
+bool ReadFileChunk(const HTTP_DATA_CHUNK& c, std::string* out) {
+  HANDLE h = c.FromFileHandle.FileHandle;
+  if (h == nullptr || h == INVALID_HANDLE_VALUE) return false;
+  unsigned long long offset =
+      c.FromFileHandle.ByteRange.StartingOffset.QuadPart;
+  unsigned long long length = c.FromFileHandle.ByteRange.Length.QuadPart;
+  if (length == HTTP_BYTE_RANGE_TO_EOF) {
+    LARGE_INTEGER size;
+    if (!GetFileSizeEx(h, &size)) return false;
+    length = static_cast<unsigned long long>(size.QuadPart) - offset;
+  }
+  if (length > (16u << 20)) return false;
+  std::string buf(static_cast<size_t>(length), '\0');
+  size_t done = 0;
+  while (done < buf.size()) {
+    OVERLAPPED ov = {};
+    unsigned long long at = offset + done;
+    ov.Offset = static_cast<DWORD>(at & 0xffffffffu);
+    ov.OffsetHigh = static_cast<DWORD>(at >> 32);
+    ov.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    DWORD got = 0;
+    BOOL ok = ReadFile(h, &buf[done], static_cast<DWORD>(buf.size() - done),
+                       &got, &ov);
+    if (!ok && GetLastError() == ERROR_IO_PENDING) {
+      ok = GetOverlappedResult(h, &ov, &got, TRUE);
+    }
+    CloseHandle(ov.hEvent);
+    if (!ok || got == 0) return false;
+    done += got;
+  }
+  out->append(buf);
+  return true;
+}
+
 std::string HeaderDump(IHttpResponse* resp) {
   HTTP_RESPONSE* raw = resp->GetRawHttpResponse();
   std::string out;
@@ -193,6 +317,30 @@ std::string HeaderDump(IHttpResponse* resp) {
     out += ": ";
     if (h.pRawValue != nullptr) out.append(h.pRawValue, h.RawValueLength);
     out += " ;; ";
+  }
+  return out;
+}
+
+// The header table as "Name: value" lines, CRLF-terminated.
+std::string HeaderLines(IHttpResponse* resp) {
+  HTTP_RESPONSE* raw = resp->GetRawHttpResponse();
+  std::string out;
+  if (raw == nullptr) return out;
+  for (int i = 0; i < HttpHeaderResponseMaximum; ++i) {
+    const HTTP_KNOWN_HEADER& h = raw->Headers.KnownHeaders[i];
+    if (h.RawValueLength > 0 && h.pRawValue != nullptr) {
+      out += kKnownResponseHeaders[i];
+      out += ": ";
+      out.append(h.pRawValue, h.RawValueLength);
+      out += "\r\n";
+    }
+  }
+  for (USHORT i = 0; i < raw->Headers.UnknownHeaderCount; ++i) {
+    const HTTP_UNKNOWN_HEADER& h = raw->Headers.pUnknownHeaders[i];
+    out.append(h.pName, h.NameLength);
+    out += ": ";
+    if (h.pRawValue != nullptr) out.append(h.pRawValue, h.RawValueLength);
+    out += "\r\n";
   }
   return out;
 }
@@ -427,7 +575,22 @@ class Probe : public CHttpModule {
       }
       rest += "|pristine_path=" + p;
     }
+    rest += "|pristine_target=" + ServerVariable(ctx, "X-PRISTINE-TARGET") +
+            "|script_name=" + ServerVariable(ctx, "SCRIPT_NAME") +
+            "|path_info=" + ServerVariable(ctx, "PATH_INFO") +
+            "|method=" + ctx->GetRequest()->GetHttpMethod();
     LogLine(id_, "resolve_cache", rest);
+    if (HasAction(ctx, "ctx")) {
+      IHttpModuleContextContainer* c = ctx->GetModuleContextContainer();
+      HRESULT hr = (c != nullptr && info_->id != nullptr)
+                       ? c->SetModuleContext(new ProbeContext(), info_->id)
+                       : E_FAIL;
+      char t[64];
+      _snprintf_s(t, sizeof(t), _TRUNCATE, "hr=0x%08lx",
+                  static_cast<unsigned long>(hr));
+      LogLine(id_, "act.ctx", t);
+    }
+    if (HasAction(ctx, "serve_html")) return ServeHtml(ctx);
     if (HasAction(ctx, "bindings")) LogBindings(ctx, id_);
     if (HasAction(ctx, "nc_ae")) {
       HRESULT hr = ctx->GetRequest()->DeleteHeader("Accept-Encoding");
@@ -457,15 +620,20 @@ class Probe : public CHttpModule {
     const bool more = (flags & HTTP_SEND_RESPONSE_FLAG_MORE_DATA) != 0;
     const bool hbs = provider->GetHeadersBeingSent() != FALSE;
     HTTP_RESPONSE* raw = resp->GetRawHttpResponse();
-    char tmp[256];
+    char tmp[384];
     _snprintf_s(tmp, sizeof(tmp), _TRUNCATE,
                 "seq=%ld|depth=%ld|gdepth=%ld|flags=0x%lx|more=%d|hbs=%d|"
-                "status=%u|served=%d|",
+                "status=%u|served=%d|method=%s|own_ctx=%d|b_ctx=%d|"
+                "own_id=%p|b_id=%p|",
                 sends_, depth, global_depth, flags, more ? 1 : 0, hbs ? 1 : 0,
-                raw != nullptr ? raw->StatusCode : 0, served_ ? 1 : 0);
+                raw != nullptr ? raw->StatusCode : 0, served_ ? 1 : 0,
+                ctx->GetRequest()->GetHttpMethod(),
+                HasContext(ctx, info_->id) ? 1 : 0,
+                HasContext(ctx, IdOf('B')) ? 1 : 0, info_->id, IdOf('B'));
     LogLine(id_, "send", std::string(tmp) + ChunkDump(resp) +
                              "|hdrs=" + HeaderDump(resp));
     REQUEST_NOTIFICATION_STATUS status = RQ_NOTIFICATION_CONTINUE;
+    if (HasAction(ctx, "capture")) Capture(ctx, resp, hbs, more);
     if (hbs && HasAction(ctx, "pid")) {
       char pid[32];
       _snprintf_s(pid, sizeof(pid), _TRUNCATE, "%lu", GetCurrentProcessId());
@@ -623,12 +791,116 @@ class Probe : public CHttpModule {
     return RQ_NOTIFICATION_FINISH_REQUEST;
   }
 
+  // The entity of every send, and the header table of the first that
+  // carries headers; written out after the last send.
+  void Capture(IHttpContext* ctx, IHttpResponse* resp, bool hbs, bool more) {
+    HTTP_RESPONSE* raw = resp->GetRawHttpResponse();
+    if (raw == nullptr) return;
+    if (hbs && !capture_has_headers_) {
+      capture_has_headers_ = true;
+      char st[32];
+      _snprintf_s(st, sizeof(st), _TRUNCATE, "%u", raw->StatusCode);
+      capture_hdrs_ = std::string("Status: ") + st + "\r\n" + HeaderLines(resp);
+    }
+    for (USHORT i = 0; i < raw->EntityChunkCount; ++i) {
+      const HTTP_DATA_CHUNK& c = raw->pEntityChunks[i];
+      if (c.DataChunkType == HttpDataChunkFromMemory) {
+        capture_body_.append(static_cast<const char*>(c.FromMemory.pBuffer),
+                             c.FromMemory.BufferLength);
+      } else if (c.DataChunkType == HttpDataChunkFromFileHandle) {
+        if (!ReadFileChunk(c, &capture_body_)) capture_failed_ = true;
+      } else {
+        capture_failed_ = true;
+      }
+    }
+    if (more) return;
+    const std::string name = StoredName(ctx);
+    if (name.empty() || capture_failed_) {
+      LogLine(id_, "act.capture",
+              capture_failed_ ? "unreadable chunk" : "no name");
+      return;
+    }
+    const std::string base = "C:\\pipeprobe\\stored\\" + name;
+    bool ok = WriteWholeFile(base + ".body", capture_body_) &&
+              WriteWholeFile(base + ".hdrs", capture_hdrs_);
+    char t[96];
+    _snprintf_s(t, sizeof(t), _TRUNCATE, "%s|bytes=%zu",
+                ok ? "written" : "write failed", capture_body_.size());
+    LogLine(id_, "act.capture", t);
+  }
+
+  // A stored page answered at RESOLVE_REQUEST_CACHE as an origin response.
+  REQUEST_NOTIFICATION_STATUS ServeHtml(IHttpContext* ctx) {
+    const std::string name = StoredName(ctx);
+    const std::string base = "C:\\pipeprobe\\stored\\" + name;
+    std::string replay;
+    std::string body;
+    if (name.empty() || !ReadWholeFile(base + ".replay", &replay) ||
+        !ReadWholeFile(base + ".body", &body)) {
+      LogLine(id_, "act.serve_html", "no stored page");
+      return RQ_NOTIFICATION_CONTINUE;
+    }
+    const bool head = _stricmp(ctx->GetRequest()->GetHttpMethod(), "HEAD") == 0;
+    // Request memory, taken before the response is touched so a failure
+    // leaves it untouched: IIS and the rewriter read the chunk after this
+    // notification has returned.
+    void* mem = nullptr;
+    if (!head && !body.empty()) {
+      mem = ctx->AllocateRequestMemory(static_cast<DWORD>(body.size()));
+      if (mem == nullptr) {
+        LogLine(id_, "act.serve_html", "no request memory");
+        return RQ_NOTIFICATION_CONTINUE;
+      }
+      memcpy(mem, body.data(), body.size());
+    }
+    served_ = true;
+    IHttpResponse* r = ctx->GetResponse();
+    if (!HasAction(ctx, "nodisarm")) DisarmCaches(r);
+    r->SetStatus(200, "OK");
+    size_t pos = 0;
+    while (pos < replay.size()) {
+      size_t end = replay.find("\r\n", pos);
+      if (end == std::string::npos) end = replay.size();
+      std::string line = replay.substr(pos, end - pos);
+      pos = end + 2;
+      size_t colon = line.find(':');
+      if (colon == std::string::npos || colon == 0) continue;
+      std::string n = line.substr(0, colon);
+      size_t v = colon + 1;
+      while (v < line.size() && line[v] == ' ') ++v;
+      std::string value = line.substr(v);
+      // FALSE: a repeated name adds a line, as the stored table had it.
+      r->SetHeader(n.c_str(), value.c_str(), static_cast<USHORT>(value.size()),
+                   FALSE);
+    }
+    char len[24];
+    _snprintf_s(len, sizeof(len), _TRUNCATE, "%zu", body.size());
+    r->SetHeader("Content-Length", len, static_cast<USHORT>(strlen(len)), TRUE);
+    if (mem != nullptr) {
+      HTTP_DATA_CHUNK c = {};
+      c.DataChunkType = HttpDataChunkFromMemory;
+      c.FromMemory.pBuffer = mem;
+      c.FromMemory.BufferLength = static_cast<ULONG>(body.size());
+      DWORD sent = 0;
+      HRESULT hr = r->WriteEntityChunks(&c, 1, FALSE, FALSE, &sent);
+      if (FAILED(hr)) LogLine(id_, "act.serve_html", "write failed");
+    }
+    char t[64];
+    _snprintf_s(t, sizeof(t), _TRUNCATE, "bytes=%zu|", body.size());
+    LogLine(id_, "act.serve_html", std::string(t) + "hdrs=" + HeaderDump(r));
+    return RQ_NOTIFICATION_FINISH_REQUEST;
+  }
+
   const ModInfo* info_;
   std::string id_ = "-";
   long in_send_ = 0;
   long sends_ = 0;
   bool served_ = false;
   bool rewrote_ = false;
+  bool capture_has_headers_ = false;
+  bool capture_failed_ = false;
+  std::string capture_hdrs_;
+  std::string capture_body_;
 };
 
 class ProbeFactory : public IHttpModuleFactory {
@@ -655,8 +927,14 @@ extern "C" __declspec(dllexport) HRESULT __stdcall RegisterModule(
   _snprintf_s(mod->name, sizeof(mod->name), _TRUNCATE, "%ls", info->GetName());
   size_t n = strlen(mod->name);
   mod->letter = n > 0 ? mod->name[n - 1] : '?';
-  // F and G register the send notification at the other end of the order.
-  mod->send_first = (mod->letter == 'F' || mod->letter == 'G');
+  // F, G and H register the send notification at the other end of the
+  // order.
+  mod->send_first =
+      (mod->letter == 'F' || mod->letter == 'G' || mod->letter == 'H');
+  mod->id = info->GetId();
+  if (mod->letter >= 'A' && mod->letter <= 'Z') {
+    g_ids[mod->letter - 'A'] = mod->id;
+  }
   t_mod = mod;
   CreateDirectoryA("C:\\pipeprobe", nullptr);
   CreateDirectoryA("C:\\pipeprobe\\log", nullptr);
@@ -678,8 +956,10 @@ extern "C" __declspec(dllexport) HRESULT __stdcall RegisterModule(
                          reinterpret_cast<LPCSTR>(&RegisterModule), &self)) {
     GetModuleFileNameA(self, image, MAX_PATH);
   }
+  char idtext[32];
+  _snprintf_s(idtext, sizeof(idtext), _TRUNCATE, "|id=%p", mod->id);
   LogLine("-", "register",
-          std::string(mod->send_first ? "send=first" : "send=last") +
+          std::string(mod->send_first ? "send=first" : "send=last") + idtext +
               "|image=" + image);
   return S_OK;
 }
