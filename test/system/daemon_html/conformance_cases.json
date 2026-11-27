@@ -33013,6 +33013,87 @@
       }
     },
     {
+      "id": "m2-store-forwards-not-anonymous-mode3",
+      "runners": ["engine"],
+      "why": "credentials: without the library's anonymous bit the entry is not recorded anonymous",
+      "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "agents",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300,
+            "flags": ["lifetime_explicit"]
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300,
+            "flags": ["lifetime_explicit"]
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [
+                {
+                  "fn": "ps_html_store_write_params",
+                  "args": {
+                    "store_flags.request_anonymous": false
+                  }
+                }
+              ],
+              "stored": [
+                {
+                  "kind": "original",
+                  "url": "https://www.example.test/page",
+                  "store_v2": true,
+                  "anonymous_recorded": false
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
       "id": "m2-mode2-markdown-legacy-falls-through",
       "runners": ["engine"],
       "pending": "serve-cached-html",
@@ -37053,7 +37134,7 @@
     {
       "id": "m2-class-token-07",
       "runners": ["engine"],
-      "why": "agent class: the user agent's class from the shared vectors",
+      "why": "agent class: a near miss is unknown (class 0, which an engine passing 0 also gives)",
       "engine": {
         "config": {
           "mode": "serve-cached-html",
@@ -37130,7 +37211,7 @@
     {
       "id": "m2-class-token-08",
       "runners": ["engine"],
-      "why": "agent class: the user agent's class from the shared vectors",
+      "why": "agent class: a near miss is unknown (class 0, which an engine passing 0 also gives)",
       "engine": {
         "config": {
           "mode": "serve-cached-html",
@@ -37207,7 +37288,7 @@
     {
       "id": "m2-class-token-09",
       "runners": ["engine"],
-      "why": "agent class: the user agent's class from the shared vectors",
+      "why": "agent class: a near miss is unknown (class 0, which an engine passing 0 also gives)",
       "engine": {
         "config": {
           "mode": "serve-cached-html",
@@ -37284,7 +37365,7 @@
     {
       "id": "m2-class-token-10",
       "runners": ["engine"],
-      "why": "agent class: the user agent's class from the shared vectors",
+      "why": "agent class: a near miss is unknown (class 0, which an engine passing 0 also gives)",
       "engine": {
         "config": {
           "mode": "serve-cached-html",
@@ -37361,7 +37442,7 @@
     {
       "id": "m2-class-token-11",
       "runners": ["engine"],
-      "why": "agent class: the user agent's class from the shared vectors",
+      "why": "agent class: a near miss is unknown (class 0, which an engine passing 0 also gives)",
       "engine": {
         "config": {
           "mode": "serve-cached-html",
@@ -37438,7 +37519,7 @@
     {
       "id": "m2-class-token-12",
       "runners": ["engine"],
-      "why": "agent class: the user agent's class from the shared vectors",
+      "why": "agent class: a near miss is unknown (class 0, which an engine passing 0 also gives)",
       "engine": {
         "config": {
           "mode": "serve-cached-html",
@@ -44585,6 +44666,27 @@
                 "kind": "fall_through"
               },
               "port_calls_exclude": ["EmitAsOrigin"]
+            }
+          },
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/markdown"],
+              "agent_class": 3,
+              "internal": true
+            },
+            "expect": {
+              "calls_exclude": ["ps_cache_read_best_site", "ps_cache_read_alternate_site", "ps_headers_sidecar_read", "ps_html_stored_facts_from_reads", "ps_html_serve_classify"],
+              "serve": {
+                "kind": "fall_through"
+              },
+              "port_calls_exclude": ["ClearAndEmitAllowlisted", "EmitAsOrigin"]
             }
           }
         ]

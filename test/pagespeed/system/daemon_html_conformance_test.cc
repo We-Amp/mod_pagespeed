@@ -1599,8 +1599,15 @@ class ConformanceAbi : public InjectedVerdictDaemonAbi {
                                 text.size()};
       }
     }
-    ADD_FAILURE() << "the verdict names " << text
-                  << ", which no Cookie line the engine passed holds";
+    // The runner cannot build the verdict: until the facts carry the Cookie
+    // lines the engine has none to pass; after that, the row names a value
+    // its own request does not hold.
+    if (!kSetsCookieLines<DaemonHtmlRequestFacts>) {
+      EntryPointMissing("cookie_lines", NamedOnEngine("cookie_lines"));
+    } else {
+      ADD_FAILURE() << kRunnerError << "the verdict names " << text
+                    << ", which no Cookie line the engine passed holds";
+    }
     return PsHtmlCookieSpan{0, 0, 0};
   }
   static Call Rec(const char* fn) {
@@ -1714,7 +1721,7 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
       ExpectStubMatchesRow(*stub_abi, engine_body_["library"]);
       // The stub answers; the row's injected verdicts are not used.
       if (!engine_body_["volume"].empty()) {
-        ADD_FAILURE() << "a stub row cannot hold a volume";
+        ADD_FAILURE() << kRunnerError << "a stub row cannot hold a volume";
       }
     }
     const Json::Value& config = engine_body_["config"];
@@ -1785,7 +1792,8 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
     GoogleString error;
     stub_abi_.reset(LoadDaemonAbi(StubLibraryPath(stub.library), &error));
     if (stub_abi_ == nullptr) {
-      ADD_FAILURE() << "the stub library did not load: " << error;
+      ADD_FAILURE() << kRunnerError
+                    << "the stub library did not load: " << error;
       return nullptr;
     }
     alignas(std::max_align_t) static unsigned char
@@ -1793,14 +1801,15 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
     PsCacheConfig* config = reinterpret_cast<PsCacheConfig*>(config_storage);
     stub_abi_->CacheConfigInit(config);
     if (stub_abi_->CacheOpen(config, &stub_cache_) != kPsOk) {
-      ADD_FAILURE() << "the stub library opened no cache";
+      ADD_FAILURE() << kRunnerError << "the stub library opened no cache";
       return nullptr;
     }
     return stub_abi_.get();
   }
 #else
   const DaemonAbi* LoadStub(const StubSetup&) {
-    ADD_FAILURE() << "this build does not run rows on the stub library";
+    ADD_FAILURE() << kRunnerError
+                  << "this build does not run rows on the stub library";
     return nullptr;
   }
 #endif
@@ -2315,7 +2324,7 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
     const Json::Value& request = step["request"];
     step_request_ = request;
     const int repeat = step.get("repeat", 1).asInt();
-    EXPECT_GE(repeat, 1) << "repeat";
+    EXPECT_GE(repeat, 1) << kRunnerError << "repeat is below 1";
     for (int i = 0; i < repeat; ++i) {
       if (kind == "capture") {
         RunCapture(request, step["response"]);
@@ -2425,7 +2434,7 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
   // `count` unsafe requests to distinct targets (the request path with
   // "-<n>" appended), with the fence map's size read back as it grows.
   void RunUnsafeMany(const Json::Value& request, int count) {
-    EXPECT_GT(count, 0) << "unsafe_many count";
+    EXPECT_GT(count, 0) << kRunnerError << "unsafe_many count";
     Json::Value response(Json::objectValue);
     response["status"] = 200;
     for (int i = 0; i < count; ++i) {
@@ -2592,11 +2601,12 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
     SCOPED_TRACE(trace);
     for (const Json::Value& want : expect["calls"]) {
       EXPECT_TRUE(IsRecordedFn(want["fn"].asString()))
-          << want["fn"].asString() << " is never recorded";
+          << kRunnerError << want["fn"].asString() << " is never recorded";
     }
     for (const Json::Value& fn : expect["calls_exclude"]) {
       EXPECT_TRUE(IsRecordedFn(fn.asString()))
-          << fn.asString() << " is never recorded, so excluding it asserts "
+          << kRunnerError << fn.asString()
+          << " is never recorded, so excluding it asserts "
           << "nothing";
     }
     if (expect.isMember("calls")) {
@@ -2636,11 +2646,13 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
     if (on_stub()) {
       for (const char* key : {"removed", "volume_epoch_s"}) {
         if (expect.isMember(key)) {
-          ADD_FAILURE() << key << " needs the in-memory volume, not the stub";
+          ADD_FAILURE() << kRunnerError << key
+                        << " needs the in-memory volume, not the stub";
         }
       }
       if (expect.isMember("stored") && !expect["stored"].empty()) {
-        ADD_FAILURE() << "a stored entry needs the in-memory volume";
+        ADD_FAILURE() << kRunnerError
+                      << "a stored entry needs the in-memory volume";
       }
     }
     if (expect.isMember("stored")) {
@@ -2650,7 +2662,7 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
       for (const Json::Value& want : expect["stored"]) {
         if (on_stub()) break;
         EXPECT_EQ("original", want.get("kind", "original").asString())
-            << "a stored entry is an original";
+            << kRunnerError << "a stored entry is an original";
         const FakeVolumeEntry* e = volume_.Find(
             default_site_, want["url"].asString(), kPsSentinelOriginal);
         ASSERT_NE(nullptr, e) << "stored " << want["url"].asString();
@@ -2873,7 +2885,8 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
       }
     }
     if (expect.isMember("recording_started")) {
-      ASSERT_TRUE(recording_started_.has_value()) << "no recording start";
+      ASSERT_TRUE(recording_started_.has_value())
+          << kRunnerError << "recording_started needs a begin_recording step";
       EXPECT_EQ(expect["recording_started"].asBool(), *recording_started_)
           << "recording started";
     }
@@ -2904,7 +2917,8 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
     }
     for (const char* key : {"oldest_fenced", "newest_fenced"}) {
       if (!expect.isMember(key)) continue;
-      ASSERT_FALSE(unsafe_targets_.empty()) << key << " needs unsafe_many";
+      ASSERT_FALSE(unsafe_targets_.empty())
+          << kRunnerError << key << " needs unsafe_many";
       const GoogleString& url = key == GoogleString("oldest_fenced")
                                     ? unsafe_targets_.front()
                                     : unsafe_targets_.back();
@@ -3550,7 +3564,7 @@ TEST(DaemonHtmlEngineRowsMeta, EveryEngineRowIsRegistered) {
   EXPECT_EQ(engine_rows, kRegisteredRows);
   // Pinned, so a row cannot leave the run unnoticed: marking a row pending,
   // or adding one, changes these in the same change.
-  EXPECT_EQ(239, kRegisteredRows);
+  EXPECT_EQ(240, kRegisteredRows);
   EXPECT_EQ(216, pending_rows);
   std::printf("engine rows: %d registered, %d pending\n", kRegisteredRows,
               pending_rows);
