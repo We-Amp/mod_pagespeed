@@ -632,10 +632,13 @@ class IisProvider(conf.Provider):
         while time.monotonic() < deadline:
             try:
                 pid = self._origin_pid()
-                if pid not in before:
+                # Every worker of the previous configuration is gone: one
+                # still draining would answer a request, or the statistics,
+                # with the previous row's state.
+                if pid not in before and not (set(self._pids()) & before):
                     self.processes = {}
                     return
-                last = f"pid {pid} still serving"
+                last = f"pid {pid} serving, previous workers {sorted(set(self._pids()) & before)}"
             except OSError as e:
                 last = repr(e)
             except conf.ProviderUnsupported as e:
@@ -755,11 +758,35 @@ class IisProvider(conf.Provider):
         finally:
             c.close()
 
-    def _stats(self) -> Dict[str, int]:
-        r = self._send("GET", STATISTICS_PATH, ROW_HOST, [], tls=False)
+    def _stats_of(self, conn: http.client.HTTPConnection) -> Dict[str, int]:
+        r = self._send("GET", STATISTICS_PATH, ROW_HOST, [], conn=conn)
         if r.status != 200:
             raise conf.ProviderUnsupported(f"statistics: {r.status}")
         return parse_statistics(r.body.decode("utf-8", "replace"))
+
+    def _stats(self) -> Dict[str, int]:
+        """The module's statistics summed over the pool's worker processes:
+        each process keeps its own."""
+        total: Dict[str, int] = {}
+        for pid in sorted(set(self._pids())):
+            conn = None
+            for _ in range(PIN_ATTEMPTS):
+                c = self._connection(tls=True)
+                try:
+                    if self._origin_pid(conn=c) == pid:
+                        conn = c
+                        break
+                except (OSError, http.client.HTTPException):
+                    pass
+                c.close()
+            if conn is None:
+                raise conf.ProviderUnsupported(f"no connection reached worker {pid}")
+            try:
+                for name, value in self._stats_of(conn).items():
+                    total[name] = total.get(name, 0) + value
+            finally:
+                conn.close()
+        return total
 
     def commits(self) -> Tuple[int, int]:
         s = self._stats()
