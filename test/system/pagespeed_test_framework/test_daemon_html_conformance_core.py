@@ -1019,6 +1019,26 @@ class TestCodedCopies:
         with pytest.raises(ValueError):
             conf.decode_body(Response(200, [("Content-Encoding", "zstd")], b""))
 
+    def test_decode_body_br_prefers_the_brotli_module(self, monkeypatch):
+        class FakeBrotli:
+            @staticmethod
+            def decompress(data):
+                if data != b"coded":
+                    raise RuntimeError("bad stream")
+                return b"abc"
+        monkeypatch.setattr(conf, "_brotli_module", lambda: FakeBrotli)
+        monkeypatch.setattr(conf, "_brotli_decoder", lambda: None)
+        br = Response(200, [("Content-Encoding", "br")], b"coded")
+        assert conf.decode_body(br) == b"abc"
+        with pytest.raises(ValueError, match="does not decode"):
+            conf.decode_body(Response(200, [("Content-Encoding", "br")], b"junk"))
+
+    def test_decode_body_br_without_a_decoder(self, monkeypatch):
+        monkeypatch.setattr(conf, "_brotli_module", lambda: None)
+        monkeypatch.setattr(conf, "_brotli_decoder", lambda: None)
+        with pytest.raises(ValueError, match="no brotli decoder"):
+            conf.decode_body(Response(200, [("Content-Encoding", "br")], b"x"))
+
     @pytest.mark.parametrize("change,error", [
         (lambda s: s[2]["expect"].update(decoded_equals_step=2), "names no earlier step"),
         (lambda s: s[2]["expect"].update(decoded_equals_step=9), "names no earlier step"),

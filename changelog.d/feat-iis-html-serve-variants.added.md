@@ -14,7 +14,8 @@
     for them.
   - The Markdown answer carries only its own header set: the site's
     `customHeaders` (for example `Strict-Transport-Security` and
-    `X-Content-Type-Options`) are not on it, and it is never compressed.
+    `X-Content-Type-Options`) are not on it. IIS never compresses it: a
+    brotli or gzip copy is sent as the optimizer stored it.
   - The answer is sent by the `PageSpeedFinalView` module entry, which the
     installer lists first. Each worker process serves Markdown for a site
     only after it has seen that entry run for one of the site's responses;
@@ -32,6 +33,8 @@
   - On a site with inbound URL Rewrite rules, a `PURGE` request may be
     answered by the site itself and purge nothing; use the admin purge
     (`/pagespeed_admin/cache?purge=<url>`), which works there.
+  - A `Range` or `If-Range` request is answered by IIS, never from a copy;
+    one that asks for Markdown counts `daemon_markdown_fallthrough_range`.
   - `Vary: Accept` is added to the HTML pages the module rewrites; a page it
     passes through unchanged (a HEAD, an AJAX request, a disallowed URL)
     does not get it.

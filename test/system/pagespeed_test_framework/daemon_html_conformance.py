@@ -693,6 +693,16 @@ class _Background:
     result: dict = field(default_factory=dict)
 
 
+def _brotli_module():
+    """The Python brotli module when it is importable (a host that has no
+    libbrotlidec, such as the IIS rig's guest, gets it with the test
+    payload), or None."""
+    try:
+        return importlib.import_module("brotli")
+    except ImportError:
+        return None
+
+
 def _brotli_decoder():
     """libbrotlidec through ctypes (the image has the library, not the Python
     module), or None."""
@@ -721,9 +731,15 @@ def decode_body(r: Response) -> bytes:
     if coding == "gzip":
         return gzip.decompress(r.body)
     if coding == "br":
+        module = _brotli_module()
+        if module is not None:
+            try:
+                return module.decompress(r.body)
+            except Exception as e:  # the module's own error type
+                raise ValueError(f"the br body does not decode: {e}") from e
         lib = _brotli_decoder()
         if lib is None:
-            raise ValueError("no brotli decoder (libbrotlidec) on this host")
+            raise ValueError("no brotli decoder (the brotli module or libbrotlidec) on this host")
         capacity = max(1024, len(r.body) * 64)
         while capacity <= 1 << 28:
             out = ctypes.create_string_buffer(capacity)

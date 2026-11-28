@@ -277,8 +277,12 @@ All are on the statistics page and in the admin console's HTML cache panel.
 `DaemonHtmlCache serve-variants` serves Markdown copies on IIS as on Apache and
 nginx, with the IIS notes in the changelog (host names from the site's
 bindings, plain URL spellings only, the `PageSpeedFinalView` module entry).
-The compressed copies are pending verification on IIS: there the plain
-Markdown copy is served as before.
+The compressed copies are served on IIS with the same guarantees as on Apache
+and nginx: the copy the request's `Accept-Encoding` prefers, with its own
+`Content-Encoding`, length and entity tag, `Accept-Encoding` in `Vary`, and
+never compressed again by IIS dynamic compression. A `Range` or `If-Range`
+request is answered by IIS itself, never from a copy, and one that asks for
+Markdown counts `daemon_markdown_fallthrough_range` as on the other servers.
 With an optimizer library that publishes C API 1.15, a request rewritten by URL
 Rewrite carries `X-Original-URL` with the request target as the client sent it;
 the HTML cache accepts it because it equals the target the page is keyed on. A

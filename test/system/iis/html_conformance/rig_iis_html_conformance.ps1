@@ -8,8 +8,12 @@
 #
 # Copies into the guest over PowerShell Direct: the runner core, the
 # provider, the cases, the origin (DhcOrigin.cs), the guest script, an
-# embeddable Python (-PythonZip, the python.org "embed-amd64" archive) and,
-# with -Msi, the package, which it installs first. Then runs the guest
+# embeddable Python (-PythonZip, the python.org "embed-amd64" archive), the
+# brotli decoder for the rows that check a br body (-BrotliWheel, the PyPI
+# "Brotli" wheel for that Python, cp312 win_amd64, unpacked beside it: the
+# guest image has no brotli library, and the guest is restored to a
+# checkpoint between runs) and, with -Msi, the package, which it installs
+# first. Then runs the guest
 # script's setup, run and teardown phases and prints every line. The
 # teardown restores the IIS configuration backup the setup took. The MSI
 # must carry the optimizer built from the test pin
@@ -29,6 +33,8 @@ param(
     [Parameter(Mandatory = $true)][string]$VMName,
     [Parameter(Mandatory = $true)][System.Management.Automation.PSCredential]$Credential,
     [Parameter(Mandatory = $true)][string]$PythonZip,
+    # Without it the rows that decode a br body fail.
+    [string]$BrotliWheel = "",
     [string]$Msi = "",
     # The IIS URL Rewrite module's installer (Microsoft's rewrite_amd64
     # package), for the rows that need it; without it they fail.
@@ -49,7 +55,7 @@ if ($env:CI_IIS_VM_NAME -and $VMName -eq $env:CI_IIS_VM_NAME) {
     Say "PRECONDITION | -VMName names the guest a CI gate restores; use a lab guest"
     exit 2
 }
-foreach ($f in @($PythonZip) + @($(if ($Msi) { $Msi }))) {
+foreach ($f in @($PythonZip) + @($(if ($Msi) { $Msi })) + @($(if ($BrotliWheel) { $BrotliWheel }))) {
     if (-not (Test-Path -LiteralPath $f)) { Say "PRECONDITION | $f does not exist"; exit 2 }
 }
 
@@ -69,6 +75,8 @@ foreach ($f in @("DhcOrigin.cs", "run_iis_html_conformance.py", "guest_iis_html_
     Copy-Item (Join-Path $here $f) "$stage\$f"
 }
 Copy-Item -LiteralPath $PythonZip "$stage\python.zip"
+# A wheel is a zip archive; Expand-Archive takes only the .zip name.
+if ($BrotliWheel) { Copy-Item -LiteralPath $BrotliWheel "$stage\brotli.zip" }
 if ($UrlRewriteMsi) { Copy-Item -LiteralPath $UrlRewriteMsi "$stage\url-rewrite.msi" }
 
 $session = New-PSSession -VMName $VMName -Credential $Credential
@@ -87,6 +95,11 @@ try {
     Copy-Item -ToSession $session -Path "$stage\*" -Destination "C:\dhc-bin\" -Recurse -Force
     Invoke-Command -Session $session -ScriptBlock {
         Expand-Archive -LiteralPath "C:\dhc-bin\python.zip" -DestinationPath "C:\dhc-bin\python" -Force
+        # The embedded Python's path holds its own directory: the wheel's
+        # module goes there.
+        if (Test-Path -LiteralPath "C:\dhc-bin\brotli.zip") {
+            Expand-Archive -LiteralPath "C:\dhc-bin\brotli.zip" -DestinationPath "C:\dhc-bin\python" -Force
+        }
     }
     if ($Msi) {
         $name = Split-Path -Leaf $Msi

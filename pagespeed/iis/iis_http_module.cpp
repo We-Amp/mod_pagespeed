@@ -1204,6 +1204,33 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		inner->set_daemon_html_capture(std::move(capture));
 	}
 
+	// DaemonHtmlCache: a Range or If-Range request that asks for Markdown is
+	// never answered from a copy; IIS answers it.  The engine still sees it,
+	// so it counts the request's fall-through reason as the other servers do.
+	// The port it gets never emits.
+	static void NoteIisRangeRequest(IHttpContext* http_context,
+	                                IisInnerRequestContext* inner)
+	{
+		PCSTR method = http_context->GetRequest()->GetHttpMethod();
+		if (method == nullptr ||
+			!(StringCaseEqual(method, "GET") || StringCaseEqual(method, "HEAD"))) {
+			return;
+		}
+		IisServerContext* server_context = inner->server_context();
+		if (server_context == nullptr || !server_context->daemon_html_serves_variants()) {
+			return;
+		}
+		DaemonHtmlEngine* engine = server_context->daemon_html_engine(
+			inner->process_context()->site_id());
+		if (engine == nullptr) {
+			return;
+		}
+		DaemonHtmlRequestFacts facts;
+		BuildIisDaemonHtmlFacts(http_context, inner, server_context->global_options(),
+			/*at_store=*/false, &facts);
+		engine->Serve(facts, &iis_daemon_html_inline_runner);
+	}
+
 	// For a request the module steps aside from before it keeps any state for
 	// it.  The send notification never sees such a request, so this is the
 	// only place its answer can be kept out of IIS's response caches: an HTML
@@ -1244,14 +1271,17 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 			return LeaveToIisUncached(pHttpContext);
 		}
 
+		// A Range or If-Range request is left to IIS.  One whose Accept names
+		// Markdown is first shown to the HTML cache (after its request context
+		// exists, below), which never answers it and counts why, as on the
+		// other servers; any other leaves here.
 		StringPiece range = StringPiece(pHttpContext->GetRequest()->GetHeader("Range"));
-		if (range.length() > 0) {
-			log(pHttpContext, "Range request. Bail");
-			return LeaveToIisUncached(pHttpContext);
-		}
 		StringPiece if_range = StringPiece(pHttpContext->GetRequest()->GetHeader("If-Range"));
-		if (if_range.length() > 0) {
-			log(pHttpContext, "If-Range request. Bail");
+		const bool range_request = range.length() > 0 || if_range.length() > 0;
+		if (range_request &&
+			FindIgnoreCase(StringPiece(pHttpContext->GetRequest()->GetHeader(HttpHeaderAccept)),
+				"markdown") == StringPiece::npos) {
+			log(pHttpContext, range.length() > 0 ? "Range request. Bail" : "If-Range request. Bail");
 			return LeaveToIisUncached(pHttpContext);
 		}
 
@@ -1327,6 +1357,11 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		GoogleString checkpath = FindConfigFile(ws2s(pHttpContext->GetApplication()->GetApplicationPhysicalPath()));
 		IisProcessContext* failed_pc = nullptr;
 		IisModuleRequestContext* ctx = CreateRequestContext(pHttpContext, checkpath, url, url_len, gurl, &failed_pc);
+		if (ctx == nullptr && range_request) {
+			log(pHttpContext, "Range request. Bail");
+			FreeUnstoredRequestState(ctx, gurl);
+			return LeaveToIisUncached(pHttpContext);
+		}
 		if (ctx == nullptr) {
 			if (!IsLocalRequest(pHttpContext,
 				failed_pc != nullptr ? failed_pc->root_options() : nullptr)) {
@@ -1543,6 +1578,12 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 				inner->set_agent_class(agent_class.agent_class);
 				CountDaemonHtmlAgentClass(agent_class, &engine->agent_class_counters());
 			}
+		}
+		if (range_request) {
+			NoteIisRangeRequest(pHttpContext, ctx->GetInnerContext());
+			log(pHttpContext, "Range request. Bail");
+			FreeUnstoredRequestState(ctx, gurl);
+			return LeaveToIisUncached(pHttpContext);
 		}
 		bool is_resource = ctx->GetInnerContext()->is_resource();
 		// TODO(oschaaf): 1.9-> is_resource arg not used?!

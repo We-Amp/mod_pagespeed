@@ -1,13 +1,12 @@
 - **The HTML cache sends the Markdown copy compressed when the client asks
-  for it** (Apache and nginx; on IIS the plain Markdown copy is served as
-  before, and compressed copies are pending verification there). With an
+  for it** (Apache, nginx and IIS). With an
   optimizer library that publishes C API 1.16, a request for a page's
   Markdown copy that accepts `br` or `gzip` gets the brotli or gzip copy the
   optimizer stored beside the plain one, chosen by the request's
   `Accept-Encoding` (q-values honoured, `identity;q=0` and `*` included).
   The copy is compressed once by the optimizer, never per request, and the
   server's own compression (`mod_deflate`, `mod_brotli`, nginx `gzip` and
-  `brotli`) never compresses it again. A coded answer carries
+  `brotli`, IIS dynamic compression) never compresses it again. A coded answer carries
   `Content-Encoding`, the coded length and an entity tag of its own, so a
   `304` is answered for the coding the client holds; every Markdown answer
   now lists `Accept-Encoding` in its `Vary` line. A page whose plain copy
