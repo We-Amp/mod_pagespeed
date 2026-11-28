@@ -305,13 +305,29 @@ class TestTheFile:
                 copy_row = by_source[rid]
                 assert copy_row["live"]["mode"] == "serve-cached-html"
                 assert copy_row["id"] == rid + "-in-serve-cached-html"
-                assert copy_row["live"]["steps"] == live["steps"]
+                assert copy_row["live"]["steps"] == [
+                    conf.audit_step(copy.deepcopy(st)) for st in live["steps"]]
                 assert live["mode"] == "serve-variants"  # the table is untouched
                 assert conf.validate_row(copy_row, BODIES) == []
         # Only an audit copy may name the mode.
         plain = dict(next(iter(by_source.values())))
         plain.pop("mode_audit")
         assert any("mode" in e for e in conf.validate_row(plain, BODIES))
+
+    def test_the_mode_audit_leaves_out_only_html_lookup_refusal_counts(self):
+        html = {"request": {"headers": [["X-Requested-With", "XMLHttpRequest"]]},
+                "expect": {"counter_delta": {
+                    "daemon_html_refused_request_header": 1,
+                    "daemon_html_stored": 0}}}
+        markdown = copy.deepcopy(html)
+        markdown["request"]["headers"].append(["Accept", "text/markdown"])
+        only_refusal = {"request": {}, "expect": {"status": 200, "counter_delta": {
+            "daemon_html_refused_cookie_request": 1}}}
+        assert conf.audit_step(copy.deepcopy(html))["expect"]["counter_delta"] == {
+            "daemon_html_stored": 0}
+        assert conf.audit_step(copy.deepcopy(markdown)) == markdown
+        assert conf.audit_step(copy.deepcopy(only_refusal))["expect"] == {
+            "status": 200}
 
     def test_every_live_row_uses_only_keys_the_runner_acts_on(self):
         errors = []

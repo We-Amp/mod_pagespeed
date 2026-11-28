@@ -782,7 +782,7 @@ void DaemonHtmlPurgeOracle::NoteLifetimeSeen(uint32 lifetime_s) {
 
 int64 DaemonHtmlPurgeOracle::UnsafeRetentionMsLocked() const {
   constexpr int64 kFloorS = 60;
-  constexpr int64 kClampS = 24 * 60 * 60;
+  constexpr int64 kClampS = int64{24} * 60 * 60;
   int64 retention_s = 0;
   if (unsafe_cap_s_ > 0) {
     retention_s = 2 * std::max<int64>(unsafe_cap_s_, kFloorS);

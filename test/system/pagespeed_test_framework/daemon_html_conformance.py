@@ -416,14 +416,48 @@ LIVE_ROWS_THAT_RUN = 145
 LIVE_ROWS_PENDING = 100
 
 
+def asks_markdown(step: dict) -> bool:
+    """Whether a live step's request names Markdown in an Accept line."""
+    for name, value in step.get("request", {}).get("headers", []):
+        if name.lower() == "accept" and "text/markdown" in value.lower():
+            return True
+    return False
+
+
+def audit_step(step: dict) -> dict:
+    """A step of a mode-audit copy. A request without a Markdown preference
+    is the one serve-cached-html judges differently: the cache also looks it
+    up, so a port that looks such requests up counts a request-policy refusal
+    at the lookup as well as at the store, as every port already does for a
+    Markdown request. Its daemon_html_refused_* deltas are therefore not
+    checked in the copy (the engine rows and each port's own rows check the
+    lookup's counting); every other expectation, daemon_html_stored among
+    them, stays."""
+    if asks_markdown(step):
+        return step
+    expect = step.get("expect", {})
+    deltas = expect.get("counter_delta")
+    if not isinstance(deltas, dict):
+        return step
+    kept = {k: v for k, v in deltas.items()
+            if not k.startswith("daemon_html_refused_")}
+    if kept:
+        expect["counter_delta"] = kept
+    else:
+        del expect["counter_delta"]
+    return step
+
+
 def mode_audit_rows(rows: List[dict]) -> List[dict]:
     """The mode audit: every row that runs serve-variants and asks for a
     Markdown copy, again in serve-cached-html. That mode serves the Markdown
     copies exactly as serve-variants does (its stored-HTML answer is a request
-    without a Markdown preference), so each row must pass unchanged. Rows that
-    switch or compare modes (set_mode, differential) are about the modes
-    themselves and are left out. Each copy is marked `mode_audit`, carries its
-    own id, and is checked by validate_row like any row."""
+    without a Markdown preference), so each row must pass unchanged, except
+    for the lookup's refusal counts of a request without a Markdown
+    preference (audit_step). Rows that switch or compare modes (set_mode,
+    differential) are about the modes themselves and are left out. Each copy
+    is marked `mode_audit`, carries its own id, and is checked by
+    validate_row like any row."""
     out = []
     for row in rows:
         live = row.get("live", {})
@@ -436,6 +470,7 @@ def mode_audit_rows(rows: List[dict]) -> List[dict]:
         audit["id"] = f"{row['id']}-in-{AUDIT_MODE}"
         audit["mode_audit"] = row["id"]
         audit["live"]["mode"] = AUDIT_MODE
+        audit["live"]["steps"] = [audit_step(s) for s in audit["live"]["steps"]]
         out.append(audit)
     return out
 
