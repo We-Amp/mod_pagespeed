@@ -581,9 +581,9 @@ class LibraryDaemonAbi : public DaemonAbi {
     out->struct_size = size;
     // Every byte of the 1.16 part the caller's struct reaches reads zero:
     // identity, and the reserved word.
-    memset(reinterpret_cast<char*>(out) + kPsHtmlServeVerdictSize15, 0,
-           std::min(size, sizeof(PsHtmlServeVerdict)) -
-               kPsHtmlServeVerdictSize15);
+    memset(
+        reinterpret_cast<char*>(out) + kPsHtmlServeVerdictSize15, 0,
+        std::min(size, sizeof(PsHtmlServeVerdict)) - kPsHtmlServeVerdictSize15);
     return rc;
   }
 

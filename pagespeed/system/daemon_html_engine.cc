@@ -2296,7 +2296,8 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
       size_t plain_etag_len = 0;
       if (abi->HtmlMarkdownEtagCoded(stored.binding_hash, stored.markdown_hash,
                                      kPsMarkdownEncodingIdentity, plain_etag,
-                                     sizeof(plain_etag), &plain_etag_len) == 0 &&
+                                     sizeof(plain_etag),
+                                     &plain_etag_len) == 0 &&
           plain_etag_len > 0) {
         result.plain_etag = plain_etag;
       }

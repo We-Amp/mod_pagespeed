@@ -464,9 +464,9 @@ TEST_F(InjectedVerdictDaemonAbiTest, TheSixteenSetIsInjectable) {
   ASSERT_EQ(0, fake_->HtmlMarkdownEtagCoded(hash, hash, kPsMarkdownEncodingBr,
                                             tag, sizeof(tag), &len));
   EXPECT_EQ(in->coded_etag[kPsMarkdownEncodingBr], tag);
-  ASSERT_EQ(0, fake_->HtmlMarkdownEtagCoded(
-                   hash, hash, kPsMarkdownEncodingIdentity, tag, sizeof(tag),
-                   &len));
+  ASSERT_EQ(
+      0, fake_->HtmlMarkdownEtagCoded(hash, hash, kPsMarkdownEncodingIdentity,
+                                      tag, sizeof(tag), &len));
   EXPECT_EQ(in->etag, tag);
   EXPECT_EQ((1 << kPsMarkdownEncodingGzip) | (1 << kPsMarkdownEncodingBr),
             fake_->ReadSharedConfigMarkdownCodings("/c"));
