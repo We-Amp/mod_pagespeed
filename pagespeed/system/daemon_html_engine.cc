@@ -1425,6 +1425,20 @@ void DaemonHtmlEngine::EvaluateRequestPolicy(
     refuse("request_header", name);
   }
 
+  // The library accepts an X-Original-URL that equals the target the guard
+  // is given.  A port that keys the page on a normalised reading of the
+  // target (Apache: the decoded, slash-merged path) hands the guard the raw
+  // target, so the header is refused here whenever the two differ.
+  if (!facts.raw_path.empty() && facts.raw_path != facts.path) {
+    for (const auto& line : facts.request_headers) {
+      if (HeaderNameIs(line.first, "X-Original-URL")) {
+        if (out->guard_reason.empty()) out->rewritten_url = true;
+        refuse("request_header", line.first);
+        break;
+      }
+    }
+  }
+
   // The port's own reading of the AJAX markers stays a second reader: the
   // guard reads them too, and a refusal never rests on one reader alone.
   if (!facts.ajax_marker.empty()) {

@@ -35042,6 +35042,138 @@
       }
     },
     {
+      "id": "m2-x-original-url-raw-target-not-the-key-refused",
+      "runners": [
+        "engine"
+      ],
+      "why": "unkeyed header: X-Original-URL on a request keyed on another spelling of its target is refused",
+      "engine": {
+        "config": {
+          "mode": "serve-variants",
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
+        "verdicts": [
+          {
+            "fn": "ps_html_request_guard",
+            "reason": "none"
+          },
+          {
+            "fn": "ps_html_request_guard",
+            "reason": "none"
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/a/b",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "agent_class": 3,
+              "raw_path": "/a//b",
+              "request_headers": [
+                [
+                  "X-Original-URL",
+                  "/a//b"
+                ]
+              ],
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                [
+                  "Content-Type",
+                  "text/html; charset=utf-8"
+                ],
+                [
+                  "Cache-Control",
+                  "max-age=300"
+                ],
+                [
+                  "ETag",
+                  "\"v1\""
+                ]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [
+                {
+                  "fn": "ps_html_request_guard",
+                  "args": {
+                    "raw_path": "/a//b",
+                    "header_names": [
+                      "X-Original-URL"
+                    ],
+                    "header_values": [
+                      "/a//b"
+                    ]
+                  }
+                }
+              ],
+              "calls_exclude": [
+                "ps_cache_write_original_site",
+                "ps_cache_write_headers_sidecar_site",
+                "ps_html_store_classify"
+              ],
+              "log_lines": 1,
+              "counters": {
+                "daemon_html_refused_request_header": 1
+              }
+            }
+          },
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/café",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": [
+                "text/markdown"
+              ],
+              "agent_class": 3,
+              "raw_path": "/caf%C3%A9",
+              "request_headers": [
+                [
+                  "x-original-url",
+                  "/caf%C3%A9"
+                ]
+              ]
+            },
+            "expect": {
+              "calls_exclude": [
+                "ps_html_serve_classify"
+              ],
+              "serve": {
+                "kind": "fall_through",
+                "reason": "request_header"
+              },
+              "log_lines": 0,
+              "counters": {
+                "daemon_html_refused_request_header": 1
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
       "id": "m2-stamp-missing-fails-closed",
       "runners": [
         "engine"
