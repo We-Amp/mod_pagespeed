@@ -3269,6 +3269,358 @@
    }
   },
   {
+   "id": "iis-url-rewrite-trailing-slash-stored-and-served",
+   "runners": [
+    "live"
+   ],
+   "why": "cache key: a rewritten directory request is keyed on the URL the client sent",
+   "ports": [
+    "iis"
+   ],
+   "live": {
+    "mode": "serve-variants",
+    "agent_optimize": true,
+    "vhost": {
+     "url_rewrite_inbound": [
+      [
+       "^docs/$",
+       "front"
+      ]
+     ]
+    },
+    "origin": {
+     "status": 200,
+     "headers": [
+      [
+       "Content-Type",
+       "text/html; charset=utf-8"
+      ],
+      [
+       "Cache-Control",
+       "max-age=300"
+      ],
+      [
+       "ETag",
+       "\"v1\""
+      ]
+     ],
+     "body_ref": "page"
+    },
+    "steps": [
+     {
+      "request": {
+       "method": "GET",
+       "path": "/docs/",
+       "headers": []
+      },
+      "expect": {
+       "status": 200,
+       "stored": true
+      }
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/docs/",
+       "headers": [
+        [
+         "Accept",
+         "text/markdown"
+        ]
+       ]
+      },
+      "pre": [
+       {
+        "wait_markdown": {
+         "timeout_s": 30
+        }
+       }
+      ],
+      "expect": {
+       "status": 200
+      }
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/docs/",
+       "headers": [
+        [
+         "Accept",
+         "text/markdown"
+        ]
+       ]
+      },
+      "expect": {
+       "status": 200,
+       "content_type": "text/markdown; charset=utf-8"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "iis-original-url-equal-target-stored-and-served",
+   "runners": [
+    "live"
+   ],
+   "why": "unkeyed header: X-Original-URL equal to the request target is stored and served",
+   "ports": [
+    "iis"
+   ],
+   "live": {
+    "mode": "serve-variants",
+    "agent_optimize": true,
+    "origin": {
+     "status": 200,
+     "headers": [
+      [
+       "Content-Type",
+       "text/html; charset=utf-8"
+      ],
+      [
+       "Cache-Control",
+       "max-age=300"
+      ],
+      [
+       "ETag",
+       "\"v1\""
+      ]
+     ],
+     "body_ref": "page"
+    },
+    "steps": [
+     {
+      "request": {
+       "method": "GET",
+       "path": "/page",
+       "headers": [
+        [
+         "X-Original-URL",
+         "/page"
+        ]
+       ]
+      },
+      "expect": {
+       "status": 200,
+       "stored": true
+      }
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/page",
+       "headers": [
+        [
+         "X-Original-URL",
+         "/page"
+        ],
+        [
+         "Accept",
+         "text/markdown"
+        ]
+       ]
+      },
+      "pre": [
+       {
+        "wait_markdown": {
+         "timeout_s": 30
+        }
+       }
+      ],
+      "expect": {
+       "status": 200
+      }
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/page",
+       "headers": [
+        [
+         "X-Original-URL",
+         "/page"
+        ],
+        [
+         "Accept",
+         "text/markdown"
+        ]
+       ]
+      },
+      "expect": {
+       "status": 200,
+       "content_type": "text/markdown; charset=utf-8"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "iis-original-url-differs-not-stored",
+   "runners": [
+    "live"
+   ],
+   "why": "unkeyed header: X-Original-URL other than the request target is neither stored nor served",
+   "ports": [
+    "iis"
+   ],
+   "live": {
+    "mode": "serve-variants",
+    "agent_optimize": true,
+    "origin": {
+     "status": 200,
+     "headers": [
+      [
+       "Content-Type",
+       "text/html; charset=utf-8"
+      ],
+      [
+       "Cache-Control",
+       "max-age=300"
+      ],
+      [
+       "ETag",
+       "\"v1\""
+      ]
+     ],
+     "body_ref": "page"
+    },
+    "steps": [
+     {
+      "request": {
+       "method": "GET",
+       "path": "/other",
+       "headers": [
+        [
+         "X-Original-URL",
+         "/admin"
+        ]
+       ]
+      },
+      "expect": {
+       "status": 200,
+       "stored": false
+      }
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/other",
+       "headers": [
+        [
+         "X-Original-URL",
+         "/other"
+        ],
+        [
+         "X-Original-URL",
+         "/admin"
+        ]
+       ]
+      },
+      "expect": {
+       "status": 200,
+       "stored": false
+      }
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/page",
+       "headers": []
+      },
+      "expect": {
+       "status": 200,
+       "stored": true
+      }
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/page",
+       "headers": [
+        [
+         "Accept",
+         "text/markdown"
+        ]
+       ]
+      },
+      "pre": [
+       {
+        "wait_markdown": {
+         "timeout_s": 30
+        }
+       }
+      ],
+      "expect": {
+       "status": 200
+      }
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/page",
+       "headers": [
+        [
+         "Accept",
+         "text/markdown"
+        ]
+       ]
+      },
+      "expect": {
+       "status": 200,
+       "content_type": "text/markdown; charset=utf-8"
+      }
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/page",
+       "headers": [
+        [
+         "X-Original-URL",
+         "/admin"
+        ],
+        [
+         "Accept",
+         "text/markdown"
+        ]
+       ]
+      },
+      "expect": {
+       "status": 200,
+       "content_type": "text/html",
+       "headers_absent": [
+        "X-Robots-Tag"
+       ]
+      }
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/page",
+       "headers": [
+        [
+         "X-Original-URL",
+         "/Page"
+        ],
+        [
+         "Accept",
+         "text/markdown"
+        ]
+       ]
+      },
+      "expect": {
+       "status": 200,
+       "content_type": "text/html",
+       "headers_absent": [
+        "X-Robots-Tag"
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
    "id": "iis-url-rewrite-inbound-raw-high-byte",
    "runners": [
     "live"

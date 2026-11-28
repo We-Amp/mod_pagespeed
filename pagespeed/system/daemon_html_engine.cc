@@ -945,7 +945,8 @@ struct DaemonHtmlEngine::RequestPolicy {
   GoogleString guard_reason;
   GoogleString guard_detail;
   // The refusal is an X-Forwarded-Proto that does not name the keyed scheme,
-  // or the header IIS URL Rewrite adds to a rewritten request.
+  // or an X-Original-URL (the header IIS URL Rewrite adds to a rewritten
+  // request) that differs from the keyed target.
   bool xfp = false;
   bool rewritten_url = false;
   // The request carries a cookie the ignore list in force does not cover,
@@ -1424,6 +1425,20 @@ void DaemonHtmlEngine::EvaluateRequestPolicy(
     refuse("request_header", name);
   }
 
+  // The library accepts an X-Original-URL that equals the target the guard
+  // is given.  A port that keys the page on a normalised reading of the
+  // target (Apache: the decoded, slash-merged path) hands the guard the raw
+  // target, so the header is refused here whenever the two differ.
+  if (!facts.raw_path.empty() && facts.raw_path != facts.path) {
+    for (const auto& line : facts.request_headers) {
+      if (HeaderNameIs(line.first, "X-Original-URL")) {
+        if (out->guard_reason.empty()) out->rewritten_url = true;
+        refuse("request_header", line.first);
+        break;
+      }
+    }
+  }
+
   // The port's own reading of the AJAX markers stays a second reader: the
   // guard reads them too, and a refusal never rests on one reader alone.
   if (!facts.ajax_marker.empty()) {
@@ -1547,11 +1562,10 @@ void DaemonHtmlEngine::NoteRewrittenUrlRefused() {
   if (deps_.handler == nullptr) return;
   deps_.handler->Message(
       kWarning,
-      "DaemonHtmlCache: a request carried X-Original-URL, which the cache key "
-      "does not contain, so no page is stored or served for it (Markdown "
-      "copies included); for example, IIS URL Rewrite adds it to every "
-      "rewritten request, so requests rewritten by URL Rewrite are not stored "
-      "until a later release");
+      "DaemonHtmlCache: a request carried an X-Original-URL that differs from "
+      "the request target the page is keyed on, so no page is stored or "
+      "served for it (Markdown copies included); a value equal to the target, "
+      "as IIS URL Rewrite sends on a rewritten request, is accepted");
 }
 
 const char* DaemonHtmlEngine::ServeModeName() const {

@@ -280,6 +280,7 @@ bindings, plain URL spellings only, the `PageSpeedFinalView` module entry).
 The compressed copies are pending verification on IIS: there the plain
 Markdown copy is served as before.
 With an optimizer library that publishes C API 1.15, a request rewritten by URL
-Rewrite carries `X-Original-URL`, a header the cache key does not contain, so it
-is neither stored nor answered until a later release; the site logs one warning
-saying so.
+Rewrite carries `X-Original-URL` with the request target as the client sent it;
+the HTML cache accepts it because it equals the target the page is keyed on. A
+request whose `X-Original-URL` differs from its target is neither stored nor
+answered, and the site logs one warning saying so.
