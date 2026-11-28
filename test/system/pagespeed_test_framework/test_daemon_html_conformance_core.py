@@ -246,6 +246,24 @@ class FakeProvider(Provider):
         self.mode = mode
 
 
+class StaleParentProvider(FakeProvider):
+    """Stores the page but never derives its Markdown copy; the stored page
+    goes stale `stale_after_s` into the runner's clock (None: never)."""
+
+    def __init__(self, clock, stale_after_s: Optional[float], **kw) -> None:
+        super().__init__(**kw)
+        self.clock = clock
+        self.stale_after_s = stale_after_s
+
+    def markdown_ready(self, path, host) -> bool:
+        self.calls.append("markdown_ready")
+        return False
+
+    def parent_stale(self, path, host) -> bool:
+        return (self.stale_after_s is not None and path in self.entries
+                and self.clock() >= self.stale_after_s)
+
+
 def run(row: dict, provider: Optional[FakeProvider] = None, clock=None) -> List[str]:
     clock = clock or FakeClock()
     return conf.run_row(provider or FakeProvider(), row, BODIES, sleep=clock.sleep, clock=clock)
@@ -364,6 +382,22 @@ class TestRowsFromTheFile:
         assert any("not servable within 30 s" in f for f in failures), failures
         assert clock.now >= 30
 
+    def test_a_parent_gone_stale_fails_at_once_with_its_cause(self):
+        clock = FakeClock()
+        failures = run(ROWS["live-head-markdown"], StaleParentProvider(clock, stale_after_s=4), clock)
+        assert any("the parent went stale before its Markdown copy was servable" in f
+                   for f in failures), failures
+        assert not any("not servable within" in f for f in failures), failures
+        assert clock.now < 30
+
+    def test_a_fresh_parent_whose_copy_never_comes_still_waits_out_the_timeout(self):
+        clock = FakeClock()
+        failures = run(ROWS["live-head-markdown"], StaleParentProvider(clock, stale_after_s=None),
+                       clock)
+        assert any("not servable within 30 s" in f for f in failures), failures
+        assert not any("went stale" in f for f in failures), failures
+        assert clock.now >= 30
+
     def test_a_differential_difference_fails(self):
         failures = run(ROWS["live-differential-agent-optimize-on"], FakeProvider({"differential_extra"}))
         assert any("headers differ" in f for f in failures), failures
@@ -402,6 +436,18 @@ class TestOps:
             ]
         )
         assert run(row) == ["synthetic step 1: the Markdown copy became servable"]
+
+    def test_wait_markdown_expect_ready_false_ignores_a_stale_parent(self):
+        clock = FakeClock()
+        row = synthetic(
+            [
+                {"request": GET_PAGE, "expect": {"stored": True}},
+                {"request": GET_MD, "pre": [{"wait_markdown": {"timeout_s": 5, "expect_ready": False}}],
+                 "expect": {"status": 200}},
+            ]
+        )
+        assert run(row, StaleParentProvider(clock, stale_after_s=0), clock) == []
+        assert clock.now >= 5
 
     def test_wait_markdown_expect_ready_false_passes_when_it_stays_unready(self):
         clock = FakeClock()

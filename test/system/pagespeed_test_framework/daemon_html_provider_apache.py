@@ -600,6 +600,9 @@ class ApacheProvider(conf.Provider):
         ask = not self.last_accept.get(path, False)
         return bool(self._probe(path, host, ask=ask).get("markdown_ready"))
 
+    def parent_stale(self, path, host) -> bool:
+        return bool(self._probe(path, host).get("stale"))
+
     def coded_ready(self, path, host, codings) -> bool:
         coded = self._probe(path, host).get("coded", {})
         return all(coded.get(c) for c in codings)

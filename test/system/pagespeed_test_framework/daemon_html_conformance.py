@@ -294,6 +294,15 @@ class Provider(abc.ABC):
         changes nothing the row asserts (no counter a row reads, no
         store)."""
 
+    def parent_stale(self, path: str, host: Optional[str]) -> bool:
+        """Whether the URL's stored page is present and past its lifetime
+        now, by the same freshness rule markdown_ready applies. A read only.
+        A stale page is never stored again without a request through the
+        server, so its Markdown copy cannot become servable while the
+        runner waits. A provider that cannot tell answers False, and the
+        wait runs to its timeout."""
+        return False
+
     def coded_ready(self, path: str, host: Optional[str], codings: List[str]) -> bool:
         """Whether the volume holds a coded copy ("br", "gzip") of the URL's
         Markdown copy, with bytes, for every coding named. A read only."""
@@ -932,6 +941,11 @@ class RowRunner:
             if self.provider.markdown_ready(request["path"], request.get("host")):
                 if not expect_ready:
                     self._fail(index, "the Markdown copy became servable")
+                return
+            # Waiting on can only time out: name the cause instead.
+            if expect_ready and self.provider.parent_stale(request["path"], request.get("host")):
+                self._fail(index, "the parent went stale before its Markdown copy was servable "
+                                  f"(after {timeout - (deadline - self.clock()):.1f} s)")
                 return
             if self.clock() >= deadline:
                 if expect_ready:

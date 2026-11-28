@@ -379,6 +379,26 @@ class _Volume:
                 self._ask(key)
         return ready
 
+    def parent_stale(self, key) -> bool:
+        """Whether the stored page is past its lifetime now, by the
+        freshness rule markdown_ready applies (False when none is stored)."""
+        self._open()
+        try:
+            original = self._read(key, ORIGINAL_ID)
+            if original is None:
+                return False
+            try:
+                facts = _PsHtmlStoredFacts()
+                facts.struct_size = ctypes.sizeof(_PsHtmlStoredFacts)
+                if self.lib.ps_html_stored_facts_from_reads(
+                        original, None, None, 0, ctypes.byref(facts)) != 0:
+                    return False
+                return time.time() - facts.stored_at >= facts.lifetime_s
+            finally:
+                self._free(original)
+        finally:
+            self.close()
+
     def coded_ready(self, key, codings) -> bool:
         """Whether the volume holds each named coded copy of the key's
         Markdown copy with bytes (an entry without bytes is the optimizer's
@@ -1288,6 +1308,9 @@ http {{
 
     def markdown_ready(self, path: str, host: Optional[str]) -> bool:
         return self.volume.markdown_ready(self._key(path, host))
+
+    def parent_stale(self, path: str, host: Optional[str]) -> bool:
+        return self.volume.parent_stale(self._key(path, host))
 
     def coded_ready(self, path: str, host: Optional[str], codings: List[str]) -> bool:
         return self.volume.coded_ready(self._key(path, host), codings)

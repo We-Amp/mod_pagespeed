@@ -11,7 +11,10 @@ exact id, with its lifetime and stored header block, and whether its
 Markdown copy is servable now. It writes nothing. One JSON object on stdout:
 
   {"present": bool, "lifetime_s": int, "stored_at": int, "sidecar": [[n, v]],
-   "markdown_ready": bool, "coded": {"br": bool, "gzip": bool}}
+   "markdown_ready": bool, "stale": bool, "coded": {"br": bool, "gzip": bool}}
+
+"stale" says the stored page is past its lifetime now, by the freshness
+rule "markdown_ready" applies; it is false when no page is stored.
 
 "coded" says whether the volume holds the brotli and the gzip copy of the
 Markdown copy with bytes (an entry without bytes is the optimizer's record
@@ -157,7 +160,8 @@ def probe(args) -> dict:
         raise RuntimeError(f"ps_cache_open: {rc}")
     url, host = args.url.encode(), args.hostname.encode()
     scheme, site = args.scheme.encode(), args.site.encode()
-    out = {"present": False, "markdown_ready": False, "coded": {"br": False, "gzip": False}}
+    out = {"present": False, "markdown_ready": False, "stale": False,
+           "coded": {"br": False, "gzip": False}}
     reads = {}
     try:
         for name, alt in (("br", SENTINEL_MARKDOWN_BR), ("gzip", SENTINEL_MARKDOWN_GZIP)):
@@ -204,6 +208,7 @@ def probe(args) -> dict:
                     cache, site, ctypes.byref(epoch)) == PS_OK
                 fenced = (not epoch_ok) or facts.stored_at <= epoch.value
                 fresh = time.time() - facts.stored_at < facts.lifetime_s
+                out["stale"] = not fresh
                 out["markdown_ready"] = bool(
                     fresh
                     and not (facts.flags & FACTS_NEEDS_VALIDATION)

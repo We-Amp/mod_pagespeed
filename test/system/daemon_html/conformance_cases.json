@@ -14526,7 +14526,7 @@
           "status": 200,
           "headers": [
             ["Content-Type", "text/html; charset=utf-8"],
-            ["Cache-Control", "max-age=5"],
+            ["Cache-Control", "max-age=15"],
             ["ETag", "\"v1\""]
           ],
           "body_ref": "page"
@@ -14538,7 +14538,7 @@
           },
           {
             "request": {"method": "HEAD", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "pre": [{"wait_markdown": {"timeout_s": 30}}, {"sleep_s": {"s": 6}}],
+            "pre": [{"wait_markdown": {"timeout_s": 30}}, {"sleep_s": {"s": 16}}],
             "expect": {"status": 200}
           },
           {
@@ -14559,7 +14559,7 @@
           "status": 200,
           "headers": [
             ["Content-Type", "text/html; charset=utf-8"],
-            ["Cache-Control", "max-age=5"],
+            ["Cache-Control", "max-age=15"],
             ["ETag", "\"v1\""]
           ],
           "body_ref": "page"
@@ -14580,7 +14580,7 @@
               "path": "/page",
               "headers": [["Accept", "text/markdown"], ["If-None-Match", "$markdown_etag"]]
             },
-            "pre": [{"sleep_s": {"s": 6}}],
+            "pre": [{"sleep_s": {"s": 16}}],
             "expect": {"status": 200, "content_type": "text/html"}
           }
         ]
@@ -18129,7 +18129,7 @@
           "status": 200,
           "headers": [
             ["Content-Type", "text/html; charset=utf-8"],
-            ["Cache-Control", "max-age=4"],
+            ["Cache-Control", "max-age=15"],
             ["ETag", "\"v1\""]
           ],
           "body_ref": "page"
@@ -18159,57 +18159,57 @@
           },
           {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "pre": [{"sleep_s": {"s": 1}}],
+            "pre": [{"sleep_s": {"s": 4}}],
             "expect": {"status": 200}
           },
           {
             "request": {"method": "GET", "path": "/page", "headers": []},
-            "pre": [{"sleep_s": {"s": 1}}],
+            "pre": [{"sleep_s": {"s": 4}}],
             "expect": {"status": 200}
           },
           {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "pre": [{"sleep_s": {"s": 1}}],
+            "pre": [{"sleep_s": {"s": 4}}],
             "expect": {"status": 200}
           },
           {
             "request": {"method": "GET", "path": "/page", "headers": []},
-            "pre": [{"sleep_s": {"s": 1}}],
+            "pre": [{"sleep_s": {"s": 4}}],
             "expect": {"status": 200}
           },
           {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "pre": [{"sleep_s": {"s": 1}}],
+            "pre": [{"sleep_s": {"s": 4}}],
             "expect": {"status": 200}
           },
           {
             "request": {"method": "GET", "path": "/page", "headers": []},
-            "pre": [{"sleep_s": {"s": 1}}],
+            "pre": [{"sleep_s": {"s": 4}}],
             "expect": {"status": 200}
           },
           {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "pre": [{"sleep_s": {"s": 1}}],
+            "pre": [{"sleep_s": {"s": 4}}],
             "expect": {"status": 200}
           },
           {
             "request": {"method": "GET", "path": "/page", "headers": []},
-            "pre": [{"sleep_s": {"s": 1}}],
+            "pre": [{"sleep_s": {"s": 4}}],
             "expect": {"status": 200}
           },
           {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "pre": [{"sleep_s": {"s": 1}}],
+            "pre": [{"sleep_s": {"s": 4}}],
             "expect": {"status": 200}
           },
           {
             "request": {"method": "GET", "path": "/page", "headers": []},
-            "pre": [{"sleep_s": {"s": 1}}],
+            "pre": [{"sleep_s": {"s": 4}}],
             "expect": {"status": 200}
           },
           {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "pre": [{"sleep_s": {"s": 1}}],
+            "pre": [{"sleep_s": {"s": 4}}],
             "expect": {
               "status": 200,
               "content_type": "text/markdown; charset=utf-8",
@@ -18227,12 +18227,12 @@
           },
           {
             "request": {"method": "GET", "path": "/page", "headers": []},
-            "pre": [{"sleep_s": {"s": 1}}],
+            "pre": [{"sleep_s": {"s": 4}}],
             "expect": {"status": 200}
           },
           {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "pre": [{"sleep_s": {"s": 1}}],
+            "pre": [{"sleep_s": {"s": 4}}],
             "expect": {
               "status": 200,
               "content_type": "text/markdown; charset=utf-8",
@@ -18250,7 +18250,7 @@
           },
           {
             "request": {"method": "GET", "path": "/page", "headers": []},
-            "pre": [{"sleep_s": {"s": 1}}],
+            "pre": [{"sleep_s": {"s": 4}}],
             "expect": {"status": 200}
           }
         ]
