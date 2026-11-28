@@ -215,7 +215,7 @@ describe("serve-variants", () => {
     ].map((n) => `daemon_html_${n}`);
     const markdown = [
       "served", "not_modified", "served_without_preference", "transport_conflict", "served_br", "served_gzip",
-      "served_identity", "encoded_copy_missing", "encoded_copy_unbound", "compress_demand_sent",
+      "served_identity", "encoded_copy_missing", "encoded_copy_unbound", "compress_demand_sent", "coded_fallback",
     ].map(
       (n) => `daemon_markdown_${n}`,
     );

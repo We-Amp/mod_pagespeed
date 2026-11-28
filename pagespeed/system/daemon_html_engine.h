@@ -206,6 +206,12 @@ struct DaemonHtmlServeResult {
   DaemonHtmlHeaderLines headers;
   GoogleString body;                // Empty for a HEAD and a 304.
   bool suppress_recording = false;  // Not used yet.
+  // With a coded copy (a Content-Encoding line in `headers`): the plain
+  // copy's entity tag and, for a GET, its bytes, for a port that finds, once
+  // the server's own header stages ran, that a body filter would rewrite the
+  // answer: it sends the plain copy instead (CodedAnswerReplacedByPlain).
+  GoogleString plain_etag;
+  GoogleString plain_body;
 };
 
 // A unit of blocking volume I/O.  Runs at most once.
@@ -257,6 +263,10 @@ class DaemonHtmlPort : public DaemonHtmlBlockingRunner {
   // Remove the client's conditionals from the request to the origin, after
   // stashing them (the stash is what DaemonHtmlRequestFacts reads).
   virtual void RemoveClientConditionals() = 0;
+  // After ClearAndEmitAllowlisted: the port sent the result's plain copy in
+  // place of its coded one (a body filter of the server would have rewritten
+  // the coded bytes).
+  virtual bool CodedAnswerReplacedByPlain() const { return false; }
 };
 
 // The optimizer's shared volume, through the run-time binding.
@@ -369,7 +379,8 @@ DaemonHtmlByteBudget* ProcessDaemonHtmlByteBudget();
 
 // The keys this process asked the optimizer to compress the Markdown copy
 // of: each at most once, in a bounded set that forgets its oldest key first.
-// Thread-safe.
+// A key is kept as its SHA-256 digest, so the set's memory is bounded by its
+// capacity whatever the URLs' lengths.  Thread-safe.
 class DaemonMarkdownCompressDemands {
  public:
   static constexpr size_t kDefaultCapacity = 4096;
@@ -379,9 +390,13 @@ class DaemonMarkdownCompressDemands {
   // True the first time `key` is seen (or seen again after it was dropped):
   // the caller sends the demand.  False while the key is in the set.
   bool Admit(const GoogleString& key);
+  // The demand for `key` was not sent: the next request may ask again.
+  void Forget(const GoogleString& key);
   size_t size() const;
 
  private:
+  static GoogleString Digest(const GoogleString& key);
+
   const size_t capacity_;
   mutable std::mutex mutex_;
   std::set<GoogleString> keys_;

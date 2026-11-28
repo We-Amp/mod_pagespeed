@@ -177,8 +177,10 @@ class FakeDaemonVolume : public DaemonAbi {
     return kPsErrInvalidArg;
   }
   int NotifyWorker(const char*, const PsNotifyParams*) const override {
-    return kPsOk;
+    return notify_rc;
   }
+  // What NotifyWorker answers.
+  int notify_rc = kPsOk;
   int CacheReadBestSite(void*, const char*, const char*, const char*,
                         const char*, uint32_t, void** out) const override {
     *out = nullptr;

@@ -85,7 +85,8 @@ const StringSet kVhostKnobs = {"header_add",
                                "chained_module_origin",
                                "named_location",
                                "proxy_hide",
-                               "trailer"};
+                               "trailer",
+                               "gunzip"};
 const StringSet kOriginKeys = {"status", "headers", "body_ref",
                                "echo_conditionals", "truncate_body"};
 const StringSet kLiveStepKeys = {"request",    "pre",    "process",

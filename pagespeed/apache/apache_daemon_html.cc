@@ -140,7 +140,13 @@ void ApplyHeaders(request_rec* r, const DaemonHtmlHeaderLines& lines,
     r->content_type = nullptr;
   }
   if (encoding != nullptr) {
-    apr_table_setn(r->headers_out, kContentEncoding, encoding);
+    // On a coded copy the stage encoded on top of it: both codings, in the
+    // order applied.
+    if (own_encoding != nullptr) {
+      apr_table_mergen(r->headers_out, kContentEncoding, encoding);
+    } else {
+      apr_table_setn(r->headers_out, kContentEncoding, encoding);
+    }
     *transport_conflict = true;
   }
   if (range != nullptr) {

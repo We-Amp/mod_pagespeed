@@ -16,6 +16,8 @@
   `daemon_markdown_served_gzip`, `daemon_markdown_served_identity`,
   `daemon_markdown_encoded_copy_missing`,
   `daemon_markdown_encoded_copy_unbound`,
-  `daemon_markdown_compress_demand_sent` and
+  `daemon_markdown_compress_demand_sent`, `daemon_markdown_coded_fallback`
+  (nginx sent the plain copy because a body filter such as `sub_filter`
+  would have rewritten the compressed one) and
   `daemon_markdown_fallthrough_no_acceptable_encoding`. With an older
   optimizer library the plain copy is sent exactly as before.

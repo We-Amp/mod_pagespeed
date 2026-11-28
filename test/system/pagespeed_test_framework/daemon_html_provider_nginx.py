@@ -83,6 +83,10 @@ RELOAD_TIMEOUT_S = 30.0
 ORIGINAL_ID = 0x0C
 MARKDOWN_ID = 0x7C
 WITHHELD_ID = 0xCC
+# nginx's own filters the provider builds as dynamic modules beside the lane
+# filter, in load order.
+LANE_FILTERS = ("ngx_http_lane_filter_module", "ngx_http_sub_filter_module",
+                "ngx_http_gunzip_filter_module")
 # The brotli and the gzip copy of the Markdown copy.
 CODED_IDS = {"br": 0xDC, "gzip": 0xEC}
 # The worker's default compression levels, which restart_worker restores
@@ -505,17 +509,20 @@ class _Volume:
 
 
 def _build_lane_filters(nginx_bin: str, nginx_src: str, out_dir: str) -> Dict[str, str]:
-    """Builds test/system/nginx_lane_filter (and, when it builds, nginx's own
-    sub filter) as dynamic modules for this nginx. Returns name -> .so."""
+    """Builds test/system/nginx_lane_filter (and, when they build, nginx's own
+    sub and gunzip filters) as dynamic modules for this nginx. Returns
+    name -> .so."""
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     lane_src = os.path.join(here, "nginx_lane_filter")
     done = os.path.join(out_dir, "modules")
     built = {}
-    for name in ("ngx_http_lane_filter_module", "ngx_http_sub_filter_module"):
+    for name in LANE_FILTERS:
         path = os.path.join(done, f"{name}.so")
         if os.path.exists(path):
             built[name] = path
-    if "ngx_http_lane_filter_module" in built:
+    gunzip_c = os.path.join(nginx_src, "src/http/modules/ngx_http_gunzip_filter_module.c")
+    if "ngx_http_lane_filter_module" in built and (
+            "ngx_http_gunzip_filter_module" in built or not os.path.exists(gunzip_c)):
         return built
     version = subprocess.run([nginx_bin, "-V"], capture_output=True, text=True)
     args = []
@@ -535,6 +542,18 @@ def _build_lane_filters(nginx_bin: str, nginx_src: str, out_dir: str) -> Dict[st
                     "ngx_module_type=HTTP_FILTER\n"
                     "ngx_module_name=ngx_http_sub_filter_module\n"
                     "ngx_module_srcs=\"$ngx_addon_dir/ngx_http_sub_filter_module.c\"\n"
+                    ". auto/module\n")
+
+    gunzip_dir = os.path.join(out_dir, "gunzip_addon")
+    os.makedirs(gunzip_dir, exist_ok=True)
+    if os.path.exists(gunzip_c):
+        shutil.copy(gunzip_c, gunzip_dir)
+        with open(os.path.join(gunzip_dir, "config"), "w") as f:
+            f.write("ngx_addon_name=ngx_http_gunzip_filter_module\n"
+                    "ngx_module_type=HTTP_FILTER\n"
+                    "ngx_module_name=ngx_http_gunzip_filter_module\n"
+                    "ngx_module_srcs=\"$ngx_addon_dir/ngx_http_gunzip_filter_module.c\"\n"
+                    "ngx_module_libs=-lz\n"
                     ". auto/module\n")
 
     def attempt(addons: List[str]) -> bool:
@@ -560,11 +579,13 @@ def _build_lane_filters(nginx_bin: str, nginx_src: str, out_dir: str) -> Dict[st
                 shutil.copy(os.path.join(tree, "objs", so), done)
         return True
 
-    if not (os.path.exists(sub_c) and attempt([lane_src, sub_dir])):
-        if not attempt([lane_src]):
-            raise ProviderSetupError(
-                f"cannot build the lane filter module (see {out_dir}/build.log)")
-    for name in ("ngx_http_lane_filter_module", "ngx_http_sub_filter_module"):
+    if not (os.path.exists(sub_c) and os.path.exists(gunzip_c)
+            and attempt([lane_src, sub_dir, gunzip_dir])):
+        if not (os.path.exists(sub_c) and attempt([lane_src, sub_dir])):
+            if not attempt([lane_src]):
+                raise ProviderSetupError(
+                    f"cannot build the lane filter module (see {out_dir}/build.log)")
+    for name in LANE_FILTERS:
         path = os.path.join(done, f"{name}.so")
         if os.path.exists(path):
             built[name] = path
@@ -882,6 +903,11 @@ class NginxProvider(conf.Provider):
                 lines.append("pagespeed InPlaceResourceOptimization on;")
                 lines.append(f"pagespeed InPlaceSMaxAgeSec {int(ip['s_maxage'])};")
             applied.add("in_place")
+        if vhost.get("gunzip"):
+            if "ngx_http_gunzip_filter_module" not in self.filters:
+                raise conf.ProviderUnsupported("nginx's gunzip filter did not build")
+            lines.append("gunzip on;")
+            applied.add("gunzip")
         cm = vhost.get("compress_markdown")
         if cm:
             lines += ["gzip on;", "gzip_types text/markdown;", "gzip_vary on;",
@@ -984,7 +1010,7 @@ class NginxProvider(conf.Provider):
     def _write_configs(self, live: Optional[dict]) -> Set[str]:
         applied: Set[str] = set()
         modules = [f"load_module {self.module};"]
-        for name in ("ngx_http_lane_filter_module", "ngx_http_sub_filter_module"):
+        for name in LANE_FILTERS:
             if name in self.filters:
                 modules.append(f"load_module {self.filters[name]};")
         for inst in self.instances.values():

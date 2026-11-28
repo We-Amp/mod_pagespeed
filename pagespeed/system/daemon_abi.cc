@@ -19,6 +19,7 @@
 
 #include "pagespeed/system/daemon_abi.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstring>
 #include <memory>
@@ -578,10 +579,11 @@ class LibraryDaemonAbi : public DaemonAbi {
     out->struct_size = kPsHtmlServeVerdictSize15;
     const int rc = html_serve_.serve_classify(request, facts, out);
     out->struct_size = size;
-    if (size >= sizeof(PsHtmlServeVerdict)) {
-      out->markdown_encoding = kPsMarkdownEncodingIdentity;
-      out->reserved_1_16 = 0;
-    }
+    // Every byte of the 1.16 part the caller's struct reaches reads zero:
+    // identity, and the reserved word.
+    memset(reinterpret_cast<char*>(out) + kPsHtmlServeVerdictSize15, 0,
+           std::min(size, sizeof(PsHtmlServeVerdict)) -
+               kPsHtmlServeVerdictSize15);
     return rc;
   }
 

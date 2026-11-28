@@ -331,6 +331,9 @@ const char* const RewriteStats::kDaemonHtmlEngineCounters[] = {
     "daemon_markdown_encoded_copy_missing",
     "daemon_markdown_encoded_copy_unbound",
     "daemon_markdown_compress_demand_sent",
+    // Coded answers the server sent as the plain copy instead, because one of
+    // its body filters would have rewritten the coded bytes (nginx).
+    "daemon_markdown_coded_fallback",
     // The agent class of each classified request (daemon_html_agent_class.h):
     // c1, c3 and c4 partition them; c1_not_ready and signature_failed are
     // parts of c3 and c4.

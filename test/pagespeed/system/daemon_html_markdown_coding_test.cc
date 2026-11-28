@@ -68,8 +68,11 @@ class RecordingPort : public DaemonHtmlPort {
   void MarkNoCompress() override { marked = true; }
   void RemoveClientConditionals() override {}
   void RunBlocking(DaemonHtmlCommit commit) override { commit.Run(); }
+  bool CodedAnswerReplacedByPlain() const override { return replaced; }
 
   bool marked = false;
+  // Answers CodedAnswerReplacedByPlain.
+  bool replaced = false;
   std::vector<DaemonHtmlServeResult> emitted;
   std::vector<bool> heads;
   std::vector<bool> marked_before_emit;
@@ -365,7 +368,12 @@ TEST_F(DaemonHtmlMarkdownCodingTest, WorkerNoSupportNoDemand) {
   ASSERT_EQ(DaemonHtmlServeResult::kFinal,
             engine->Serve(Request({"br"}), &port).kind);
   EXPECT_EQ(0, CompressDemands());
-  EXPECT_EQ(1, Counter("daemon_markdown_encoded_copy_missing"));
+  // Such a worker writes no coded copy: none is read or counted.
+  EXPECT_EQ(std::vector<GoogleString>({"null/0"}), CodedFactsCalls());
+  EXPECT_EQ(0, Counter("daemon_markdown_encoded_copy_missing"));
+  EXPECT_EQ(0u, abi_.serve_requests()[0].markdown_encoding);
+  EXPECT_NE(0u, abi_.serve_requests()[0].request_flags &
+                    kPsHtmlServeRequestIdentityOk);
 
   // Only gzip enabled: a missing br copy is never asked for.  Read on the
   // shared-config timer, not per request.
@@ -602,6 +610,108 @@ TEST_F(DaemonHtmlMarkdownCodingTest, AnUnaskedCodingIsNeverSent) {
   EXPECT_TRUE(port.emitted.empty());
 }
 
+// A copy the library did not admit (a stale or purged page) asks for no
+// coded copy and counts none missing, whatever the request preferred.
+TEST_F(DaemonHtmlMarkdownCodingTest, NotAdmittedNoDemand) {
+  Order({kPsMarkdownEncodingBr, kPsMarkdownEncodingIdentity});
+  Verdicts({FallThrough(6 /* stale */), FallThrough(9 /* purged */)});
+  std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
+  RecordingPort port;
+  DaemonHtmlServeResult r = engine->Serve(Request({"br"}), &port);
+  EXPECT_EQ(DaemonHtmlServeResult::kFallThrough, r.kind);
+  EXPECT_EQ("stale", r.reason);
+  r = engine->Serve(Request({"br"}), &port);
+  EXPECT_EQ("purged", r.reason);
+  EXPECT_EQ(0, CompressDemands());
+  EXPECT_EQ(0, Counter("daemon_markdown_encoded_copy_missing"));
+  EXPECT_EQ(1, Counter("daemon_markdown_fallthrough_stale"));
+  EXPECT_EQ(1, Counter("daemon_markdown_fallthrough_purged"));
+}
+
+// A verdict naming another coding than the copy read is never sent: br read
+// and bound, the verdict says gzip (br bytes would go out labelled gzip).
+TEST_F(DaemonHtmlMarkdownCodingTest, AVerdictForAnotherCodingIsNeverSent) {
+  Put(kPsSentinelMarkdownBr, kBr);
+  abi_.mutable_injection()->coded_bits[kPsMarkdownEncodingBr] =
+      kPsHtmlFactsBrCopyBound;
+  Order({kPsMarkdownEncodingBr, kPsMarkdownEncodingIdentity});
+  Verdicts({ServeIn(kPsMarkdownEncodingGzip)});
+  std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
+  RecordingPort port;
+  const DaemonHtmlServeResult r = engine->Serve(Request({"br, gzip"}), &port);
+  EXPECT_EQ(DaemonHtmlServeResult::kFallThrough, r.kind);
+  EXPECT_EQ("other", r.reason);
+  EXPECT_TRUE(port.emitted.empty());
+  EXPECT_EQ(0, Counter("daemon_markdown_served"));
+}
+
+// The coding asked for, but its copy was never read (missing): never sent.
+TEST_F(DaemonHtmlMarkdownCodingTest, AVerdictForAnUnreadCopyIsNeverSent) {
+  Order({kPsMarkdownEncodingBr, kPsMarkdownEncodingIdentity});
+  Verdicts({ServeIn(kPsMarkdownEncodingBr)});
+  std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
+  RecordingPort port;
+  const DaemonHtmlServeResult r = engine->Serve(Request({"br"}), &port);
+  EXPECT_EQ(DaemonHtmlServeResult::kFallThrough, r.kind);
+  EXPECT_EQ("other", r.reason);
+  EXPECT_TRUE(port.emitted.empty());
+}
+
+// A demand whose send failed is asked again by the next request, and once
+// it went out, never again.
+TEST_F(DaemonHtmlMarkdownCodingTest, AFailedDemandIsAskedAgain) {
+  Order({kPsMarkdownEncodingBr, kPsMarkdownEncodingIdentity});
+  abi_.mutable_injection()->verdict = ServeIn(kPsMarkdownEncodingIdentity);
+  std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
+  RecordingPort port;
+  volume_.notify_rc = 2;  // PS_ERR_IO
+  engine->Serve(Request({"br"}), &port);
+  EXPECT_EQ(1, CompressDemands());  // tried
+  EXPECT_EQ(0, Counter("daemon_markdown_compress_demand_sent"));
+  EXPECT_EQ(0u, demands_.size());
+  volume_.notify_rc = kPsOk;
+  engine->Serve(Request({"br"}), &port);
+  EXPECT_EQ(2, CompressDemands());
+  EXPECT_EQ(1, Counter("daemon_markdown_compress_demand_sent"));
+  engine->Serve(Request({"br"}), &port);
+  EXPECT_EQ(2, CompressDemands());
+}
+
+// Nothing the request accepts is a coding this module reads (a value a
+// later library might return): never the plain copy, ENCODING_NONE.
+TEST_F(DaemonHtmlMarkdownCodingTest, AnUnknownCodingAloneIsEncodingNone) {
+  Order({7});
+  Verdicts({FallThrough(kNoAcceptableEncoding)});
+  std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
+  RecordingPort port;
+  const DaemonHtmlServeResult r = engine->Serve(Request({"zstd"}), &port);
+  EXPECT_EQ("no_acceptable_encoding", r.reason);
+  ASSERT_EQ(1u, abi_.serve_requests().size());
+  EXPECT_NE(0u, abi_.serve_requests()[0].request_flags &
+                    kPsHtmlServeRequestEncodingNone);
+}
+
+// A coded answer carries the plain copy's tag and bytes for a port that
+// must send the plain copy instead, and such an answer counts as plain.
+TEST_F(DaemonHtmlMarkdownCodingTest, APortMaySendThePlainCopyInstead) {
+  Put(kPsSentinelMarkdownGzip, kGzip);
+  abi_.mutable_injection()->coded_bits[kPsMarkdownEncodingGzip] =
+      kPsHtmlFactsGzipCopyBound;
+  Order({kPsMarkdownEncodingGzip, kPsMarkdownEncodingIdentity});
+  Verdicts({ServeIn(kPsMarkdownEncodingGzip)});
+  std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
+  RecordingPort port;
+  port.replaced = true;
+  const DaemonHtmlServeResult r = engine->Serve(Request({"gzip"}), &port);
+  ASSERT_EQ(DaemonHtmlServeResult::kFinal, r.kind);
+  EXPECT_EQ(kGzip, r.body);
+  EXPECT_EQ(kPlain, r.plain_body);
+  EXPECT_EQ(kPlainTag, r.plain_etag);
+  EXPECT_EQ(1, Counter("daemon_markdown_coded_fallback"));
+  EXPECT_EQ(1, Counter("daemon_markdown_served_identity"));
+  EXPECT_EQ(0, Counter("daemon_markdown_served_gzip"));
+}
+
 // The demand set: each key once, the oldest forgotten first.
 TEST(DaemonMarkdownCompressDemandsTest, OncePerKeyBounded) {
   DaemonMarkdownCompressDemands demands(2);
@@ -612,6 +722,12 @@ TEST(DaemonMarkdownCompressDemandsTest, OncePerKeyBounded) {
   EXPECT_EQ(2u, demands.size());
   EXPECT_TRUE(demands.Admit("a"));
   EXPECT_FALSE(demands.Admit("c"));
+  demands.Forget("c");
+  EXPECT_EQ(1u, demands.size());
+  EXPECT_TRUE(demands.Admit("c"));
+  // A long key costs a digest, not its length.
+  EXPECT_TRUE(demands.Admit(GoogleString(100000, 'x')));
+  EXPECT_FALSE(demands.Admit(GoogleString(100000, 'x')));
   EXPECT_EQ(4096u, DaemonMarkdownCompressDemands::kDefaultCapacity);
 }
 

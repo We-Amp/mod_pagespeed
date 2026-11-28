@@ -1,16 +1,15 @@
 # HTML cache: serving Markdown copies (`DaemonHtmlCache serve-variants`)
 
-`DaemonHtmlCache serve-variants` lets Apache and nginx keep a copy of each HTML
-page they serve and answer a request that prefers `text/markdown` with a
+`DaemonHtmlCache serve-variants` lets Apache, nginx and IIS keep a copy of each
+HTML page they serve and answer a request that prefers `text/markdown` with a
 Markdown copy of that page, at the same URL. Browsers, search engines and every
 request that does not ask for Markdown keep getting the HTML page.
 
 This is an opt-in feature. It does nothing unless every step in "Turn it on"
 is done, and `off` turns it off again at any time.
 
-IIS does not serve Markdown yet. There, `serve-variants` runs as `report-only`
-and no client sees a change. Envoy counts HTML responses as
-`daemon_html_unavailable` in either mode.
+On IIS the notes in the IIS section below apply. Envoy counts HTML responses
+as `daemon_html_unavailable` in either mode.
 
 ## What you need
 
@@ -180,6 +179,11 @@ Consequences to plan for:
   `DirectoryIndex` works: `/` served as `index.html` is stored and served.
 - A decoded path containing `?`, `#`, a space, a control byte or DEL is neither
   stored nor served.
+- A compressed copy is written as stored and never encoded again. A stage
+  outside the content filters that encodes it a second time is kept (both
+  codings are named, so the body still decodes) and counted in
+  `daemon_markdown_transport_conflict`, unless it applies the same coding the
+  copy is in, which is not detected.
 - Content filters (every output filter ahead of the protocol stage) do not run
   on a Markdown answer, so
   `mod_security` response-body scanning and `mod_substitute` do not see it.
@@ -197,6 +201,13 @@ Consequences to plan for:
   origin's. Two lines with different `max-age` values conflict, so the page
   keeps no lifetime and is never served as Markdown. Set the lifetime at the
   origin and do not add a `Cache-Control` line with `add_header`.
+- Body filters still run on a Markdown answer. When one would rewrite it
+  (`sub_filter`, `ssi`, `addition` or another filter that clears the length
+  for `text/markdown`), a request that prefers a compressed copy gets the plain
+  copy instead, with the plain copy's entity tag, so the filter sees text; it
+  counts `daemon_markdown_coded_fallback`. `charset` recoding never applies to
+  a compressed copy (nginx skips an encoded response). With `gunzip on` the
+  gzip copy reaches a client that accepts gzip unchanged.
 - A `proxy_hide_header` does not hide a `Set-Cookie`, `Cache-Control`, `Vary`
   or `Pragma` from the store decision.
 
@@ -248,12 +259,16 @@ All are on the statistics page and in the admin console's HTML cache panel.
 | `daemon_markdown_served`, `daemon_markdown_not_modified` | Markdown `200` and `304` answers. |
 | `daemon_markdown_served_br`, `daemon_markdown_served_gzip`, `daemon_markdown_served_identity` | Markdown `200` answers by the coding sent (C API 1.16 libraries). |
 | `daemon_markdown_encoded_copy_missing`, `daemon_markdown_encoded_copy_unbound`, `daemon_markdown_compress_demand_sent` | Compressed copies a request preferred that were not stored yet or were made from an earlier copy, and the requests to the optimizer to write them. |
+| `daemon_markdown_coded_fallback` | Compressed answers sent as the plain copy because a body filter would have rewritten them (nginx). |
 | `daemon_markdown_fallthrough_<reason>` | Requests that preferred Markdown and got HTML, by reason (for example `absent`, `stale`, `withheld`, `url_disagree`, `request_header`, `no_acceptable_encoding`). |
 | `daemon_html_sidecar_write_failed`, `daemon_html_epoch_write_failed`, `daemon_html_purge_remove_failed` | Failures to investigate. |
 | `daemon_markdown_served_without_preference`, `daemon_markdown_transport_conflict` | Should stay 0. |
 
 ## IIS
 
-IIS does not serve Markdown copies yet. `DaemonHtmlCache serve-variants` is
-accepted there and runs as `report-only`; the page evaluation and decision log
-work as described in the changelog for `report-only`.
+`DaemonHtmlCache serve-variants` serves Markdown copies on IIS as on Apache and
+nginx, with the IIS notes in the changelog (host names from the site's
+bindings, plain URL spellings only, the `PageSpeedFinalView` module entry).
+With an optimizer library that publishes C API 1.16 the compressed copies are
+sent there too, with IIS's dynamic compression off for the answer; the
+optimizer for Windows has to be built at that C API for it.

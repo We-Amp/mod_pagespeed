@@ -604,15 +604,34 @@ DaemonHtmlByteBudget* ProcessDaemonHtmlByteBudget() {
   return budget;
 }
 
+GoogleString DaemonMarkdownCompressDemands::Digest(const GoogleString& key) {
+  uint8_t digest[SHA256_DIGEST_LENGTH];
+  SHA256(reinterpret_cast<const uint8_t*>(key.data()), key.size(), digest);
+  return GoogleString(reinterpret_cast<const char*>(digest), sizeof(digest));
+}
+
 bool DaemonMarkdownCompressDemands::Admit(const GoogleString& key) {
+  const GoogleString digest = Digest(key);
   std::lock_guard<std::mutex> lock(mutex_);
-  if (capacity_ == 0 || !keys_.insert(key).second) return false;
-  order_.push_back(key);
+  if (capacity_ == 0 || !keys_.insert(digest).second) return false;
+  order_.push_back(digest);
   while (order_.size() > capacity_) {
     keys_.erase(order_.front());
     order_.pop_front();
   }
   return true;
+}
+
+void DaemonMarkdownCompressDemands::Forget(const GoogleString& key) {
+  const GoogleString digest = Digest(key);
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (keys_.erase(digest) == 0) return;
+  for (auto it = order_.begin(); it != order_.end(); ++it) {
+    if (*it == digest) {
+      order_.erase(it);
+      break;
+    }
+  }
 }
 
 size_t DaemonMarkdownCompressDemands::size() const {
@@ -671,6 +690,7 @@ struct DaemonHtmlEngine::Counters {
             s->GetVariable("daemon_markdown_encoded_copy_unbound")),
         compress_demand_sent(
             s->GetVariable("daemon_markdown_compress_demand_sent")),
+        coded_fallback(s->GetVariable("daemon_markdown_coded_fallback")),
         evaluated(s->GetVariable("daemon_html_evaluated")),
         would_store(s->GetVariable("daemon_html_would_store")),
         would_store_no_notify(
@@ -722,6 +742,8 @@ struct DaemonHtmlEngine::Counters {
   Variable* encoded_copy_missing;
   Variable* encoded_copy_unbound;
   Variable* compress_demand_sent;
+  // Coded answers a port replaced by the plain copy (a body filter).
+  Variable* coded_fallback;
   std::map<GoogleString, Variable*> fallthrough;
   // The report's, in every mode.
   Variable* evaluated;
@@ -1975,6 +1997,16 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
       // the plain one is read.
     }
     // A malformed call (-1) reads as the plain copy alone.
+    int codings = -1;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      codings = markdown_codings_;
+    }
+    // A worker that publishes no codings writes no coded copy: none is read.
+    if (codings < 0) coded_order.clear();
+    // Nothing the request accepts is a coding this module reads: never the
+    // plain copy for a request that refused it.
+    if (!identity_ok && coded_order.empty()) encoding_none = true;
   }
 
   const int64 now_s = deps_.timer->NowMs() / Timer::kSecondMs;
@@ -2173,6 +2205,18 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
   }
   const uint8_t* markdown = nullptr;
   size_t markdown_len = 0;
+  const uint8_t* plain = nullptr;
+  size_t plain_len = 0;
+  if (coded_body &&
+      (reads.markdown == nullptr ||
+       abi->ReadContent(reads.markdown, &plain, &plain_len) != kPsOk ||
+       plain_len == 0)) {
+    // The plain copy stands behind every coded answer (a port may send it
+    // instead): without it nothing is sent.
+    result.reason = "absent";
+    CountFallThrough(result.reason);
+    return result;
+  }
   void* const body_read = coded_body ? coded_read : reads.markdown;
   if (body_read == nullptr ||
       abi->ReadContent(body_read, &markdown, &markdown_len) != kPsOk ||
@@ -2247,6 +2291,20 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
     if (!head) {
       result.body.assign(reinterpret_cast<const char*>(markdown), markdown_len);
     }
+    if (coded_body) {
+      char plain_etag[kPsHtmlMarkdownEtagChars + 8] = {0};
+      size_t plain_etag_len = 0;
+      if (abi->HtmlMarkdownEtagCoded(stored.binding_hash, stored.markdown_hash,
+                                     kPsMarkdownEncodingIdentity, plain_etag,
+                                     sizeof(plain_etag), &plain_etag_len) == 0 &&
+          plain_etag_len > 0) {
+        result.plain_etag = plain_etag;
+      }
+      if (!head) {
+        result.plain_body.assign(reinterpret_cast<const char*>(plain),
+                                 plain_len);
+      }
+    }
   }
   port->MarkNoCompress();
   if (!port->ClearAndEmitAllowlisted(result, head)) {
@@ -2255,22 +2313,27 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
     CountFallThrough(fall_through.reason);
     return fall_through;
   }
+  // A port that sent the plain copy in place of the coded one.
+  const bool replaced =
+      coded_body && !not_modified && port->CodedAnswerReplacedByPlain();
+  const int sent_coding = replaced ? kPsMarkdownEncodingIdentity : coding;
+  if (replaced) counters_->coded_fallback->Add(1);
   if (not_modified) {
     counters_->markdown_not_modified->Add(1);
   } else {
     counters_->markdown_served->Add(1);
     if (coded_set) {
-      (coding == kPsMarkdownEncodingBr     ? counters_->served_br
-       : coding == kPsMarkdownEncodingGzip ? counters_->served_gzip
-                                           : counters_->served_identity)
+      (sent_coding == kPsMarkdownEncodingBr     ? counters_->served_br
+       : sent_coding == kPsMarkdownEncodingGzip ? counters_->served_gzip
+                                                : counters_->served_identity)
           ->Add(1);
     }
   }
   LogServeSide("served_markdown", "fresh", facts.host, facts.path,
                result.status, not_modified || head ? 0 : markdown_len, 0,
-               coding == kPsMarkdownEncodingBr     ? "markdown_br"
-               : coding == kPsMarkdownEncodingGzip ? "markdown_gzip"
-                                                   : "markdown",
+               sent_coding == kPsMarkdownEncodingBr     ? "markdown_br"
+               : sent_coding == kPsMarkdownEncodingGzip ? "markdown_gzip"
+                                                        : "markdown",
                verdict.age_s);
   return result;
 }
@@ -2282,7 +2345,8 @@ void DaemonHtmlEngine::DemandCompress(const DaemonHtmlRequestFacts& facts,
       deps_.compress_demands != nullptr
           ? deps_.compress_demands
           : ProcessDaemonMarkdownCompressDemands();
-  if (!demands->Admit(StrCat(config_.site, "\n", url))) return;
+  const GoogleString key = StrCat(config_.site, "\n", url);
+  if (!demands->Admit(key)) return;
   ModuleNotifyInput input;
   input.url = url;
   input.hostname = hostname;
@@ -2295,11 +2359,14 @@ void DaemonHtmlEngine::DemandCompress(const DaemonHtmlRequestFacts& facts,
   input.markdown_compress = true;
   input.agent_request = true;
   ModuleNotifyParams built;
-  if (!BuildModuleNotifyParams(*deps_.substrate.abi, input, &built)) return;
-  if (deps_.substrate.abi->NotifyWorker(deps_.substrate.notify_socket.c_str(),
+  if (BuildModuleNotifyParams(*deps_.substrate.abi, input, &built) &&
+      deps_.substrate.abi->NotifyWorker(deps_.substrate.notify_socket.c_str(),
                                         &built.params()) == kPsOk) {
     counters_->compress_demand_sent->Add(1);
+    return;
   }
+  // Not sent (the worker restarting, say): a later request asks again.
+  demands->Forget(key);
 }
 
 void DaemonHtmlEngine::NoteTransportConflict() {
