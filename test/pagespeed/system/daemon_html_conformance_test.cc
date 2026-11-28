@@ -1518,7 +1518,11 @@ class ConformanceAbi : public InjectedVerdictDaemonAbi {
       return stub_->HtmlUnsafeMethodInvalidates(method, status);
     }
     if (!HasHtmlServe15Set()) return 0;
-    return Pop("ps_html_unsafe_method_invalidates").get("value", 0).asInt();
+    // The last verdict holds for every later call, so a step of many unsafe
+    // requests (unsafe_many) needs one.
+    const Json::Value v = Pop("ps_html_unsafe_method_invalidates");
+    if (!v.isNull()) last_unsafe_invalidates_ = v.get("value", 0).asInt();
+    return last_unsafe_invalidates_;
   }
 
   // Every decision line the engine queues: formatted as the library would,
@@ -1628,6 +1632,7 @@ class ConformanceAbi : public InjectedVerdictDaemonAbi {
   mutable std::vector<GoogleString> decision_lines_;
   std::function<void(const GoogleString&)> on_remove_;
   mutable int store_classify_calls_ = 0;
+  mutable int last_unsafe_invalidates_ = 0;
   int minor_;
   uint64_t policy_stamp_;
   std::vector<GoogleString> missing_;
@@ -3451,8 +3456,7 @@ TEST(DaemonHtmlEngineRowsMeta, EveryPendingRowRunsAndStillFails) {
 // changes this set in the same change, and a declaration whose signature the
 // runner cannot call fails here instead of reading as "not declared yet".
 TEST(DaemonHtmlEngineRowsMeta, ServePathEntryPointsStillUndeclared) {
-  const std::set<GoogleString> kExpectedUndeclared = {
-      "served_from_cache", "internal", "OnUnsafeRequest"};
+  const std::set<GoogleString> kExpectedUndeclared = {};
   std::set<GoogleString> undeclared;
   for (const auto& [name, state] :
        EntryPointStates<DaemonHtmlRequestFacts, DaemonHtmlEngine>()) {
@@ -3562,8 +3566,8 @@ TEST(DaemonHtmlEngineRowsMeta, EveryEngineRowIsRegistered) {
   EXPECT_EQ(engine_rows, kRegisteredRows);
   // Pinned, so a row cannot leave the run unnoticed: marking a row pending,
   // or adding one, changes these in the same change.
-  EXPECT_EQ(326, kRegisteredRows);
-  EXPECT_EQ(151, pending_rows);
+  EXPECT_EQ(477, kRegisteredRows);
+  EXPECT_EQ(0, pending_rows);
   std::printf("engine rows: %d registered, %d pending\n", kRegisteredRows,
               pending_rows);
 }

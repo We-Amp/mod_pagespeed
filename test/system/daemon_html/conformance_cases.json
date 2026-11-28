@@ -19813,7 +19813,6 @@
     {
       "id": "m2-as-origin-headers-exact",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "html hit: the as-origin result, exactly",
       "engine": {
         "config": {
@@ -19917,7 +19916,6 @@
     {
       "id": "m2-as-origin-sidecar-order-kept",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "html hit: header block lines in stored order",
       "engine": {
         "config": {
@@ -19994,7 +19992,6 @@
     {
       "id": "m2-as-origin-cc-expires-literal",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "html hit: the origin Cache-Control and Expires lines come back verbatim",
       "engine": {
         "config": {
@@ -20067,6 +20064,18 @@
                   "Expires": {
                     "count": 1,
                     "value": "Fri, 27 Nov 2026 12:05:00 GMT"
+                  },
+                  "Content-Type": {
+                    "count": 1,
+                    "value": "text/html; charset=utf-8"
+                  },
+                  "Content-Length": {
+                    "count": 1,
+                    "value": "$len:page"
+                  },
+                  "Age": {
+                    "count": 1,
+                    "value": "10"
                   }
                 }
               }
@@ -20078,7 +20087,6 @@
     {
       "id": "m2-as-origin-head-no-body",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "html hit: HEAD gets the headers of GET and no body",
       "engine": {
         "config": {
@@ -20176,7 +20184,6 @@
     {
       "id": "m2-as-origin-age-from-verdict",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "html hit: Age is the verdict's age",
       "engine": {
         "config": {
@@ -20242,6 +20249,22 @@
                 "kind": "as_origin",
                 "status": 200,
                 "headers_exact": {
+                  "X-Frame-Options": {
+                    "count": 1,
+                    "value": "DENY"
+                  },
+                  "Cache-Control": {
+                    "count": 1,
+                    "value": "max-age=300"
+                  },
+                  "Content-Type": {
+                    "count": 1,
+                    "value": "text/html; charset=utf-8"
+                  },
+                  "Content-Length": {
+                    "count": 1,
+                    "value": "$len:page"
+                  },
                   "Age": {
                     "count": 1,
                     "value": "47"
@@ -20256,7 +20279,6 @@
     {
       "id": "m2-emit-fails-falls-through",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "html hit: an emit the port refuses is a miss",
       "engine": {
         "config": {
@@ -20386,7 +20408,6 @@
     {
       "id": "m2-hit-records-nothing",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "html hit: nothing is recorded after a hit",
       "engine": {
         "config": {
@@ -20523,7 +20544,6 @@
     {
       "id": "m2-hit-sends-no-notify",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "html hit: no notification after a hit",
       "engine": {
         "config": {
@@ -20623,7 +20643,6 @@
     {
       "id": "m2-begin-recording-refused-when-served-from-cache",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "html hit: a recording start on a served request is refused and counted",
       "engine": {
         "config": {
@@ -20690,7 +20709,6 @@
     {
       "id": "m2-begin-recording-allowed-on-a-miss",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "html hit: a recording start on a request not served from the cache runs",
       "engine": {
         "config": {
@@ -20732,7 +20750,6 @@
     {
       "id": "m2-second-classify-after-absent",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "html fallback: one second classify after the Markdown reason absent",
       "engine": {
         "config": {
@@ -20831,7 +20848,6 @@
     {
       "id": "m2-second-classify-after-withheld",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "html fallback: one second classify after the Markdown reason withheld",
       "engine": {
         "config": {
@@ -20930,7 +20946,6 @@
     {
       "id": "m2-second-classify-after-binding-stale",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "html fallback: one second classify after the Markdown reason binding_stale",
       "engine": {
         "config": {
@@ -21029,7 +21044,6 @@
     {
       "id": "m2-second-classify-after-no-transform",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "html fallback: one second classify after the Markdown reason no_transform",
       "engine": {
         "config": {
@@ -21128,7 +21142,6 @@
     {
       "id": "m2-second-classify-after-parent-stale",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "html fallback: one second classify after the Markdown reason parent_stale",
       "engine": {
         "config": {
@@ -21227,7 +21240,6 @@
     {
       "id": "m2-second-classify-after-purged",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "html fallback: one second classify after the Markdown reason purged",
       "engine": {
         "config": {
@@ -21326,7 +21338,6 @@
     {
       "id": "m2-second-classify-after-client-no-cache",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "html fallback: one second classify after the Markdown reason client_no_cache",
       "engine": {
         "config": {
@@ -21425,7 +21436,6 @@
     {
       "id": "m2-second-classify-after-range",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "html fallback: one second classify after the Markdown reason range",
       "engine": {
         "config": {
@@ -21524,7 +21534,6 @@
     {
       "id": "m2-second-classify-after-credentialed",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "html fallback: one second classify after the Markdown reason credentialed",
       "engine": {
         "config": {
@@ -21623,7 +21632,6 @@
     {
       "id": "m2-second-classify-after-legacy-entry",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "html fallback: one second classify after the Markdown reason legacy_entry",
       "engine": {
         "config": {
@@ -21722,7 +21730,6 @@
     {
       "id": "m2-second-classify-after-policy-mismatch",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "html fallback: one second classify after the Markdown reason policy_mismatch",
       "engine": {
         "config": {
@@ -21821,7 +21828,6 @@
     {
       "id": "m2-second-classify-after-headers-not-reproducible",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "html fallback: one second classify after the Markdown reason headers_not_reproducible",
       "engine": {
         "config": {
@@ -21920,7 +21926,6 @@
     {
       "id": "m2-second-classify-after-stale",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "html fallback: one second classify after the Markdown reason stale",
       "engine": {
         "config": {
@@ -22019,7 +22024,6 @@
     {
       "id": "m2-second-classify-after-needs-validation",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "html fallback: one second classify after the Markdown reason needs_validation",
       "engine": {
         "config": {
@@ -22118,7 +22122,6 @@
     {
       "id": "m2-second-classify-after-sidecar-missing",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "html fallback: one second classify after the Markdown reason sidecar_missing",
       "engine": {
         "config": {
@@ -22217,7 +22220,6 @@
     {
       "id": "m2-second-classify-after-cors",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "html fallback: one second classify after the Markdown reason cors",
       "engine": {
         "config": {
@@ -22316,7 +22318,6 @@
     {
       "id": "m2-second-classify-verdict-is-the-library-s",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "html fallback: the second verdict decides, serving the page",
       "engine": {
         "config": {
@@ -22580,7 +22581,6 @@
     {
       "id": "m2-html-request-classified-once",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "html path: a request without a Markdown preference",
       "engine": {
         "config": {
@@ -22680,8 +22680,7 @@
     {
       "id": "m2-html-only-path-reads",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
-      "why": "html path: reads only the page and its header block",
+      "why": "html path: reads only the page and its header block, never the Markdown copy or its marker",
       "engine": {
         "config": {
           "mode": "serve-cached-html",
@@ -22717,6 +22716,14 @@
               ["X-Frame-Options", "DENY"],
               ["Cache-Control", "max-age=300"]
             ]
+          },
+          {
+            "kind": "markdown",
+            "url": "https://www.example.test/page"
+          },
+          {
+            "kind": "withheld",
+            "url": "https://www.example.test/page"
           }
         ],
         "verdicts": [
@@ -22744,13 +22751,23 @@
             "expect": {
               "calls": [
                 {
-                  "fn": "ps_cache_read_best_site"
+                  "fn": "ps_cache_read_alternate_site",
+                  "args": {"alternate": "original"}
                 },
                 {
                   "fn": "ps_headers_sidecar_read"
+                },
+                {
+                  "fn": "ps_html_stored_facts_from_reads",
+                  "args": {
+                    "original": true,
+                    "markdown": false,
+                    "withheld": false,
+                    "block": true
+                  }
                 }
               ],
-              "calls_exclude": ["ps_cache_read_alternate_site"]
+              "calls_exclude": ["ps_cache_read_best_site"]
             }
           }
         ]
@@ -22759,7 +22776,6 @@
     {
       "id": "m2-passes-scope-agents-class-1",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "request: scope agents, agent class 1, cap and fresh-only passed",
       "engine": {
         "config": {
@@ -22845,7 +22861,6 @@
     {
       "id": "m2-passes-scope-agents-class-2",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "request: scope agents, agent class 2, cap and fresh-only passed",
       "engine": {
         "config": {
@@ -22931,7 +22946,6 @@
     {
       "id": "m2-passes-scope-agents-class-3",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "request: scope agents, agent class 3, cap and fresh-only passed",
       "engine": {
         "config": {
@@ -23017,7 +23031,6 @@
     {
       "id": "m2-passes-scope-all-class-0",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "request: scope all, agent class 0, cap and fresh-only passed",
       "engine": {
         "config": {
@@ -23103,7 +23116,6 @@
     {
       "id": "m2-passes-scope-all-class-1",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "request: scope all, agent class 1, cap and fresh-only passed",
       "engine": {
         "config": {
@@ -23189,7 +23201,6 @@
     {
       "id": "m2-passes-scope-all-class-2",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "request: scope all, agent class 2, cap and fresh-only passed",
       "engine": {
         "config": {
@@ -23275,7 +23286,6 @@
     {
       "id": "m2-passes-scope-all-class-3",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "request: scope all, agent class 3, cap and fresh-only passed",
       "engine": {
         "config": {
@@ -23361,7 +23371,6 @@
     {
       "id": "m2-passes-conditional-if-none-match",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "request: an arrived if none match sets conditional",
       "engine": {
         "config": {
@@ -23443,7 +23452,6 @@
     {
       "id": "m2-passes-conditional-if-none-match-module-tag",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "request: an arrived if none match module tag sets conditional",
       "engine": {
         "config": {
@@ -23525,7 +23533,6 @@
     {
       "id": "m2-passes-conditional-if-modified-since",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "request: an arrived if modified since sets conditional",
       "engine": {
         "config": {
@@ -23607,7 +23614,6 @@
     {
       "id": "m2-passes-conditional-if-match",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "request: an arrived if match sets conditional",
       "engine": {
         "config": {
@@ -23689,7 +23695,6 @@
     {
       "id": "m2-passes-conditional-if-unmodified-since",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "request: an arrived if unmodified since sets conditional",
       "engine": {
         "config": {
@@ -23771,7 +23776,6 @@
     {
       "id": "m2-passes-explicit-public",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "request: the explicit-public policy bit",
       "engine": {
         "config": {
@@ -23849,7 +23853,6 @@
     {
       "id": "m2-passes-cap-zero",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "request: a cap of 0 is sent as no cap",
       "engine": {
         "config": {
@@ -23927,7 +23930,6 @@
     {
       "id": "m2-passes-cap-default",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "request: the default cap is 3600 seconds",
       "engine": {
         "config": {
@@ -24000,7 +24002,6 @@
     {
       "id": "m2-passes-entry-stamp",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "request: the entry's stamp reaches the classifier",
       "engine": {
         "config": {
@@ -24084,7 +24085,6 @@
     {
       "id": "m2-scope-pregate-skips-reads",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "scope: an unknown agent under agents reads nothing",
       "engine": {
         "config": {
@@ -24154,7 +24154,6 @@
     {
       "id": "m2-scope-pregate-not-under-all",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "scope: under all an unknown agent is read",
       "engine": {
         "config": {
@@ -24218,7 +24217,8 @@
             "expect": {
               "calls": [
                 {
-                  "fn": "ps_cache_read_best_site"
+                  "fn": "ps_cache_read_alternate_site",
+                  "args": {"alternate": "original"}
                 },
                 {
                   "fn": "ps_html_serve_classify"
@@ -24232,7 +24232,6 @@
     {
       "id": "m2-scope-pregate-markdown-preference-reads",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "scope: a Markdown preference is read under agents",
       "engine": {
         "config": {
@@ -24305,7 +24304,8 @@
             "expect": {
               "calls": [
                 {
-                  "fn": "ps_cache_read_best_site"
+                  "fn": "ps_cache_read_alternate_site",
+                  "args": {"alternate": "original"}
                 }
               ]
             }
@@ -24316,7 +24316,6 @@
     {
       "id": "m2-scope-pregate-known-agent-reads",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "scope: a known agent is read under agents",
       "engine": {
         "config": {
@@ -24380,7 +24379,8 @@
             "expect": {
               "calls": [
                 {
-                  "fn": "ps_cache_read_best_site"
+                  "fn": "ps_cache_read_alternate_site",
+                  "args": {"alternate": "original"}
                 }
               ]
             }
@@ -24391,7 +24391,6 @@
     {
       "id": "m2-shadow-sample-reads",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "scope: one in 16 pre-gated requests reads as scope all",
       "engine": {
         "config": {
@@ -24480,7 +24479,6 @@
     {
       "id": "m2-shadow-sample-fallthrough-reason",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "scope: a sampled fall-through counts its reason",
       "engine": {
         "config": {
@@ -24555,7 +24553,6 @@
     {
       "id": "m2-shadow-body-differs",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "scope: a sampled would-serve page that the origin changed",
       "engine": {
         "config": {
@@ -24674,7 +24671,6 @@
     {
       "id": "m2-shadow-body-same",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "scope: a sampled would-serve page the origin kept",
       "engine": {
         "config": {
@@ -24793,7 +24789,6 @@
     {
       "id": "m2-unexpected-validate",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "defence: a validate verdict with fresh-only is a fall-through",
       "engine": {
         "config": {
@@ -24869,7 +24864,6 @@
     {
       "id": "m2-forbidden-header-refused-set-cookie",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "defence: a header block holding Set-Cookie is never emitted",
       "engine": {
         "config": {
@@ -24947,7 +24941,6 @@
     {
       "id": "m2-forbidden-header-refused-etag",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "defence: a header block holding ETag is never emitted",
       "engine": {
         "config": {
@@ -25025,7 +25018,6 @@
     {
       "id": "m2-forbidden-header-refused-last-modified",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "defence: a header block holding Last-Modified is never emitted",
       "engine": {
         "config": {
@@ -25103,7 +25095,6 @@
     {
       "id": "m2-credentialed-serve-refused-blocking-cookie",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "defence: a serve the credentialed policy forbids is refused at emit (blocking-cookie)",
       "engine": {
         "config": {
@@ -25187,7 +25178,6 @@
     {
       "id": "m2-credentialed-serve-refused-authorization",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "defence: a serve the credentialed policy forbids is refused at emit (authorization)",
       "engine": {
         "config": {
@@ -25270,7 +25260,6 @@
     {
       "id": "m2-credentialed-serve-refused-authenticated-user",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "defence: a serve the credentialed policy forbids is refused at emit (authenticated-user)",
       "engine": {
         "config": {
@@ -25353,7 +25342,6 @@
     {
       "id": "m2-credentialed-serve-refused-proxy-authorization",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "defence: a serve the credentialed policy forbids is refused at emit (proxy-authorization)",
       "engine": {
         "config": {
@@ -25710,7 +25698,6 @@
     {
       "id": "m2-credentialed-serve-refused-entry-not-anonymous",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "defence: a serve the credentialed policy forbids is refused at emit (entry-not-anonymous)",
       "engine": {
         "config": {
@@ -25787,7 +25774,6 @@
     {
       "id": "m2-credentialed-serve-refused-entry-anonymous-without-v2",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "defence: a serve the credentialed policy forbids is refused at emit (entry-anonymous-without-v2)",
       "engine": {
         "config": {
@@ -25864,7 +25850,6 @@
     {
       "id": "m2-credentialed-serve-refused-stamp-mismatch",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "defence: a serve the credentialed policy forbids is refused at emit (stamp-mismatch)",
       "engine": {
         "config": {
@@ -26111,7 +26096,6 @@
     {
       "id": "m2-degrade-minor-14",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "degrade: a library below 1.15 serves variants only",
       "engine": {
         "config": {
@@ -26213,7 +26197,6 @@
     {
       "id": "m2-degrade-1-15-symbol-missing",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "degrade: a missing 1.15 symbol serves variants only",
       "engine": {
         "config": {
@@ -26316,7 +26299,6 @@
     {
       "id": "m2-purged-hit-misses",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "fence: a URL purge makes the next HTML request a miss",
       "engine": {
         "config": {
@@ -26461,7 +26443,6 @@
     {
       "id": "m2-epoch-fenced-hit-misses",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "fence: a purge epoch after the insert time fences hits",
       "engine": {
         "config": {
@@ -26547,7 +26528,6 @@
     {
       "id": "m2-race-url-before-send-html-hit",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
         "config": {
@@ -26675,7 +26655,6 @@
     {
       "id": "m2-race-url-before-send-no-recheck-html-hit",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
         "config": {
@@ -26808,7 +26787,6 @@
     {
       "id": "m2-race-url-after-send-html-hit",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
         "config": {
@@ -26936,7 +26914,6 @@
     {
       "id": "m2-race-url-after-send-no-recheck-html-hit",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
         "config": {
@@ -27069,7 +27046,6 @@
     {
       "id": "m2-race-url-after-commit-html-hit",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
         "config": {
@@ -27197,7 +27173,6 @@
     {
       "id": "m2-race-url-after-commit-no-recheck-html-hit",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
         "config": {
@@ -27330,7 +27305,6 @@
     {
       "id": "m2-race-url-after-recheck-html-hit",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
         "config": {
@@ -27457,7 +27431,6 @@
     {
       "id": "m2-race-url-after-recheck-no-recheck-html-hit",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
         "config": {
@@ -27590,7 +27563,6 @@
     {
       "id": "m2-race-global-before-send-html-hit",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
         "config": {
@@ -27718,7 +27690,6 @@
     {
       "id": "m2-race-global-before-send-no-recheck-html-hit",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
         "config": {
@@ -27851,7 +27822,6 @@
     {
       "id": "m2-race-global-after-send-html-hit",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
         "config": {
@@ -27979,7 +27949,6 @@
     {
       "id": "m2-race-global-after-send-no-recheck-html-hit",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
         "config": {
@@ -28112,7 +28081,6 @@
     {
       "id": "m2-race-global-after-commit-html-hit",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
         "config": {
@@ -28240,7 +28208,6 @@
     {
       "id": "m2-race-global-after-commit-no-recheck-html-hit",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
         "config": {
@@ -28373,7 +28340,6 @@
     {
       "id": "m2-race-global-after-recheck-html-hit",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
         "config": {
@@ -28500,7 +28466,6 @@
     {
       "id": "m2-race-global-after-recheck-no-recheck-html-hit",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
         "config": {
@@ -28633,7 +28598,6 @@
     {
       "id": "m2-race-epoch-before-send-html-hit",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
         "config": {
@@ -28763,7 +28727,6 @@
     {
       "id": "m2-race-epoch-before-send-no-recheck-html-hit",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
         "config": {
@@ -28899,7 +28862,6 @@
     {
       "id": "m2-race-epoch-after-send-html-hit",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
         "config": {
@@ -29029,7 +28991,6 @@
     {
       "id": "m2-race-epoch-after-send-no-recheck-html-hit",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
         "config": {
@@ -29165,7 +29126,6 @@
     {
       "id": "m2-race-epoch-after-commit-html-hit",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
         "config": {
@@ -29295,7 +29255,6 @@
     {
       "id": "m2-race-epoch-after-commit-no-recheck-html-hit",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
         "config": {
@@ -29431,7 +29390,6 @@
     {
       "id": "m2-race-epoch-after-recheck-html-hit",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
         "config": {
@@ -29561,7 +29519,6 @@
     {
       "id": "m2-race-epoch-after-recheck-no-recheck-html-hit",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
         "config": {
@@ -29697,7 +29654,6 @@
     {
       "id": "m2-race-purge-before-send-not-fenced-html-hit",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
         "config": {
@@ -29811,7 +29767,6 @@
     {
       "id": "m2-race-same-second-is-a-miss-html-hit",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
         "config": {
@@ -29929,7 +29884,6 @@
     {
       "id": "m2-race-global-same-second-is-a-miss-html-hit",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
         "config": {
@@ -30050,7 +30004,6 @@
     {
       "id": "m2-race-visible-after-recheck-html-hit",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
         "config": {
@@ -30213,7 +30166,6 @@
     {
       "id": "m2-race-visible-after-recheck-no-recheck-html-hit",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "fence with hits: purge: capture-time fence",
       "engine": {
         "config": {
@@ -31741,7 +31693,6 @@
     {
       "id": "m2-cookie-blocking-no-read-mode3",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: a blocking cookie reads nothing and names the cookie, never its value",
       "engine": {
         "config": {
@@ -31893,7 +31844,6 @@
     {
       "id": "m2-cookie-ignorable-only-passes-no-cookie-flag-mode3",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: only ignorable cookies send no cookie flag",
       "engine": {
         "config": {
@@ -31980,7 +31930,6 @@
     {
       "id": "m2-auth-no-read-mode3",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: Authorization reads nothing",
       "engine": {
         "config": {
@@ -32051,7 +32000,6 @@
     {
       "id": "m2-authenticated-user-no-read-mode3",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: an authenticated user reads nothing",
       "engine": {
         "config": {
@@ -32118,7 +32066,6 @@
     {
       "id": "m2-request-header-no-read-mode3",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "unkeyed header: refused before any read",
       "engine": {
         "config": {
@@ -32273,7 +32220,6 @@
     {
       "id": "m2-path-no-read-mode3",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "deception path: refused before any read",
       "engine": {
         "config": {
@@ -32919,7 +32865,6 @@
     {
       "id": "m2-stamp-written-and-compared-mode3",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "policy stamp: written in the header block and sent on every classify",
       "engine": {
         "config": {
@@ -33637,7 +33582,6 @@
     {
       "id": "m2-restore-after-expiry",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "freshness: hits through a lifetime, then one re-store",
       "engine": {
         "config": {
@@ -36246,11 +36190,11 @@
       }
     },
     {
-      "id": "m2-html-request-not-judged-at-lookup",
+      "id": "m2-html-request-judged-at-lookup",
       "runners": [
         "engine"
       ],
-      "why": "html path: a request without a Markdown preference is not judged or counted at the lookup",
+      "why": "html path: a request without a Markdown preference is judged by the request policy before any read, and counted",
       "engine": {
         "config": {
           "mode": "serve-cached-html",
@@ -36264,7 +36208,14 @@
         "library": {
           "minor": 15
         },
-        "verdicts": [],
+        "verdicts": [
+          {
+            "fn": "ps_html_request_guard",
+            "reason": "request_header",
+            "header_index": 0,
+            "xfp": false
+          }
+        ],
         "steps": [
           {
             "kind": "serve",
@@ -36291,15 +36242,38 @@
               ]
             },
             "expect": {
+              "calls": [
+                {
+                  "fn": "ps_html_request_guard",
+                  "args": {
+                    "header_names": ["X-Forwarded-Host"]
+                  }
+                },
+                {
+                  "fn": "ps_html_classify_cookies",
+                  "args": {
+                    "cookie_lines": ["sid=abc12345"]
+                  }
+                }
+              ],
               "calls_exclude": [
-                "ps_html_request_guard",
-                "ps_html_classify_cookies",
                 "ps_cache_read_alternate_site",
+                "ps_headers_sidecar_read",
+                "ps_html_stored_facts_from_reads",
                 "ps_html_serve_classify"
               ],
+              "serve": {
+                "kind": "fall_through",
+                "reason": "request_header"
+              },
+              "decision_lines": {
+                "contains": ["\"detail\":\"X-Forwarded-Host\""],
+                "absent": ["abc12345", "attacker.example"]
+              },
               "counters": {
                 "daemon_html_refused_cookie_request": 0,
-                "daemon_html_refused_request_header": 0
+                "daemon_html_refused_request_header": 1,
+                "daemon_html_agent_html_requests": 1
               }
             }
           }
@@ -36865,7 +36839,6 @@
     {
       "id": "m2-fresh-body-changed-counted",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "freshness: a fresh entry re-recorded with another body",
       "engine": {
         "config": {
@@ -36958,7 +36931,6 @@
     {
       "id": "m2-unsafe-post-200-removes",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "invalidate: POST 200 fences first, then removes the key",
       "engine": {
         "config": {
@@ -37068,10 +37040,14 @@
                 {
                   "fn": "ps_html_serve_classify",
                   "args": {
-                    "stored.purged": true
+                    "stored.present": false
                   }
                 }
-              ]
+              ],
+              "serve": {
+                "kind": "fall_through"
+              },
+              "port_calls_exclude": ["EmitAsOrigin"]
             }
           }
         ]
@@ -37080,7 +37056,6 @@
     {
       "id": "m2-unsafe-put-removes",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "invalidate: PUT with a success status",
       "engine": {
         "config": {
@@ -37156,7 +37131,6 @@
     {
       "id": "m2-unsafe-delete-removes",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "invalidate: DELETE with a success status",
       "engine": {
         "config": {
@@ -37232,7 +37206,6 @@
     {
       "id": "m2-unsafe-patch-removes",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "invalidate: PATCH with a success status",
       "engine": {
         "config": {
@@ -37308,7 +37281,6 @@
     {
       "id": "m2-unsafe-303-location-removes-both",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "invalidate: a 303 with a same-host Location removes both keys",
       "engine": {
         "config": {
@@ -37386,7 +37358,6 @@
     {
       "id": "m2-unsafe-content-location-same-host",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "invalidate: a same-host Content-Location is removed too",
       "engine": {
         "config": {
@@ -37464,7 +37435,6 @@
     {
       "id": "m2-unsafe-location-other-host-ignored",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "invalidate: a Location on another host is ignored",
       "engine": {
         "config": {
@@ -37538,7 +37508,6 @@
     {
       "id": "m2-unsafe-location-other-scheme-ignored",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "invalidate: a Location on another scheme is ignored",
       "engine": {
         "config": {
@@ -37612,7 +37581,6 @@
     {
       "id": "m2-unsafe-location-limit-two",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "invalidate: at most two extra targets",
       "engine": {
         "config": {
@@ -37696,7 +37664,6 @@
     {
       "id": "m2-unsafe-400-no-remove",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "invalidate: POST with status 400 removes nothing",
       "engine": {
         "config": {
@@ -37769,7 +37736,6 @@
     {
       "id": "m2-unsafe-404-no-remove",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "invalidate: POST with status 404 removes nothing",
       "engine": {
         "config": {
@@ -37842,7 +37808,6 @@
     {
       "id": "m2-unsafe-409-no-remove",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "invalidate: POST with status 409 removes nothing",
       "engine": {
         "config": {
@@ -37915,7 +37880,6 @@
     {
       "id": "m2-unsafe-500-no-remove",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "invalidate: POST with status 500 removes nothing",
       "engine": {
         "config": {
@@ -37988,7 +37952,6 @@
     {
       "id": "m2-unsafe-503-no-remove",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "invalidate: POST with status 503 removes nothing",
       "engine": {
         "config": {
@@ -38061,7 +38024,6 @@
     {
       "id": "m2-unsafe-safe-get-never",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "invalidate: the safe method GET never removes",
       "engine": {
         "config": {
@@ -38131,7 +38093,6 @@
     {
       "id": "m2-unsafe-safe-head-never",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "invalidate: the safe method HEAD never removes",
       "engine": {
         "config": {
@@ -38201,7 +38162,6 @@
     {
       "id": "m2-unsafe-safe-options-never",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "invalidate: the safe method OPTIONS never removes",
       "engine": {
         "config": {
@@ -38271,7 +38231,6 @@
     {
       "id": "m2-unsafe-safe-trace-never",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "invalidate: the safe method TRACE never removes",
       "engine": {
         "config": {
@@ -38341,7 +38300,6 @@
     {
       "id": "m2-unsafe-inflight-capture-fenced",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "invalidate: a capture started before the POST is fenced",
       "engine": {
         "config": {
@@ -38465,7 +38423,6 @@
     {
       "id": "m2-unsafe-unvouched-host-no-call",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "invalidate: a host not configured makes no call",
       "engine": {
         "config": {
@@ -38529,7 +38486,6 @@
     {
       "id": "m2-unsafe-url-disagree-removes-nothing",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "invalidate: a disagreeing URL spelling removes nothing, no key is guessed",
       "engine": {
         "config": {
@@ -38600,7 +38556,6 @@
     {
       "id": "m2-unsafe-not-found-is-success",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "invalidate: a missing entry counts as removed",
       "engine": {
         "config": {
@@ -38652,7 +38607,6 @@
     {
       "id": "m2-unsafe-remove-failure-counted",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "invalidate: a failed removal is counted, the fence stays",
       "engine": {
         "config": {
@@ -38756,7 +38710,6 @@
     {
       "id": "m2-unsafe-mode2-removes-markdown-parent",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "invalidate: in serve-variants the key and its Markdown parent are removed",
       "engine": {
         "config": {
@@ -38857,7 +38810,6 @@
     {
       "id": "m2-unsafe-fence-map-bounded",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "invalidate: the fence map is bounded, drops its oldest, never moves the global purge time",
       "engine": {
         "config": {
@@ -38933,7 +38885,6 @@
     {
       "id": "m2-unsafe-fence-retention-cap",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "invalidate: a fence lasts twice the larger of cap and 60 s",
       "engine": {
         "config": {
@@ -39081,7 +39032,6 @@
     {
       "id": "m2-unsafe-cap0-retention",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "invalidate: with cap 0 a fence lasts the largest lifetime seen",
       "engine": {
         "config": {
@@ -39192,7 +39142,6 @@
     {
       "id": "m2-unsafe-restore-skip-ignores-fenced-entry",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "invalidate: a fenced entry is never skipped as unchanged",
       "engine": {
         "config": {
@@ -46364,7 +46313,6 @@
     {
       "id": "m2-unsafe-fence-retention-default-cap",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "invalidate: under the default cap a fence lasts twice the cap",
       "engine": {
         "config": {
@@ -46510,7 +46458,6 @@
     {
       "id": "m2-explicit-public-cookie-serve-reads",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: explicit-public reads for a blocking cookie and says so to the library",
       "engine": {
         "config": {
@@ -46580,7 +46527,8 @@
             "expect": {
               "calls": [
                 {
-                  "fn": "ps_cache_read_best_site"
+                  "fn": "ps_cache_read_alternate_site",
+                  "args": {"alternate": "original"}
                 },
                 {
                   "fn": "ps_html_serve_classify",
@@ -46816,7 +46764,6 @@
     {
       "id": "m2-proxy-authorization-no-read-mode3",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: Proxy-Authorization reads nothing",
       "engine": {
         "config": {
@@ -47246,7 +47193,6 @@
     {
       "id": "m2-html-gate-internal-request",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "html path: an internal request, marked, is declined by the engine itself",
       "engine": {
         "config": {
@@ -47508,7 +47454,6 @@
     {
       "id": "m2-second-classify-carries-every-field",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "html fallback: the second classify carries every request field",
       "engine": {
         "config": {
@@ -47605,7 +47550,6 @@
     {
       "id": "m2-shadow-classify-carries-every-field",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "scope: the shadow classify carries every request field with scope all",
       "engine": {
         "config": {
@@ -47692,7 +47636,6 @@
     {
       "id": "m2-shadow-never-reads-blocking-cookie",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "scope: the shadow sample never reads a refused request",
       "engine": {
         "config": {
@@ -47842,7 +47785,6 @@
     {
       "id": "m2-shadow-never-reads-authorization",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "scope: the shadow sample never reads a refused request",
       "engine": {
         "config": {
@@ -47910,7 +47852,6 @@
     {
       "id": "m2-shadow-never-reads-guard-refusal",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "scope: the shadow sample never reads a refused request",
       "engine": {
         "config": {
@@ -48077,7 +48018,6 @@
     {
       "id": "m2-unsafe-location-limit-two-of-three",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "invalidate: at most two extra targets out of three candidates",
       "engine": {
         "config": {
@@ -48161,7 +48101,6 @@
     {
       "id": "m2-unsafe-same-second-fenced",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "invalidate: a capture that started in the second of the POST is fenced",
       "engine": {
         "config": {
@@ -48258,7 +48197,6 @@
     {
       "id": "m2-unsafe-report-only-no-call",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "invalidate: report-only removes nothing",
       "engine": {
         "config": {
@@ -48322,7 +48260,6 @@
     {
       "id": "m2-unsafe-library-below-1-15-no-call",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "invalidate: without the 1.15 predicate nothing is invalidated, as before",
       "engine": {
         "config": {
@@ -48785,7 +48722,6 @@
     {
       "id": "m2-forbidden-header-refused-set-cookie-lower-case",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "defence: a header block holding set-cookie in any case is never emitted",
       "engine": {
         "config": {
@@ -48863,7 +48799,6 @@
     {
       "id": "m2-served-html-counted-c1",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "value counters: served pages by agent class",
       "engine": {
         "config": {
@@ -48966,7 +48901,6 @@
     {
       "id": "m2-served-html-counted-unclassed",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "value counters: served pages by agent class",
       "engine": {
         "config": {
@@ -50463,7 +50397,6 @@
     {
       "id": "m2-ajax-underscore-name-no-read-html-mode3",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "ajax marker spelled with underscores: the guard gets the names; refused before any read",
       "engine": {
         "config": {

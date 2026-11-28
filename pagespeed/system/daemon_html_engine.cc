@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <iterator>
 
 #include "net/instaweb/rewriter/public/rewrite_stats.h"
 #include "openssl/sha.h"
@@ -92,6 +93,29 @@ constexpr char kAfterRecheck[] = "after_recheck";
 // 410, a request-side reason, a lifetime or content rule -- leaves the entry.
 const char* const kRemovingReasons[] = {"private", "no_store", "set_cookie",
                                         "vary", "headers"};
+
+// The fall-through reasons that are the stored entry's own record (C API
+// 1.15): counted under daemon_html_fallthrough_ for either body.
+const char* const kEntryRecordReasons[] = {"legacy_entry", "policy_mismatch",
+                                           "credentialed"};
+
+// The header lines a stored page is never answered with: a cookie, which the
+// store refuses, and the validators, which a hit never replays (no 304 is
+// produced for HTML, and a validator would let a client revalidate the
+// rewritten page against the origin's).  A header block holding one is a
+// defect; the hit is refused at emit.  A coding or a range would not match
+// the stored body, which is always whole and never compressed.
+const char* const kForbiddenOnHit[] = {
+    "Set-Cookie",       "Set-Cookie2",      "ETag",
+    "Last-Modified",    "Content-Encoding", "Content-Range",
+    "Transfer-Encoding"};
+
+// The lines a hit carries from the stored entry itself, never from the
+// header block.
+const char* const kHitOwnLines[] = {"Content-Type", "Content-Length", "Age"};
+
+// The sampled would-serve pages remembered for the body comparison.
+constexpr size_t kShadowWouldServeMax = 256;
 
 // The response lines whose value a stored entry represents itself, or that
 // describe this transfer only: never part of the header block compared by
@@ -741,8 +765,87 @@ bool DaemonHtmlPurgeOracle::Purged(const GoogleString& url,
   if (local != local_url_purges_.end() && stored_ms <= local->second) {
     return true;
   }
+  if (UnsafeFencedLocked(url, stored_ms)) return true;
   return source_ != nullptr &&
          !source_->IsUrlValidIgnoringGlobal(url, stored_ms);
+}
+
+void DaemonHtmlPurgeOracle::SetUnsafeRetentionCap(uint32 cap_s) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  unsafe_cap_s_ = cap_s;
+}
+
+void DaemonHtmlPurgeOracle::NoteLifetimeSeen(uint32 lifetime_s) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  largest_lifetime_s_ = std::max(largest_lifetime_s_, lifetime_s);
+}
+
+int64 DaemonHtmlPurgeOracle::UnsafeRetentionMsLocked() const {
+  constexpr int64 kFloorS = 60;
+  constexpr int64 kClampS = 24 * 60 * 60;
+  int64 retention_s = 0;
+  if (unsafe_cap_s_ > 0) {
+    retention_s = 2 * std::max<int64>(unsafe_cap_s_, kFloorS);
+  } else {
+    // No cap: as long as a page stored before the fence could still be
+    // fresh, never past a day and never shorter than with the smallest cap.
+    retention_s = std::max<int64>(std::min<int64>(largest_lifetime_s_, kClampS),
+                                  2 * kFloorS);
+  }
+  return retention_s * Timer::kSecondMs;
+}
+
+void DaemonHtmlPurgeOracle::NoteUnsafeInvalidation(const GoogleString& url,
+                                                   int64 fence_ms) {
+  if (timer_ != nullptr) fence_ms = std::min(fence_ms, timer_->NowMs());
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto it = unsafe_fences_.find(url);
+  if (it != unsafe_fences_.end()) {
+    // A newer fence for the same key: it moves to the back of the order.
+    fence_ms = std::max(fence_ms, it->second->second);
+    unsafe_order_.erase(it->second);
+    unsafe_fences_.erase(it);
+  }
+  // Expired fences go first, then, when the map is still full, the oldest:
+  // that key keeps only the bound every other process has.
+  const int64 now_ms = timer_ != nullptr ? timer_->NowMs() : fence_ms;
+  const int64 retention_ms = UnsafeRetentionMsLocked();
+  while (!unsafe_order_.empty() &&
+         (now_ms - unsafe_order_.front().second >= retention_ms ||
+          unsafe_order_.size() >= kUnsafeFencesMax)) {
+    unsafe_fences_.erase(unsafe_order_.front().first);
+    unsafe_order_.pop_front();
+  }
+  unsafe_order_.emplace_back(url, fence_ms);
+  unsafe_fences_[url] = std::prev(unsafe_order_.end());
+}
+
+bool DaemonHtmlPurgeOracle::UnsafeFencedLocked(const GoogleString& url,
+                                               int64 stored_ms) {
+  auto it = unsafe_fences_.find(url);
+  if (it == unsafe_fences_.end()) return false;
+  const int64 fence_ms = it->second->second;
+  const int64 now_ms = timer_ != nullptr ? timer_->NowMs() : fence_ms;
+  if (now_ms - fence_ms >= UnsafeRetentionMsLocked()) {
+    unsafe_order_.erase(it->second);
+    unsafe_fences_.erase(it);
+    return false;
+  }
+  // At or before: an entry stored in the second of the unsafe request is
+  // fenced, as for a purge.
+  return stored_ms <= fence_ms;
+}
+
+bool DaemonHtmlPurgeOracle::UnsafeFenced(const GoogleString& url,
+                                         uint32 stored_at_s) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return UnsafeFencedLocked(url,
+                            static_cast<int64>(stored_at_s) * Timer::kSecondMs);
+}
+
+size_t DaemonHtmlPurgeOracle::unsafe_fences_size() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return unsafe_fences_.size();
 }
 
 // ---------------------------------------------------------------------------
@@ -863,7 +966,26 @@ struct DaemonHtmlEngine::Counters {
         refused_other(s->GetVariable("daemon_html_refused_other")),
         unavailable(s->GetVariable("daemon_html_unavailable")),
         classify_failed(s->GetVariable("daemon_html_classify_failed")),
-        log_dropped(s->GetVariable("daemon_html_log_dropped")) {
+        log_dropped(s->GetVariable("daemon_html_log_dropped")),
+        served_html(s->GetVariable("daemon_html_served_html")),
+        served_html_c1(s->GetVariable("daemon_html_served_html_c1")),
+        served_html_c3(s->GetVariable("daemon_html_served_html_c3")),
+        served_html_markdown_preference(
+            s->GetVariable("daemon_html_served_html_markdown_preference")),
+        served_html_unclassed(
+            s->GetVariable("daemon_html_served_html_unclassed")),
+        agent_html_requests(s->GetVariable("daemon_html_agent_html_requests")),
+        shadow_sampled(s->GetVariable("daemon_html_shadow_sampled")),
+        would_serve_html(s->GetVariable("daemon_html_would_serve_html")),
+        would_serve_body_differs(
+            s->GetVariable("daemon_html_would_serve_body_differs")),
+        fresh_body_changed(s->GetVariable("daemon_html_fresh_body_changed")),
+        hit_recorded(s->GetVariable("daemon_html_hit_recorded")),
+        hit_forbidden_header(
+            s->GetVariable("daemon_html_hit_forbidden_header")),
+        unexpected_validate(s->GetVariable("daemon_html_unexpected_validate")),
+        invalidated_unsafe(s->GetVariable("daemon_html_invalidated_unsafe")),
+        invalidate_failed(s->GetVariable("daemon_html_invalidate_failed")) {
     for (const char* const* reason =
              RewriteStats::kDaemonMarkdownFallthroughReasons;
          *reason != nullptr; ++reason) {
@@ -880,6 +1002,12 @@ struct DaemonHtmlEngine::Counters {
          *reason != nullptr; ++reason) {
       html_fallthrough[*reason] =
           s->GetVariable(StrCat("daemon_html_fallthrough_", *reason));
+    }
+    for (const char* const* reason =
+             RewriteStats::kDaemonHtmlWouldFallthroughReasons;
+         *reason != nullptr; ++reason) {
+      would_fallthrough[*reason] =
+          s->GetVariable(StrCat("daemon_html_would_fallthrough_", *reason));
     }
   }
 
@@ -928,8 +1056,29 @@ struct DaemonHtmlEngine::Counters {
   Variable* classify_failed;
   Variable* log_dropped;
   std::map<GoogleString, Variable*> refused_by_reason;
-  // The entry-record reasons of C API 1.15, both bodies.
+  // The entry-record reasons of C API 1.15, both bodies, and the reasons an
+  // HTML lookup falls through for (serve-cached-html).
   std::map<GoogleString, Variable*> html_fallthrough;
+  // serve-cached-html: stored pages answered, by the request's agent class
+  // (the parts sum to served_html), the agent-classed HTML requests
+  // evaluated, the shadow sample, and the checks that must stay 0.
+  Variable* served_html;
+  Variable* served_html_c1;
+  Variable* served_html_c3;
+  Variable* served_html_markdown_preference;
+  Variable* served_html_unclassed;
+  Variable* agent_html_requests;
+  Variable* shadow_sampled;
+  Variable* would_serve_html;
+  Variable* would_serve_body_differs;
+  Variable* fresh_body_changed;
+  Variable* hit_recorded;
+  Variable* hit_forbidden_header;
+  Variable* unexpected_validate;
+  // Unsafe-method invalidation.
+  Variable* invalidated_unsafe;
+  Variable* invalidate_failed;
+  std::map<GoogleString, Variable*> would_fallthrough;
 };
 
 // What the request policy says about one request, before any read.  Filled
@@ -1100,6 +1249,7 @@ DaemonHtmlEngine::DaemonHtmlEngine(Config config, Deps deps)
   if (config_.epoch_sites.empty()) {
     config_.epoch_sites.push_back(config_.site);
   }
+  oracle_.SetUnsafeRetentionCap(config_.max_age_s);
   ReadConditions(/*log_change=*/false);
   ReadSiteEpoch();
   ObservePurgeState();
@@ -1763,9 +1913,8 @@ void DaemonHtmlEngine::Hook(const char* point) {
 
 void DaemonHtmlEngine::CountFallThrough(const GoogleString& reason) {
   // The stored entry's own record, for either body.
-  auto html = counters_->html_fallthrough.find(reason);
-  if (html != counters_->html_fallthrough.end()) {
-    html->second->Add(1);
+  if (ValueIn(reason, kEntryRecordReasons)) {
+    CountHtmlFallThrough(reason);
     return;
   }
   auto it = counters_->fallthrough.find(reason);
@@ -1775,13 +1924,41 @@ void DaemonHtmlEngine::CountFallThrough(const GoogleString& reason) {
   it->second->Add(1);
 }
 
+void DaemonHtmlEngine::CountHtmlFallThrough(const GoogleString& reason) {
+  auto html = counters_->html_fallthrough.find(reason);
+  if (html != counters_->html_fallthrough.end()) html->second->Add(1);
+}
+
 void DaemonHtmlEngine::CountUnavailable() { counters_->unavailable->Add(1); }
+
+void DaemonHtmlEngine::NoteHitPathInvariant(const char* what) {
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (hit_invariant_logged_) return;
+    hit_invariant_logged_ = true;
+  }
+  if (deps_.handler == nullptr) return;
+  deps_.handler->Message(
+      kError,
+      "DaemonHtmlCache: %s; this must never happen and was refused (logged "
+      "once)",
+      what);
+}
 
 std::unique_ptr<DaemonHtmlRecording> DaemonHtmlEngine::StartRecording(
     const DaemonHtmlRequestFacts& facts, DaemonHtmlPort* port,
     bool* unavailable) {
   if (unavailable != nullptr) *unavailable = false;
   if (config_.mode == DaemonHtmlMode::kOff) return nullptr;
+  if (facts.served_from_cache) {
+    // The cache answered this request: recording it would store the page
+    // again from its own cached bytes and keep it fresh past its lifetime.
+    // A port must never start one; refused, counted, logged once.
+    counters_->hit_recorded->Add(1);
+    NoteHitPathInvariant(
+        "a recording was started for a request the cache answered");
+    return nullptr;
+  }
   if (deps_.substrate.abi == nullptr) {
     if (unavailable != nullptr) *unavailable = true;
     return nullptr;
@@ -2031,7 +2208,7 @@ void DaemonHtmlEngine::LogServeSide(
     const char* action, const GoogleString& reason, const GoogleString& host,
     const GoogleString& path, int status, uint64 size, uint32 lifetime_s,
     const char* variant, int64 age_s, const char* mode,
-    const GoogleString& detail) {
+    const GoogleString& detail, int agent_class, int serve_scope) {
   if (log_ == nullptr) return;
   const int64 now_ms = deps_.timer->NowMs();
   const GoogleString log_path = DaemonHtmlLogPath(path);
@@ -2055,6 +2232,19 @@ void DaemonHtmlEngine::LogServeSide(
       {"variant", variant == nullptr ? GoogleString() : GoogleString(variant)},
       {"age_s", age_s >= 0 ? Integer64ToString(age_s) : GoogleString()},
       {"detail", detail_known ? detail : GoogleString()},
+      // A served page's scope and the request's agent class, which only a
+      // library whose grammar has the keys (C API 1.15) is given.
+      {"scope",
+       serve_scope >= 0 &&
+               deps_.substrate.abi->VersionMinor() >= kRequestHeaderReasonMinor
+           ? GoogleString(serve_scope == kPsHtmlServeScopeAll ? "all"
+                                                              : "agents")
+           : GoogleString()},
+      {"agent_class",
+       agent_class >= 0 && agent_class <= kPsHtmlAgentClassMax &&
+               deps_.substrate.abi->VersionMinor() >= kRequestHeaderReasonMinor
+           ? IntegerToString(agent_class)
+           : GoogleString()},
   };
   // Only the request path takes what the writer has to say; a commit may
   // run on a pool thread.
@@ -2188,6 +2378,10 @@ void DaemonHtmlEngine::Commit(
   bool upgrade_restore = false;
   uint8_t hash[kPsHtmlHashBytes];
   Sha256(body, hash);
+  const GoogleString identity = VolumeIdentity(url, hostname, facts.scheme);
+  // A sampled would-serve page whose origin answer is now recorded: did the
+  // origin answer with the bytes the cache would have served?
+  CheckShadowBody(identity, hash);
 
   // The insert time: computed by the library alone, from the request's
   // start and the inbound Age.  A refused Age stores nothing.
@@ -2204,10 +2398,23 @@ void DaemonHtmlEngine::Commit(
     return;
   }
   const uint32 inserted_at = params.cache_inserted_at;
+  oracle_.NoteLifetimeSeen(verdict.lifetime_s);
+  // An unsafe request answered for this key in this process after the
+  // capture started: what was captured may already be out of date, and the
+  // entry would only be removed again.  Nothing is written.
+  if (oracle_.UnsafeFenced(url, inserted_at)) {
+    counters_->purge_race_refused->Add(1);
+    LogServeSide("purged", "purge_race", facts.host, facts.path, 200,
+                 body.size(), verdict.lifetime_s, nullptr, -1);
+    return;
+  }
 
   // The re-store skip: only an unchanged, paired, fresh entry with more than
   // half its lifetime left, or a newer one, is kept as it is.
   bool hash_changed = true;
+  // The key held a fresh entry with another body: the origin changed the
+  // page within its lifetime (counted when this store is kept).
+  bool fresh_body_changed = false;
   {
     ServeReads existing(abi);
     if (abi->CacheReadAlternateSite(cache, VolumeUrl(url).c_str(),
@@ -2218,11 +2425,21 @@ void DaemonHtmlEngine::Commit(
     }
     if (existing.original != nullptr) {
       const uint32 stored_at = abi->ReadCacheInsertedAt(existing.original);
+      const uint32 existing_lifetime = abi->ReadOriginMaxAge(existing.original);
+      oracle_.NoteLifetimeSeen(existing_lifetime);
+      // An entry an unsafe request fenced counts as purged here too: it is
+      // never kept as unchanged.
       if (!oracle_.Purged(url, stored_at)) {
         const uint8_t* old_hash = abi->ReadOriginHtmlHash(existing.original);
         const bool same_body = old_hash != nullptr && !IsZeroHash(old_hash) &&
                                memcmp(old_hash, hash, kPsHtmlHashBytes) == 0;
         hash_changed = !same_body;
+        const int64 capture_s = facts.capture_start_ms / Timer::kSecondMs;
+        fresh_body_changed = !same_body && old_hash != nullptr &&
+                             !IsZeroHash(old_hash) &&
+                             capture_s >= static_cast<int64>(stored_at) &&
+                             capture_s - static_cast<int64>(stored_at) <
+                                 static_cast<int64>(existing_lifetime);
         // The key is present again (written here or by a peer): a later
         // refusal must read and remove it, whatever this process removed.
         ForgetRemoved(VolumeIdentity(url, hostname, facts.scheme));
@@ -2357,7 +2574,7 @@ void DaemonHtmlEngine::Commit(
     TrackUnpaired(url, hostname, facts.scheme);
     return;
   }
-  ForgetRemoved(VolumeIdentity(url, hostname, facts.scheme));
+  ForgetRemoved(identity);
   Hook(kAfterCommit);
 
   // The fence: a purge that covers the insert time and became visible while
@@ -2375,6 +2592,7 @@ void DaemonHtmlEngine::Commit(
   Hook(kAfterRecheck);
   counters_->stored->Add(1);
   if (upgrade_restore) counters_->upgrade_restores->Add(1);
+  if (fresh_body_changed) counters_->fresh_body_changed->Add(1);
   LogServeSide("stored", GoogleString(), facts.host, facts.path, 200,
                body.size(), verdict.lifetime_s, nullptr, -1);
   if (verdict.action == kPsHtmlStoreActionStore && hash_changed) {
@@ -2462,102 +2680,322 @@ void DaemonHtmlEngine::Notify(const DaemonHtmlRequestFacts& facts,
   }
 }
 
+// ---------------------------------------------------------------------------
+// The serve
+
+// What one serve carries from PrepareServe through Read to FinishServe.
+struct DaemonHtmlPendingServe::State {
+  explicit State(const DaemonAbi* abi) : reads(abi) {}
+
+  enum Kind {
+    kDecided,   // `result` is the answer; nothing to read
+    kMarkdown,  // a request that prefers Markdown
+    kHtml,      // serve-cached-html: a request without that preference
+    kShadow,    // a pre-gated request sampled: read and classified as `all`
+  };
+  Kind kind = kDecided;
+  bool read_done = false;
+
+  DaemonHtmlEngine* engine = nullptr;
+  DaemonHtmlRequestFacts facts;
+  DaemonHtmlPort* port = nullptr;
+  DaemonHtmlServeResult result;
+  DaemonHtmlEngine::RequestPolicy policy;
+  bool cached_html = false;
+  GoogleString accept;
+  bool has_accept = false;
+
+  // The volume handle, asked for once, and the request's key.
+  void* cache = nullptr;
+  GoogleString url;
+  GoogleString hostname;
+
+  // What Read found.
+  ServeReads reads;
+  bool sidecar_present = false;
+  bool sidecar_unpaired = false;
+  const uint8_t* stamp = nullptr;  // the original's body hash, in `reads`
+};
+
+DaemonHtmlPendingServe::DaemonHtmlPendingServe() = default;
+DaemonHtmlPendingServe::~DaemonHtmlPendingServe() = default;
+DaemonHtmlPendingServe::DaemonHtmlPendingServe(
+    DaemonHtmlPendingServe&&) noexcept = default;
+DaemonHtmlPendingServe& DaemonHtmlPendingServe::operator=(
+    DaemonHtmlPendingServe&&) noexcept = default;
+
+bool DaemonHtmlPendingServe::needs_read() const {
+  return state_ != nullptr && state_->kind != State::kDecided &&
+         !state_->read_done;
+}
+
+void DaemonHtmlPendingServe::Read() {
+  if (!needs_read()) return;
+  state_->engine->ReadForServe(state_.get());
+  state_->read_done = true;
+}
+
 DaemonHtmlServeResult DaemonHtmlEngine::Serve(
     const DaemonHtmlRequestFacts& facts, DaemonHtmlPort* port) {
-  DaemonHtmlServeResult result;
+  PendingServe pending = PrepareServe(facts, port);
+  pending.Read();
+  return FinishServe(std::move(pending));
+}
+
+DaemonHtmlPendingServe DaemonHtmlEngine::PrepareServe(
+    const DaemonHtmlRequestFacts& facts, DaemonHtmlPort* port) {
+  using State = DaemonHtmlPendingServe::State;
+  DaemonHtmlPendingServe pending;
+  pending.state_ = std::make_unique<State>(deps_.substrate.abi);
+  State& s = *pending.state_;
+  s.engine = this;
+  s.port = port;
+  DaemonHtmlServeResult& result = s.result;
   result.reason = "mode";
   // The serve gate: nothing is read before every part of it holds.
   if (config_.mode < DaemonHtmlMode::kServeVariants ||
       !config_.agent_optimize || !IsSiteId(config_.site) ||
       facts.site != config_.site) {
-    return result;
+    return pending;
   }
   if (!serving()) {
     NoteUnavailable();
-    return result;
+    return pending;
+  }
+  if (config_.mode == DaemonHtmlMode::kServeCachedHtml &&
+      effective_mode() != DaemonHtmlMode::kServeCachedHtml) {
+    // The library lacks the 1.15 set: this runs as serve-variants.
+    counters_->serve_cached_html_unavailable->Add(1);
+    NoteServe15Unavailable();
   }
   result.reason = "other";
+  // Main requests only: a subrequest or an internal redirect goes on as it
+  // is, for either body.
+  if (facts.internal) return pending;
   if (!facts.options_enabled_and_allowed || !IsVolumePath(facts.path) ||
       !HostExactlyConfigured(facts.host, config_.host_names)) {
-    return result;
+    return pending;
   }
   const DaemonAbi* abi = deps_.substrate.abi;
-  const GoogleString accept = JoinCollection(facts.accept_lines, ", ");
-  const bool has_accept = !facts.accept_lines.empty();
-  const bool cached_html = effective_mode() == DaemonHtmlMode::kServeCachedHtml;
-  // Only a Markdown request is looked up: the stored page itself is not
-  // answered yet, so nothing is read, judged or counted for another one.
-  if (abi->WantsAgentMarkdown(accept.c_str()) != 1) {
+  s.accept = JoinCollection(facts.accept_lines, ", ");
+  s.has_accept = !facts.accept_lines.empty();
+  s.cached_html = effective_mode() == DaemonHtmlMode::kServeCachedHtml;
+  const bool markdown_request = abi->WantsAgentMarkdown(s.accept.c_str()) == 1;
+  if (!markdown_request && !s.cached_html) {
+    // Only a Markdown request is looked up below serve-cached-html: nothing
+    // is read, judged or counted for another one.
     result.reason = "";  // Not a Markdown request at all.
-    return result;
+    return pending;
   }
-  // Counted only for a Markdown request, so the counter means one.
-  if (!facts.url_agreed) {
+  const bool agent_classed =
+      facts.agent_class >= 1 && facts.agent_class <= kPsHtmlAgentClassMax;
+  if (!markdown_request) {
+    // The HTML lookup (serve-cached-html): GET and HEAD only, the URL
+    // agreed; nothing counted under the Markdown counters.
+    if (facts.method != "GET" && facts.method != "HEAD") {
+      result.reason = "method";
+      return pending;
+    }
+    if (!facts.url_agreed) {
+      result.reason = "url_disagree";
+      return pending;
+    }
+    if (agent_classed) counters_->agent_html_requests->Add(1);
+  } else if (!facts.url_agreed) {
+    // Counted only for a Markdown request, so the counter means one.
     result.reason = "url_disagree";
     CountFallThrough(result.reason);
-    return result;
+    return pending;
   }
-  RequestPolicy policy;
-  EvaluateRequestPolicy(facts, &policy);
-  if (policy.applies) {
+  EvaluateRequestPolicy(facts, &s.policy);
+  if (s.policy.applies) {
     // The request policy of C API 1.15, before any read and for both
     // bodies: credentials, the headers a cache key does not contain (the
     // AJAX markers among them) and the shape of the path.
     GoogleString reason;
     GoogleString detail;
-    policy.Verdict(credential_skip_disabled_, &reason, &detail);
+    s.policy.Verdict(credential_skip_disabled_, &reason, &detail);
     if (!reason.empty()) {
-      NoteRequestRefused(facts, policy, reason, detail, nullptr);
+      NoteRequestRefused(facts, s.policy, reason, detail, nullptr);
       result.reason = reason;
-      CountFallThrough(result.reason);
-      return result;
+      if (markdown_request) CountFallThrough(result.reason);
+      return pending;
     }
   } else if (!facts.ajax_marker.empty()) {
     // A script's request is never answered from the cache: it may want a
-    // fragment where the cache holds the page.
+    // fragment where the cache holds the page.  (Below 1.15 only a Markdown
+    // request reaches here.)
     result.reason = "request_header";
     CountFallThrough(result.reason);
     if (abi->VersionMinor() >= kRequestHeaderReasonMinor) {
       LogServeSide("refuse", "request_header", facts.host, facts.path, 0, 0, 0,
                    nullptr, -1);
     }
-    return result;
+    return pending;
   }
-  void* cache = Cache();
-  if (cache == nullptr) return result;
+  State::Kind kind = markdown_request ? State::kMarkdown : State::kHtml;
+  if (!markdown_request && config_.serve_scope != kPsHtmlServeScopeAll &&
+      !agent_classed) {
+    // The pre-gate: under `agents`, a request that neither prefers Markdown
+    // nor comes from a known agent is never read (the library would say
+    // `scope`).  It can only skip, never serve.  One in kShadowSampleEvery
+    // is read and classified as `all` to measure what `all` would serve,
+    // and falls through all the same.
+    result.reason = "scope";
+    CountHtmlFallThrough(result.reason);
+    const uint64 n = pregated_.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (n % kShadowSampleEvery != 0) return pending;
+    kind = State::kShadow;
+  }
+  s.cache = Cache();
+  if (s.cache == nullptr) return pending;
+  s.facts = facts;
+  CacheKey(facts, &s.url, &s.hostname);
+  s.kind = kind;
+  return pending;
+}
 
-  GoogleString url;
-  GoogleString hostname;
-  CacheKey(facts, &url, &hostname);
+void DaemonHtmlEngine::ReadForServe(DaemonHtmlPendingServe::State* s) {
+  const DaemonAbi* abi = deps_.substrate.abi;
   const char* site = config_.site.c_str();
-  const char* scheme = facts.scheme.c_str();
-  ServeReads reads(abi);
+  const char* scheme = s->facts.scheme.c_str();
+  const GoogleString volume_url = VolumeUrl(s->url);
   auto read = [&](uint8_t id, void** out) {
-    if (abi->CacheReadAlternateSite(cache, VolumeUrl(url).c_str(),
-                                    hostname.c_str(), scheme, site, id,
+    if (abi->CacheReadAlternateSite(s->cache, volume_url.c_str(),
+                                    s->hostname.c_str(), scheme, site, id,
                                     out) != kPsOk) {
       *out = nullptr;
     }
   };
-  read(kPsSentinelOriginal, &reads.original);
-  read(kPsSentinelAgentMarkdown, &reads.markdown);
-  read(kPsSentinelMarkdownWithheld, &reads.withheld);
-  bool sidecar_present = false;
-  const uint8_t* stamp = reads.original == nullptr
-                             ? nullptr
-                             : abi->ReadOriginHtmlHash(reads.original);
-  if (reads.original != nullptr &&
-      abi->HeadersSidecarRead(cache, VolumeUrl(url).c_str(), hostname.c_str(),
-                              scheme, site, &reads.block) == kPsOk &&
-      reads.block != nullptr) {
-    if (abi->HeaderBlockPairing(reads.block, stamp) != kPsSidecarPaired) {
-      TrackUnpaired(url, hostname, facts.scheme);
-      result.reason = "sidecar_unpaired";
-      CountFallThrough(result.reason);
-      return result;
-    }
-    sidecar_present = true;
+  // The HTML lookup reads the page alone (and its header block): never the
+  // Markdown copy or its marker.
+  read(kPsSentinelOriginal, &s->reads.original);
+  if (s->kind == DaemonHtmlPendingServe::State::kMarkdown) {
+    read(kPsSentinelAgentMarkdown, &s->reads.markdown);
+    read(kPsSentinelMarkdownWithheld, &s->reads.withheld);
   }
+  s->stamp = s->reads.original == nullptr
+                 ? nullptr
+                 : abi->ReadOriginHtmlHash(s->reads.original);
+  if (s->reads.original != nullptr &&
+      abi->HeadersSidecarRead(s->cache, volume_url.c_str(), s->hostname.c_str(),
+                              scheme, site, &s->reads.block) == kPsOk &&
+      s->reads.block != nullptr) {
+    if (abi->HeaderBlockPairing(s->reads.block, s->stamp) != kPsSidecarPaired) {
+      s->sidecar_unpaired = true;
+    } else {
+      s->sidecar_present = true;
+    }
+  }
+}
+
+DaemonHtmlServeResult DaemonHtmlEngine::FinishServe(PendingServe pending) {
+  using State = DaemonHtmlPendingServe::State;
+  if (pending.state_ == nullptr) return DaemonHtmlServeResult();
+  State* s = pending.state_.get();
+  if (s->kind == State::kDecided) return s->result;
+  // A port that skipped the read: read now, inline.
+  if (!s->read_done) pending.Read();
+  if (s->sidecar_unpaired) {
+    TrackUnpaired(s->url, s->hostname, s->facts.scheme);
+    if (s->kind == State::kShadow) return s->result;  // still `scope`
+    s->result.reason = "sidecar_unpaired";
+    if (s->kind == State::kMarkdown) CountFallThrough(s->result.reason);
+    return s->result;
+  }
+  return s->kind == State::kMarkdown ? FinishMarkdownServe(s)
+                                     : FinishHtmlServe(s);
+}
+
+void DaemonHtmlEngine::FillServeRequest(const DaemonHtmlRequestFacts& facts,
+                                        const RequestPolicy& policy,
+                                        bool cached_html, int64 now_s,
+                                        PsHtmlServeRequest* request) const {
+  const DaemonAbi* abi = deps_.substrate.abi;
+  uint32_t request_flags = 0;
+  if (facts.has_authorization) {
+    request_flags |= kPsHtmlServeRequestHasAuthorization;
+  }
+  if (facts.authenticated_user) {
+    request_flags |= kPsHtmlServeRequestAuthenticatedUser;
+  }
+  // With C API 1.15 only a blocking cookie counts (see Classify).
+  if (policy.applies ? policy.blocking_cookie : facts.has_cookie) {
+    request_flags |= kPsHtmlServeRequestHasCookie;
+  }
+  if (facts.has_range) request_flags |= kPsHtmlServeRequestHasRange;
+  if (facts.has_if_range) request_flags |= kPsHtmlServeRequestHasIfRange;
+  if (facts.has_origin) request_flags |= kPsHtmlServeRequestHasOrigin;
+  if (abi->HasHtmlServe15Set()) {
+    if (config_.credentialed == kPsHtmlCredentialedExplicitPublic) {
+      request_flags |= kPsHtmlServeRequestExplicitPublic;
+    }
+    if (cached_html) {
+      // Never a validation step here: a not-fresh entry falls through.
+      request_flags |= kPsHtmlServeRequestFreshOnly;
+      // A conditional as the client sent it (this module's own entity tags
+      // included): the library sends it to the origin for HTML.
+      if (facts.has_if_none_match || facts.has_if_modified_since ||
+          facts.has_if_match || facts.has_if_unmodified_since) {
+        request_flags |= kPsHtmlServeRequestConditional;
+      }
+    }
+  }
+  *request = PsHtmlServeRequest();
+  request->struct_size = HtmlServeRequestSize(*abi);
+  // effective_mode() is serve-cached-html only with the 1.15 set bound.
+  request->mode =
+      cached_html ? kPsHtmlCacheServeCachedHtml : kPsHtmlCacheServeVariants;
+  request->method = facts.method.c_str();
+  request->cache_control =
+      CStrOrNull(facts.has_cache_control, facts.cache_control);
+  request->pragma = CStrOrNull(facts.has_pragma, facts.pragma);
+  request->if_none_match =
+      CStrOrNull(facts.has_if_none_match, facts.if_none_match);
+  request->request_flags = request_flags;
+  request->now_seconds = static_cast<uint32_t>(now_s);
+  request->serve_scope = config_.serve_scope;
+  request->agent_class = facts.agent_class;
+  // Always sent, so the cap holds whatever the library's default.
+  request->html_max_lifetime_s = config_.max_age_s;
+  request->policy_stamp = config_.policy_stamp;
+}
+
+bool DaemonHtmlEngine::CredentialedForbids(
+    const RequestPolicy& policy, const PsHtmlStoredFacts& stored) const {
+  if (!policy.applies) return false;
+  const bool explicit_public =
+      config_.credentialed == kPsHtmlCredentialedExplicitPublic;
+  const bool request_credentialed =
+      policy.auth || (policy.blocking_cookie && !explicit_public);
+  const bool entry_forbidden =
+      (stored.flags & kPsHtmlFactsStoreV2) == 0 ||
+      (!explicit_public &&
+       (stored.flags & kPsHtmlFactsAnonymousRecorded) == 0) ||
+      stored.entry_policy_stamp != config_.policy_stamp;
+  return request_credentialed || entry_forbidden;
+}
+
+DaemonHtmlServeResult DaemonHtmlEngine::FinishMarkdownServe(
+    DaemonHtmlPendingServe::State* s) {
+  const DaemonAbi* abi = deps_.substrate.abi;
+  const DaemonHtmlRequestFacts& facts = s->facts;
+  DaemonHtmlPort* port = s->port;
+  ServeReads& reads = s->reads;
+  const GoogleString& url = s->url;
+  const GoogleString& hostname = s->hostname;
+  const RequestPolicy& policy = s->policy;
+  const bool cached_html = s->cached_html;
+  DaemonHtmlServeResult result = s->result;
+  const bool sidecar_present = s->sidecar_present;
+  const uint8_t* stamp = s->stamp;
+  auto read = [&](uint8_t id, void** out) {
+    if (abi->CacheReadAlternateSite(s->cache, VolumeUrl(url).c_str(),
+                                    hostname.c_str(), facts.scheme.c_str(),
+                                    config_.site.c_str(), id, out) != kPsOk) {
+      *out = nullptr;
+    }
+  };
   // The codings the request accepts for the copy, most preferred first
   // (C API 1.16): the coded copies read are those it prefers to the plain
   // one.  Without the 1.16 set it is the plain copy alone, as before.
@@ -2609,56 +3047,17 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
     if (!identity_ok && coded_order.empty()) encoding_none = true;
   }
 
+  // Fence and freshness are judged now, at the time this runs.
   const int64 now_s = deps_.timer->NowMs() / Timer::kSecondMs;
-  uint32_t request_flags = 0;
-  if (facts.has_authorization) {
-    request_flags |= kPsHtmlServeRequestHasAuthorization;
-  }
-  if (facts.authenticated_user) {
-    request_flags |= kPsHtmlServeRequestAuthenticatedUser;
-  }
-  // With C API 1.15 only a blocking cookie counts (see Classify).
-  if (policy.applies ? policy.blocking_cookie : facts.has_cookie) {
-    request_flags |= kPsHtmlServeRequestHasCookie;
-  }
-  if (facts.has_range) request_flags |= kPsHtmlServeRequestHasRange;
-  if (facts.has_if_range) request_flags |= kPsHtmlServeRequestHasIfRange;
-  if (facts.has_origin) request_flags |= kPsHtmlServeRequestHasOrigin;
-  if (abi->HasHtmlServe15Set()) {
-    if (config_.credentialed == kPsHtmlCredentialedExplicitPublic) {
-      request_flags |= kPsHtmlServeRequestExplicitPublic;
-    }
-    if (cached_html) {
-      // Never a validation step here: a not-fresh entry falls through.
-      request_flags |= kPsHtmlServeRequestFreshOnly;
-      if (facts.has_if_none_match || facts.has_if_modified_since ||
-          facts.has_if_match || facts.has_if_unmodified_since) {
-        request_flags |= kPsHtmlServeRequestConditional;
-      }
-    }
-  }
+  PsHtmlServeRequest request;
+  FillServeRequest(facts, policy, cached_html, now_s, &request);
+  request.accept = CStrOrNull(s->has_accept, s->accept);
   if (coded_set) {
-    if (identity_ok) request_flags |= kPsHtmlServeRequestIdentityOk;
-    if (encoding_none) request_flags |= kPsHtmlServeRequestEncodingNone;
+    if (identity_ok) request.request_flags |= kPsHtmlServeRequestIdentityOk;
+    if (encoding_none) {
+      request.request_flags |= kPsHtmlServeRequestEncodingNone;
+    }
   }
-  PsHtmlServeRequest request = {};
-  request.struct_size = HtmlServeRequestSize(*abi);
-  // effective_mode() is serve-cached-html only with the 1.15 set bound.
-  request.mode =
-      cached_html ? kPsHtmlCacheServeCachedHtml : kPsHtmlCacheServeVariants;
-  request.method = facts.method.c_str();
-  request.accept = CStrOrNull(has_accept, accept);
-  request.cache_control =
-      CStrOrNull(facts.has_cache_control, facts.cache_control);
-  request.pragma = CStrOrNull(facts.has_pragma, facts.pragma);
-  request.if_none_match =
-      CStrOrNull(facts.has_if_none_match, facts.if_none_match);
-  request.request_flags = request_flags;
-  request.now_seconds = static_cast<uint32_t>(now_s);
-  request.serve_scope = config_.serve_scope;
-  request.agent_class = facts.agent_class;
-  request.html_max_lifetime_s = config_.max_age_s;
-  request.policy_stamp = config_.policy_stamp;
 
   // One classification per coding asked for: the most preferred coded copy
   // first, then, when the library answers that it is not bound (identity
@@ -2702,9 +3101,11 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
       CountFallThrough(result.reason);
       return result;
     }
-    if ((stored.flags & kPsHtmlFactsPresent) != 0 &&
-        oracle_.Purged(url, stored.stored_at)) {
-      stored.flags |= kPsHtmlFactsPurged;
+    if ((stored.flags & kPsHtmlFactsPresent) != 0) {
+      oracle_.NoteLifetimeSeen(stored.lifetime_s);
+      if (oracle_.Purged(url, stored.stored_at)) {
+        stored.flags |= kPsHtmlFactsPurged;
+      }
     }
     if (requested != kPsMarkdownEncodingIdentity) {
       const bool br = requested == kPsMarkdownEncodingBr;
@@ -2774,6 +3175,17 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
   if (verdict.action != kPsHtmlServeActionServeMarkdown) {
     const char* name = abi->HtmlServeReasonName(verdict.reason);
     result.reason = name == nullptr ? "other" : name;
+    if (verdict.action != kPsHtmlServeActionFallThrough) {
+      // A validation (or the page itself) asked for on the Markdown path
+      // while fresh-only is set: never acted on.
+      if (cached_html && verdict.action == kPsHtmlServeActionValidate) {
+        counters_->unexpected_validate->Add(1);
+        NoteHitPathInvariant(
+            "the optimizer library asked for a validation the request ruled "
+            "out");
+      }
+      result.reason = "other";
+    }
     CountFallThrough(result.reason);
     // The lost copy: a present, fresh page this module's store wrote, with
     // no copy bound to it, asks the worker once per limiter window.
@@ -2790,38 +3202,71 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
             static_cast<int64>(stored.lifetime_s)) {
       Notify(facts, url, hostname, /*agent_request=*/true);
     }
+    if (!cached_html || verdict.action != kPsHtmlServeActionFallThrough) {
+      return result;
+    }
+    // serve-cached-html: once more for the page itself, with the same
+    // request and facts and html_fallback set.  The library decides which
+    // Markdown reasons leave the page servable and repeats every refusal
+    // both bodies share; the engine keeps no list of its own.
+    PsHtmlServeRequest html_request = request;
+    html_request.request_flags |= kPsHtmlServeRequestHtmlFallback;
+    html_request.markdown_encoding = kPsMarkdownEncodingIdentity;
+    if (coded_set) {
+      // The page is compressed, or not, by the server after the rewriter:
+      // the request's codings say nothing about it.
+      html_request.request_flags &= ~kPsHtmlServeRequestEncodingNone;
+      html_request.request_flags |= kPsHtmlServeRequestIdentityOk;
+    }
+    PsHtmlServeVerdict html_verdict = {};
+    html_verdict.struct_size = HtmlServeVerdictSize(*abi);
+    if (abi->HtmlServeClassify(&html_request, &stored, &html_verdict) != 0) {
+      return result;
+    }
+    if (html_verdict.action == kPsHtmlServeActionServeHtml) {
+      return EmitStoredPage(s, stored, html_verdict,
+                            /*markdown_preference=*/true);
+    }
+    if (html_verdict.action == kPsHtmlServeActionValidate) {
+      counters_->unexpected_validate->Add(1);
+      NoteHitPathInvariant(
+          "the optimizer library asked for a validation the request ruled "
+          "out");
+      result.reason = "other";
+      return result;
+    }
+    if (html_verdict.action == kPsHtmlServeActionFallThrough) {
+      const char* html_name = abi->HtmlServeReasonName(html_verdict.reason);
+      result.reason = html_name == nullptr ? "other" : html_name;
+      // The Markdown reason is counted above; only a reason of the page's
+      // own is counted again.
+      if (!ValueIn(result.reason, kEntryRecordReasons)) {
+        CountHtmlFallThrough(result.reason);
+      }
+    } else {
+      result.reason = "other";
+    }
     return result;
   }
   // Defence in depth against a library or flag defect: a serve the
   // credentialed policy forbids is never emitted, whatever the verdict.
-  if (policy.applies) {
-    const bool request_credentialed =
-        policy.auth ||
-        (policy.blocking_cookie &&
-         config_.credentialed != kPsHtmlCredentialedExplicitPublic);
-    const bool entry_forbidden =
-        (stored.flags & kPsHtmlFactsStoreV2) == 0 ||
-        (config_.credentialed != kPsHtmlCredentialedExplicitPublic &&
-         (stored.flags & kPsHtmlFactsAnonymousRecorded) == 0) ||
-        stored.entry_policy_stamp != config_.policy_stamp;
-    if (request_credentialed || entry_forbidden) {
-      // Must never happen: the library said serve where the policy forbids
-      // it.  Counted, and logged so a non-zero count can be traced.
-      counters_->served_credentialed_refused->Add(1);
-      if (deps_.handler != nullptr) {
-        deps_.handler->Message(
-            kError,
-            "DaemonHtmlCache: refused to serve the Markdown copy of %s%s, "
-            "which the credentialed policy forbids, although the optimizer "
-            "library allowed it",
-            DaemonHtmlIsLogHost(facts.host) ? facts.host.c_str() : "",
-            DaemonHtmlLogPath(facts.path).c_str());
-      }
-      LogServeSide("refuse", "credentialed", facts.host, facts.path, 0, 0, 0,
-                   nullptr, -1);
-      result.reason = "credentialed";
-      return result;
+  if (CredentialedForbids(policy, stored)) {
+    // Must never happen: the library said serve where the policy forbids
+    // it.  Counted, and logged so a non-zero count can be traced.
+    counters_->served_credentialed_refused->Add(1);
+    if (deps_.handler != nullptr) {
+      deps_.handler->Message(
+          kError,
+          "DaemonHtmlCache: refused to serve the Markdown copy of %s%s, "
+          "which the credentialed policy forbids, although the optimizer "
+          "library allowed it",
+          DaemonHtmlIsLogHost(facts.host) ? facts.host.c_str() : "",
+          DaemonHtmlLogPath(facts.path).c_str());
     }
+    LogServeSide("refuse", "credentialed", facts.host, facts.path, 0, 0, 0,
+                 nullptr, -1);
+    result.reason = "credentialed";
+    return result;
   }
   if (verdict.wants_markdown == 0) {
     // The library said serve without a preference: a defect, never sent.
@@ -2979,6 +3424,346 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
                                                : "markdown",
       verdict.age_s);
   return result;
+}
+
+DaemonHtmlServeResult DaemonHtmlEngine::FinishHtmlServe(
+    DaemonHtmlPendingServe::State* s) {
+  const DaemonAbi* abi = deps_.substrate.abi;
+  const bool shadow = s->kind == DaemonHtmlPendingServe::State::kShadow;
+  DaemonHtmlServeResult result = s->result;
+  PsHtmlStoredFacts stored = {};
+  stored.struct_size = HtmlStoredFactsSize(*abi);
+  // The page alone: no Markdown copy and no marker.
+  if (abi->HtmlStoredFactsFromReadsEx(
+          s->reads.original, nullptr, nullptr, s->sidecar_present ? 1 : 0,
+          s->sidecar_present ? s->reads.block : nullptr, &stored) != 0) {
+    if (!shadow) result.reason = "other";
+    return result;
+  }
+  if ((stored.flags & kPsHtmlFactsPresent) != 0) {
+    oracle_.NoteLifetimeSeen(stored.lifetime_s);
+    if (oracle_.Purged(s->url, stored.stored_at)) {
+      stored.flags |= kPsHtmlFactsPurged;
+    }
+  }
+  // Fence and freshness are judged now, at the time this runs.
+  const int64 now_s = deps_.timer->NowMs() / Timer::kSecondMs;
+  PsHtmlServeRequest request;
+  FillServeRequest(s->facts, s->policy, /*cached_html=*/true, now_s, &request);
+  request.accept = CStrOrNull(s->has_accept, s->accept);
+  request.markdown_encoding = kPsMarkdownEncodingIdentity;
+  if (abi->HasHtmlServe16Set()) {
+    request.request_flags |= kPsHtmlServeRequestIdentityOk;
+  }
+  // The shadow sample asks what scope `all` would answer.
+  if (shadow) request.serve_scope = kPsHtmlServeScopeAll;
+  PsHtmlServeVerdict verdict = {};
+  verdict.struct_size = HtmlServeVerdictSize(*abi);
+  if (abi->HtmlServeClassify(&request, &stored, &verdict) != 0) {
+    if (!shadow) result.reason = "other";
+    return result;
+  }
+  const char* name = abi->HtmlServeReasonName(verdict.reason);
+  if (shadow) {
+    // Counted and remembered, never answered: still a `scope` fall-through.
+    counters_->shadow_sampled->Add(1);
+    if (verdict.action == kPsHtmlServeActionServeHtml) {
+      counters_->would_serve_html->Add(1);
+      NoteShadowWouldServe(VolumeIdentity(s->url, s->hostname, s->facts.scheme),
+                           s->stamp);
+    } else {
+      if (verdict.action == kPsHtmlServeActionValidate) {
+        counters_->unexpected_validate->Add(1);
+        NoteHitPathInvariant(
+            "the optimizer library asked for a validation the request ruled "
+            "out");
+      }
+      auto it = counters_->would_fallthrough.find(
+          verdict.action == kPsHtmlServeActionFallThrough && name != nullptr
+              ? GoogleString(name)
+              : GoogleString("other"));
+      if (it == counters_->would_fallthrough.end()) {
+        it = counters_->would_fallthrough.find("other");
+      }
+      it->second->Add(1);
+    }
+    return result;
+  }
+  if (verdict.action == kPsHtmlServeActionServeHtml) {
+    return EmitStoredPage(s, stored, verdict, /*markdown_preference=*/false);
+  }
+  if (verdict.action == kPsHtmlServeActionValidate) {
+    // fresh-only is always set here: the library never validates, so this
+    // is a defect, and never acted on.
+    counters_->unexpected_validate->Add(1);
+    NoteHitPathInvariant(
+        "the optimizer library asked for a validation the request ruled out");
+    result.reason = "other";
+    return result;
+  }
+  if (verdict.action != kPsHtmlServeActionFallThrough) {
+    // A Markdown answer for a request that does not prefer Markdown.
+    result.reason = "other";
+    return result;
+  }
+  result.reason = name == nullptr ? "other" : name;
+  CountHtmlFallThrough(result.reason);
+  return result;
+}
+
+DaemonHtmlServeResult DaemonHtmlEngine::EmitStoredPage(
+    DaemonHtmlPendingServe::State* s, const PsHtmlStoredFacts& stored,
+    const PsHtmlServeVerdict& verdict, bool markdown_preference) {
+  const DaemonAbi* abi = deps_.substrate.abi;
+  const DaemonHtmlRequestFacts& facts = s->facts;
+  DaemonHtmlServeResult fall_through = s->result;
+  fall_through.kind = DaemonHtmlServeResult::kFallThrough;
+  // Defence in depth against a library or flag defect: a serve the
+  // credentialed policy forbids is never emitted, whatever the verdict.
+  if (CredentialedForbids(s->policy, stored)) {
+    counters_->served_credentialed_refused->Add(1);
+    if (deps_.handler != nullptr) {
+      deps_.handler->Message(
+          kError,
+          "DaemonHtmlCache: refused to serve the stored page of %s%s, which "
+          "the credentialed policy forbids, although the optimizer library "
+          "allowed it",
+          DaemonHtmlIsLogHost(facts.host) ? facts.host.c_str() : "",
+          DaemonHtmlLogPath(facts.path).c_str());
+    }
+    LogServeSide("refuse", "credentialed", facts.host, facts.path, 0, 0, 0,
+                 nullptr, -1);
+    fall_through.reason = "credentialed";
+    return fall_through;
+  }
+  const char* content_type =
+      s->reads.original == nullptr
+          ? nullptr
+          : abi->ReadOriginContentType(s->reads.original);
+  const uint8_t* body = nullptr;
+  size_t body_len = 0;
+  if (s->reads.original == nullptr || s->reads.block == nullptr ||
+      !s->sidecar_present || content_type == nullptr || *content_type == '\0' ||
+      abi->ReadContent(s->reads.original, &body, &body_len) != kPsOk ||
+      body_len == 0) {
+    // Never an answer without the page, its type or its header block.
+    fall_through.reason = "absent";
+    return fall_through;
+  }
+  DaemonHtmlServeResult result;
+  result.kind = DaemonHtmlServeResult::kAsOrigin;
+  result.status = 200;
+  result.reason = "fresh";
+  result.suppress_recording = true;
+  // The header block's lines in stored order, the origin's Cache-Control and
+  // Expires among them, verbatim.
+  bool forbidden = false;
+  const size_t n = abi->HeaderBlockCount(s->reads.block);
+  for (size_t i = 0; i < n; ++i) {
+    const char* name = nullptr;
+    const char* value = nullptr;
+    size_t name_len = 0;
+    size_t value_len = 0;
+    if (abi->HeaderBlockGet(s->reads.block, i, &name, &name_len, &value,
+                            &value_len) != kPsOk) {
+      // A block that cannot be read whole is never answered with.
+      fall_through.reason = "headers_not_reproducible";
+      return fall_through;
+    }
+    const StringPiece line_name(name, name_len);
+    if (NameIn(line_name, kForbiddenOnHit)) {
+      forbidden = true;
+      break;
+    }
+    if (NameIn(line_name, kHitOwnLines)) continue;
+    result.headers.emplace_back(GoogleString(name, name_len),
+                                GoogleString(value, value_len));
+  }
+  if (forbidden) {
+    // Must never happen: the store keeps none of these.  Never emitted.
+    counters_->hit_forbidden_header->Add(1);
+    if (deps_.handler != nullptr) {
+      deps_.handler->Message(
+          kError,
+          "DaemonHtmlCache: refused to serve the stored page of %s%s: its "
+          "header block holds a line a stored page is never answered with",
+          DaemonHtmlIsLogHost(facts.host) ? facts.host.c_str() : "",
+          DaemonHtmlLogPath(facts.path).c_str());
+    }
+    LogServeSide("refuse", "headers", facts.host, facts.path, 0, 0, 0, nullptr,
+                 -1);
+    fall_through.reason = "headers_not_reproducible";
+    return fall_through;
+  }
+  result.headers.emplace_back("Content-Type", content_type);
+  result.headers.emplace_back("Content-Length", Integer64ToString(body_len));
+  result.headers.emplace_back("Age", Integer64ToString(verdict.age_s));
+  const bool head = facts.method == "HEAD";
+  if (!head) result.body.assign(reinterpret_cast<const char*>(body), body_len);
+  if (!s->port->EmitAsOrigin(result)) {
+    // The port could not hand the page to its chain: a miss.
+    fall_through.reason = "other";
+    return fall_through;
+  }
+  counters_->served_html->Add(1);
+  const int agent_class = facts.agent_class;
+  Variable* by_class =
+      markdown_preference ? counters_->served_html_markdown_preference
+      : agent_class == kDaemonHtmlAgentClassSigned ? counters_->served_html_c1
+      : agent_class == kDaemonHtmlAgentClassToken
+          ? counters_->served_html_c3
+          : counters_->served_html_unclassed;
+  by_class->Add(1);
+  LogServeSide("served_html", "fresh", facts.host, facts.path, 200,
+               head ? 0 : body_len, stored.lifetime_s, nullptr, verdict.age_s,
+               nullptr, GoogleString(), agent_class, config_.serve_scope);
+  return result;
+}
+
+void DaemonHtmlEngine::NoteShadowWouldServe(const GoogleString& identity,
+                                            const uint8_t* stored_hash) {
+  if (stored_hash == nullptr || IsZeroHash(stored_hash)) return;
+  const GoogleString hash(reinterpret_cast<const char*>(stored_hash),
+                          kPsHtmlHashBytes);
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (shadow_would_serve_.count(identity) == 0) {
+    shadow_order_.push_back(identity);
+  }
+  shadow_would_serve_[identity] = hash;
+  while (shadow_order_.size() > kShadowWouldServeMax) {
+    shadow_would_serve_.erase(shadow_order_.front());
+    shadow_order_.pop_front();
+  }
+}
+
+void DaemonHtmlEngine::CheckShadowBody(const GoogleString& identity,
+                                       const uint8_t* hash) {
+  GoogleString stored;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = shadow_would_serve_.find(identity);
+    if (it == shadow_would_serve_.end()) return;
+    stored = it->second;
+    shadow_would_serve_.erase(it);
+    for (auto o = shadow_order_.begin(); o != shadow_order_.end(); ++o) {
+      if (*o == identity) {
+        shadow_order_.erase(o);
+        break;
+      }
+    }
+  }
+  if (memcmp(stored.data(), hash, kPsHtmlHashBytes) != 0) {
+    counters_->would_serve_body_differs->Add(1);
+  }
+}
+
+void DaemonHtmlEngine::OnUnsafeRequest(
+    const DaemonHtmlRequestFacts& facts, int status,
+    const std::vector<GoogleString>& location,
+    const std::vector<GoogleString>& content_location, DaemonHtmlPort* port) {
+  const DaemonAbi* abi = deps_.substrate.abi;
+  // In serve-variants or a later mode, with the 1.15 predicate; a main
+  // request of this site, on one of its exact names, whose URL the server
+  // and this module read the same way (no key is guessed otherwise).
+  if (abi == nullptr || config_.mode < DaemonHtmlMode::kServeVariants ||
+      !config_.agent_optimize || !abi->HasHtmlServe15Set() ||
+      !IsSiteId(config_.site) || facts.site != config_.site || facts.internal ||
+      !HostExactlyConfigured(facts.host, config_.host_names)) {
+    return;
+  }
+  if (!facts.url_agreed || !IsVolumePath(facts.path)) return;
+  if (abi->HtmlUnsafeMethodInvalidates(facts.method.c_str(), status) != 1) {
+    return;
+  }
+  // The targets: the request's own key, then up to kUnsafeTargetsMax more
+  // from Location and Content-Location, in that order, each same-scheme and
+  // on an exactly configured host, normalised as a URL purge is.
+  struct Target {
+    GoogleString url, hostname, scheme, host, path;
+  };
+  std::vector<Target> targets;
+  {
+    Target own;
+    CacheKey(facts, &own.url, &own.hostname);
+    own.scheme = facts.scheme;
+    own.host = facts.host;
+    own.path = facts.path;
+    targets.push_back(std::move(own));
+  }
+  auto add_target = [&](StringPiece value) {
+    if (targets.size() >= kUnsafeTargetsMax + 1) return;
+    TrimWhitespace(&value);
+    const size_t hash = value.find('#');
+    if (hash != StringPiece::npos) value = value.substr(0, hash);
+    DaemonHtmlRequestFacts parts;
+    if (value.size() >= 1 && value[0] == '/' &&
+        !(value.size() >= 2 && value[1] == '/')) {
+      // Relative to the request: same scheme, same host.
+      parts.scheme = facts.scheme;
+      parts.host = facts.host;
+      parts.path = value.as_string();
+    } else {
+      const GoogleString key = DaemonHtmlNormalizePurgeUrl(value);
+      const size_t sep = key.find("://");
+      if (sep == GoogleString::npos) return;
+      parts.scheme = key.substr(0, sep);
+      if (parts.scheme != facts.scheme) return;
+      const size_t path_start = key.find_first_of("/?", sep + 3);
+      parts.host = key.substr(sep + 3, path_start == GoogleString::npos
+                                           ? GoogleString::npos
+                                           : path_start - sep - 3);
+      parts.path = path_start == GoogleString::npos ? GoogleString("/")
+                                                    : key.substr(path_start);
+      if (!HostExactlyConfigured(parts.host, config_.host_names)) return;
+    }
+    if (!IsVolumePath(parts.path)) return;
+    Target t;
+    CacheKey(parts, &t.url, &t.hostname);
+    for (const Target& have : targets) {
+      if (have.url == t.url) return;
+    }
+    t.scheme = parts.scheme;
+    t.host = parts.host;
+    t.path = parts.path;
+    targets.push_back(std::move(t));
+  };
+  for (const GoogleString& line : location) add_target(line);
+  for (const GoogleString& line : content_location) add_target(line);
+
+  // The fence first, in this process, for every target: a capture of any of
+  // them already under way fails its check, and no later serve here reads
+  // an entry stored before now.
+  const int64 now_ms = deps_.timer->NowMs();
+  for (const Target& t : targets) oracle_.NoteUnsafeInvalidation(t.url, now_ms);
+  counters_->invalidated_unsafe->Add(1);
+  LogServeSide("invalidated", GoogleString(), facts.host, facts.path, status, 0,
+               0, nullptr, -1);
+  void* cache = Cache();
+  // No volume this process can vouch for: nothing is served from one either,
+  // and the fence holds.
+  if (cache == nullptr) return;
+  // Then the removal, which fails closed: a missing entry is a success, any
+  // other failure is counted and leaves the fence.
+  auto remove = [this, cache, targets] {
+    const DaemonAbi* abi = deps_.substrate.abi;
+    for (const Target& t : targets) {
+      const int rc = abi->CacheRemoveSite(cache, VolumeUrl(t.url).c_str(),
+                                          t.hostname.c_str(), t.scheme.c_str(),
+                                          config_.site.c_str());
+      if (rc == kPsOk) {
+        counters_->removed->Add(1);
+        LogServeSide("purged", "invalidated", t.host, t.path, 0, 0, 0, nullptr,
+                     -1);
+      } else if (rc != kPsErrNotFound) {
+        counters_->invalidate_failed->Add(1);
+      }
+    }
+  };
+  if (port != nullptr) {
+    port->RunBlocking(DaemonHtmlCommit(std::move(remove)));
+  } else {
+    RunOn(deps_.runner, std::move(remove));
+  }
 }
 
 void DaemonHtmlEngine::DemandCompress(const DaemonHtmlRequestFacts& facts,
