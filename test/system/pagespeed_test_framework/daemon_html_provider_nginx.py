@@ -920,6 +920,10 @@ class NginxProvider(conf.Provider):
             applied.add("merge_slashes")
         elif "merge_slashes" in vhost:
             applied.add("merge_slashes")
+        if "respect_xfp" in vhost:
+            if vhost["respect_xfp"]:
+                lines.append("pagespeed RespectXForwardedProto on;")
+            applied.add("respect_xfp")
         if "poll_interval_s" in vhost:
             lines.append(f"pagespeed CacheFlushPollIntervalSec {int(vhost['poll_interval_s'])};")
             applied.add("poll_interval_s")

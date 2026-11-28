@@ -51,7 +51,7 @@
     "live body: mode, agent_optimize, vhost (knobs: header_add, header_always,",
     "header_early, expires, auth, alias, default_vhost, in_place,",
     "pagespeed_off_location, compress_markdown, third_party_filter, merge_slashes, gunzip,",
-    "poll_interval_s, chained_module_origin), origin {status, headers, body_ref,",
+    "poll_interval_s, respect_xfp, chained_module_origin), origin {status, headers, body_ref,",
     "echo_conditionals, truncate_body (the body ends before its Content-Length)},",
     "and steps [{request {method, path, host, headers}, pre,",
     "process, background, window, expect}]. live pre ops: purge_url {url, form PURGE |",
@@ -169,7 +169,7 @@
     "pages) behind the server, request paths naming its endpoints. Vhost knobs",
     "add serve_scope, max_age_s, credentialed, ignore_cookies, expires_by_type,",
     "deflate, ssi, substitute, proxy_html, sub_filter, rewriter_off_for_type,",
-    "rewriter_declines, disable_rewrite_on_no_transform, tls_front, respect_xfp,",
+    "rewriter_declines, disable_rewrite_on_no_transform, tls_front,",
     "redirect. Ops add set_vhost {knob: value}, protect {variant}, origin_fail",
     "{path, status}, fill_read_queue, release_slow {sticky}. Step keys add",
     "abort_after_ms. Expect adds body_cred_identity (the identity whose credential",
@@ -18908,6 +18908,120 @@
       }
     },
     {
+      "id": "live-xfp-respect-on-stores-nginx",
+      "runners": [
+        "live"
+      ],
+      "why": "request: with RespectXForwardedProto the forwarded scheme is keyed, so the page is stored",
+      "ports": [
+        "nginx"
+      ],
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "vhost": {
+          "respect_xfp": true
+        },
+        "origin": {
+          "status": 200,
+          "headers": [
+            [
+              "Content-Type",
+              "text/html; charset=utf-8"
+            ],
+            [
+              "Cache-Control",
+              "max-age=300"
+            ],
+            [
+              "ETag",
+              "\"v1\""
+            ]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {
+              "method": "GET",
+              "path": "/page",
+              "headers": [
+                [
+                  "X-Forwarded-Proto",
+                  "https"
+                ]
+              ]
+            },
+            "expect": {
+              "status": 200,
+              "content_type": "text/html",
+              "counter_delta": {
+                "daemon_html_stored": 1,
+                "daemon_html_refused_request_header": 0
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-xfp-respect-off-refused-nginx",
+      "runners": [
+        "live"
+      ],
+      "why": "request: without RespectXForwardedProto a forwarded scheme other than the keyed one is refused",
+      "ports": [
+        "nginx"
+      ],
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "vhost": {
+          "respect_xfp": false
+        },
+        "origin": {
+          "status": 200,
+          "headers": [
+            [
+              "Content-Type",
+              "text/html; charset=utf-8"
+            ],
+            [
+              "Cache-Control",
+              "max-age=300"
+            ],
+            [
+              "ETag",
+              "\"v1\""
+            ]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {
+              "method": "GET",
+              "path": "/page",
+              "headers": [
+                [
+                  "X-Forwarded-Proto",
+                  "https"
+                ]
+              ]
+            },
+            "expect": {
+              "status": 200,
+              "content_type": "text/html",
+              "counter_delta": {
+                "daemon_html_stored": 0,
+                "daemon_html_refused_request_header": 1
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
       "id": "live-ajax-never-stores-never-hits",
       "runners": ["live"],
       "why": "request: an AJAX request is never stored or answered from the cache",
@@ -35549,6 +35663,67 @@
         "config": {
           "policy_stamp": "5a17c0de00000001"
         }
+      }
+    },
+    {
+      "id": "m2-html-request-not-judged-at-lookup",
+      "runners": [
+        "engine"
+      ],
+      "why": "html path: a request without a Markdown preference is not judged or counted at the lookup",
+      "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "agents",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
+        "verdicts": [],
+        "steps": [
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": [
+                "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8"
+              ],
+              "agent_class": 3,
+              "cookie": true,
+              "cookie_lines": [
+                "sid=abc12345"
+              ],
+              "request_headers": [
+                [
+                  "X-Forwarded-Host",
+                  "attacker.example"
+                ]
+              ]
+            },
+            "expect": {
+              "calls_exclude": [
+                "ps_html_request_guard",
+                "ps_html_classify_cookies",
+                "ps_cache_read_alternate_site",
+                "ps_html_serve_classify"
+              ],
+              "counters": {
+                "daemon_html_refused_cookie_request": 0,
+                "daemon_html_refused_request_header": 0
+              }
+            }
+          }
+        ]
       }
     },
     {

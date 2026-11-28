@@ -7,9 +7,17 @@
   `public`. A page stored before the upgrade is not answered as Markdown
   until its next miss stores it again. Behind a TLS-terminating proxy, set
   `RespectXForwardedProto on` (Apache, nginx and IIS key the page on the
-  forwarded scheme then): otherwise the forwarded scheme differs from the one
-  the server keys on, nothing is stored or answered on that virtual host or
-  site, and the server logs one warning saying so. On IIS, requests
+  forwarded scheme then), but only where every request reaches the server
+  through that proxy and the proxy sets the header itself; otherwise the
+  forwarded scheme differs from the one the server keys on, nothing is
+  stored or answered on that virtual host or site, and the server logs one
+  warning saying so. `report-only` applies the same request policy, so its
+  numbers change with a 1.15 library too: a request that carries only
+  listed analytics cookies counts as one that would be stored, and a request
+  the policy refuses for a request header, its path or a mismatched
+  `X-Forwarded-Proto` is no longer evaluated (it counts in
+  `daemon_html_refused_request_header` or `daemon_html_refused_path`
+  instead of `daemon_html_evaluated`). On IIS, requests
   rewritten by URL Rewrite are not stored or answered from the HTML cache
   until a later release: URL Rewrite adds `X-Original-URL` to the rewritten
   request, a header the cache key does not contain, and the site logs one

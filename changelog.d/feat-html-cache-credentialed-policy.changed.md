@@ -42,5 +42,7 @@
   `daemon_html_refused_auth` instead of `daemon_html_refused_auth_request`),
   the decision log names the cookie or header (never its value), and
   `daemon_html_upgrade_restores` counts pages stored again after an
-  upgrade. With an older optimizer library every cookie counts as a cookie,
-  as before.
+  upgrade. `report-only` applies the same request policy, so its report
+  says what serving would do. Every port counts both `Authorization` and
+  `Proxy-Authorization`. With an older optimizer library every cookie counts
+  as a cookie, as before.

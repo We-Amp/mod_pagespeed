@@ -938,14 +938,14 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 			!(facts->scheme == "http" && local_port == 80)) {
 			StrAppend(&facts->host, ":", IntegerToString(local_port));
 		}
-		// With RespectXForwardedProto on, the scheme a TLS-terminating
-		// front forwards is the one the page is keyed on (the host keeps the
-		// connection's port rule, so the key names the page as the front
-		// serves it).
-		if (options != nullptr) {
-			facts->scheme = DaemonHtmlKeyedScheme(facts->scheme,
-				facts->request_headers, options->respect_x_forwarded_proto());
-		}
+		// With RespectXForwardedProto on (the site's setting), the scheme a
+		// TLS-terminating front forwards is the one the page is keyed on.
+		// The host keeps the connection's port rule above, so with a back
+		// end on a port other than the scheme's default the key names that
+		// port too.
+		facts->scheme = DaemonHtmlKeyedScheme(facts->scheme,
+			facts->request_headers,
+			inner->server_context()->global_options()->respect_x_forwarded_proto());
 		USHORT length = 0;
 		PCSTR value = nullptr;
 		facts->site = IisRequestSiteId(

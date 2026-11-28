@@ -1312,7 +1312,8 @@ void DaemonHtmlEngine::NoteForwardedProtoMismatch() {
       "DaemonHtmlCache: a request carried an X-Forwarded-Proto that is not "
       "the scheme this server keys its pages on, so no page is stored or "
       "served for it (Markdown copies included); behind a TLS-terminating "
-      "proxy, set RespectXForwardedProto on");
+      "proxy that every request passes and that sets the header itself, set "
+      "RespectXForwardedProto on");
 }
 
 bool DaemonHtmlEngine::ApplyPolicySettings(const DaemonAbi& abi, Config* config,
@@ -1548,9 +1549,9 @@ void DaemonHtmlEngine::NoteRewrittenUrlRefused() {
       kWarning,
       "DaemonHtmlCache: a request carried X-Original-URL, which the cache key "
       "does not contain, so no page is stored or served for it (Markdown "
-      "copies included); IIS URL Rewrite adds this header to every rewritten "
-      "request, so requests rewritten by URL Rewrite are not stored until a "
-      "later release");
+      "copies included); for example, IIS URL Rewrite adds it to every "
+      "rewritten request, so requests rewritten by URL Rewrite are not stored "
+      "until a later release");
 }
 
 const char* DaemonHtmlEngine::ServeModeName() const {
@@ -1839,6 +1840,9 @@ std::unique_ptr<DaemonHtmlRecording> DaemonHtmlEngine::StartRecording(
   std::unique_ptr<DaemonHtmlRecording> recording(
       new DaemonHtmlRecording(this, facts, port, may_store));
   if (policy.applies) {
+    // The engine's own reading of the credential lines reaches the
+    // library's classification too (the report-only path among them).
+    if (policy.auth) recording->facts_.has_authorization = true;
     recording->cookie_classified_ = true;
     recording->blocking_cookie_ = policy.blocking_cookie;
     recording->ignorable_cookies_ = std::move(policy.ignorable_cookies);
@@ -2780,7 +2784,7 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
   // credentialed policy forbids is never emitted, whatever the verdict.
   if (policy.applies) {
     const bool request_credentialed =
-        facts.has_authorization || facts.authenticated_user ||
+        policy.auth ||
         (policy.blocking_cookie &&
          config_.credentialed != kPsHtmlCredentialedExplicitPublic);
     const bool entry_forbidden =

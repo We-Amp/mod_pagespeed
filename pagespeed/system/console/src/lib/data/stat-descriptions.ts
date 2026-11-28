@@ -73,7 +73,13 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
   daemon_html_refused_auth_request:
     "Refusals: the request carried credentials (Authorization or Proxy-Authorization, or a signed-in user). No response header overrides this.",
   daemon_html_refused_cookie_request:
-    "Refusals: the request carried a cookie and the response was not marked shareable (public or s-maxage).",
+    "Refusals: the request carried a cookie outside the ignore list (C API 1.15: refused before the response under anonymous-only) and the page was not shareable. Counted at the store and, for a Markdown request, at the lookup.",
+  daemon_html_refused_auth:
+    "Refused before any read (C API 1.15): the request carried Authorization, Proxy-Authorization or a signed-in user. Counted at the store and, for a Markdown request, at the lookup.",
+  daemon_html_refused_path:
+    "Refused (C API 1.15): the request path has a form the cache does not key, such as a parameter, an encoded slash or a dot segment.",
+  daemon_html_refused_cookie_echo:
+    "Stores refused (C API 1.15): the page repeats the value of an ignore-listed cookie.",
   daemon_html_refused_set_cookie:
     "Refusals: the response sets a cookie.",
   daemon_html_refused_private:
@@ -205,6 +211,12 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
     "Markdown requests that fell through to the origin page because the server and the module disagree about the URL.",
   daemon_markdown_fallthrough_request_header:
     "Markdown requests that fell through to the origin page because the request came from a script (X-Requested-With: XMLHttpRequest, X-MicrosoftAjax or X-Prototype-Version).",
+  daemon_markdown_fallthrough_path:
+    "Markdown requests that fell through to the origin page because of the request path's form (C API 1.15).",
+  daemon_html_upgrade_restores:
+    "Pages stored before C API 1.15 that were stored again on their next miss.",
+  daemon_html_served_credentialed_refused:
+    "Markdown answers the credential policy forbids, refused at the last step. Expected to stay at zero.",
   daemon_markdown_fallthrough_other:
     "Markdown requests that fell through because the optimizer library could not classify the request, the answer could not be sent, or for a reason this module has no counter for.",
 

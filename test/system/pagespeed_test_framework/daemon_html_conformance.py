@@ -97,6 +97,7 @@ VHOST_KNOBS = frozenset(
         "third_party_filter",
         "merge_slashes",
         "poll_interval_s",
+        "respect_xfp",
         "chained_module_origin",
         "named_location",
         "proxy_hide",

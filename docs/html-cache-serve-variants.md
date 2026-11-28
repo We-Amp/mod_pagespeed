@@ -170,7 +170,11 @@ Consequences to plan for:
   request, once more at the lookup, together with
   `daemon_markdown_fallthrough_request_header`. In
   `report-only` such a request is not evaluated either: it counts only in
-  `daemon_html_refused_request_header`.
+  `daemon_html_refused_request_header`. With optimizer C API 1.15,
+  `report-only` applies the whole request policy the same way, so its numbers
+  say what serving would do: a request with only listed analytics cookies
+  counts as one that would be stored, and one refused for a request header,
+  its path or a mismatched `X-Forwarded-Proto` is not evaluated.
 
 ### Apache
 
@@ -275,3 +279,7 @@ nginx, with the IIS notes in the changelog (host names from the site's
 bindings, plain URL spellings only, the `PageSpeedFinalView` module entry).
 The compressed copies are pending verification on IIS: there the plain
 Markdown copy is served as before.
+With an optimizer library that publishes C API 1.15, a request rewritten by URL
+Rewrite carries `X-Original-URL`, a header the cache key does not contain, so it
+is neither stored nor answered until a later release; the site logs one warning
+saying so.
