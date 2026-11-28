@@ -1463,8 +1463,14 @@ void DaemonHtmlEngine::EvaluateRequestPolicy(
                                    config_.ignore_cookies ? 1 : 0,
                                    additions.data(), additions.size(), spans,
                                    kIgnorableCookieValuesMax, &cls) != 0) {
-        out->blocking_cookie = true;
-      } else if (cls.cookie_class == kPsHtmlCookiesBlocking) {
+        // Fails closed: a request the classifier could not judge is
+        // blocking, with no name to give.
+        cls = PsHtmlCookieClass();
+        cls.cookie_class = kPsHtmlCookiesBlocking;
+      }
+      if (cls.cookie_class != kPsHtmlCookiesNone &&
+          cls.cookie_class != kPsHtmlCookiesIgnorableOnly) {
+        // Blocking, or a class this build does not know.
         out->blocking_cookie = true;
         StringPiece name;
         if (cls.malformed != 0) {
@@ -1493,8 +1499,6 @@ void DaemonHtmlEngine::EvaluateRequestPolicy(
                 value.as_string());
           }
         }
-      } else if (cls.cookie_class != kPsHtmlCookiesNone) {
-        out->blocking_cookie = true;
       }
     }
     if (out->blocking_cookie) {
