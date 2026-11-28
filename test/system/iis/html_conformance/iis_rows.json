@@ -3269,11 +3269,11 @@
    }
   },
   {
-   "id": "iis-url-rewrite-original-url-with-query-stored-and-served",
+   "id": "iis-url-rewrite-trailing-slash-stored-and-served",
    "runners": [
     "live"
    ],
-   "why": "cache key: a rewritten request with a query is keyed on the URL the client sent",
+   "why": "cache key: a rewritten directory request is keyed on the URL the client sent",
    "ports": [
     "iis"
    ],
@@ -3283,7 +3283,7 @@
     "vhost": {
      "url_rewrite_inbound": [
       [
-       "^blog-(a|b)$",
+       "^docs/$",
        "front"
       ]
      ]
@@ -3310,7 +3310,7 @@
      {
       "request": {
        "method": "GET",
-       "path": "/blog-a?p=2",
+       "path": "/docs/",
        "headers": []
       },
       "expect": {
@@ -3321,7 +3321,7 @@
      {
       "request": {
        "method": "GET",
-       "path": "/blog-a?p=2",
+       "path": "/docs/",
        "headers": [
         [
          "Accept",
@@ -3343,7 +3343,7 @@
      {
       "request": {
        "method": "GET",
-       "path": "/blog-a?p=2",
+       "path": "/docs/",
        "headers": [
         [
          "Accept",
