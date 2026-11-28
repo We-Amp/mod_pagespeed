@@ -2893,6 +2893,11 @@ void ps_daemon_html_request_facts(ngx_http_request_t* r,
   }
   FillDaemonHtmlRequestHeaderFacts(lines, ps_client_conditional_stash(r),
                                    facts);
+  // The scheme the URL of this module reads (RespectXForwardedProto), so
+  // the cache key and the request guard see the scheme the page is for.
+  facts->scheme = DaemonHtmlKeyedScheme(
+      facts->scheme, facts->request_headers,
+      server_context->global_options()->respect_x_forwarded_proto());
   const SystemRewriteOptions* options =
       SystemRewriteOptions::DynamicCast(server_context->global_options());
   if (options != nullptr &&

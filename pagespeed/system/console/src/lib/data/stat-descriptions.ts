@@ -114,7 +114,7 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
   daemon_html_refused_url_disagree:
     "Store refusals: the server and the module disagree about the request's URL. Shown as a warning.",
   daemon_html_refused_request_header:
-    "Store refusals: the request came from a script (X-Requested-With: XMLHttpRequest, X-MicrosoftAjax or X-Prototype-Version), so nothing is recorded for it. Not part of the evaluated responses.",
+    "Requests refused for a request header: a script's request (X-Requested-With: XMLHttpRequest, X-MicrosoftAjax or X-Prototype-Version), or, with optimizer C API 1.15, a header the cache key does not contain. Counted once at the store and, for a Markdown request, once at the lookup. Not part of the evaluated responses.",
   daemon_html_sidecar_write_failed:
     "Stores abandoned because the saved response headers could not be written; nothing is stored in that case.",
   daemon_html_sidecar_unpaired_stale:

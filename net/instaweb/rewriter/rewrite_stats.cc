@@ -383,6 +383,8 @@ const char* const RewriteStats::kDaemonMarkdownFallthroughReasons[] = {
     "sidecar_unpaired",
     "url_disagree",
     "request_header",
+    // C API 1.15: the request guard's path rule.
+    "path",
     "other",
     nullptr,
 };

@@ -307,8 +307,16 @@ class DaemonHtmlEngineTest : public testing::Test {
     deps.handler = &handler_;
     deps.limiter = &limiter_;
     deps.budget = &budget_;
-    return std::make_unique<DaemonHtmlEngine>(config_, deps);
+    // As a port's configuration load would (ApplyPolicySettings): with the
+    // 1.15 set, the policy has a stamp unless a test says otherwise.
+    DaemonHtmlEngine::Config config = config_;
+    if (apply_stamp_ && with_abi && abi_.HasHtmlServe15Set() &&
+        config.policy_stamp == 0) {
+      config.policy_stamp = 0x5A5A;
+    }
+    return std::make_unique<DaemonHtmlEngine>(config, deps);
   }
+  bool apply_stamp_ = true;
 
   DaemonHtmlRequestFacts MarkdownRequest() {
     DaemonHtmlRequestFacts f;
@@ -1136,6 +1144,23 @@ TEST_F(DaemonHtmlEngineTest, ANonDefaultIgnoreCookieSettingWarnsOnlyBelow15) {
   EXPECT_EQ(before, handler_.MessagesOfType(kWarning));
 }
 
+// With the 1.15 set, an engine whose configuration has no policy stamp
+// (its settings were never applied) stores and serves nothing.
+TEST_F(DaemonHtmlEngineTest, NoPolicyStampStoresAndServesNothingOnFifteen) {
+  abi_.mutable_injection()->has_set_15 = true;
+  apply_stamp_ = false;
+  std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
+  EXPECT_FALSE(engine->serving());
+  InlinePort port;
+  engine->Serve(MarkdownRequest(), &port);
+  EXPECT_TRUE(abi_.serve_requests().empty());
+  abi_.Queue(kPsHtmlStoreActionStore, "none");
+  abi_.Queue(kPsHtmlStoreActionStore, "none");
+  Capture(engine.get(), &port, kOrigin, kOrigin, MarkdownRequest());
+  EXPECT_EQ(0, CallsOf("ps_cache_write_original_site"));
+  EXPECT_EQ(0, CallsOf("ps_cache_write_headers_sidecar_site"));
+}
+
 // Configuration load: each addition through the library's guard, the list
 // kept as a sorted set, the stamp computed; a refused addition is named.
 TEST_F(DaemonHtmlEngineTest, ApplyPolicySettingsGuardsAndStamps) {
@@ -1172,6 +1197,23 @@ TEST_F(DaemonHtmlEngineTest, ApplyPolicySettingsGuardsAndStamps) {
   EXPECT_FALSE(ApplyDaemonHtmlPolicySettingsForPort(&abi_, &config, &handler_));
   EXPECT_EQ(DaemonHtmlMode::kReportOnly, config.mode);
   EXPECT_EQ(1, handler_.MessagesOfType(kError));
+}
+
+// The scheme nginx and IIS key a page on: the connection's, or with
+// RespectXForwardedProto the first X-Forwarded-Proto line naming http or
+// https, as the URL this module builds reads it.
+TEST(DaemonHtmlKeyedSchemeTest, FollowsRespectXForwardedProto) {
+  const DaemonHtmlHeaderLines https = {{"x-forwarded-proto", "HTTPS"}};
+  EXPECT_EQ("http", DaemonHtmlKeyedScheme("http", https, false));
+  EXPECT_EQ("https", DaemonHtmlKeyedScheme("http", https, true));
+  EXPECT_EQ("http", DaemonHtmlKeyedScheme(
+                        "https", {{"X-Forwarded-Proto", "http"}}, true));
+  // Only the first line counts, and only http or https.
+  EXPECT_EQ("http", DaemonHtmlKeyedScheme("http",
+                                          {{"X-Forwarded-Proto", "ftp"},
+                                           {"X-Forwarded-Proto", "https"}},
+                                          true));
+  EXPECT_EQ("http", DaemonHtmlKeyedScheme("http", {}, true));
 }
 
 TEST(DaemonHtmlModeTest, EveryOptionModeMapsAndOnlyLaterModesServe) {

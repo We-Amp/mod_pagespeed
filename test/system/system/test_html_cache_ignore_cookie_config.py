@@ -10,7 +10,8 @@ library's guard refuses (`*` alone, fewer than 3 characters before a `*`, or
 a name that matches or would cover a session cookie) fails the
 configuration test with an error that names it, and a narrow addition
 passes. The check runs against a copy of the lane's configuration, so the
-lane's own server is untouched. IIS is covered on its own rig.
+lane's own server is untouched. IIS is covered by its configuration test
+(test/pagespeed/iis/iis_configuration_test.cc).
 """
 
 import ctypes

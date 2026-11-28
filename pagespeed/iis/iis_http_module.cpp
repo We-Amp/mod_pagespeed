@@ -938,6 +938,14 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 			!(facts->scheme == "http" && local_port == 80)) {
 			StrAppend(&facts->host, ":", IntegerToString(local_port));
 		}
+		// With RespectXForwardedProto on, the scheme a TLS-terminating
+		// front forwards is the one the page is keyed on (the host keeps the
+		// connection's port rule, so the key names the page as the front
+		// serves it).
+		if (options != nullptr) {
+			facts->scheme = DaemonHtmlKeyedScheme(facts->scheme,
+				facts->request_headers, options->respect_x_forwarded_proto());
+		}
 		USHORT length = 0;
 		PCSTR value = nullptr;
 		facts->site = IisRequestSiteId(
@@ -963,7 +971,8 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 			}
 		}
 		const IisAuthFacts auth = ReadIisAuthFacts(http_context);
-		facts->has_authorization = auth.has_authorization_header;
+		facts->has_authorization = auth.has_authorization_header ||
+			request->GetHeader(HttpHeaderProxyAuthorization) != nullptr;
 		facts->authenticated_user = auth.user_authenticated ||
 			auth.has_remote_user || auth.has_client_certificate;
 		facts->has_cookie = request->GetHeader("Cookie") != nullptr ||

@@ -1542,7 +1542,9 @@ void RewriteOptions::AddProperties() {
                   "DaemonHtmlCache also ignores; one per line, repeatable. "
                   "An addition that is * alone, too short a prefix, or a "
                   "session cookie name is refused when the configuration "
-                  "is read. Needs optimizer C API 1.15; with an older "
+                  "is read (on IIS: logged as an error, and the site's "
+                  "HTML cache runs report-only). Needs optimizer C API "
+                  "1.15; with an older "
                   "library every cookie counts as a cookie.",
                   true);
   properties_->property(properties_->size() - 1)

@@ -212,6 +212,15 @@ const char* DaemonHtmlAjaxMarker(StringPiece name, StringPiece value);
 // absolute-form target taken off; "/" for an empty one.
 GoogleString DaemonHtmlRawRequestPath(StringPiece target);
 
+// The scheme the HTML cache keys a request on: the connection's
+// (`connection_scheme`), or, with RespectXForwardedProto on
+// (`respect_forwarded_proto`), the first X-Forwarded-Proto line of
+// `request_headers` when it names http or https (any case), as the URL this
+// module builds for the request reads it.
+GoogleString DaemonHtmlKeyedScheme(StringPiece connection_scheme,
+                                   const DaemonHtmlHeaderLines& request_headers,
+                                   bool respect_forwarded_proto);
+
 // What the engine asks the port to do with one request.
 struct DaemonHtmlServeResult {
   enum Kind { kFallThrough, kFinal, kAsOrigin /* not produced */ };
@@ -670,7 +679,12 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
                              RequestPolicy* out);
   // Counts and logs a request the policy refused before any read.
   void NoteRequestRefused(const DaemonHtmlRequestFacts& facts,
-                          const RequestPolicy& policy, const char* mode);
+                          const RequestPolicy& policy,
+                          const GoogleString& reason,
+                          const GoogleString& detail, const char* mode);
+  // Logs once per vhost that a request carried the header IIS URL Rewrite
+  // adds to a rewritten request.
+  void NoteRewrittenUrlRefused();
 
   // The cache key of a request: scheme://host[:port]path, the host
   // lowercased and a default port dropped; and that host.
@@ -770,6 +784,7 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
   bool set16_bound_ = false;
   int markdown_codings_ = -1;
   bool xfp_logged_ = false;
+  bool rewritten_url_logged_ = false;
   std::atomic<bool> credential_skip_disabled_{false};
   // The newest global purge (seconds) this process wrote as an epoch.
   int64 epoch_written_s_ = -1;
@@ -792,8 +807,8 @@ void FillDaemonHtmlServeSettings(const RewriteOptions& options,
                                  DaemonHtmlEngine::Config* config);
 
 // A RewriteOptions::DaemonHtmlIgnoreCookieCheck backed by the optimizer
-// library under its default name, loaded once, on the first addition, and
-// kept: ps_html_ignore_cookie_guard refuses an addition that is `*` alone,
+// library under its default name, loaded for each check and released after
+// it: ps_html_ignore_cookie_guard refuses an addition that is `*` alone,
 // has fewer than 3 characters before its `*`, or would cover a session
 // cookie name.  With no library, or one below C API 1.15, the setting has
 // no effect and every addition the syntax check passed is accepted.  A port
@@ -808,9 +823,12 @@ bool DaemonHtmlCheckIgnoreCookieWithLibrary(StringPiece addition,
 // (none: nothing to apply).  When it refuses, logs the error naming the
 // addition and runs the configuration report-only: nothing is stored or
 // served under a policy the library refused.  Returns whether it applied.
+// When given, *error receives the error on a refusal (a port that must also
+// report it elsewhere, such as the IIS event log).
 bool ApplyDaemonHtmlPolicySettingsForPort(const DaemonAbi* abi,
                                           DaemonHtmlEngine::Config* config,
-                                          MessageHandler* handler);
+                                          MessageHandler* handler,
+                                          GoogleString* error_out = nullptr);
 
 // The engine a server port builds from its DaemonHtmlCache settings, or
 // nullptr for off.  Until the port stores and serves, serve-variants runs

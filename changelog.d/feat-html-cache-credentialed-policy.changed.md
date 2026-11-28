@@ -16,13 +16,12 @@
   `_hjClosedSurveyInvites`, `_hjDonePolls`, `_clck`, `_clsk`, `_pk_id.*`,
   `_pk_ses.*`, `_pk_ref.*`, `_uetsid`, `_uetvid`, `_uetmsclkid`) and the
   `DaemonHtmlCacheIgnoreCookie` additions. Any other cookie, a session
-  cookie whatever the additions say, a cookie line that does not parse, or
-  more listed cookies than the cache can check sends the request to the
-  origin. `DaemonHtmlCacheCredentialed explicit-public` lets a request with
+  cookie whatever the additions say, a cookie line that does not parse, a
+  `Cookie2` line, or more listed cookies than the cache can check sends the
+  request to the origin. `DaemonHtmlCacheCredentialed explicit-public` lets a request with
   other cookies be stored and answered when the origin marks the page
-  `public` or gives it an `s-maxage`, as before. A page whose body or stored
-  headers carry the value of a listed cookie (8 bytes or longer, also
-  percent-encoded) is never stored. A request that carries a header the
+  `public` or gives it an `s-maxage`, as before. A page that repeats the
+  value of a listed cookie is not stored. A request that carries a header the
   cache key does not contain (`X-Forwarded-Host`, `X-Host`,
   `X-Original-Host`, `X-Original-URL`, `X-Rewrite-URL`, `X-Forwarded-Port`,
   `X-Forwarded-Scheme`, `X-Forwarded-Prefix`, `X-HTTP-Method-Override`,
@@ -38,8 +37,10 @@
   stored again on its next miss. The refusals are counted in
   `daemon_html_refused_auth`, `daemon_html_refused_cookie_request`,
   `daemon_html_refused_cookie_echo`, `daemon_html_refused_request_header`
-  and `daemon_html_refused_path` (each lookup and each store), the decision
-  log names the cookie or header (never its value), and
+  and `daemon_html_refused_path` (once at the store and, for a Markdown
+  request, once at the lookup; an `Authorization` request now counts in
+  `daemon_html_refused_auth` instead of `daemon_html_refused_auth_request`),
+  the decision log names the cookie or header (never its value), and
   `daemon_html_upgrade_restores` counts pages stored again after an
   upgrade. With an older optimizer library every cookie counts as a cookie,
   as before.
