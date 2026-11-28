@@ -158,7 +158,7 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
   daemon_markdown_compress_demand_sent:
     "Requests to the optimizer to write the compressed copies of a page's Markdown copy, sent at most once per page per server process after a compressed copy was missing or out of date.",
   daemon_markdown_coded_fallback:
-    "Markdown answers sent uncompressed although a compressed copy was ready, because a body filter of the server (for example nginx sub_filter or ssi for text/markdown) would have rewritten the compressed bytes.",
+    "Markdown answers sent uncompressed although a compressed copy was ready, because a body filter of the server (for example nginx's sub or SSI filter for Markdown) would have rewritten the compressed bytes.",
   daemon_markdown_fallthrough_no_acceptable_encoding:
     "Markdown requests that fell through to the origin page because they accept no coding the Markdown copy is stored in (for example identity;q=0 with no compressed copy ready).",
   daemon_markdown_fallthrough_fresh:
