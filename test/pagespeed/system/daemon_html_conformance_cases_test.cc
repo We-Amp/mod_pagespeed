@@ -85,7 +85,8 @@ const StringSet kVhostKnobs = {"header_add",
                                "chained_module_origin",
                                "named_location",
                                "proxy_hide",
-                               "trailer"};
+                               "trailer",
+                               "gunzip"};
 const StringSet kOriginKeys = {"status", "headers", "body_ref",
                                "echo_conditionals", "truncate_body"};
 const StringSet kLiveStepKeys = {"request",    "pre",    "process",
@@ -94,18 +95,27 @@ const StringSet kLiveWindowKeys = {"stale_max_s", "margin_s", "observe_s",
                                    "every_s", "stale"};
 const StringSet kLiveRequestKeys = {"method", "path", "host", "headers"};
 const StringSet kLiveOps = {
-    "purge_url",      "purge_global", "wait_markdown",
-    "sleep_s",        "origin_set",   "hold_origin",
-    "release_origin", "set_mode",     "wait_origin_held"};
-const StringSet kLiveExpectKeys = {"status",         "content_type",
-                                   "headers_exact",  "headers_absent",
-                                   "stored",         "stored_lifetime_s",
-                                   "sidecar_absent", "body_ref",
-                                   "body_bytes",     "body_contains",
+    "purge_url",        "purge_global", "wait_markdown",  "sleep_s",
+    "origin_set",       "hold_origin",  "release_origin", "set_mode",
+    "wait_origin_held", "wait_coded",   "restart_worker"};
+const StringSet kLiveExpectKeys = {"status",
+                                   "content_type",
+                                   "headers_exact",
+                                   "headers_absent",
+                                   "stored",
+                                   "stored_lifetime_s",
+                                   "sidecar_absent",
+                                   "body_ref",
+                                   "body_bytes",
+                                   "body_contains",
                                    "length_matches_body",
-                                   "origin_saw",     "origin_saw_absent",
-                                   "counter_delta",  "differential",
-                                   "headers_only"};
+                                   "origin_saw",
+                                   "origin_saw_absent",
+                                   "counter_delta",
+                                   "differential",
+                                   "headers_only",
+                                   "decoded_equals_step",
+                                   "header_equals_step"};
 
 // The one pending value, and what a pending row may add to the sets above.
 const char kPendingSupport[] = "serve-cached-html";
@@ -528,7 +538,7 @@ void CheckLive(Checker& c, const GoogleString& w, const Json::Value& l,
       if (!he.isObject()) c.Fail(sw, "headers_exact is not an object");
       for (const GoogleString& name : he.getMemberNames()) {
         c.Keys(StrCat(sw, " headers_exact ", name), he[name],
-               {"count", "value", "contains"}, {"count"});
+               {"count", "value", "contains", "tokens"}, {"count"});
         if (!he[name]["count"].isUInt()) {
           c.Fail(StrCat(sw, " headers_exact ", name), "count is not a count");
         }

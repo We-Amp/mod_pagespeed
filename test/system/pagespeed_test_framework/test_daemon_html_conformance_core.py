@@ -13,6 +13,8 @@ which is how these tests prove the runner notices.
 Run with: python -m pytest -v test_daemon_html_conformance_core.py
 """
 
+import copy
+import gzip
 import json
 import threading
 from typing import Dict, List, Optional
@@ -167,9 +169,9 @@ class FakeProvider(Provider):
 
     def _markdown(self, method, path, inm) -> Response:
         self.stats["daemon_markdown_served"] = self.stats.get("daemon_markdown_served", 0) + 1
-        vary = [("Vary", "Accept")]
+        vary = [("Vary", "Accept, Accept-Encoding")]
         if "duplicate_vary" in self.defects:
-            vary.append(("Vary", "Accept"))
+            vary.append(("Vary", "Accept, Accept-Encoding"))
         if MARKDOWN_ETAG in inm:
             return Response(
                 304,
@@ -917,6 +919,121 @@ class TestProviderPorts:
         monkeypatch.setattr(conf, "PROVIDER_PORTS", frozenset(["no-such-port"]))
         with pytest.raises(ModuleNotFoundError):
             conf.load_provider("no-such-port", object())
+
+
+class CodedProvider(FakeProvider):
+    """Serves the Markdown copy gzip-coded to a request that accepts gzip,
+    and knows whether its coded copies are stored."""
+
+    def __init__(self, defects=(), coded_after: int = 0) -> None:
+        super().__init__(defects)
+        self.coded_after = coded_after
+        self.coded_polls = 0
+        self.restarts: List[tuple] = []
+
+    def request(self, method, path, host, headers, process=None) -> Response:
+        r = super().request(method, path, host, headers, process)
+        ae = ", ".join(v for n, v in headers if n.lower() == "accept-encoding")
+        if r.status == 200 and "gzip" in ae and any(
+                v.startswith("text/markdown") for v in r.lines("Content-Type")):
+            body = r.body if "wrong_bytes" not in self.defects else r.body + b"x"
+            coded = gzip.compress(body)
+            lines = [(n, v) for n, v in r.headers if n.lower() != "content-length"]
+            lines += [("Content-Encoding", "gzip"), ("Content-Length", str(len(coded)))]
+            r = Response(200, lines, b"" if method == "HEAD" else coded)
+        return r
+
+    def coded_ready(self, path, host, codings) -> bool:
+        self.coded_polls += 1
+        return self.coded_polls > self.coded_after
+
+    def restart_worker(self, gzip_level, brotli_level) -> None:
+        if "no_restart" in self.defects:
+            raise ProviderUnsupported("cannot restart the worker")
+        self.restarts.append((gzip_level, brotli_level))
+
+
+GET_MD_GZIP = {"method": "GET", "path": "/page",
+               "headers": [["Accept", "text/markdown"], ["Accept-Encoding", "gzip"]]}
+CODED_STEPS = [
+    {"request": GET_PAGE, "expect": {"stored": True}},
+    {"request": GET_MD, "pre": [{"wait_markdown": {"timeout_s": 5}},
+                               {"wait_coded": {"codings": ["br", "gzip"], "timeout_s": 5}}],
+     "expect": {"status": 200}},
+    {"request": GET_MD_GZIP,
+     "expect": {"status": 200, "decoded_equals_step": 1,
+                "header_equals_step": {"ETag": 1}}},
+]
+
+
+class TestCodedCopies:
+    def test_a_coded_body_that_decodes_to_the_plain_copy_passes(self):
+        provider = CodedProvider(coded_after=2)
+        assert run(synthetic(CODED_STEPS), provider) == []
+        assert provider.coded_polls == 3
+
+    def test_a_coded_body_of_other_bytes_fails(self):
+        failures = run(synthetic(CODED_STEPS), CodedProvider({"wrong_bytes"}))
+        assert any("the decoded body" in f for f in failures), failures
+
+    def test_a_header_that_differs_from_the_earlier_step_fails(self):
+        steps = copy.deepcopy(CODED_STEPS)
+        steps[2]["expect"]["header_equals_step"] = {"Content-Length": 1}
+        failures = run(synthetic(steps), CodedProvider())
+        assert any("Content-Length" in f and "step 1 had" in f for f in failures), failures
+
+    def test_coded_copies_never_stored_fail_at_the_deadline(self):
+        failures = run(synthetic(CODED_STEPS), CodedProvider(coded_after=10**6))
+        assert any("br/gzip copies not stored within 5 s" in f for f in failures), failures
+
+    def test_a_provider_without_a_coded_probe_fails_the_row(self):
+        failures = run(synthetic(CODED_STEPS), FakeProvider())
+        assert any("no coded-copy probe" in f for f in failures), failures
+
+    def test_restart_worker_reaches_the_provider_or_fails(self):
+        steps = copy.deepcopy(CODED_STEPS)
+        steps[0]["pre"] = [{"restart_worker": {"gzip_level": 0, "brotli_level": 0}}]
+        provider = CodedProvider()
+        assert run(synthetic(steps), provider) == []
+        assert provider.restarts == [(0, 0)]
+        failures = run(synthetic(steps), CodedProvider({"no_restart"}))
+        assert any("cannot restart the worker" in f for f in failures), failures
+
+    def test_a_vary_list_compares_by_token(self):
+        steps = copy.deepcopy(CODED_STEPS)
+        steps[2]["expect"]["headers_exact"] = {
+            "Vary": {"count": 1, "tokens": ["Accept", "Accept-Encoding"]}}
+        assert run(synthetic(steps), CodedProvider()) == []
+        steps[2]["expect"]["headers_exact"]["Vary"]["tokens"] = ["Accept-Encoding", "Accept"]
+        failures = run(synthetic(steps), CodedProvider())
+        assert any("expected the list Accept-Encoding, Accept" in x for x in failures), failures
+
+    def test_decode_body(self):
+        plain = Response(200, [("Content-Type", "text/markdown")], b"abc")
+        assert conf.decode_body(plain) == b"abc"
+        gz = Response(200, [("Content-Encoding", "gzip")], gzip.compress(b"abc"))
+        assert conf.decode_body(gz) == b"abc"
+        with pytest.raises(ValueError):
+            conf.decode_body(Response(200, [("Content-Encoding", "gzip"),
+                                            ("Content-Encoding", "br")], b""))
+        with pytest.raises(ValueError):
+            conf.decode_body(Response(200, [("Content-Encoding", "zstd")], b""))
+
+    @pytest.mark.parametrize("change,error", [
+        (lambda s: s[2]["expect"].update(decoded_equals_step=2), "names no earlier step"),
+        (lambda s: s[2]["expect"].update(decoded_equals_step=9), "names no earlier step"),
+        (lambda s: s[2]["expect"].update(header_equals_step={"ETag": True}),
+         "names no earlier step"),
+        (lambda s: s[1]["pre"][1]["wait_coded"].update(codings=["zstd"]), "wait_coded names"),
+        (lambda s: s[1]["pre"][1]["wait_coded"].update(codings=[]), "wait_coded names"),
+        (lambda s: s[0].update(pre=[{"restart_worker": {"gzip_level": 0}}]),
+         "restart_worker names gzip_level and brotli_level"),
+    ])
+    def test_validation(self, change, error):
+        steps = copy.deepcopy(CODED_STEPS)
+        change(steps)
+        errors = conf.validate_row(synthetic(steps), BODIES)
+        assert any(error in e for e in errors), errors
 
 
 class TestHeaderHelpers:

@@ -105,7 +105,9 @@ TEST_F(InjectedVerdictDaemonAbiTest, EveryServeVerdictCanBeInjected) {
   EXPECT_STREQ("policy_mismatch", fake_->HtmlServeReasonName(24));
   EXPECT_STREQ("request_header", fake_->HtmlServeReasonName(25));
   EXPECT_STREQ("path", fake_->HtmlServeReasonName(26));
-  EXPECT_EQ(nullptr, fake_->HtmlServeReasonName(27));
+  // And the 1.16 one.
+  EXPECT_STREQ("no_acceptable_encoding", fake_->HtmlServeReasonName(27));
+  EXPECT_EQ(nullptr, fake_->HtmlServeReasonName(28));
   EXPECT_EQ(nullptr, fake_->HtmlServeReasonName(-1));
 
   // A malformed-call answer is injectable too, and then nothing is written.
@@ -420,6 +422,72 @@ TEST_F(InjectedVerdictDaemonAbiTest, TheFifteenSetIsInjectable) {
   EXPECT_EQ(7u, fake_->serve_requests()[0].policy_stamp);
   EXPECT_EQ(0, fake_->serve_requests()[1].agent_class);
   EXPECT_EQ(0u, fake_->serve_requests()[1].policy_stamp);
+}
+
+// The 1.16 set answers what a case injects: off by default, then the order,
+// the coded facts bits for a coded read only, one tag per coding, the
+// published codings, and successive verdicts.
+TEST_F(InjectedVerdictDaemonAbiTest, TheSixteenSetIsInjectable) {
+  HtmlServeInjection* in = fake_->mutable_injection();
+  int order[3] = {-1, -1, -1};
+  EXPECT_FALSE(fake_->HasHtmlServe16Set());
+  EXPECT_EQ(-1, fake_->MarkdownSelectEncoding(nullptr, 0, order));
+  in->has_set_15 = true;
+  in->has_set_16 = true;
+  EXPECT_TRUE(fake_->HasHtmlServe16Set());
+  in->select_rc = 2;
+  in->select_order = {kPsMarkdownEncodingBr, kPsMarkdownEncodingIdentity};
+  const char* lines[] = {"br"};
+  ASSERT_EQ(2, fake_->MarkdownSelectEncoding(lines, 1, order));
+  EXPECT_EQ(kPsMarkdownEncodingBr, order[0]);
+  EXPECT_EQ(kPsMarkdownEncodingIdentity, order[1]);
+
+  in->coded_bits[kPsMarkdownEncodingBr] = kPsHtmlFactsBrCopyBound;
+  PsHtmlStoredFacts facts = {};
+  facts.struct_size = sizeof(facts);
+  int coded = 0;
+  ASSERT_EQ(0, fake_->HtmlStoredFactsFromReadsCoded(
+                   nullptr, nullptr, nullptr, 0, nullptr, &coded,
+                   kPsMarkdownEncodingBr, &facts));
+  EXPECT_NE(0u, facts.flags & kPsHtmlFactsBrCopyBound);
+  ASSERT_EQ(0, fake_->HtmlStoredFactsFromReadsCoded(
+                   nullptr, nullptr, nullptr, 0, nullptr, nullptr,
+                   kPsMarkdownEncodingBr, &facts));
+  EXPECT_EQ(0u, facts.flags & kPsHtmlFactsBrCopyBound);
+  EXPECT_EQ(-1, fake_->HtmlStoredFactsFromReadsCoded(
+                    nullptr, nullptr, nullptr, 0, nullptr, &coded,
+                    kPsMarkdownEncodingIdentity, &facts));
+
+  uint8_t hash[kPsHtmlHashBytes] = {1};
+  char tag[64];
+  size_t len = 0;
+  ASSERT_EQ(0, fake_->HtmlMarkdownEtagCoded(hash, hash, kPsMarkdownEncodingBr,
+                                            tag, sizeof(tag), &len));
+  EXPECT_EQ(in->coded_etag[kPsMarkdownEncodingBr], tag);
+  ASSERT_EQ(
+      0, fake_->HtmlMarkdownEtagCoded(hash, hash, kPsMarkdownEncodingIdentity,
+                                      tag, sizeof(tag), &len));
+  EXPECT_EQ(in->etag, tag);
+  EXPECT_EQ((1 << kPsMarkdownEncodingGzip) | (1 << kPsMarkdownEncodingBr),
+            fake_->ReadSharedConfigMarkdownCodings("/c"));
+
+  PsHtmlServeVerdict first = {};
+  first.action = kPsHtmlServeActionServeMarkdown;
+  first.markdown_encoding = kPsMarkdownEncodingGzip;
+  in->verdicts = {first};
+  in->verdict.action = kPsHtmlServeActionFallThrough;
+  PsHtmlServeRequest request = {};
+  request.struct_size = sizeof(request);
+  request.method = "GET";
+  request.markdown_encoding = kPsMarkdownEncodingGzip;
+  PsHtmlServeVerdict out = Classify(request);
+  EXPECT_EQ(kPsHtmlServeActionServeMarkdown, out.action);
+  EXPECT_EQ(kPsMarkdownEncodingGzip, out.markdown_encoding);
+  out = Classify(request);
+  EXPECT_EQ(kPsHtmlServeActionFallThrough, out.action);
+  ASSERT_EQ(2u, fake_->serve_requests().size());
+  EXPECT_EQ(1u, fake_->serve_requests()[0].markdown_encoding);
+  EXPECT_TRUE(fake_->serve_requests()[0].verdict_zeroed);
 }
 
 }  // namespace

@@ -70,6 +70,13 @@ struct RecordedServeRequest {
   int agent_class = 0;
   uint32_t html_max_lifetime_s = 0;
   uint64_t policy_stamp = 0;
+  // The 1.16 coding word, recorded from a request of the 1.15 size.
+  uint32_t markdown_encoding = 0;
+  // The verdict's struct_size as the engine stamped it, and whether every
+  // byte of the buffer past it was zero when the call came in (a stale
+  // verdict must be zeroed before each call).
+  size_t verdict_size = 0;
+  bool verdict_zeroed = false;
 };
 
 // A header block the fake hands out.  Owned by the fake until
@@ -105,7 +112,30 @@ struct HtmlServeInjection {
       "method", "range", "cors", "no_transform", "withheld", "skew",
       // 1.15
       "scope", "capped", "conditional", "credentialed", "legacy_entry",
-      "policy_mismatch", "request_header", "path"};
+      "policy_mismatch", "request_header", "path",
+      // 1.16
+      "no_acceptable_encoding"};
+
+  // The 1.16 set.  Off by default, like the 1.15 one.
+  bool has_set_16 = false;
+  GoogleString unavailable_reason_16 = "the fake library reports C API 1.15";
+  // ps_markdown_select_encoding: the answer (the return code and the
+  // order), whatever the lines; the default is identity only.
+  int select_rc = 1;
+  std::vector<int> select_order = {kPsMarkdownEncodingIdentity};
+  // ps_html_stored_facts_from_reads_coded: the bits OR-ed into the injected
+  // facts for a non-null coded read of each coding (index = coding).
+  uint32_t coded_bits[3] = {0, 0, 0};
+  // ps_html_markdown_etag_coded: the tag of each coding (index = coding;
+  // identity is `etag` above).
+  GoogleString coded_etag[3] = {"", "W/\"psm-0123456789abcdeg\"",
+                                "W/\"psm-0123456789abcdeb\""};
+  // ps_read_shared_config_markdown_codings.
+  int markdown_codings =
+      (1 << kPsMarkdownEncodingGzip) | (1 << kPsMarkdownEncodingBr);
+  // ps_html_serve_classify: the verdicts of successive calls; once used up,
+  // `verdict` answers every further call.
+  std::vector<PsHtmlServeVerdict> verdicts;
 
   // ps_html_store_write_params: the return code, and on success the insert
   // time it stamps (0 = capture_start_ms floored to seconds).
@@ -120,6 +150,9 @@ struct HtmlServeInjection {
   int etag_rc = 0;
   GoogleString etag = "W/\"psm-0123456789abcdef\"";
   int inm_match = 0;
+  // When set, ps_if_none_match_matches_weak answers 1 exactly when the
+  // field holds the tag, instead of inm_match.
+  bool inm_compare = false;
 
   // ps_cache_write_headers_sidecar_site.
   int sidecar_write_rc = kPsOk;
@@ -188,6 +221,7 @@ class InjectedVerdictDaemonAbi : public RecordingDaemonAbi {
     serve_requests_.clear();
     serve_facts_.clear();
     sidecar_writes_.clear();
+    next_verdict_ = 0;
   }
 
   // The names of the calls made, in order.
@@ -234,6 +268,15 @@ class InjectedVerdictDaemonAbi : public RecordingDaemonAbi {
         r.agent_class = request->agent_class;
         r.html_max_lifetime_s = request->html_max_lifetime_s;
         r.policy_stamp = request->policy_stamp;
+        r.markdown_encoding = request->markdown_encoding;
+      }
+    }
+    if (out != nullptr) {
+      r.verdict_size = out->struct_size;
+      r.verdict_zeroed = true;
+      const unsigned char* bytes = reinterpret_cast<const unsigned char*>(out);
+      for (size_t i = sizeof(size_t); i < sizeof(PsHtmlServeVerdict); ++i) {
+        r.verdict_zeroed = r.verdict_zeroed && bytes[i] == 0;
       }
     }
     serve_requests_.push_back(r);
@@ -244,6 +287,9 @@ class InjectedVerdictDaemonAbi : public RecordingDaemonAbi {
     if (out == nullptr || out->struct_size < sizeof(size_t)) return -1;
     const size_t size = out->struct_size;
     PsHtmlServeVerdict v = injection_.verdict;
+    if (next_verdict_ < injection_.verdicts.size()) {
+      v = injection_.verdicts[next_verdict_++];
+    }
     v.struct_size = size;
     memcpy(out, &v, size < sizeof(v) ? size : sizeof(v));
     return 0;
@@ -315,6 +361,77 @@ class InjectedVerdictDaemonAbi : public RecordingDaemonAbi {
     if (!HasHtmlServe15Set()) return -1;
     if (injection_.facts_rc != 0) return injection_.facts_rc;
     return CopyFacts(out);
+  }
+
+  // The 1.16 set.
+  bool HasHtmlServe16Set() const override {
+    return HasHtmlServe15Set() && injection_.has_set_16;
+  }
+  GoogleString HtmlServe16SetUnavailableReason() const override {
+    return HasHtmlServe16Set() ? GoogleString()
+                               : injection_.unavailable_reason_16;
+  }
+
+  int MarkdownSelectEncoding(const char* const* lines, size_t count,
+                             int* out_order) const override {
+    std::vector<GoogleString> args = {Num(count)};
+    for (size_t i = 0; i < count; ++i) args.push_back(Str(lines[i]));
+    Record("ps_markdown_select_encoding", args);
+    if (!HasHtmlServe16Set() || out_order == nullptr) return -1;
+    if (injection_.select_rc < 0) return injection_.select_rc;
+    for (size_t i = 0; i < injection_.select_order.size() && i < 3; ++i) {
+      out_order[i] = injection_.select_order[i];
+    }
+    return injection_.select_rc;
+  }
+
+  int HtmlStoredFactsFromReadsCoded(const void* original, const void* markdown,
+                                    const void* withheld_marker,
+                                    int sidecar_present, const void* block,
+                                    const void* coded, int coding,
+                                    PsHtmlStoredFacts* out) const override {
+    Record("ps_html_stored_facts_from_reads_coded",
+           {original == nullptr ? "null" : "original",
+            markdown == nullptr ? "null" : "markdown",
+            withheld_marker == nullptr ? "null" : "withheld",
+            Num(sidecar_present), block == nullptr ? "null" : "block",
+            coded == nullptr ? "null" : "coded", Num(coding)});
+    if (!HasHtmlServe16Set()) return -1;
+    if (coded != nullptr && coding != kPsMarkdownEncodingGzip &&
+        coding != kPsMarkdownEncodingBr) {
+      return -1;
+    }
+    if (injection_.facts_rc != 0) return injection_.facts_rc;
+    const int rc = CopyFacts(out);
+    if (rc == 0 && coded != nullptr) {
+      out->flags |= injection_.coded_bits[coding];
+    }
+    return rc;
+  }
+
+  int HtmlMarkdownEtagCoded(const uint8_t* binding_hash,
+                            const uint8_t* markdown_hash, int coding, char* buf,
+                            size_t capacity, size_t* out_len) const override {
+    Record("ps_html_markdown_etag_coded",
+           {Hex(binding_hash), Hex(markdown_hash), Num(coding)});
+    if (!HasHtmlServe16Set() || coding < 0 || coding > 2) return -1;
+    if (injection_.etag_rc != 0) return injection_.etag_rc;
+    const GoogleString& tag =
+        coding == 0 ? injection_.etag : injection_.coded_etag[coding];
+    if (out_len == nullptr) return -1;
+    *out_len = tag.size();
+    if (buf == nullptr || capacity <= tag.size()) {
+      if (buf != nullptr && capacity > 0) buf[0] = '\0';
+      return -3;
+    }
+    memcpy(buf, tag.c_str(), tag.size() + 1);
+    return 0;
+  }
+
+  int ReadSharedConfigMarkdownCodings(const char* cache_path) const override {
+    Record("ps_read_shared_config_markdown_codings", {Str(cache_path)});
+    if (!HasHtmlServe16Set()) return -1;
+    return injection_.markdown_codings;
   }
 
   int HtmlRequestGuard(const char* raw_path, const char* const* names,
@@ -419,6 +536,12 @@ class InjectedVerdictDaemonAbi : public RecordingDaemonAbi {
                              const char* etag) const override {
     Record("ps_if_none_match_matches_weak",
            {if_none_match == nullptr ? "(null)" : if_none_match, Str(etag)});
+    if (injection_.inm_compare) {
+      return if_none_match != nullptr && etag != nullptr && *etag != '\0' &&
+                     strstr(if_none_match, etag) != nullptr
+                 ? 1
+                 : 0;
+    }
     return injection_.inm_match;
   }
 
@@ -586,6 +709,7 @@ class InjectedVerdictDaemonAbi : public RecordingDaemonAbi {
   HtmlServeInjection injection_;
   mutable std::vector<InjectedHtmlCall> html_calls_;
   mutable std::vector<RecordedServeRequest> serve_requests_;
+  mutable size_t next_verdict_ = 0;
   mutable std::vector<PsHtmlStoredFacts> serve_facts_;
   mutable std::vector<std::vector<std::pair<GoogleString, GoogleString>>>
       sidecar_writes_;

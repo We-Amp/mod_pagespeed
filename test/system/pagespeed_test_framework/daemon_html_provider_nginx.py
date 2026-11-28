@@ -83,6 +83,16 @@ RELOAD_TIMEOUT_S = 30.0
 ORIGINAL_ID = 0x0C
 MARKDOWN_ID = 0x7C
 WITHHELD_ID = 0xCC
+# nginx's own filters the provider builds as dynamic modules beside the lane
+# filter, in load order.
+LANE_FILTERS = ("ngx_http_lane_filter_module", "ngx_http_sub_filter_module",
+                "ngx_http_gunzip_filter_module")
+# The brotli and the gzip copy of the Markdown copy.
+CODED_IDS = {"br": 0xDC, "gzip": 0xEC}
+# The worker's default compression levels, which restart_worker restores
+# after a row.
+WORKER_GZIP_LEVEL = 6
+WORKER_BROTLI_LEVEL = 6
 FACTS_PRESENT = 0x1
 FACTS_BINDING_LIVE = 0x200
 FACTS_WITHHELD = 0x800
@@ -369,6 +379,27 @@ class _Volume:
                 self._ask(key)
         return ready
 
+    def coded_ready(self, key, codings) -> bool:
+        """Whether the volume holds each named coded copy of the key's
+        Markdown copy with bytes (an entry without bytes is the optimizer's
+        record that the coding is not smaller)."""
+        self._open()
+        try:
+            for coding in codings:
+                read = self._read(key, CODED_IDS[coding])
+                if read is None:
+                    return False
+                try:
+                    data, size = ctypes.c_void_p(), ctypes.c_size_t(0)
+                    if self.lib.ps_read_content(read, ctypes.byref(data),
+                                                ctypes.byref(size)) != 0 or size.value == 0:
+                        return False
+                finally:
+                    self._free(read)
+            return True
+        finally:
+            self.close()
+
     def _ask(self, key) -> None:
         path, hostname, scheme, site = key
         n = _PsNotifyParams()
@@ -478,17 +509,20 @@ class _Volume:
 
 
 def _build_lane_filters(nginx_bin: str, nginx_src: str, out_dir: str) -> Dict[str, str]:
-    """Builds test/system/nginx_lane_filter (and, when it builds, nginx's own
-    sub filter) as dynamic modules for this nginx. Returns name -> .so."""
+    """Builds test/system/nginx_lane_filter (and, when they build, nginx's own
+    sub and gunzip filters) as dynamic modules for this nginx. Returns
+    name -> .so."""
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     lane_src = os.path.join(here, "nginx_lane_filter")
     done = os.path.join(out_dir, "modules")
     built = {}
-    for name in ("ngx_http_lane_filter_module", "ngx_http_sub_filter_module"):
+    for name in LANE_FILTERS:
         path = os.path.join(done, f"{name}.so")
         if os.path.exists(path):
             built[name] = path
-    if "ngx_http_lane_filter_module" in built:
+    gunzip_c = os.path.join(nginx_src, "src/http/modules/ngx_http_gunzip_filter_module.c")
+    if "ngx_http_lane_filter_module" in built and (
+            "ngx_http_gunzip_filter_module" in built or not os.path.exists(gunzip_c)):
         return built
     version = subprocess.run([nginx_bin, "-V"], capture_output=True, text=True)
     args = []
@@ -508,6 +542,18 @@ def _build_lane_filters(nginx_bin: str, nginx_src: str, out_dir: str) -> Dict[st
                     "ngx_module_type=HTTP_FILTER\n"
                     "ngx_module_name=ngx_http_sub_filter_module\n"
                     "ngx_module_srcs=\"$ngx_addon_dir/ngx_http_sub_filter_module.c\"\n"
+                    ". auto/module\n")
+
+    gunzip_dir = os.path.join(out_dir, "gunzip_addon")
+    os.makedirs(gunzip_dir, exist_ok=True)
+    if os.path.exists(gunzip_c):
+        shutil.copy(gunzip_c, gunzip_dir)
+        with open(os.path.join(gunzip_dir, "config"), "w") as f:
+            f.write("ngx_addon_name=ngx_http_gunzip_filter_module\n"
+                    "ngx_module_type=HTTP_FILTER\n"
+                    "ngx_module_name=ngx_http_gunzip_filter_module\n"
+                    "ngx_module_srcs=\"$ngx_addon_dir/ngx_http_gunzip_filter_module.c\"\n"
+                    "ngx_module_libs=-lz\n"
                     ". auto/module\n")
 
     def attempt(addons: List[str]) -> bool:
@@ -533,11 +579,13 @@ def _build_lane_filters(nginx_bin: str, nginx_src: str, out_dir: str) -> Dict[st
                 shutil.copy(os.path.join(tree, "objs", so), done)
         return True
 
-    if not (os.path.exists(sub_c) and attempt([lane_src, sub_dir])):
-        if not attempt([lane_src]):
-            raise ProviderSetupError(
-                f"cannot build the lane filter module (see {out_dir}/build.log)")
-    for name in ("ngx_http_lane_filter_module", "ngx_http_sub_filter_module"):
+    if not (os.path.exists(sub_c) and os.path.exists(gunzip_c)
+            and attempt([lane_src, sub_dir, gunzip_dir])):
+        if not (os.path.exists(sub_c) and attempt([lane_src, sub_dir])):
+            if not attempt([lane_src]):
+                raise ProviderSetupError(
+                    f"cannot build the lane filter module (see {out_dir}/build.log)")
+    for name in LANE_FILTERS:
         path = os.path.join(done, f"{name}.so")
         if os.path.exists(path):
             built[name] = path
@@ -644,19 +692,27 @@ class NginxProvider(conf.Provider):
         self._origin_server.daemon_threads = True
         threading.Thread(target=self._origin_server.serve_forever, daemon=True).start()
 
-    def _start_worker(self) -> None:
+    def _start_worker(self, fresh: bool = True,
+                      levels: Tuple[int, int] = (WORKER_GZIP_LEVEL, WORKER_BROTLI_LEVEL)) -> None:
+        """Start the worker; `fresh` on an empty volume, else on the one it
+        had, with the compression levels (gzip, brotli) given."""
         wdir = os.path.join(self.dir, "worker")
-        shutil.rmtree(wdir, ignore_errors=True)
         cache_root = os.path.join(wdir, "cache")
-        os.makedirs(cache_root)
+        if fresh:
+            shutil.rmtree(wdir, ignore_errors=True)
+            os.makedirs(cache_root)
         self.socket_path = os.path.join(wdir, "notify.sock")
         self.volume_path = os.path.join(cache_root, "cache")
+        if not fresh and os.path.exists(self.socket_path):
+            os.unlink(self.socket_path)
+        self.worker_levels = levels
         log = open(os.path.join(self.dir, "worker.log"), "a")
         proc = subprocess.Popen(
             [os.path.join(self.daemon_dir, "factory_worker"),
              "--cache-dir", cache_root, "--socket", self.socket_path,
              "--cache-size", "536870912", "--html-mode", "markdown-static",
-             "--agent-optimize", "--log-level", "info"],
+             "--agent-optimize", "--log-level", "info",
+             "--gzip-level", str(levels[0]), "--brotli-level", str(levels[1])],
             stdout=log, stderr=log, stdin=subprocess.DEVNULL, start_new_session=True,
             env=dict(os.environ, LD_LIBRARY_PATH=self.daemon_dir))
         self._started.append((proc.pid, "factory_worker"))
@@ -847,6 +903,11 @@ class NginxProvider(conf.Provider):
                 lines.append("pagespeed InPlaceResourceOptimization on;")
                 lines.append(f"pagespeed InPlaceSMaxAgeSec {int(ip['s_maxage'])};")
             applied.add("in_place")
+        if vhost.get("gunzip"):
+            if "ngx_http_gunzip_filter_module" not in self.filters:
+                raise conf.ProviderUnsupported("nginx's gunzip filter did not build")
+            lines.append("gunzip on;")
+            applied.add("gunzip")
         cm = vhost.get("compress_markdown")
         if cm:
             lines += ["gzip on;", "gzip_types text/markdown;", "gzip_vary on;",
@@ -949,7 +1010,7 @@ class NginxProvider(conf.Provider):
     def _write_configs(self, live: Optional[dict]) -> Set[str]:
         applied: Set[str] = set()
         modules = [f"load_module {self.module};"]
-        for name in ("ngx_http_lane_filter_module", "ngx_http_sub_filter_module"):
+        for name in LANE_FILTERS:
             if name in self.filters:
                 modules.append(f"load_module {self.filters[name]};")
         for inst in self.instances.values():
@@ -1052,6 +1113,8 @@ http {{
         self.origin.reset(200, [], b"")
         if os.path.exists(self.hold_file):
             os.unlink(self.hold_file)
+        if self.worker_levels != (WORKER_GZIP_LEVEL, WORKER_BROTLI_LEVEL):
+            self.restart_worker(WORKER_GZIP_LEVEL, WORKER_BROTLI_LEVEL)
 
     def _instance(self, process: Optional[str]) -> _Instance:
         if process is None:
@@ -1221,6 +1284,25 @@ http {{
 
     def markdown_ready(self, path: str, host: Optional[str]) -> bool:
         return self.volume.markdown_ready(self._key(path, host))
+
+    def coded_ready(self, path: str, host: Optional[str], codings: List[str]) -> bool:
+        return self.volume.coded_ready(self._key(path, host), codings)
+
+    def restart_worker(self, gzip_level: int, brotli_level: int) -> None:
+        """The worker this provider started, stopped and started again on the
+        same volume with these levels."""
+        worker = getattr(self, "_worker", None)
+        if worker is not None and worker.poll() is None and _pid_is(worker.pid, "factory_worker"):
+            worker.terminate()
+            try:
+                worker.wait(10)
+            except subprocess.TimeoutExpired:
+                worker.kill()
+                worker.wait(10)
+        self._start_worker(fresh=False, levels=(gzip_level, brotli_level))
+        # Every server process reads the restarted worker's state anew.
+        if getattr(self, "row", None) is not None:
+            self._reload()
 
     def _admin_post(self, target: str) -> None:
         r = self._send(self.instances["a"], "POST", target, ROW_HOST,

@@ -167,10 +167,15 @@ TEST_F(DaemonAbiTest, TheServeSetLayoutsAreThePublishedOnes) {
   EXPECT_EQ(32u, offsetof(PsHtmlStoredFacts, binding_hash));
   EXPECT_EQ(64u, offsetof(PsHtmlStoredFacts, markdown_hash));
 
-  EXPECT_EQ(64u, sizeof(PsHtmlServeVerdict));
+  EXPECT_EQ(76u, offsetof(PsHtmlServeRequest, markdown_encoding));
+
+  EXPECT_EQ(72u, sizeof(PsHtmlServeVerdict));
   EXPECT_EQ(8u, offsetof(PsHtmlServeVerdict, action));
   EXPECT_EQ(28u, offsetof(PsHtmlServeVerdict, not_modified));
   EXPECT_EQ(32u, offsetof(PsHtmlServeVerdict, etag));
+  EXPECT_EQ(64u, offsetof(PsHtmlServeVerdict, markdown_encoding));
+  EXPECT_EQ(68u, offsetof(PsHtmlServeVerdict, reserved_1_16));
+  EXPECT_EQ(64u, kPsHtmlServeVerdictSize15);
   EXPECT_EQ(kPsHtmlMarkdownEtagChars + 8, sizeof(PsHtmlServeVerdict::etag));
 
   // The request policy's results.
@@ -215,6 +220,33 @@ TEST_F(DaemonAbiTest, TheFifteenConstantsAreThePublishedValues) {
            kPsHtmlServeRequestConditional | kPsHtmlServeRequestExplicitPublic) &
               63u);
   EXPECT_EQ(0u, (kPsHtmlFactsStoreV2 | kPsHtmlFactsAnonymousRecorded) & 0xFFFu);
+}
+
+TEST_F(DaemonAbiTest, TheSixteenConstantsAreThePublishedValues) {
+  EXPECT_EQ(16, kHtmlServe16SetMinor);
+  EXPECT_EQ(0xDC, kPsSentinelMarkdownBr);
+  EXPECT_EQ(0xEC, kPsSentinelMarkdownGzip);
+  EXPECT_EQ(0x10u, kPsNotifyFlagMarkdownCompress);
+  EXPECT_EQ(1024u, kPsHtmlServeRequestIdentityOk);
+  EXPECT_EQ(2048u, kPsHtmlServeRequestEncodingNone);
+  EXPECT_EQ(0, kPsMarkdownEncodingIdentity);
+  EXPECT_EQ(1, kPsMarkdownEncodingGzip);
+  EXPECT_EQ(2, kPsMarkdownEncodingBr);
+  EXPECT_EQ(0x4000u, kPsHtmlFactsGzipCopyBound);
+  EXPECT_EQ(0x8000u, kPsHtmlFactsBrCopyBound);
+  EXPECT_EQ(0x10000u, kPsHtmlFactsGzipNotSmaller);
+  EXPECT_EQ(0x20000u, kPsHtmlFactsBrNotSmaller);
+  // Both coded ids are sentinel-shaped, and new bits overlap no older one.
+  for (uint8_t id : {kPsSentinelMarkdownBr, kPsSentinelMarkdownGzip}) {
+    EXPECT_EQ(kPsViewportSentinel,
+              (id >> kPsMaskViewportShift) & kPsMaskViewportBits);
+  }
+  EXPECT_EQ(0u,
+            (kPsHtmlServeRequestIdentityOk | kPsHtmlServeRequestEncodingNone) &
+                1023u);
+  EXPECT_EQ(0u, (kPsHtmlFactsGzipCopyBound | kPsHtmlFactsBrCopyBound |
+                 kPsHtmlFactsGzipNotSmaller | kPsHtmlFactsBrNotSmaller) &
+                    0x3FFFu);
 }
 
 TEST_F(DaemonAbiTest, TheServeSetConstantsAreThePublishedValues) {
@@ -338,6 +370,30 @@ class HtmlServeSetTest : public DaemonAbiTest {
     EXPECT_EQ(kPsHtmlServeRequestSize14, HtmlServeRequestSize(abi));
     EXPECT_EQ(kPsHtmlStoredFactsSize14, HtmlStoredFactsSize(abi));
     EXPECT_EQ(kPsSidecarWriteParamsSize13, SidecarWriteParamsSize(abi));
+    ExpectUnbound16Answers(abi);
+  }
+
+  // No call into an unbound 1.16 set reaches anything.
+  void ExpectUnbound16Answers(const DaemonAbi& abi) {
+    EXPECT_FALSE(abi.HasHtmlServe16Set());
+    EXPECT_FALSE(abi.HtmlServe16SetUnavailableReason().empty());
+    const char* lines[] = {"br, gzip"};
+    int order[3] = {7, 7, 7};
+    EXPECT_EQ(-1, abi.MarkdownSelectEncoding(lines, 1, order));
+    EXPECT_EQ(7, order[0]);
+    PsHtmlStoredFacts facts = {};
+    facts.struct_size = sizeof(facts);
+    int coded = 0;
+    EXPECT_EQ(-1, abi.HtmlStoredFactsFromReadsCoded(
+                      nullptr, nullptr, nullptr, 0, nullptr, &coded,
+                      kPsMarkdownEncodingBr, &facts));
+    uint8_t hash[kPsHtmlHashBytes] = {1};
+    char etag[64];
+    size_t len = 0;
+    EXPECT_EQ(-1, abi.HtmlMarkdownEtagCoded(hash, hash, kPsMarkdownEncodingBr,
+                                            etag, sizeof(etag), &len));
+    EXPECT_EQ(-1, abi.ReadSharedConfigMarkdownCodings("/unused"));
+    EXPECT_EQ(kPsHtmlServeVerdictSize15, HtmlServeVerdictSize(abi));
   }
 
   static constexpr char kSite[] =
@@ -838,6 +894,205 @@ TEST_F(HtmlServe15SetTest, NoFourteenSetMeansNoFifteenSet) {
   ASSERT_TRUE(abi != nullptr) << error_;
   EXPECT_FALSE(abi->HasHtmlServeSet());
   ExpectUnbound15Answers(*abi);
+}
+
+class HtmlServe16SetTest : public HtmlServe15SetTest {
+ protected:
+  void SetUp() override {
+    HtmlServe15SetTest::SetUp();
+    unsetenv("PS_STUB_MARKDOWN_CODINGS");
+    unsetenv("PS_STUB_NOT_SMALLER");
+    setenv("PS_STUB_HTML_SERVE_ACTION", "2", 1);
+  }
+  void TearDown() override {
+    unsetenv("PS_STUB_MARKDOWN_CODINGS");
+    unsetenv("PS_STUB_NOT_SMALLER");
+    unsetenv("PS_STUB_HTML_SERVE_ACTION");
+    HtmlServe15SetTest::TearDown();
+  }
+
+  // A present page with a bound plain copy, as the facts call reports it.
+  static PsHtmlStoredFacts BoundFacts(uint32_t extra) {
+    PsHtmlStoredFacts facts = {};
+    facts.struct_size = sizeof(facts);
+    facts.flags = kPsHtmlFactsPresent | kPsHtmlFactsBindingLive | extra;
+    memset(facts.binding_hash, 0x11, sizeof(facts.binding_hash));
+    memset(facts.markdown_hash, 0x22, sizeof(facts.markdown_hash));
+    return facts;
+  }
+
+  // One serve-variants Markdown classification asking for `coding`.
+  static PsHtmlServeVerdict ServeCoded(const DaemonAbi& abi, int coding,
+                                       uint32_t flags,
+                                       const PsHtmlStoredFacts& facts) {
+    PsHtmlServeRequest request = {};
+    request.struct_size = sizeof(request);
+    request.mode = kPsHtmlCacheServeVariants;
+    request.method = "GET";
+    request.accept = "text/markdown";
+    request.request_flags = flags;
+    request.markdown_encoding = static_cast<uint32_t>(coding);
+    PsHtmlServeVerdict verdict;
+    memset(&verdict, 0x5A, sizeof(verdict));  // a stale buffer
+    verdict.struct_size = sizeof(verdict);
+    EXPECT_EQ(0, abi.HtmlServeClassify(&request, &facts, &verdict));
+    return verdict;
+  }
+};
+
+TEST_F(HtmlServe16SetTest, ASixteenLibraryBindsEverySet) {
+  std::unique_ptr<DaemonAbi> abi =
+      Load("16", "libdaemon_stub_html_serve_16.so");
+  ASSERT_TRUE(abi != nullptr) << error_;
+  EXPECT_TRUE(abi->HasHtmlServeSet());
+  EXPECT_TRUE(abi->HasHtmlServe15Set());
+  EXPECT_TRUE(abi->HasHtmlServe16Set());
+  EXPECT_EQ("", abi->HtmlServe16SetUnavailableReason());
+  EXPECT_EQ(sizeof(PsHtmlServeVerdict), HtmlServeVerdictSize(*abi));
+  EXPECT_STREQ("no_acceptable_encoding", abi->HtmlServeReasonName(27));
+  EXPECT_EQ(nullptr, abi->HtmlServeReasonName(28));
+}
+
+TEST_F(HtmlServe16SetTest, TheCodingCallsReachTheLibrary) {
+  std::unique_ptr<DaemonAbi> abi =
+      Load("16", "libdaemon_stub_html_serve_16.so");
+  ASSERT_TRUE(abi != nullptr) << error_;
+  ASSERT_TRUE(abi->HasHtmlServe16Set());
+  const char* lines[] = {"gzip;q=1, br;q=0.5", "identity;q=0"};
+  int order[3] = {-1, -1, -1};
+  ASSERT_EQ(2, abi->MarkdownSelectEncoding(lines, 2, order));
+  EXPECT_EQ(kPsMarkdownEncodingGzip, order[0]);
+  EXPECT_EQ(kPsMarkdownEncodingBr, order[1]);
+  ASSERT_EQ(1, abi->MarkdownSelectEncoding(nullptr, 0, order));
+  EXPECT_EQ(kPsMarkdownEncodingIdentity, order[0]);
+  const char* refused[] = {"identity;q=0"};
+  EXPECT_EQ(0, abi->MarkdownSelectEncoding(refused, 1, order));
+  EXPECT_EQ(-1, abi->MarkdownSelectEncoding(lines, 1, nullptr));
+
+  EXPECT_EQ((1 << kPsMarkdownEncodingGzip) | (1 << kPsMarkdownEncodingBr),
+            abi->ReadSharedConfigMarkdownCodings("/unused"));
+  setenv("PS_STUB_MARKDOWN_CODINGS", "-1", 1);
+  EXPECT_EQ(-1, abi->ReadSharedConfigMarkdownCodings("/unused"));
+
+  // The coded facts: the bound bit of the coding read, nothing for a miss,
+  // and the not-smaller record in its place when the optimizer wrote one.
+  int original = 0;
+  int markdown = 0;
+  int coded = 0;
+  PsHtmlStoredFacts facts = {};
+  facts.struct_size = sizeof(facts);
+  ASSERT_EQ(0, abi->HtmlStoredFactsFromReadsCoded(
+                   &original, &markdown, nullptr, 0, nullptr, &coded,
+                   kPsMarkdownEncodingBr, &facts));
+  EXPECT_NE(0u, facts.flags & kPsHtmlFactsBrCopyBound);
+  EXPECT_EQ(0u, facts.flags & kPsHtmlFactsGzipCopyBound);
+  ASSERT_EQ(0, abi->HtmlStoredFactsFromReadsCoded(
+                   &original, &markdown, nullptr, 0, nullptr, nullptr,
+                   kPsMarkdownEncodingGzip, &facts));
+  EXPECT_EQ(
+      0u, facts.flags & (kPsHtmlFactsBrCopyBound | kPsHtmlFactsGzipCopyBound));
+  setenv("PS_STUB_NOT_SMALLER", "1", 1);
+  ASSERT_EQ(0, abi->HtmlStoredFactsFromReadsCoded(
+                   &original, &markdown, nullptr, 0, nullptr, &coded,
+                   kPsMarkdownEncodingGzip, &facts));
+  EXPECT_NE(0u, facts.flags & kPsHtmlFactsGzipNotSmaller);
+  EXPECT_EQ(0u, facts.flags & kPsHtmlFactsGzipCopyBound);
+  EXPECT_EQ(-1, abi->HtmlStoredFactsFromReadsCoded(
+                    &original, &markdown, nullptr, 0, nullptr, &coded,
+                    kPsMarkdownEncodingIdentity, &facts));
+
+  // Three tags of one copy, one per coding, all the same length.
+  uint8_t binding[kPsHtmlHashBytes];
+  uint8_t md[kPsHtmlHashBytes];
+  memset(binding, 0x11, sizeof(binding));
+  memset(md, 0x22, sizeof(md));
+  char plain[64], gz[64], br[64], legacy[64];
+  size_t a = 0, b = 0, c = 0, d = 0;
+  ASSERT_EQ(0,
+            abi->HtmlMarkdownEtagCoded(binding, md, kPsMarkdownEncodingIdentity,
+                                       plain, sizeof(plain), &a));
+  ASSERT_EQ(0, abi->HtmlMarkdownEtagCoded(binding, md, kPsMarkdownEncodingGzip,
+                                          gz, sizeof(gz), &b));
+  ASSERT_EQ(0, abi->HtmlMarkdownEtagCoded(binding, md, kPsMarkdownEncodingBr,
+                                          br, sizeof(br), &c));
+  ASSERT_EQ(0, abi->HtmlMarkdownEtag(binding, md, legacy, sizeof(legacy), &d));
+  EXPECT_STREQ(legacy, plain);
+  EXPECT_EQ(kPsHtmlMarkdownEtagChars, a);
+  EXPECT_EQ(a, b);
+  EXPECT_EQ(a, c);
+  EXPECT_STRNE(plain, gz);
+  EXPECT_STRNE(plain, br);
+  EXPECT_STRNE(gz, br);
+}
+
+// The verdict at its 1.16 size names the coding to send, and a stale buffer
+// never leaves a coding behind.
+TEST_F(HtmlServe16SetTest, TheVerdictNamesTheCoding) {
+  std::unique_ptr<DaemonAbi> abi =
+      Load("16", "libdaemon_stub_html_serve_16.so");
+  ASSERT_TRUE(abi != nullptr) << error_;
+  PsHtmlServeVerdict v = ServeCoded(*abi, kPsMarkdownEncodingBr, 0,
+                                    BoundFacts(kPsHtmlFactsBrCopyBound));
+  EXPECT_EQ(kPsHtmlServeActionServeMarkdown, v.action);
+  EXPECT_EQ(kPsMarkdownEncodingBr, v.markdown_encoding);
+  EXPECT_EQ(0, v.reserved_1_16);
+  v = ServeCoded(*abi, kPsMarkdownEncodingBr, kPsHtmlServeRequestIdentityOk,
+                 BoundFacts(0));
+  EXPECT_EQ(kPsHtmlServeActionServeMarkdown, v.action);
+  EXPECT_EQ(kPsMarkdownEncodingIdentity, v.markdown_encoding);
+  v = ServeCoded(*abi, kPsMarkdownEncodingBr, 0, BoundFacts(0));
+  EXPECT_EQ(kPsHtmlServeActionFallThrough, v.action);
+  EXPECT_STREQ("no_acceptable_encoding", abi->HtmlServeReasonName(v.reason));
+  v = ServeCoded(*abi, kPsMarkdownEncodingIdentity,
+                 kPsHtmlServeRequestEncodingNone, BoundFacts(0));
+  EXPECT_EQ(kPsHtmlServeActionFallThrough, v.action);
+  EXPECT_STREQ("no_acceptable_encoding", abi->HtmlServeReasonName(v.reason));
+}
+
+// The same library reporting 1.15: the 1.16 set stays unbound, the library
+// is handed the 1.15 verdict size and no coding, and the caller's 1.16
+// field reads identity whatever the buffer held.
+TEST_F(HtmlServe16SetTest, AFifteenLibraryIsSentOnlyTheFifteenShape) {
+  std::unique_ptr<DaemonAbi> abi =
+      Load("15", "libdaemon_stub_html_serve_16.so");
+  ASSERT_TRUE(abi != nullptr) << error_;
+  EXPECT_TRUE(abi->HasHtmlServe15Set());
+  const GoogleString reason = abi->HtmlServe16SetUnavailableReason();
+  EXPECT_NE(GoogleString::npos, reason.find("reports C API 1.15")) << reason;
+  ExpectUnbound16Answers(*abi);
+  PsHtmlServeVerdict v =
+      ServeCoded(*abi, kPsMarkdownEncodingBr, kPsHtmlServeRequestEncodingNone,
+                 BoundFacts(kPsHtmlFactsBrCopyBound));
+  // ENCODING_NONE never reached it: the plain copy, as before.
+  EXPECT_EQ(kPsHtmlServeActionServeMarkdown, v.action);
+  EXPECT_EQ(sizeof(PsHtmlServeVerdict), v.struct_size);
+  EXPECT_EQ(kPsMarkdownEncodingIdentity, v.markdown_encoding);
+  EXPECT_EQ(0, v.reserved_1_16);
+}
+
+TEST_F(HtmlServe16SetTest, OneMissingSixteenSymbolLeavesOnlyTheFifteenSet) {
+  std::unique_ptr<DaemonAbi> abi =
+      Load("16", "libdaemon_stub_html_serve_16_partial.so");
+  ASSERT_TRUE(abi != nullptr) << error_;
+  EXPECT_TRUE(abi->HasHtmlServe15Set());
+  const GoogleString reason = abi->HtmlServe16SetUnavailableReason();
+  EXPECT_NE(GoogleString::npos, reason.find("ps_markdown_select_encoding"))
+      << reason;
+  ExpectUnbound16Answers(*abi);
+}
+
+// A library that reports 1.16 but exports none of its set keeps the 1.15
+// set; without the 1.15 set there is no 1.16 set either.
+TEST_F(HtmlServe16SetTest, ASixteenLibraryWithoutTheSetKeepsTheFifteenSet) {
+  std::unique_ptr<DaemonAbi> abi =
+      Load("16", "libdaemon_stub_html_serve_15.so");
+  ASSERT_TRUE(abi != nullptr) << error_;
+  EXPECT_TRUE(abi->HasHtmlServe15Set());
+  ExpectUnbound16Answers(*abi);
+  abi = Load("16", "libdaemon_stub_html_serve_15_partial.so");
+  ASSERT_TRUE(abi != nullptr) << error_;
+  EXPECT_FALSE(abi->HasHtmlServe15Set());
+  ExpectUnbound16Answers(*abi);
 }
 
 }  // namespace

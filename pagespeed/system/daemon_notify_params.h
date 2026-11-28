@@ -74,6 +74,10 @@ struct ModuleNotifyInput {
   bool html_stored = false;
   // With html_stored only: the requesting client asked for the Markdown copy.
   bool agent_request = false;
+  // With html_stored only: ask the worker to write the coded copies of the
+  // page's Markdown copy (kPsNotifyFlagMarkdownCompress).  The caller sends
+  // it only to a worker that publishes its Markdown codings.
+  bool markdown_compress = false;
 };
 
 // A built notification: the parameter struct and the storage its pointers

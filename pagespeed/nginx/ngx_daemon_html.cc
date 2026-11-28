@@ -141,6 +141,8 @@ void FillDaemonHtmlRequestHeaderFacts(const std::vector<NgxHeaderLine>& lines,
     }
     if (StringCaseEqual(name, "Accept")) {
       facts->accept_lines.push_back(value.as_string());
+    } else if (StringCaseEqual(name, "Accept-Encoding")) {
+      facts->accept_encoding_lines.push_back(value.as_string());
     } else if (StringCaseEqual(name, "Cache-Control")) {
       if (facts->has_cache_control) facts->cache_control.append(", ");
       facts->has_cache_control = true;

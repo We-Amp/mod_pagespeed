@@ -39,6 +39,15 @@ export const HTML_CACHE_TEXT = {
   notifyLimited: "Notifications held back (rate limit)",
   markdownServed: "Markdown answers (200)",
   markdownNotModified: "Markdown answers (304)",
+  markdownCodings: "Markdown 200s by coding",
+  markdownBr: "brotli",
+  markdownGzip: "gzip",
+  markdownIdentity: "uncompressed",
+  encodedCopies: "Compressed copies not sent",
+  encodedMissing: "missing",
+  encodedUnbound: "out of date",
+  compressDemands: "asked of the optimizer",
+  codedFallback: "Compressed copies sent uncompressed (a body filter of the server)",
   storeRefusals: "Store refusals by the engine",
   fallthroughs: "Fall-throughs to the origin page, by reason",
   degraded: "Serving is not active",
@@ -71,7 +80,7 @@ export const HTML_CACHE_WARNINGS: ReadonlyArray<readonly [string, string]> = [
   ["daemon_html_epoch_write_failed", "A purge could not be recorded; the site's stored copies are treated as purged until it can."],
   ["daemon_html_purge_remove_failed", "A purged copy could not be removed from the cache."],
   ["daemon_html_refused_url_disagree", "The server and the module disagree about a request's URL, so nothing is stored for it."],
-  ["daemon_markdown_transport_conflict", "A Markdown answer still carried a Content-Encoding or Content-Range header (a compression or range filter ignored the module's no-compress mark). Must stay at zero."],
+  ["daemon_markdown_transport_conflict", "A Markdown answer still carried a Content-Encoding or Content-Range header (a compression or range filter ignored the module's no-compress mark). Must stay at zero. On Apache a stage that applies the compressed copy's own coding a second time is not detected."],
 ];
 
 /** The wait after a failed read of /config, doubled for each further failure, up to the cap. */
@@ -120,6 +129,17 @@ export interface HtmlCacheView {
   notifyLimited: number;
   markdownServed: number;
   markdownNotModified: number;
+  /** Markdown 200s by the coding sent (C API 1.16 libraries only). */
+  markdownServedBr: number;
+  markdownServedGzip: number;
+  markdownServedIdentity: number;
+  /** Compressed copies a request preferred that were missing or out of date,
+   * and the requests to the optimizer to write them. */
+  encodedCopyMissing: number;
+  encodedCopyUnbound: number;
+  compressDemandSent: number;
+  /** Compressed answers the server sent as the plain copy (a body filter). */
+  codedFallback: number;
   /** Store refusals the engine counts itself (budget, URL disagreement, sidecar write). */
   storeRefusals: HtmlCacheReason[];
   /** Requests that fell through to the origin page, by reason; largest first. */
@@ -247,6 +267,13 @@ export function htmlCacheView(
     notifyLimited: count(stats, "daemon_html_notify_limited"),
     markdownServed,
     markdownNotModified,
+    markdownServedBr: count(stats, "daemon_markdown_served_br"),
+    markdownServedGzip: count(stats, "daemon_markdown_served_gzip"),
+    markdownServedIdentity: count(stats, "daemon_markdown_served_identity"),
+    encodedCopyMissing: count(stats, "daemon_markdown_encoded_copy_missing"),
+    encodedCopyUnbound: count(stats, "daemon_markdown_encoded_copy_unbound"),
+    compressDemandSent: count(stats, "daemon_markdown_compress_demand_sent"),
+    codedFallback: count(stats, "daemon_markdown_coded_fallback"),
     storeRefusals,
     fallthroughs,
     modeInferred: mode === null && effective !== null,

@@ -542,6 +542,62 @@ cc_binary(
     win_def_file = "daemon_stub_html_serve_15_partial.def",
 )
 
+# The 1.15 set and the C API 1.16 set (compressed Markdown copies). The 1.16
+# set is bound only when the reported minor is 16 or later.
+cc_binary(
+    name = "libdaemon_stub_html_serve_16.so",
+    testonly = True,
+    srcs = ["daemon_stub_lib.cc"],
+    defines = [
+        "PS_STUB_HTML_POLICY",
+        "PS_STUB_HTML_SERVE",
+        "PS_STUB_HTML_SERVE_15",
+        "PS_STUB_HTML_SERVE_16",
+    ],
+    linkopts = select({
+        "@platforms//os:linux": ["-nostdlib++"],
+        "//conditions:default": [],
+    }),
+    linkshared = True,
+    linkstatic = True,
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//visibility:public"],
+    win_def_file = "daemon_stub_html_serve_16.def",
+)
+
+# The 1.16 set less ps_markdown_select_encoding (the last symbol the binding
+# resolves), while reporting 1.16: the 1.15 set is bound and none of the 1.16
+# one is.
+cc_binary(
+    name = "libdaemon_stub_html_serve_16_partial.so",
+    testonly = True,
+    srcs = ["daemon_stub_lib.cc"],
+    defines = [
+        "PS_STUB_HTML_POLICY",
+        "PS_STUB_HTML_SERVE",
+        "PS_STUB_HTML_SERVE_15",
+        "PS_STUB_HTML_SERVE_16",
+        "PS_STUB_OMIT_MARKDOWN_SELECT_ENCODING",
+    ],
+    linkopts = select({
+        "@platforms//os:linux": ["-nostdlib++"],
+        "//conditions:default": [],
+    }),
+    linkshared = True,
+    linkstatic = True,
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//visibility:public"],
+    win_def_file = "daemon_stub_html_serve_16_partial.def",
+)
+
 # A daemon package from before the per-failure explanation was published. Like
 # the two flavours above this entry point is bound OPTIONALLY, so this library
 # must still load and still work; without it "an older library is unaffected"
@@ -608,6 +664,8 @@ pagespeed_cc_test(
         ":libdaemon_stub_html_serve.so",
         ":libdaemon_stub_html_serve_15.so",
         ":libdaemon_stub_html_serve_15_partial.so",
+        ":libdaemon_stub_html_serve_16.so",
+        ":libdaemon_stub_html_serve_16_partial.so",
         ":libdaemon_stub_html_serve_partial.so",
         ":libdaemon_stub_no_site.so",
     ],
@@ -750,6 +808,28 @@ pagespeed_cc_test(
         "//pagespeed/system:daemon_html_purge_observer",
         "//test/pagespeed/kernel/base:kernel_test_util",
         "@boringssl//:crypto",
+    ],
+)
+
+# The HTML cache engine's coded Markdown answers (C API 1.16): the coding
+# the library chose, the coded copy read by exact id, its headers and tag,
+# the second coding, the compress demand, and the plain copy below 1.16.
+pagespeed_cc_test(
+    name = "daemon_html_markdown_coding_test",
+    srcs = [
+        "daemon_html_markdown_coding_test.cc",
+        "fake_daemon_volume.h",
+        "injected_verdict_daemon_abi.h",
+        "recording_daemon_abi.h",
+    ],
+    deps = [
+        "//net/instaweb/rewriter",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/cache",
+        "//pagespeed/kernel/util",
+        "//pagespeed/system:daemon_html_engine",
+        "//pagespeed/system:daemon_html_purge_observer",
+        "//test/pagespeed/kernel/base:kernel_test_util",
     ],
 )
 

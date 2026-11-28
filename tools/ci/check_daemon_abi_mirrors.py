@@ -134,6 +134,19 @@ DEFINES = {
     "kPsHtmlCredentialedAnonymousOnly": "PS_HTML_CREDENTIALED_ANONYMOUS_ONLY",
     "kPsHtmlCredentialedExplicitPublic":
         "PS_HTML_CREDENTIALED_EXPLICIT_PUBLIC",
+    # C API 1.16.
+    "kPsSentinelMarkdownBr": "PS_SENTINEL_MARKDOWN_BR",
+    "kPsSentinelMarkdownGzip": "PS_SENTINEL_MARKDOWN_GZIP",
+    "kPsNotifyFlagMarkdownCompress": "PS_NOTIFY_FLAG_MARKDOWN_COMPRESS",
+    "kPsHtmlServeRequestIdentityOk": "PS_HTML_SERVE_REQUEST_IDENTITY_OK",
+    "kPsHtmlServeRequestEncodingNone": "PS_HTML_SERVE_REQUEST_ENCODING_NONE",
+    "kPsMarkdownEncodingIdentity": "PS_MARKDOWN_ENCODING_IDENTITY",
+    "kPsMarkdownEncodingGzip": "PS_MARKDOWN_ENCODING_GZIP",
+    "kPsMarkdownEncodingBr": "PS_MARKDOWN_ENCODING_BR",
+    "kPsHtmlFactsGzipCopyBound": "PS_HTML_FACTS_GZIP_COPY_BOUND",
+    "kPsHtmlFactsBrCopyBound": "PS_HTML_FACTS_BR_COPY_BOUND",
+    "kPsHtmlFactsGzipNotSmaller": "PS_HTML_FACTS_GZIP_NOT_SMALLER",
+    "kPsHtmlFactsBrNotSmaller": "PS_HTML_FACTS_BR_NOT_SMALLER",
 }
 
 # Module constant -> optimizer enumerator in the ps_html_cache_mode_t enum.
@@ -169,6 +182,7 @@ STRUCTS = {
 SETS = (
     ("BindHtmlServeSet", "HtmlServeSetFns", "kHtmlServeSetMinor"),
     ("BindHtmlServe15Set", "HtmlServe15SetFns", "kHtmlServe15SetMinor"),
+    ("BindHtmlServe16Set", "HtmlServe16SetFns", "kHtmlServe16SetMinor"),
 )
 
 # Array lengths spelled with a constant on either side.
@@ -257,7 +271,20 @@ def peer_alternate_ids(text):
 
 def _fields(body):
     fields = []
+    # An anonymous union (the peer's 1.16 request names one word twice) is
+    # one field: its members, in order, as one entry.
+    unions = []
+
+    def _union(m):
+        unions.append(tuple(_fields(m.group(1))))
+        return " __union%d ;" % (len(unions) - 1)
+
+    body = re.sub(r"\bunion\s*\{([^{}]*)\}\s*;", _union, body)
     for decl in body.split(";"):
+        u = re.match(r"\s*__union(\d+)\s*$", decl)
+        if u:
+            fields.append(("union", unions[int(u.group(1))], None))
+            continue
         decl = " ".join(decl.split())
         if not decl:
             continue
@@ -271,11 +298,18 @@ def _fields(body):
 
 
 def module_struct(text, name):
-    m = re.search(r"\bstruct\s+%s\s*\{(.*?)\};" % name, _strip_comments(text),
-                  re.S)
+    text = _strip_comments(text)
+    m = re.search(r"\bstruct\s+%s\s*\{" % name, text)
     if not m:
         raise DriftError("could not read struct %s from daemon_abi.h" % name)
-    return _fields(m.group(1))
+    # To the brace that closes this one: a nested union has its own.
+    depth, i = 1, m.end()
+    while depth and i < len(text):
+        depth += {"{": 1, "}": -1}.get(text[i], 0)
+        i += 1
+    if depth:
+        raise DriftError("could not read struct %s from daemon_abi.h" % name)
+    return _fields(text[m.end():i - 1])
 
 
 def peer_struct(text, name):
@@ -450,6 +484,10 @@ inline constexpr size_t kPsHtmlHashBytes = 32;
 struct PsHtmlStoredFacts {
   size_t struct_size;
   uint32_t flags;  // comment
+  union {
+    uint32_t coding;
+    uint32_t spare;
+  };
   uint8_t binding_hash[kPsHtmlHashBytes];
 };
 """
@@ -482,6 +520,10 @@ typedef enum ps_html_cache_mode_t {
 typedef struct {
   size_t struct_size;
   uint32_t flags; /* PS_HTML_FACTS_* */
+  union {
+    uint32_t coding;
+    uint32_t spare;
+  };
   uint8_t binding_hash[PS_HTML_HASH_BYTES];
 } ps_html_stored_facts_t;
 PS_EXPORT int ps_html_serve_classify(const ps_html_stored_facts_t* facts,
@@ -539,6 +581,9 @@ def self_test():
             (0, "kHtmlServe15SetMinor = 15", "kHtmlServe16SetMinor = 15"),
             (1, "struct HtmlServe15SetFns", "struct HtmlServe15Set"),
             (1, "void BindHtmlServe15Set()", "void BindHtmlServeNext()"),
+            (2, "    uint32_t coding;\n    uint32_t spare;",
+             "    uint32_t spare;\n    uint32_t coding;"),  # union reordered
+            (0, "    uint32_t spare;\n  };", "  };\n    uint32_t spare;"),
         ]
         for index, old, new in drifts:
             mutated = list(args)

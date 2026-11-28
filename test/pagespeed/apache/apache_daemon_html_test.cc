@@ -118,6 +118,45 @@ TEST_F(ApacheDaemonHtmlTest, AnEncodingFoundIsKeptAndReported) {
   EXPECT_EQ(nullptr, apr_table_get(request_.headers_out, "X-Filter"));
 }
 
+// A coded copy's own Content-Encoding is the set's: written once, and the
+// filter pass that finds it again reports no conflict.  Another coding found
+// next to it still does.
+TEST_F(ApacheDaemonHtmlTest, TheSetsOwnEncodingIsNoConflict) {
+  DaemonHtmlHeaderLines coded = kOk;
+  coded.insert(coded.begin() + 2, {"Content-Encoding", "br"});
+  bool conflict = true;
+  ApacheApplyMarkdownHeaders(&request_, coded, &conflict);
+  EXPECT_FALSE(conflict);
+  // The handler pass wrote it; the filter pass finds it and keeps one.
+  ApacheApplyMarkdownHeaders(&request_, coded, &conflict);
+  EXPECT_FALSE(conflict);
+  int lines = 0;
+  apr_table_do(
+      [](void* rec, const char*, const char*) {
+        ++*static_cast<int*>(rec);
+        return 1;
+      },
+      &lines, request_.headers_out, "Content-Encoding", nullptr);
+  EXPECT_EQ(1, lines);
+  EXPECT_STREQ("br", apr_table_get(request_.headers_out, "Content-Encoding"));
+
+  apr_table_add(request_.headers_out, "Content-Encoding", "gzip");
+  ApacheApplyMarkdownHeaders(&request_, coded, &conflict);
+  EXPECT_TRUE(conflict);
+  // Both codings, in the order applied: the body is br, then gzip.
+  EXPECT_STREQ("br, gzip",
+               apr_table_get(request_.headers_out, "Content-Encoding"));
+
+  // A stage that merged its coding into the copy's own line: kept whole,
+  // never "br, br, gzip".
+  apr_table_clear(request_.headers_out);
+  apr_table_add(request_.headers_out, "Content-Encoding", "br, gzip");
+  ApacheApplyMarkdownHeaders(&request_, coded, &conflict);
+  EXPECT_TRUE(conflict);
+  EXPECT_STREQ("br, gzip",
+               apr_table_get(request_.headers_out, "Content-Encoding"));
+}
+
 // Only the request's filters below the protocol filters go; the Markdown
 // header filter, the protocol filters and the connection's stay.
 TEST_F(ApacheDaemonHtmlTest, OnlyContentFiltersAreRemoved) {

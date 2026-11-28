@@ -207,6 +207,9 @@ run_tests() {
     export PAGESPEED_DHC_INNER_PORT="${PAGESPEED_DHC_INNER_PORT:-8187}"
     export PAGESPEED_DHC_TLS_CERT="${PAGESPEED_DHC_TLS_CERT:-/tmp/apache_pagespeed_test/certs/server.crt}"
     export PAGESPEED_DHC_TLS_KEY="${PAGESPEED_DHC_TLS_KEY:-/tmp/apache_pagespeed_test/certs/server.key}"
+    # The script that restarts the conformance worker on its volume with other
+    # compression levels (setup_apache_test.sh).
+    export PAGESPEED_DHC_RESTART="${PAGESPEED_DHC_RESTART:-/tmp/apache_pagespeed_test/restart_dhc_worker.sh}"
     # Lane fixture self_fetch_access: the self-fetch-access.example.com vhost
     # is on the secondary port too.
     export PAGESPEED_SELF_FETCH_ACCESS_PORT="${PAGESPEED_SELF_FETCH_ACCESS_PORT:-$PAGESPEED_SECONDARY_PORT}"

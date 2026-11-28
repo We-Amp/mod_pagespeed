@@ -94,6 +94,9 @@ DHC_SOCKET="$DHC_WORKER_DIR/notify.sock"
 DHC_VOLUME="$DHC_WORKER_DIR/cache/cache"
 DHC_PID="$LANE_STATE_DIR/dhc_worker.pid"
 DHC_LOG="$LANE_STATE_DIR/dhc_worker.log"
+# Restarts the conformance worker on its own volume, with any extra arguments
+# (the compression levels a row sets; run by the Apache provider).
+DHC_RESTART="$LANE_STATE_DIR/restart_dhc_worker.sh"
 DHC_API_PORT="${DHC_API_PORT:-8186}"
 DHC_SITE_CONF="pagespeed-test-dhc"
 
@@ -2518,6 +2521,34 @@ start_dhc_worker() {
         --api-port "$DHC_API_PORT" --api-no-auth \
         > "$DHC_LOG" 2>&1 < /dev/null &
     echo $! > "$DHC_PID"
+    # The same start on the same volume, with the caller's extra arguments:
+    # it stops only the process the pid file names, and only while that is
+    # still this lane's conformance worker.
+    cat > "$DHC_RESTART" << EOF
+#!/bin/bash
+set -u
+pid="\$(cat "$DHC_PID" 2>/dev/null)"
+if [ -n "\$pid" ] && tr '\\0' ' ' < "/proc/\$pid/cmdline" 2>/dev/null | grep -q "factory_worker"; then
+    sudo pkill -TERM -P "\$pid" 2>/dev/null || true
+    sudo kill -TERM "\$pid" 2>/dev/null || true
+    for i in \$(seq 1 100); do [ -d "/proc/\$pid" ] || break; sleep 0.1; done
+fi
+sudo rm -f "$DHC_SOCKET"
+nohup sudo -u www-data "$DAEMON_ARTIFACT_DIR/factory_worker" \\
+    --cache-dir "$DHC_WORKER_DIR/cache" --socket "$DHC_SOCKET" \\
+    --cache-size 268435456 --log-level info \\
+    --html-mode markdown-static --agent-optimize \\
+    --api-port "$DHC_API_PORT" --api-no-auth "\$@" \\
+    >> "$DHC_LOG" 2>&1 < /dev/null &
+echo \$! > "$DHC_PID"
+for i in \$(seq 1 150); do
+    if [ -S "$DHC_SOCKET" ]; then sudo chmod 666 "$DHC_SOCKET"; exit 0; fi
+    sleep 0.2
+done
+echo "the conformance worker did not open its socket again" >&2
+exit 1
+EOF
+    chmod +x "$DHC_RESTART"
     local i
     for i in $(seq 1 100); do
         if [ -S "$DHC_SOCKET" ] && [ -n "$(sudo find "$DHC_WORKER_DIR" -name pagespeed-shared.conf 2>/dev/null)" ]; then

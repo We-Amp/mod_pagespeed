@@ -26,6 +26,9 @@ waits for a stated deadline and fails at it.
 
 import abc
 import copy
+import ctypes
+import ctypes.util
+import gzip
 import http.client
 import importlib
 import json
@@ -98,6 +101,9 @@ VHOST_KNOBS = frozenset(
         "named_location",
         "proxy_hide",
         "trailer",
+        # nginx: `gunzip on` (a gzip response is inflated for a client that
+        # does not accept gzip).
+        "gunzip",
     ]
 )
 ORIGIN_KEYS = frozenset(
@@ -128,8 +134,15 @@ OPS = frozenset(
         "release_origin",
         "set_mode",
         "wait_origin_held",
+        # The coded copies of the step request's Markdown copy are stored
+        # ({codings, timeout_s}), and the worker restarted on its volume with
+        # other compression levels ({gzip_level, brotli_level}).
+        "wait_coded",
+        "restart_worker",
     ]
 )
+# The codings wait_coded names.
+CODINGS = frozenset(["br", "gzip"])
 EXPECT_KEYS = frozenset(
     [
         "status",
@@ -148,9 +161,17 @@ EXPECT_KEYS = frozenset(
         "origin_saw_absent",
         "counter_delta",
         "differential",
+        # The body, decoded by its one Content-Encoding (none, gzip or br),
+        # equals the body of an earlier step (its index); a header line equals
+        # the same line of an earlier step ({name: index}).
+        "decoded_equals_step",
+        "header_equals_step",
     ]
 )
-HEADER_EXPECT_KEYS = frozenset(["count", "value", "contains"])
+# `tokens`: the line is that comma-separated list, in order, names compared
+# case-insensitively and whitespace around a comma ignored (a server may join
+# list tokens with "," alone: RFC 9110 5.6.1).
+HEADER_EXPECT_KEYS = frozenset(["count", "value", "contains", "tokens"])
 MODES = frozenset(["off", "report-only", "serve-variants"])
 
 # The mode a row may run in only as a mode-audit rerun (mode_audit_rows); a
@@ -272,6 +293,20 @@ class Provider(abc.ABC):
         changes nothing the row asserts (no counter a row reads, no
         store)."""
 
+    def coded_ready(self, path: str, host: Optional[str], codings: List[str]) -> bool:
+        """Whether the volume holds a coded copy ("br", "gzip") of the URL's
+        Markdown copy, with bytes, for every coding named. A read only."""
+        raise ProviderUnsupported("no coded-copy probe")
+
+    def restart_worker(self, gzip_level: int, brotli_level: int) -> None:
+        """Restart the optimizer worker on the same volume with these
+        compression levels (0 disables a coding), then reload the row's
+        server so every server process reads the worker's new state; return
+        once both serve again. The provider restores the default levels at
+        teardown. Counters may restart with the server: a step asserting a
+        counter delta does not restart the worker in its own pre ops."""
+        raise ProviderUnsupported("cannot restart the worker")
+
     @abc.abstractmethod
     def purge_url(self, url: str, form: str) -> None:
         """Purge one URL: form PURGE (the method) or query (?purge=)."""
@@ -376,7 +411,7 @@ def live_rows(cases: dict) -> List[dict]:
 # The live rows that run today and the ones held back, pinned so a row cannot
 # leave the run unnoticed: marking a row pending, or adding one, changes these
 # in the same change.
-LIVE_ROWS_THAT_RUN = 130
+LIVE_ROWS_THAT_RUN = 143
 LIVE_ROWS_PENDING = 100
 
 
@@ -548,6 +583,25 @@ def validate_row(row: dict, bodies: Dict[str, str]) -> List[str]:
             isinstance(t, str) and t for t in contains
         ):
             errors.append(f"{rid}: {where} body_contains is not a list of strings")
+        for key, at in [("decoded_equals_step", expect.get("decoded_equals_step"))] + [
+                ("header_equals_step", v) for v in expect.get("header_equals_step", {}).values()]:
+            if at is None:
+                continue
+            if not isinstance(at, int) or isinstance(at, bool) or not 0 <= at < i:
+                errors.append(f"{rid}: {where} {key} names no earlier step")
+            elif steps[at].get("background") or "window" in steps[at]:
+                errors.append(f"{rid}: {where} {key} names a step whose response is not kept")
+        for op in step.get("pre", []):
+            if not isinstance(op, dict) or len(op) != 1:
+                continue
+            name, arg = next(iter(op.items()))
+            if name == "wait_coded" and (
+                    not isinstance(arg, dict) or not set(arg) <= {"codings", "timeout_s"}
+                    or not arg.get("codings") or not set(arg["codings"]) <= CODINGS):
+                errors.append(f"{rid}: {where} wait_coded names codings (br, gzip) and timeout_s")
+            if name == "restart_worker" and (
+                    not isinstance(arg, dict) or set(arg) != {"gzip_level", "brotli_level"}):
+                errors.append(f"{rid}: {where} restart_worker names gzip_level and brotli_level")
         diff = expect.get("differential")
         if diff is not None:
             unknown(f"{where} differential", diff, {"against", "allow_vary_accept"})
@@ -638,6 +692,48 @@ class _Background:
     result: dict = field(default_factory=dict)
 
 
+def _brotli_decoder():
+    """libbrotlidec through ctypes (the image has the library, not the Python
+    module), or None."""
+    name = ctypes.util.find_library("brotlidec") or "libbrotlidec.so.1"
+    try:
+        lib = ctypes.CDLL(name)
+    except OSError:
+        return None
+    lib.BrotliDecoderDecompress.restype = ctypes.c_int
+    lib.BrotliDecoderDecompress.argtypes = [
+        ctypes.c_size_t, ctypes.c_char_p, ctypes.POINTER(ctypes.c_size_t),
+        ctypes.c_char_p]
+    return lib
+
+
+def decode_body(r: Response) -> bytes:
+    """The body decoded by its one Content-Encoding line: none (or identity),
+    gzip or br. Raises ValueError for anything else, or a body that does not
+    decode."""
+    codings = r.lines("Content-Encoding")
+    if not codings or [c.strip().lower() for c in codings] == ["identity"]:
+        return r.body
+    if len(codings) != 1:
+        raise ValueError(f"{len(codings)} Content-Encoding lines {codings!r}")
+    coding = codings[0].strip().lower()
+    if coding == "gzip":
+        return gzip.decompress(r.body)
+    if coding == "br":
+        lib = _brotli_decoder()
+        if lib is None:
+            raise ValueError("no brotli decoder (libbrotlidec) on this host")
+        capacity = max(1024, len(r.body) * 64)
+        while capacity <= 1 << 28:
+            out = ctypes.create_string_buffer(capacity)
+            size = ctypes.c_size_t(capacity)
+            if lib.BrotliDecoderDecompress(len(r.body), r.body, ctypes.byref(size), out) == 1:
+                return out.raw[: size.value]
+            capacity *= 4
+        raise ValueError("the br body does not decode")
+    raise ValueError(f"Content-Encoding {coding!r}")
+
+
 class RowRunner:
     """Drives one live row against a provider and collects every failure."""
 
@@ -664,6 +760,9 @@ class RowRunner:
         self.purged_at: Optional[float] = None
         # One record per window step run: what the watched process sent.
         self.windows: List[dict] = []
+        # The response of each step run, by index (decoded_equals_step,
+        # header_equals_step).
+        self.responses: Dict[int, Response] = {}
 
     # ---- entry
 
@@ -757,6 +856,23 @@ class RowRunner:
                 self.provider.set_mode(arg["mode"])
             elif name == "wait_origin_held":
                 self._wait_origin_held(index, arg)
+            elif name == "wait_coded":
+                self._wait_coded(index, request, arg)
+            elif name == "restart_worker":
+                self.provider.restart_worker(int(arg["gzip_level"]), int(arg["brotli_level"]))
+
+    def _wait_coded(self, index: int, request: dict, arg: dict) -> None:
+        timeout = float(arg.get("timeout_s", 30))
+        codings = list(arg["codings"])
+        deadline = self.clock() + timeout
+        while True:
+            self.provider.settle()
+            if self.provider.coded_ready(request["path"], request.get("host"), codings):
+                return
+            if self.clock() >= deadline:
+                self._fail(index, f"the {'/'.join(codings)} copies not stored within {timeout:g} s")
+                return
+            self.sleep(self.poll_s)
 
     def _wait_origin_held(self, index: int, arg: dict) -> None:
         want = (arg["method"], arg["path"])
@@ -837,6 +953,7 @@ class RowRunner:
         self.provider.settle()
         origin_before = len(self.provider.origin_requests())
         response = self._send(step)
+        self.responses[index] = response
         self._check(index, step, response, counters_before, origin_before)
 
     def _run_window(self, index: int, step: dict) -> None:
@@ -981,6 +1098,9 @@ class RowRunner:
                     fail(f"{name}: {value!r}, expected {spec['value']!r}")
                 if "contains" in spec and spec["contains"] not in value:
                     fail(f"{name}: {value!r} does not contain {spec['contains']!r}")
+                if "tokens" in spec and [t.strip().lower() for t in value.split(",")] != [
+                        t.lower() for t in spec["tokens"]]:
+                    fail(f"{name}: {value!r}, expected the list {', '.join(spec['tokens'])}")
         if expect.get("headers_only"):
             allowed = {n.lower() for n in exact} | TRANSPORT_LINES
             for name, value in r.headers:
@@ -1048,6 +1168,25 @@ class RowRunner:
                 got = after.get(name, 0) - counters_before.get(name, 0)
                 if got != delta:
                     fail(f"{name} moved by {got}, expected {delta}")
+        if "decoded_equals_step" in expect:
+            earlier = self.responses.get(expect["decoded_equals_step"])
+            if earlier is None:
+                fail(f"no response of step {expect['decoded_equals_step']} to compare with")
+            else:
+                try:
+                    decoded = decode_body(r)
+                except (ValueError, OSError, EOFError) as e:
+                    fail(f"the body does not decode: {e}")
+                else:
+                    if decoded != earlier.body:
+                        fail(f"the decoded body ({len(decoded)} bytes) is not step "
+                             f"{expect['decoded_equals_step']}'s ({len(earlier.body)} bytes)")
+        for name, at in expect.get("header_equals_step", {}).items():
+            earlier = self.responses.get(at)
+            if earlier is None:
+                fail(f"no response of step {at} to compare {name} with")
+            elif r.lines(name) != earlier.lines(name):
+                fail(f"{name} {r.lines(name)!r}, step {at} had {earlier.lines(name)!r}")
         if "differential" in expect:
             self._differential(index, step, r, expect["differential"])
 

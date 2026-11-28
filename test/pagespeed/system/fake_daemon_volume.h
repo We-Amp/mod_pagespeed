@@ -70,7 +70,9 @@ class FakeDaemonVolume : public DaemonAbi {
   }
   // The volume takes a URL path ("/..."), never a full URL: a call with
   // anything else is refused, as a misuse.
-  static bool IsPath(const char* url) { return url != nullptr && url[0] == '/'; }
+  static bool IsPath(const char* url) {
+    return url != nullptr && url[0] == '/';
+  }
   static GoogleString Key(const char* site, const char* url,
                           const char* hostname, const char* scheme) {
     return Key(site, EntryUrl(url, hostname, scheme).c_str());
@@ -177,8 +179,10 @@ class FakeDaemonVolume : public DaemonAbi {
     return kPsErrInvalidArg;
   }
   int NotifyWorker(const char*, const PsNotifyParams*) const override {
-    return kPsOk;
+    return notify_rc;
   }
+  // What NotifyWorker answers.
+  int notify_rc = kPsOk;
   int CacheReadBestSite(void*, const char*, const char*, const char*,
                         const char*, uint32_t, void** out) const override {
     *out = nullptr;

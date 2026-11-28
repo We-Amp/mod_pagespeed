@@ -321,6 +321,19 @@ const char* const RewriteStats::kDaemonHtmlEngineCounters[] = {
     "daemon_markdown_not_modified",
     "daemon_markdown_served_without_preference",
     "daemon_markdown_transport_conflict",
+    // With a library that publishes C API 1.16: the coding of each Markdown
+    // 200 (they sum to daemon_markdown_served), the coded copies a request
+    // preferred that were missing or not bound, and the requests to the
+    // optimizer to write them (at most one per page per process).
+    "daemon_markdown_served_br",
+    "daemon_markdown_served_gzip",
+    "daemon_markdown_served_identity",
+    "daemon_markdown_encoded_copy_missing",
+    "daemon_markdown_encoded_copy_unbound",
+    "daemon_markdown_compress_demand_sent",
+    // Coded answers the server sent as the plain copy instead, because one of
+    // its body filters would have rewritten the coded bytes (nginx).
+    "daemon_markdown_coded_fallback",
     // The agent class of each classified request (daemon_html_agent_class.h):
     // c1, c3 and c4 partition them; c1_not_ready and signature_failed are
     // parts of c3 and c4.
@@ -353,6 +366,8 @@ const char* const RewriteStats::kDaemonMarkdownFallthroughReasons[] = {
     "no_transform",
     "withheld",
     "skew",
+    // C API 1.16: the request accepts no coding the copy is stored in.
+    "no_acceptable_encoding",
     // The engine's own.
     "sidecar_unpaired",
     "url_disagree",

@@ -2224,8 +2224,13 @@ struct PsDaemonHtmlRequest {
   DaemonHtmlServeResult answer;
   DaemonHtmlEngine* engine = nullptr;
   // The never-sent Content-Encoding entry that keeps the compressors off
-  // this response (see ps_daemon_html_mark_no_compress).
+  // this response (see ps_daemon_html_mark_no_compress); for a coded copy,
+  // the answer's own Content-Encoding line, which is sent.
   ngx_table_elt_t* no_compress = nullptr;
+  bool no_compress_coded = false;
+  // A coded answer replaced by its plain copy, because a body filter would
+  // rewrite the coded bytes (ps_daemon_html_final_enforcement).
+  bool coded_fallback = false;
   bool conflict_noted = false;
 };
 
@@ -2991,20 +2996,33 @@ ngx_int_t ps_daemon_html_reset_headers(ngx_http_request_t* r) {
 
 // No compressor touches this response: nginx's gzip filter reads its test
 // as done and failed, and every compressor (gzip, brotli and the like) skips
-// a response that already has a Content-Encoding.  That one is an entry that
-// is never sent (hash 0), so the client never sees it.
+// a response that already has a Content-Encoding.  For a plain answer that
+// one is an entry that is never sent (hash 0), so the client never sees it;
+// for a coded copy it is the answer's own Content-Encoding line, sent once.
 ngx_int_t ps_daemon_html_mark_no_compress(ngx_http_request_t* r,
                                           PsDaemonHtmlRequest* state) {
 #if (NGX_HTTP_GZIP)
   r->gzip_tested = 1;
   r->gzip_ok = 0;
 #endif
-  ngx_table_elt_t* h =
-      ps_daemon_html_push_line(r, "Content-Encoding", "identity");
+  const GoogleString* coding = nullptr;
+  for (const auto& [name, value] : state->answer.headers) {
+    if (StringCaseEqual(name, "Content-Encoding")) coding = &value;
+  }
+  ngx_table_elt_t* h = ps_daemon_html_push_line(
+      r, "Content-Encoding",
+      coding == nullptr ? StringPiece("identity") : StringPiece(*coding));
   if (h == nullptr) return NGX_ERROR;
-  h->hash = 0;
+  if (coding == nullptr) h->hash = 0;
+#if (NGX_HTTP_GZIP)
+  // The client accepts the coding the copy is in (the library chose it):
+  // nginx's gunzip filter, which inflates a gzip response for a client it
+  // reads as not accepting gzip, passes this one through.
+  if (coding != nullptr && StringCaseEqual(*coding, "gzip")) r->gzip_ok = 1;
+#endif
   r->headers_out.content_encoding = h;
   state->no_compress = h;
+  state->no_compress_coded = coding != nullptr;
   return NGX_OK;
 }
 
@@ -3019,7 +3037,10 @@ void ps_daemon_html_undo_no_compress(ngx_http_request_t* r,
       r->headers_out.content_encoding == state->no_compress) {
     r->headers_out.content_encoding = nullptr;
   }
+  // A coded answer's own line is withdrawn with it.
+  state->no_compress->hash = 0;
   state->no_compress = nullptr;
+  state->no_compress_coded = false;
 }
 
 // The Markdown answer's header set, on whatever the header stages so far
@@ -3035,8 +3056,15 @@ ngx_int_t ps_daemon_html_enforce_markdown(ngx_http_request_t* r,
                                           bool* conflict) {
   ngx_http_headers_out_t* out = &r->headers_out;
   NgxListIterator it(&out->headers.part);
+  // A stage removed a coded answer's own Content-Encoding line: the bytes
+  // would go out unlabelled.  Kept as it is, and counted.
+  if (state->no_compress_coded && !state->coded_fallback &&
+      state->no_compress != nullptr && state->no_compress->hash == 0) {
+    *conflict = true;
+  }
   for (ngx_table_elt_t* h = it.Next(); h != nullptr; h = it.Next()) {
-    if (h->hash == 0) continue;
+    // The no-compress mark: a coded answer's own Content-Encoding.
+    if (h->hash == 0 || h == state->no_compress) continue;
     switch (ClassifyMarkdownLine(str_to_string_piece(h->key))) {
       case NgxMarkdownLine::kTransport:
         break;
@@ -3090,8 +3118,11 @@ ngx_int_t ps_daemon_html_enforce_markdown(ngx_http_request_t* r,
       out->content_type.len = value.size();
       const size_t semi = value.find(';');
       out->content_type_len = semi == GoogleString::npos ? value.size() : semi;
-    } else if (StringCaseEqual(name, "Content-Length")) {
-      // Set by the emit; never restored here once a stage cleared it.
+    } else if (StringCaseEqual(name, "Content-Length") ||
+               StringCaseEqual(name, "Content-Encoding")) {
+      // Content-Length is set by the emit and never restored here once a
+      // stage cleared it; Content-Encoding is carried by the no-compress mark
+      // (ps_daemon_html_mark_no_compress).
     } else if (StringCaseEqual(name, "Cache-Control")) {
       char* cc = string_piece_to_pool_string(r->pool, value);
       if (cc == nullptr || ps_set_cache_control(r, cc) != NGX_OK) {
@@ -3119,6 +3150,11 @@ class NgxDaemonHtmlServePort : public DaemonHtmlPort {
   ngx_int_t rc() const { return rc_; }
 
   void MarkNoCompress() override { mark_no_compress_ = true; }
+
+  bool CodedAnswerReplacedByPlain() const override {
+    return state_->coded_fallback;
+  }
+  bool MaySendPlainInstead() const override { return true; }
 
   bool ClearAndEmitAllowlisted(const DaemonHtmlServeResult& result,
                                bool head) override {
@@ -3150,23 +3186,26 @@ class NgxDaemonHtmlServePort : public DaemonHtmlPort {
         result.status != NGX_HTTP_OK) {
       return true;
     }
+    // The header stages replaced the coded copy by the plain one.
+    const GoogleString& body =
+        state_->coded_fallback ? result.plain_body : result.body;
     ngx_buf_t* buf = static_cast<ngx_buf_t*>(ngx_calloc_buf(r_->pool));
     if (buf == nullptr) {
       rc_ = NGX_ERROR;
       return true;
     }
-    if (!result.body.empty()) {
-      u_char* copy =
-          static_cast<u_char*>(ngx_palloc(r_->pool, result.body.size()));
+    if (!body.empty()) {
+      u_char* copy = static_cast<u_char*>(ngx_palloc(r_->pool, body.size()));
       if (copy == nullptr) {
         rc_ = NGX_ERROR;
         return true;
       }
-      ngx_memcpy(copy, result.body.data(), result.body.size());
+      ngx_memcpy(copy, body.data(), body.size());
       // The pool holds the body from here on; the state keeps the headers.
       state_->answer.body.clear();
+      state_->answer.plain_body.clear();
       buf->pos = copy;
-      buf->last = copy + result.body.size();
+      buf->last = copy + body.size();
       buf->temporary = 1;
     } else {
       buf->sync = 1;
@@ -4610,6 +4649,37 @@ void ps_merge_compressor_vary(ngx_http_request_t* r, ps_request_ctx_t* ctx) {
 // states its one Vary line itself.
 ngx_int_t ps_daemon_html_final_enforcement(ngx_http_request_t* r,
                                            PsDaemonHtmlRequest* state) {
+  // A coded answer whose length a stage cleared: a body filter (sub_filter,
+  // ssi, addition and the like, which clear the length when they will
+  // rewrite the body) would rewrite the coded bytes.  The plain copy goes
+  // out instead, with its own tag, as such a filter expects text.  Nothing
+  // has been written to the client yet: this is the last header filter.
+  if (state->no_compress_coded && !state->coded_fallback &&
+      state->no_compress != nullptr && state->no_compress->hash != 0 &&
+      !state->answer.plain_etag.empty() &&
+      DaemonHtmlAnswerContentLength(state->answer) >= 0 &&
+      r->headers_out.content_length_n < 0) {
+    state->coded_fallback = true;
+    state->no_compress->hash = 0;
+#if (NGX_HTTP_GZIP)
+    r->gzip_ok = 0;
+#endif
+    if (r->headers_out.content_encoding == state->no_compress) {
+      r->headers_out.content_encoding = nullptr;
+    }
+    DaemonHtmlHeaderLines plain;
+    for (const auto& [name, value] : state->answer.headers) {
+      if (StringCaseEqual(name, "Content-Encoding")) continue;
+      if (StringCaseEqual(name, "ETag")) {
+        plain.emplace_back(name, state->answer.plain_etag);
+      } else if (StringCaseEqual(name, "Content-Length")) {
+        // A stage cleared the length; the plain copy goes out chunked.
+      } else {
+        plain.emplace_back(name, value);
+      }
+    }
+    state->answer.headers = std::move(plain);
+  }
   bool conflict = false;
   if (ps_daemon_html_enforce_markdown(r, state, &conflict) != NGX_OK) {
     return NGX_ERROR;

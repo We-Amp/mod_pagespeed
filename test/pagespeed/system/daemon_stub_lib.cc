@@ -139,6 +139,20 @@
 //                                with PS_STUB_HTML_SERVE_15: the 1.15 set
 //                                without ps_html_unsafe_method_invalidates,
 //                                the LAST one bound, so none of it is used.
+//   PS_STUB_HTML_SERVE_16        with PS_STUB_HTML_SERVE_15: also the 1.16
+//                                set (the coding choice, the coded facts,
+//                                the coded tag and the published codings,
+//                                PS_STUB_MARKDOWN_CODINGS, default 6: both),
+//                                the reason no_acceptable_encoding, the 1.16
+//                                verdict field: a verdict of the 1.16 size
+//                                to serve Markdown names the coding asked
+//                                for when its BOUND fact is set, else
+//                                identity with IDENTITY_OK, else falls
+//                                through.  Bound only from minor 16.
+//   PS_STUB_OMIT_MARKDOWN_SELECT_ENCODING
+//                                with PS_STUB_HTML_SERVE_16: the 1.16 set
+//                                without ps_markdown_select_encoding, the
+//                                LAST one bound, so none of it is used.
 //   PS_STUB_ECHO_SIZES (setting) every serve verdict carries the request's
 //                                struct_size in age_s and the facts'
 //                                struct_size in not_modified, so a test sees
@@ -925,7 +939,19 @@ struct StubServeVerdict {
   uint32_t age_s;
   int not_modified;
   char etag[32];
+#ifdef PS_STUB_HTML_SERVE_16
+  int markdown_encoding;
+  int reserved_1_16;
+#endif
 };
+
+#ifdef PS_STUB_HTML_SERVE_16
+// The 1.16 request's coding word (the 1.15 reserved one) and its bits.
+constexpr size_t kServeRequestCodingOffset = 76;
+constexpr uint32_t kServeRequestIdentityOk = 1024u;
+constexpr uint32_t kServeRequestEncodingNone = 2048u;
+constexpr size_t kServeVerdictSize16 = 72;
+#endif
 
 // A stored sidecar, and also the block a read hands out (a malloc'd copy).
 struct StubSidecar {
@@ -1145,6 +1171,10 @@ const char* ps_html_serve_reason_name(int reason) {
                                        "request_header",
                                        "path"
 #endif
+#ifdef PS_STUB_HTML_SERVE_16
+                                       ,
+                                       "no_acceptable_encoding"
+#endif
   };
   if (reason < 0 ||
       static_cast<size_t>(reason) >= sizeof(kNames) / sizeof(kNames[0])) {
@@ -1195,6 +1225,12 @@ int ps_if_none_match_matches_weak(const char* if_none_match, const char* etag) {
   return 0;
 }
 
+#ifdef PS_STUB_HTML_SERVE_16
+int ps_html_markdown_etag_coded(const uint8_t* binding_hash,
+                                const uint8_t* markdown_hash, int coding,
+                                char* buf, size_t capacity, size_t* out_len);
+#endif
+
 int ps_html_serve_classify(const StubServeRequest* request,
                            const StubStoredFacts* facts,
                            StubServeVerdict* out) {
@@ -1229,12 +1265,43 @@ int ps_html_serve_classify(const StubServeRequest* request,
     v.action = static_cast<int>(EnvOr("PS_STUB_HTML_SERVE_ACTION", 0));
     v.reason = static_cast<int>(EnvOr("PS_STUB_HTML_SERVE_REASON", 0));
     size_t len = 0;
+#ifdef PS_STUB_HTML_SERVE_16
+    // The coding, only for a caller whose request and verdict carry it.
+    if (v.action == 2 && request->struct_size >= kServeRequestSize15 &&
+        out->struct_size >= kServeVerdictSize16) {
+      uint32_t coding = 0;
+      memcpy(&coding,
+             reinterpret_cast<const char*>(request) + kServeRequestCodingOffset,
+             sizeof(coding));
+      const bool bound = (coding == 1 && (facts->flags & 0x4000u) != 0) ||
+                         (coding == 2 && (facts->flags & 0x8000u) != 0);
+      if ((request->request_flags & kServeRequestEncodingNone) != 0) {
+        v.action = 0;
+        v.reason = 27;  // no_acceptable_encoding
+      } else if (coding == 1 || coding == 2) {
+        if (bound) {
+          v.markdown_encoding = static_cast<int>(coding);
+        } else if ((request->request_flags & kServeRequestIdentityOk) == 0) {
+          v.action = 0;
+          v.reason = 27;
+        }
+      }
+    }
+    if (v.action == 2 &&
+        ps_html_markdown_etag_coded(facts->binding_hash, facts->markdown_hash,
+                                    v.markdown_encoding, v.etag, sizeof(v.etag),
+                                    &len) == 0) {
+      v.not_modified =
+          ps_if_none_match_matches_weak(request->if_none_match, v.etag) == 1;
+    }
+#else
     if (v.action == 2 &&
         ps_html_markdown_etag(facts->binding_hash, facts->markdown_hash, v.etag,
                               sizeof(v.etag), &len) == 0) {
       v.not_modified =
           ps_if_none_match_matches_weak(request->if_none_match, v.etag) == 1;
     }
+#endif
   }
   if (EnvOr("PS_STUB_ECHO_SIZES", 0) != 0) {
     v.age_s = static_cast<uint32_t>(request->struct_size);
@@ -1620,6 +1687,170 @@ int ps_header_block_policy_stamp(const void* block, uint64_t* out) {
   *out = static_cast<uint64_t>(stamp);
   return stamp != 0 ? 1 : 0;
 }
+
+#ifdef PS_STUB_HTML_SERVE_16
+// ---------------------------------------------------------------------------
+// The 1.16 set.  The argument checks are the real library's; the coding
+// choice is a small subset of its rules (br, gzip, x-gzip, identity, `*`,
+// q=0 and a q of up to three decimals), enough for a test to see an order
+// come back.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+bool StubCaseEqualN(const char* a, const char* b, size_t n) {
+  for (size_t i = 0; i < n; ++i) {
+    char x = a[i], y = b[i];
+    if (x >= 'A' && x <= 'Z') x = static_cast<char>(x - 'A' + 'a');
+    if (y >= 'A' && y <= 'Z') y = static_cast<char>(y - 'A' + 'a');
+    if (x != y) return false;
+  }
+  return true;
+}
+
+// The q of one element ("" = 1000), in thousandths; -1 when it does not
+// parse.
+int StubQ(const char* params, size_t length) {
+  int q = 1000;
+  size_t i = 0;
+  while (i < length) {
+    while (i < length && (params[i] == ' ' || params[i] == ';')) ++i;
+    if (i + 1 < length && (params[i] == 'q' || params[i] == 'Q') &&
+        params[i + 1] == '=') {
+      i += 2;
+      if (i >= length || (params[i] != '0' && params[i] != '1')) return -1;
+      int whole = params[i] - '0';
+      ++i;
+      int frac = 0;
+      int digits = 0;
+      if (i < length && params[i] == '.') {
+        ++i;
+        while (i < length && params[i] >= '0' && params[i] <= '9' &&
+               digits < 3) {
+          frac = frac * 10 + (params[i] - '0');
+          ++digits;
+          ++i;
+        }
+      }
+      while (digits < 3) {
+        frac *= 10;
+        ++digits;
+      }
+      q = whole * 1000 + frac;
+      if (q > 1000) return -1;
+      while (i < length && params[i] == ' ') ++i;
+      if (i < length && params[i] != ';') return -1;
+    } else {
+      while (i < length && params[i] != ';') ++i;
+    }
+  }
+  return q;
+}
+
+}  // namespace
+
+#ifndef PS_STUB_OMIT_MARKDOWN_SELECT_ENCODING
+int ps_markdown_select_encoding(const char* const* lines, size_t count,
+                                int* out_order) {
+  if (out_order == nullptr || (lines == nullptr && count != 0)) return -1;
+  // q per coding: identity 0, gzip 1, br 2; -2 = not named.
+  int q[3] = {-2, -2, -2};
+  int star = -2;
+  bool any = false;
+  for (size_t l = 0; l < count; ++l) {
+    const char* line = lines[l];
+    if (line == nullptr) continue;
+    const char* p = line;
+    while (*p != '\0') {
+      while (*p == ' ' || *p == ',') ++p;
+      if (*p == '\0') break;
+      const char* end = p;
+      while (*end != '\0' && *end != ',') ++end;
+      const char* semi = p;
+      while (semi < end && *semi != ';') ++semi;
+      const char* name_end = semi;
+      while (name_end > p && name_end[-1] == ' ') --name_end;
+      const size_t n = static_cast<size_t>(name_end - p);
+      const int value = StubQ(semi, static_cast<size_t>(end - semi));
+      any = true;
+      if (value >= 0) {
+        int* slot = nullptr;
+        if (n == 1 && *p == '*') {
+          slot = &star;
+        } else if (n == 2 && StubCaseEqualN(p, "br", 2)) {
+          slot = &q[2];
+        } else if ((n == 4 && StubCaseEqualN(p, "gzip", 4)) ||
+                   (n == 6 && StubCaseEqualN(p, "x-gzip", 6))) {
+          slot = &q[1];
+        } else if (n == 8 && StubCaseEqualN(p, "identity", 8)) {
+          slot = &q[0];
+        }
+        if (slot != nullptr && (*slot == -2 || value < *slot)) *slot = value;
+      }
+      p = end;
+    }
+  }
+  if (!any) {
+    out_order[0] = 0;
+    return 1;
+  }
+  for (int c = 1; c <= 2; ++c) {
+    if (q[c] == -2) q[c] = star == -2 ? 0 : star;
+  }
+  // Identity is acceptable unless refused by name or by `*;q=0`; unnamed,
+  // it ranks after every coding named.
+  int identity = q[0];
+  if (identity == -2) identity = star == 0 ? 0 : -1;
+  int n = 0;
+  for (int pass = 1000; pass >= 1; --pass) {
+    if (q[2] == pass) out_order[n++] = 2;
+    if (q[1] == pass) out_order[n++] = 1;
+    if (identity == pass) out_order[n++] = 0;
+  }
+  if (identity == -1) out_order[n++] = 0;
+  return n;
+}
+#endif  // PS_STUB_OMIT_MARKDOWN_SELECT_ENCODING
+
+int ps_html_stored_facts_from_reads_coded(const void* original,
+                                          const void* markdown,
+                                          const void* withheld_marker,
+                                          int sidecar_present,
+                                          const void* block, const void* coded,
+                                          int coding, StubStoredFacts15* out) {
+  if (coded != nullptr && coding != 1 && coding != 2) return -1;
+  if (ps_html_stored_facts_from_reads_ex(original, markdown, withheld_marker,
+                                         sidecar_present, block, out) != 0) {
+    return -1;
+  }
+  // A coded read with a live plain binding is bound; PS_STUB_NOT_SMALLER
+  // makes it the not-smaller record instead.
+  if (coded != nullptr && (out->base.flags & 0x200u) != 0) {
+    const bool not_smaller = EnvOr("PS_STUB_NOT_SMALLER", 0) != 0;
+    if (coding == 1) out->base.flags |= not_smaller ? 0x10000u : 0x4000u;
+    if (coding == 2) out->base.flags |= not_smaller ? 0x20000u : 0x8000u;
+  }
+  return 0;
+}
+
+int ps_html_markdown_etag_coded(const uint8_t* binding_hash,
+                                const uint8_t* markdown_hash, int coding,
+                                char* buf, size_t capacity, size_t* out_len) {
+  if (coding < 0 || coding > 2) return -1;
+  const int rc = ps_html_markdown_etag(binding_hash, markdown_hash, buf,
+                                       capacity, out_len);
+  // Not the real hash: the coding's digit in place of the tag's last one.
+  if (rc == 0 && coding != 0 && *out_len >= 2) {
+    buf[*out_len - 2] = coding == 1 ? 'g' : 'b';
+  }
+  return rc;
+}
+
+int ps_read_shared_config_markdown_codings(const char* cache_path) {
+  if (cache_path == nullptr) return -1;
+  return static_cast<int>(EnvOr("PS_STUB_MARKDOWN_CODINGS", 6));
+}
+#endif  // PS_STUB_HTML_SERVE_16
 #endif  // PS_STUB_HTML_SERVE_15
 
 int ps_cache_remove_site(void* cache, const char* url, const char* hostname,
@@ -2164,8 +2395,8 @@ int ps_notify_worker_ex(const char* socket_path,
           ? params->agent_request
           : 0;
   const bool has_site_fields =
-      params->struct_size >= offsetof(StubNotifyParams, notify_flags) +
-                                 sizeof(params->notify_flags);
+      params->struct_size >=
+      offsetof(StubNotifyParams, notify_flags) + sizeof(params->notify_flags);
   const char* site = has_site_fields ? params->site : nullptr;
   const uint32_t flags = has_site_fields ? params->notify_flags : 0;
   if (!StubSiteIsValid(site)) {

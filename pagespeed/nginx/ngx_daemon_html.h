@@ -103,7 +103,8 @@ DaemonHtmlAgentSignature NgxDaemonHtmlAgentSignature(
 
 // The request-side facts that come from the request's own header lines, in
 // order, every line counted: Authorization or Proxy-Authorization, Cookie or
-// Cookie2, every Accept line, Cache-Control and Pragma joined with ", ",
+// Cookie2, every Accept and every Accept-Encoding line, Cache-Control and
+// Pragma joined with ", ",
 // If-Match, If-Unmodified-Since, Range, If-Range and Origin.  If-None-Match
 // and If-Modified-Since are never read here: they come from the client
 // conditional stash (`stash`, null when the request carried neither), as

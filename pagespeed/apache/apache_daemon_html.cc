@@ -80,17 +80,35 @@ apr_status_t DeleteMarkdownFilterContext(void* data) {
 }
 
 // Writes the set to a cleared request.  `keep_transport`: a Content-Encoding
-// or Content-Range line found is kept (the body is already encoded).
+// or Content-Range line found is kept (the body is already encoded).  The
+// set's own Content-Encoding (a coded copy, sent as stored) is the set's,
+// not a conflict: it is written once from the set.
 void ApplyHeaders(request_rec* r, const DaemonHtmlHeaderLines& lines,
                   bool keep_transport, bool* transport_conflict) {
   *transport_conflict = false;
+  const char* own_encoding = nullptr;
+  for (const auto& line : lines) {
+    if (StringCaseEqual(line.first, kContentEncoding)) {
+      own_encoding = line.second.c_str();
+    }
+  }
   const char* encoding = nullptr;
   const char* range = nullptr;
   if (keep_transport) {
-    encoding = FindLine(r, kContentEncoding);
-    if (encoding == nullptr) encoding = r->content_encoding;
+    // Every Content-Encoding line a stage left, and the field the core
+    // header filter writes one from: any but the set's own is a conflict.
+    std::vector<GoogleString> found = Lines(r->headers_out, kContentEncoding);
+    for (const GoogleString& e : Lines(r->err_headers_out, kContentEncoding)) {
+      found.push_back(e);
+    }
+    if (r->content_encoding != nullptr) found.push_back(r->content_encoding);
+    for (const GoogleString& e : found) {
+      if (own_encoding == nullptr || !StringCaseEqual(e, own_encoding)) {
+        encoding = apr_pstrdup(r->pool, e.c_str());
+        break;
+      }
+    }
     range = FindLine(r, kContentRange);
-    if (encoding != nullptr) encoding = apr_pstrdup(r->pool, encoding);
     if (range != nullptr) range = apr_pstrdup(r->pool, range);
   }
   apr_table_clear(r->headers_out);
@@ -122,7 +140,18 @@ void ApplyHeaders(request_rec* r, const DaemonHtmlHeaderLines& lines,
     r->content_type = nullptr;
   }
   if (encoding != nullptr) {
-    apr_table_setn(r->headers_out, kContentEncoding, encoding);
+    // On a coded copy the stage encoded on top of it: both codings, in the
+    // order applied.  A value that already starts with the copy's coding
+    // (a stage that merged its own into the line) is that list already.
+    StringPiece first(encoding);
+    const size_t comma = first.find(',');
+    if (comma != StringPiece::npos) first = first.substr(0, comma);
+    TrimWhitespace(&first);
+    if (own_encoding != nullptr && !StringCaseEqual(first, own_encoding)) {
+      apr_table_mergen(r->headers_out, kContentEncoding, encoding);
+    } else {
+      apr_table_setn(r->headers_out, kContentEncoding, encoding);
+    }
     *transport_conflict = true;
   }
   if (range != nullptr) {
@@ -264,6 +293,7 @@ void FillApacheDaemonHtmlRequestFacts(request_rec* r,
   facts->has_cookie =
       Has(in, HttpAttributes::kCookie) || Has(in, HttpAttributes::kCookie2);
   facts->accept_lines = Lines(in, HttpAttributes::kAccept);
+  facts->accept_encoding_lines = Lines(in, HttpAttributes::kAcceptEncoding);
   const std::vector<GoogleString> cache_control =
       Lines(in, HttpAttributes::kCacheControl);
   facts->has_cache_control = !cache_control.empty();

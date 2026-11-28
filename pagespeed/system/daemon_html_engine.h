@@ -22,7 +22,10 @@
 //     purge epoch;
 //   * the re-store skip, the refusal removal, the notification limiter and
 //     the process-wide byte budget;
-//   * the exact header set a Markdown answer carries.
+//   * the exact header set a Markdown answer carries, and with a library
+//     that publishes C API 1.16 the coded copy it carries: the coding the
+//     library chose from the request's Accept-Encoding, read by exact id and
+//     sent as stored, never compressed here.
 //
 // WHEN IT ACTS AT ALL.  Only in the serve-variants mode or a later one
 // (serve-cached-html, which needs the library's 1.15 set and otherwise runs
@@ -70,10 +73,12 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <utility>
 #include <vector>
 
@@ -139,6 +144,10 @@ struct DaemonHtmlRequestFacts {
   bool has_cookie = false;  // Cookie or Cookie2
   // Every Accept line, in order; joined with ", " for the library.
   std::vector<GoogleString> accept_lines;
+  // Every Accept-Encoding line as received, in order (none: the field was
+  // absent).  Read only with the library's 1.16 set, for the coding of a
+  // Markdown answer.
+  std::vector<GoogleString> accept_encoding_lines;
   // Every Cache-Control and Pragma line, joined with ", "; `has_*` tells an
   // absent field from an empty one.
   GoogleString cache_control;
@@ -197,6 +206,12 @@ struct DaemonHtmlServeResult {
   DaemonHtmlHeaderLines headers;
   GoogleString body;                // Empty for a HEAD and a 304.
   bool suppress_recording = false;  // Not used yet.
+  // With a coded copy (a Content-Encoding line in `headers`): the plain
+  // copy's entity tag and, for a GET, its bytes, for a port that finds, once
+  // the server's own header stages ran, that a body filter would rewrite the
+  // answer: it sends the plain copy instead (CodedAnswerReplacedByPlain).
+  GoogleString plain_etag;
+  GoogleString plain_body;
 };
 
 // A unit of blocking volume I/O.  Runs at most once.
@@ -248,6 +263,13 @@ class DaemonHtmlPort : public DaemonHtmlBlockingRunner {
   // Remove the client's conditionals from the request to the origin, after
   // stashing them (the stash is what DaemonHtmlRequestFacts reads).
   virtual void RemoveClientConditionals() = 0;
+  // After ClearAndEmitAllowlisted: the port sent the result's plain copy in
+  // place of its coded one (a body filter of the server would have rewritten
+  // the coded bytes).
+  virtual bool CodedAnswerReplacedByPlain() const { return false; }
+  // Whether the port may do so: only then is the plain copy read and carried
+  // beside a coded answer (DaemonHtmlServeResult::plain_body, plain_etag).
+  virtual bool MaySendPlainInstead() const { return false; }
 };
 
 // The optimizer's shared volume, through the run-time binding.
@@ -357,6 +379,35 @@ class DaemonHtmlByteBudget {
 
 // The budget every engine of this process shares (never destroyed).
 DaemonHtmlByteBudget* ProcessDaemonHtmlByteBudget();
+
+// The keys this process asked the optimizer to compress the Markdown copy
+// of: each at most once, in a bounded set that forgets its oldest key first.
+// A key is kept as its SHA-256 digest, so the set's memory is bounded by its
+// capacity whatever the URLs' lengths.  Thread-safe.
+class DaemonMarkdownCompressDemands {
+ public:
+  static constexpr size_t kDefaultCapacity = 4096;
+
+  explicit DaemonMarkdownCompressDemands(size_t capacity = kDefaultCapacity)
+      : capacity_(capacity) {}
+  // True the first time `key` is seen (or seen again after it was dropped):
+  // the caller sends the demand.  False while the key is in the set.
+  bool Admit(const GoogleString& key);
+  // The demand for `key` was not sent: the next request may ask again.
+  void Forget(const GoogleString& key);
+  size_t size() const;
+
+ private:
+  static GoogleString Digest(const GoogleString& key);
+
+  const size_t capacity_;
+  mutable std::mutex mutex_;
+  std::set<GoogleString> keys_;
+  std::deque<GoogleString> order_;
+};
+
+// The set every engine of this process shares (never destroyed).
+DaemonMarkdownCompressDemands* ProcessDaemonMarkdownCompressDemands();
 
 class DaemonHtmlEngine;
 
@@ -480,6 +531,8 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
     DaemonHtmlByteBudget* budget = nullptr;
     // Runs the admin path's and the ticks' volume I/O; inline when null.
     DaemonHtmlBlockingRunner* runner = nullptr;
+    // The compress demands sent; the process's own when null.
+    DaemonMarkdownCompressDemands* compress_demands = nullptr;
     // The decision log goes to <log_dir>/daemon-html/; none when empty.
     GoogleString log_dir;
   };
@@ -630,6 +683,10 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
                      const GoogleString& scheme);
   void Notify(const DaemonHtmlRequestFacts& facts, const GoogleString& url,
               const GoogleString& hostname, bool agent_request);
+  // Asks the worker, once per key, to write the coded copies of the page's
+  // Markdown copy (1.16).
+  void DemandCompress(const DaemonHtmlRequestFacts& facts,
+                      const GoogleString& url, const GoogleString& hostname);
   void CountFallThrough(const GoogleString& reason);
   void Hook(const char* point);
 
@@ -652,6 +709,10 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
   bool set15_bound_ = false;
   GoogleString set15_reason_;
   bool set15_logged_ = false;
+  // The 1.16 set, and the codings the worker publishes
+  // (ReadSharedConfigMarkdownCodings; -1 = none, or the set is unbound).
+  bool set16_bound_ = false;
+  int markdown_codings_ = -1;
   bool ignore_cookie_logged_ = false;
   // The newest global purge (seconds) this process wrote as an epoch.
   int64 epoch_written_s_ = -1;
