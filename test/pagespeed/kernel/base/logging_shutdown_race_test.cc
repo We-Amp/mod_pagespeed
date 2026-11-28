@@ -35,6 +35,7 @@
 //   bazel test --config=clang-asan //test/pagespeed/kernel/base:base_test \
 //     --test_filter='LoggingShutdownRaceTest.*' --test_output=all
 
+#include <algorithm>
 #include <condition_variable>
 #include <memory>
 #include <mutex>
@@ -96,6 +97,9 @@ TEST(LoggingShutdownRaceTest, WorkerSpdlogCallSurvivesRegistryTeardown) {
   // keep the logger alive and mask the pre-fix UAF).
   auto blocking_sink = std::make_shared<BlockingSink>(&entered, &release);
   spdlog::default_logger()->sinks().push_back(blocking_sink);
+  // A raw pointer holds no reference, so it does not keep the logger alive.
+  // It is only used after the worker has joined, to detach the sink again.
+  spdlog::logger* const logger = spdlog::default_logger_raw();
 
   // (3) Worker logs while g_logging_shutdown stays FALSE; parks inside sink_it_.
   std::thread worker([] { LOG(INFO) << "in-flight during teardown"; });
@@ -108,6 +112,13 @@ TEST(LoggingShutdownRaceTest, WorkerSpdlogCallSurvivesRegistryTeardown) {
   // (5) Release the parked worker; pre-fix it returns into a freed logger.
   release.Notify();
   worker.join();
+
+  // (6) Detach the blocking sink. The logger outlives this test (base/logging.cc
+  // holds it for the life of the process), and the sink points at this test's
+  // stack SyncPoints, so a later LOG() in this binary would use freed memory.
+  auto& sinks = logger->sinks();
+  sinks.erase(std::remove(sinks.begin(), sinks.end(), blocking_sink),
+              sinks.end());
 
   SUCCEED();
 }
