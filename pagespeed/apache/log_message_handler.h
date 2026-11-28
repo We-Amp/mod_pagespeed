@@ -32,7 +32,8 @@ namespace net_instaweb {
 namespace log_message_handler {
 
 // Install a log message handler that routes LOG() messages to the
-// apache error log. Should be called once at startup.
+// apache error log. Called on every configuration pass; it also undoes a
+// pagespeed_logging::ShutDownLogging() left by the previous pass's teardown.
 void Install(apr_pool_t* pool);
 
 // The log_message_handler is not attached to a specific server_rec, so the

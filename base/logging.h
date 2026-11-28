@@ -58,6 +58,12 @@ void RemoveLogSink(LogSink* sink);
 // order fiasco (spdlog's global logger may already be destroyed).
 void ShutDownLogging();
 
+// Undo ShutDownLogging(): LOG() goes back to spdlog and the registered sinks.
+// For a host that tears its logging down and sets it up again in the same
+// process (Apache clears and rebuilds its configuration pool on every start
+// and graceful restart); call it once the new sink is installed.
+void RestoreLogging();
+
 // Internal: send to all registered sinks
 void SendToSinks(int severity, const char* full_filename,
                  const char* base_filename, int line, const char* message,
