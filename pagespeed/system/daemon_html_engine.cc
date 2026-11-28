@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstring>
 #include <iterator>
+#include <limits>
 
 #include "net/instaweb/rewriter/public/rewrite_stats.h"
 #include "openssl/sha.h"
@@ -885,12 +886,10 @@ void DaemonHtmlPurgeOracle::SetUnsafeRetentionCap(uint32 cap_s) {
 
 int64 DaemonHtmlPurgeOracle::UnsafeRetentionMsLocked() const {
   constexpr int64 kFloorS = 60;
-  // No cap: a page stored before the fence could still be fresh for as long
-  // as any stored page is kept, which the library clamps to a day.
-  constexpr int64 kNoCapS = int64{24} * 60 * 60;
-  const int64 retention_s =
-      unsafe_cap_s_ > 0 ? 2 * std::max<int64>(unsafe_cap_s_, kFloorS) : kNoCapS;
-  return retention_s * Timer::kSecondMs;
+  // No cap: the library keeps a stored page's own lifetime, unclamped, so
+  // no age is safe to drop a fence at; it goes only when the map is full.
+  if (unsafe_cap_s_ == 0) return std::numeric_limits<int64>::max();
+  return 2 * std::max<int64>(unsafe_cap_s_, kFloorS) * Timer::kSecondMs;
 }
 
 GoogleString DaemonHtmlPurgeOracle::UnsafeFenceKey(const GoogleString& url) {

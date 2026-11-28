@@ -39038,7 +39038,7 @@
     {
       "id": "m2-unsafe-cap0-retention",
       "runners": ["engine"],
-      "why": "invalidate: with cap 0 a fence lasts the largest lifetime seen",
+      "why": "invalidate: with no cap a fence still holds for a page whose own lifetime is an hour",
       "engine": {
         "config": {
           "mode": "serve-cached-html",
@@ -48366,7 +48366,7 @@
             "url": "https://www.example.test/page",
             "stored_at_s": 1789999990,
             "lifetime_s": 300,
-            "body_ref": "page_v2",
+            "body_ref": "page_v3",
             "paired": true,
             "cc_flags": [],
             "content_type": "text/html; charset=utf-8",
@@ -48433,14 +48433,14 @@
                   },
                   "Content-Length": {
                     "count": 1,
-                    "value": "$len:page_v2"
+                    "value": "$len:page_v3"
                   },
                   "Age": {
                     "count": 1,
                     "value": "10"
                   }
                 },
-                "body_ref": "page_v2"
+                "body_ref": "page_v3"
               }
             }
           }
@@ -48568,11 +48568,11 @@
       }
     },
     {
-      "id": "m2-unsafe-cap0-retention-day",
+      "id": "m2-unsafe-cap0-fence-never-aged",
       "runners": [
         "engine"
       ],
-      "why": "invalidate: with no cap a fence lasts a day, whatever this process has seen",
+      "why": "invalidate: with no cap a fence is never dropped for its age, a day later included",
       "engine": {
         "config": {
           "mode": "serve-cached-html",
@@ -48742,7 +48742,7 @@
                 {
                   "fn": "ps_html_serve_classify",
                   "args": {
-                    "stored.purged": false
+                    "stored.purged": true
                   }
                 }
               ]

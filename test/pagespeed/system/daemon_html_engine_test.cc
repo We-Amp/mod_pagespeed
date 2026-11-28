@@ -189,13 +189,13 @@ TEST(DaemonHtmlPurgeOracleTest, TheUnsafeFenceMapDropsItsOldestWhenFull) {
 }
 
 // How long an unsafe fence lasts: twice the larger of the cap and 60 s; with
-// no cap, a day.
+// no cap, until the bounded map drops it.
 TEST(DaemonHtmlPurgeOracleTest, TheUnsafeFenceRetentionFollowsTheCap) {
   struct Case {
     uint32 cap_s;
     int64 retention_s;
   };
-  const Case kCases[] = {{60, 120}, {30, 120}, {3600, 7200}, {0, 86400}};
+  const Case kCases[] = {{60, 120}, {30, 120}, {3600, 7200}};
   for (const Case& c : kCases) {
     SCOPED_TRACE(StrCat("cap ", IntegerToString(c.cap_s)));
     MockTimer timer(new NullMutex, kNowMs);
@@ -211,6 +211,21 @@ TEST(DaemonHtmlPurgeOracleTest, TheUnsafeFenceRetentionFollowsTheCap) {
     timer.AdvanceMs(1);
     EXPECT_FALSE(oracle.UnsafeFenced("https://a.test/p", stored_s));
   }
+}
+
+// With no cap a fence is never dropped for its age: a stored page may stay
+// fresh for longer than any fixed time.
+TEST(DaemonHtmlPurgeOracleTest, WithoutACapAnUnsafeFenceIsNeverAged) {
+  MockTimer timer(new NullMutex, kNowMs);
+  Source source;
+  DaemonHtmlPurgeOracle oracle(&source, &timer);
+  oracle.SetUnsafeRetentionCap(0);
+  oracle.NoteUnsafeInvalidation("https://a.test/p", kNowMs);
+  const uint32 stored_s = static_cast<uint32>(kNowMs / 1000 - 1);
+  timer.AdvanceMs(int64{400} * 24 * 3600 * 1000);
+  oracle.NoteUnsafeInvalidation("https://a.test/q", timer.NowMs());
+  EXPECT_TRUE(oracle.UnsafeFenced("https://a.test/p", stored_s));
+  EXPECT_EQ(2u, oracle.unsafe_fences_size());
 }
 
 // A fence names the stored entry: every port spelling of its host, never

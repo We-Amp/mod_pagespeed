@@ -19,4 +19,4 @@
   unsafe-request invalidations, and checks that must stay at zero.
   The Apache, nginx and IIS ports start sending these answers, and invalidating
   on unsafe requests, in a later release; until then no response changes, and
-  no counter moves for a request without a Markdown preference.
+  a request without a Markdown preference is counted as before.

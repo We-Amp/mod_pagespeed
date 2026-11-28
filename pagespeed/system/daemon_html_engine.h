@@ -431,8 +431,10 @@ class DaemonHtmlPurgeOracle {
   void NoteUnsafeInvalidation(const GoogleString& url, int64 fence_ms);
   static constexpr size_t kUnsafeFencesMax = 4096;
   // How long an unsafe fence lasts: twice the larger of `cap_s` (the
-  // DaemonHtmlCacheMaxAge cap) and 60 s; with no cap (0), 24 h, the longest
-  // lifetime a stored page is ever kept for.
+  // DaemonHtmlCacheMaxAge cap) and 60 s.  With no cap (0) a fence is never
+  // dropped for its age, because a stored page stays fresh for the origin's
+  // own lifetime, however long; it goes only as the oldest when the map is
+  // full.
   void SetUnsafeRetentionCap(uint32 cap_s);
   // Whether an unsafe fence covers an entry of `url` inserted at
   // `stored_at_s` (also part of Purged).
