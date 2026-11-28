@@ -141,8 +141,13 @@ void ApplyHeaders(request_rec* r, const DaemonHtmlHeaderLines& lines,
   }
   if (encoding != nullptr) {
     // On a coded copy the stage encoded on top of it: both codings, in the
-    // order applied.
-    if (own_encoding != nullptr) {
+    // order applied.  A value that already starts with the copy's coding
+    // (a stage that merged its own into the line) is that list already.
+    StringPiece first(encoding);
+    const size_t comma = first.find(',');
+    if (comma != StringPiece::npos) first = first.substr(0, comma);
+    TrimWhitespace(&first);
+    if (own_encoding != nullptr && !StringCaseEqual(first, own_encoding)) {
       apr_table_mergen(r->headers_out, kContentEncoding, encoding);
     } else {
       apr_table_setn(r->headers_out, kContentEncoding, encoding);

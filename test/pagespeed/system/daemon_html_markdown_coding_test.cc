@@ -69,10 +69,12 @@ class RecordingPort : public DaemonHtmlPort {
   void RemoveClientConditionals() override {}
   void RunBlocking(DaemonHtmlCommit commit) override { commit.Run(); }
   bool CodedAnswerReplacedByPlain() const override { return replaced; }
+  bool MaySendPlainInstead() const override { return standby; }
 
   bool marked = false;
-  // Answers CodedAnswerReplacedByPlain.
+  // Answer CodedAnswerReplacedByPlain and MaySendPlainInstead.
   bool replaced = false;
+  bool standby = false;
   std::vector<DaemonHtmlServeResult> emitted;
   std::vector<bool> heads;
   std::vector<bool> marked_before_emit;
@@ -677,14 +679,15 @@ TEST_F(DaemonHtmlMarkdownCodingTest, AFailedDemandIsAskedAgain) {
   EXPECT_EQ(2, CompressDemands());
 }
 
-// Nothing the request accepts is a coding this module reads (a value a
-// later library might return): never the plain copy, ENCODING_NONE.
+// Identity refused, and only a coding this module does not read accepted (a
+// value a later library might return): ENCODING_NONE, never the plain copy.
 TEST_F(DaemonHtmlMarkdownCodingTest, AnUnknownCodingAloneIsEncodingNone) {
   Order({7});
   Verdicts({FallThrough(kNoAcceptableEncoding)});
   std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
   RecordingPort port;
-  const DaemonHtmlServeResult r = engine->Serve(Request({"zstd"}), &port);
+  const DaemonHtmlServeResult r =
+      engine->Serve(Request({"zstd, identity;q=0"}), &port);
   EXPECT_EQ("no_acceptable_encoding", r.reason);
   ASSERT_EQ(1u, abi_.serve_requests().size());
   EXPECT_NE(0u, abi_.serve_requests()[0].request_flags &
@@ -702,6 +705,7 @@ TEST_F(DaemonHtmlMarkdownCodingTest, APortMaySendThePlainCopyInstead) {
   std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
   RecordingPort port;
   port.replaced = true;
+  port.standby = true;
   const DaemonHtmlServeResult r = engine->Serve(Request({"gzip"}), &port);
   ASSERT_EQ(DaemonHtmlServeResult::kFinal, r.kind);
   EXPECT_EQ(kGzip, r.body);
@@ -710,6 +714,31 @@ TEST_F(DaemonHtmlMarkdownCodingTest, APortMaySendThePlainCopyInstead) {
   EXPECT_EQ(1, Counter("daemon_markdown_coded_fallback"));
   EXPECT_EQ(1, Counter("daemon_markdown_served_identity"));
   EXPECT_EQ(0, Counter("daemon_markdown_served_gzip"));
+}
+
+// A port that may send the plain copy instead gets no coded answer without
+// one; a port that may not never has the plain copy read or carried.
+TEST_F(DaemonHtmlMarkdownCodingTest, ThePlainStandbyIsReadOnlyWhenUsable) {
+  volume_.entries().erase({FakeDaemonVolume::Key(kSite, kUrl),
+                           kPsSentinelAgentMarkdown});
+  Put(kPsSentinelMarkdownBr, kBr);
+  abi_.mutable_injection()->coded_bits[kPsMarkdownEncodingBr] =
+      kPsHtmlFactsBrCopyBound;
+  Order({kPsMarkdownEncodingBr, kPsMarkdownEncodingIdentity});
+  abi_.mutable_injection()->verdict = ServeIn(kPsMarkdownEncodingBr);
+  std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
+  RecordingPort standby_port;
+  standby_port.standby = true;
+  DaemonHtmlServeResult r = engine->Serve(Request({"br"}), &standby_port);
+  EXPECT_EQ(DaemonHtmlServeResult::kFallThrough, r.kind);
+  EXPECT_EQ("absent", r.reason);
+  EXPECT_TRUE(standby_port.emitted.empty());
+  RecordingPort port;
+  r = engine->Serve(Request({"br"}), &port);
+  ASSERT_EQ(DaemonHtmlServeResult::kFinal, r.kind);
+  EXPECT_EQ(kBr, r.body);
+  EXPECT_TRUE(r.plain_body.empty());
+  EXPECT_TRUE(r.plain_etag.empty());
 }
 
 // The demand set: each key once, the oldest forgotten first.

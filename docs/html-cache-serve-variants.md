@@ -205,7 +205,10 @@ Consequences to plan for:
   (`sub_filter`, `ssi`, `addition` or another filter that clears the length
   for `text/markdown`), a request that prefers a compressed copy gets the plain
   copy instead, with the plain copy's entity tag, so the filter sees text; it
-  counts `daemon_markdown_coded_fallback`. `charset` recoding never applies to
+  counts `daemon_markdown_coded_fallback`. That happens also for a request
+  that refused the uncompressed form (`identity;q=0`), and such a client gets
+  a full `200` each time, as its `If-None-Match` names the compressed copy's
+  tag. `charset` recoding never applies to
   a compressed copy (nginx skips an encoded response). With `gunzip on` the
   gzip copy reaches a client that accepts gzip unchanged.
 - A `proxy_hide_header` does not hide a `Set-Cookie`, `Cache-Control`, `Vary`
@@ -269,6 +272,5 @@ All are on the statistics page and in the admin console's HTML cache panel.
 `DaemonHtmlCache serve-variants` serves Markdown copies on IIS as on Apache and
 nginx, with the IIS notes in the changelog (host names from the site's
 bindings, plain URL spellings only, the `PageSpeedFinalView` module entry).
-With an optimizer library that publishes C API 1.16 the compressed copies are
-sent there too, with IIS's dynamic compression off for the answer; the
-optimizer for Windows has to be built at that C API for it.
+The compressed copies are pending verification on IIS: there the plain
+Markdown copy is served as before.

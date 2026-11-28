@@ -94,6 +94,9 @@
           {#if view.encodedCopyMissing + view.encodedCopyUnbound + view.compressDemandSent > 0}
             <li>{text.encodedCopies}: {text.encodedMissing} {formatCount(view.encodedCopyMissing)}; {text.encodedUnbound} {formatCount(view.encodedCopyUnbound)}; {text.compressDemands} {formatCount(view.compressDemandSent)}</li>
           {/if}
+          {#if view.codedFallback > 0}
+            <li>{text.codedFallback}: {formatCount(view.codedFallback)}</li>
+          {/if}
         </ul>
         {#if view.storeRefusals.length > 0}
           <table aria-label={text.storeRefusals}>

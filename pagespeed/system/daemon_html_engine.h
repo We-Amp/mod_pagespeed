@@ -267,6 +267,9 @@ class DaemonHtmlPort : public DaemonHtmlBlockingRunner {
   // place of its coded one (a body filter of the server would have rewritten
   // the coded bytes).
   virtual bool CodedAnswerReplacedByPlain() const { return false; }
+  // Whether the port may do so: only then is the plain copy read and carried
+  // beside a coded answer (DaemonHtmlServeResult::plain_body, plain_etag).
+  virtual bool MaySendPlainInstead() const { return false; }
 };
 
 // The optimizer's shared volume, through the run-time binding.

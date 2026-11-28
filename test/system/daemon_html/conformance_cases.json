@@ -48449,6 +48449,59 @@
       }
     },
     {
+      "id": "live-md-enc-unknown-coding",
+      "runners": ["live"],
+      "why": "RFC 9110 12.5.3: an unknown coding alone still takes identity",
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["Cache-Control", "max-age=300"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [
+              {"wait_markdown": {"timeout_s": 30}},
+              {"wait_coded": {"codings": ["br", "gzip"], "timeout_s": 30}}
+            ],
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {"Vary": {"count": 1, "tokens": ["Accept", "Accept-Encoding"]}},
+              "headers_absent": ["Content-Encoding"],
+              "length_matches_body": true
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "path": "/page",
+              "headers": [["Accept", "text/markdown"], ["Accept-Encoding", "zstd"]]
+            },
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_absent": ["Content-Encoding"],
+              "decoded_equals_step": 1,
+              "length_matches_body": true,
+              "counter_delta": {"daemon_markdown_served_identity": 1}
+            }
+          }
+        ]
+      }
+    },
+    {
       "id": "live-md-enc-identity-refused",
       "runners": ["live"],
       "why": "RFC 9110 12.5.3: identity;q=0 and no coding: origin answers",

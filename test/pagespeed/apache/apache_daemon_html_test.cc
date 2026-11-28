@@ -146,6 +146,15 @@ TEST_F(ApacheDaemonHtmlTest, TheSetsOwnEncodingIsNoConflict) {
   // Both codings, in the order applied: the body is br, then gzip.
   EXPECT_STREQ("br, gzip",
                apr_table_get(request_.headers_out, "Content-Encoding"));
+
+  // A stage that merged its coding into the copy's own line: kept whole,
+  // never "br, br, gzip".
+  apr_table_clear(request_.headers_out);
+  apr_table_add(request_.headers_out, "Content-Encoding", "br, gzip");
+  ApacheApplyMarkdownHeaders(&request_, coded, &conflict);
+  EXPECT_TRUE(conflict);
+  EXPECT_STREQ("br, gzip",
+               apr_table_get(request_.headers_out, "Content-Encoding"));
 }
 
 // Only the request's filters below the protocol filters go; the Markdown

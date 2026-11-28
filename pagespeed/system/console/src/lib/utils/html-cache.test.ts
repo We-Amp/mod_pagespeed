@@ -99,6 +99,7 @@ describe("serve-variants", () => {
         daemon_markdown_encoded_copy_missing: 4,
         daemon_markdown_encoded_copy_unbound: 1,
         daemon_markdown_compress_demand_sent: 2,
+        daemon_markdown_coded_fallback: 3,
         daemon_markdown_fallthrough_no_acceptable_encoding: 5,
       },
       "serve-variants",
@@ -109,6 +110,7 @@ describe("serve-variants", () => {
     expect(view.encodedCopyMissing).toBe(4);
     expect(view.encodedCopyUnbound).toBe(1);
     expect(view.compressDemandSent).toBe(2);
+    expect(view.codedFallback).toBe(3);
     expect(view.fallthroughs).toEqual([{ name: "no_acceptable_encoding", count: 5 }]);
     // An older library counts none of them: all read as zero.
     const old = htmlCacheView({ daemon_markdown_served: 6 }, "serve-variants");

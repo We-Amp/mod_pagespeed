@@ -2004,8 +2004,12 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
     }
     // A worker that publishes no codings writes no coded copy: none is read.
     if (codings < 0) coded_order.clear();
-    // Nothing the request accepts is a coding this module reads: never the
-    // plain copy for a request that refused it.
+    // Identity refused and no coding this module reads left: the request
+    // falls through rather than get the plain copy.  (Identity stays
+    // acceptable for, say, `Accept-Encoding: zstd`.)  The plain copy may
+    // still be sent after identity;q=0 when a port must replace a coded
+    // answer for a body filter; RFC 9110 12.5.3 permits an answer in no
+    // acceptable coding.
     if (!identity_ok && coded_order.empty()) encoding_none = true;
   }
 
@@ -2207,7 +2211,10 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
   size_t markdown_len = 0;
   const uint8_t* plain = nullptr;
   size_t plain_len = 0;
-  if (coded_body &&
+  // Only a port that may send the plain copy in place of the coded one
+  // reads it as a standby.
+  const bool standby = coded_body && port->MaySendPlainInstead();
+  if (standby &&
       (reads.markdown == nullptr ||
        abi->ReadContent(reads.markdown, &plain, &plain_len) != kPsOk ||
        plain_len == 0)) {
@@ -2291,7 +2298,7 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
     if (!head) {
       result.body.assign(reinterpret_cast<const char*>(markdown), markdown_len);
     }
-    if (coded_body) {
+    if (standby) {
       char plain_etag[kPsHtmlMarkdownEtagChars + 8] = {0};
       size_t plain_etag_len = 0;
       if (abi->HtmlMarkdownEtagCoded(stored.binding_hash, stored.markdown_hash,
@@ -2331,7 +2338,9 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
     }
   }
   LogServeSide("served_markdown", "fresh", facts.host, facts.path,
-               result.status, not_modified || head ? 0 : markdown_len, 0,
+               result.status,
+               not_modified || head ? 0 : (replaced ? plain_len : markdown_len),
+               0,
                sent_coding == kPsMarkdownEncodingBr     ? "markdown_br"
                : sent_coding == kPsMarkdownEncodingGzip ? "markdown_gzip"
                                                         : "markdown",

@@ -3018,7 +3018,7 @@ ngx_int_t ps_daemon_html_mark_no_compress(ngx_http_request_t* r,
   // The client accepts the coding the copy is in (the library chose it):
   // nginx's gunzip filter, which inflates a gzip response for a client it
   // reads as not accepting gzip, passes this one through.
-  if (coding != nullptr) r->gzip_ok = 1;
+  if (coding != nullptr && StringCaseEqual(*coding, "gzip")) r->gzip_ok = 1;
 #endif
   r->headers_out.content_encoding = h;
   state->no_compress = h;
@@ -3153,6 +3153,7 @@ class NgxDaemonHtmlServePort : public DaemonHtmlPort {
   bool CodedAnswerReplacedByPlain() const override {
     return state_->coded_fallback;
   }
+  bool MaySendPlainInstead() const override { return true; }
 
   bool ClearAndEmitAllowlisted(const DaemonHtmlServeResult& result,
                                bool head) override {
@@ -4659,6 +4660,9 @@ ngx_int_t ps_daemon_html_final_enforcement(ngx_http_request_t* r,
       r->headers_out.content_length_n < 0) {
     state->coded_fallback = true;
     state->no_compress->hash = 0;
+#if (NGX_HTTP_GZIP)
+    r->gzip_ok = 0;
+#endif
     if (r->headers_out.content_encoding == state->no_compress) {
       r->headers_out.content_encoding = nullptr;
     }
@@ -4668,8 +4672,7 @@ ngx_int_t ps_daemon_html_final_enforcement(ngx_http_request_t* r,
       if (StringCaseEqual(name, "ETag")) {
         plain.emplace_back(name, state->answer.plain_etag);
       } else if (StringCaseEqual(name, "Content-Length")) {
-        plain.emplace_back(name,
-                           Integer64ToString(state->answer.plain_body.size()));
+        // A stage cleared the length; the plain copy goes out chunked.
       } else {
         plain.emplace_back(name, value);
       }
