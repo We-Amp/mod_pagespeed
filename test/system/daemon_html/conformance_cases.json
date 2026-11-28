@@ -18912,7 +18912,7 @@
       "runners": [
         "live"
       ],
-      "why": "request: with RespectXForwardedProto the forwarded scheme is keyed, so the page is stored",
+      "why": "request: with RespectXForwardedProto the forwarded scheme (http behind this TLS server) is keyed and stored",
       "ports": [
         "nginx"
       ],
@@ -18948,7 +18948,7 @@
               "headers": [
                 [
                   "X-Forwarded-Proto",
-                  "https"
+                  "http"
                 ]
               ]
             },
@@ -18969,7 +18969,7 @@
       "runners": [
         "live"
       ],
-      "why": "request: without RespectXForwardedProto a forwarded scheme other than the keyed one is refused",
+      "why": "request: without RespectXForwardedProto a forwarded scheme other than the keyed https is refused",
       "ports": [
         "nginx"
       ],
@@ -19005,7 +19005,7 @@
               "headers": [
                 [
                   "X-Forwarded-Proto",
-                  "https"
+                  "http"
                 ]
               ]
             },
