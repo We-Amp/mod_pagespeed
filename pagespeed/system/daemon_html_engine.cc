@@ -2678,14 +2678,12 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
                         reads.original, reads.markdown, reads.withheld,
                         sidecar_present ? 1 : 0, block, coded_read, requested,
                         &stored)
-        : policy.applies
-            ? abi->HtmlStoredFactsFromReadsEx(reads.original, reads.markdown,
-                                              reads.withheld,
-                                              sidecar_present ? 1 : 0, block,
-                                              &stored)
-            : abi->HtmlStoredFactsFromReads(reads.original, reads.markdown,
-                                            reads.withheld,
-                                            sidecar_present ? 1 : 0, &stored);
+        : policy.applies ? abi->HtmlStoredFactsFromReadsEx(
+                               reads.original, reads.markdown, reads.withheld,
+                               sidecar_present ? 1 : 0, block, &stored)
+                         : abi->HtmlStoredFactsFromReads(
+                               reads.original, reads.markdown, reads.withheld,
+                               sidecar_present ? 1 : 0, &stored);
     if (facts_rc != 0) {
       CountFallThrough(result.reason);
       return result;
