@@ -97,7 +97,12 @@ class DaemonHtmlMarkdownCodingTest : public testing::Test {
     in->has_set_15 = true;
     in->has_set_16 = true;
     in->wants_markdown = 1;
-    in->facts.flags = kPsHtmlFactsPresent | kPsHtmlFactsBindingLive;
+    // A page stored under this configuration's credentialed policy, as a
+    // port's configuration load stamps it.
+    config_.policy_stamp = kStamp;
+    in->facts.flags = kPsHtmlFactsPresent | kPsHtmlFactsBindingLive |
+                      kPsHtmlFactsStoreV2 | kPsHtmlFactsAnonymousRecorded;
+    in->facts.entry_policy_stamp = kStamp;
     in->facts.stored_at = 1789999990;
     in->facts.lifetime_s = 300;
     memset(in->facts.binding_hash, 0x11, sizeof(in->facts.binding_hash));
@@ -175,6 +180,7 @@ class DaemonHtmlMarkdownCodingTest : public testing::Test {
     return v;
   }
   static constexpr int kNoAcceptableEncoding = 27;
+  static constexpr uint64_t kStamp = 0x5A5A;
 
   void Verdicts(std::vector<PsHtmlServeVerdict> verdicts) {
     abi_.mutable_injection()->verdicts = std::move(verdicts);
@@ -267,6 +273,45 @@ TEST_F(DaemonHtmlMarkdownCodingTest, BrSelected) {
   EXPECT_EQ(1, Counter("daemon_markdown_served_br"));
   EXPECT_EQ(1, Counter("daemon_markdown_served"));
   EXPECT_EQ(0, CompressDemands());
+}
+
+// The coded copy's facts carry the entry's header block, so the library
+// compares the entry's policy stamp for a coded answer as for the plain one.
+TEST_F(DaemonHtmlMarkdownCodingTest, CodedFactsCarryTheEntryHeaderBlock) {
+  abi_.mutable_injection()->sidecar_read_rc = kPsOk;
+  Put(kPsSentinelMarkdownBr, kBr);
+  abi_.mutable_injection()->coded_bits[kPsMarkdownEncodingBr] =
+      kPsHtmlFactsBrCopyBound;
+  Order({kPsMarkdownEncodingBr, kPsMarkdownEncodingIdentity});
+  Verdicts({ServeIn(kPsMarkdownEncodingBr)});
+  std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
+  RecordingPort port;
+  engine->Serve(Request({"br"}), &port);
+  int coded_calls = 0;
+  for (const InjectedHtmlCall& c : abi_.html_calls()) {
+    if (c.fn != "ps_html_stored_facts_from_reads_coded") continue;
+    ++coded_calls;
+    EXPECT_EQ("block", c.args[4]);
+  }
+  EXPECT_EQ(1, coded_calls);
+}
+
+// An entry stored under another policy stamp never answers with a coded
+// copy, whatever the verdict says.
+TEST_F(DaemonHtmlMarkdownCodingTest, AStampMismatchedEntryNeverServesCoded) {
+  Put(kPsSentinelMarkdownBr, kBr);
+  abi_.mutable_injection()->coded_bits[kPsMarkdownEncodingBr] =
+      kPsHtmlFactsBrCopyBound;
+  abi_.mutable_injection()->facts.entry_policy_stamp = kStamp + 1;
+  Order({kPsMarkdownEncodingBr, kPsMarkdownEncodingIdentity});
+  Verdicts({ServeIn(kPsMarkdownEncodingBr)});
+  std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
+  RecordingPort port;
+  const DaemonHtmlServeResult r = engine->Serve(Request({"br"}), &port);
+  EXPECT_EQ(DaemonHtmlServeResult::kFallThrough, r.kind);
+  EXPECT_TRUE(port.emitted.empty());
+  EXPECT_EQ(1, Counter("daemon_html_served_credentialed_refused"));
+  EXPECT_EQ(0, Counter("daemon_markdown_served_br"));
 }
 
 // md-enc-gzip-selected
@@ -586,7 +631,8 @@ TEST_F(DaemonHtmlMarkdownCodingTest, Library115Plain) {
   EXPECT_EQ(0, Calls("ps_html_stored_facts_from_reads_coded"));
   EXPECT_EQ(0, Calls("ps_html_markdown_etag_coded"));
   EXPECT_EQ(0, Calls("ps_read_shared_config_markdown_codings"));
-  EXPECT_EQ(1, Calls("ps_html_stored_facts_from_reads"));
+  // The 1.15 form, which reads the entry's stamp from its header block.
+  EXPECT_EQ(1, Calls("ps_html_stored_facts_from_reads_ex"));
   ASSERT_EQ(1u, abi_.serve_requests().size());
   EXPECT_EQ(kPsHtmlServeVerdictSize15, abi_.serve_requests()[0].verdict_size);
   EXPECT_EQ(0u, abi_.serve_requests()[0].markdown_encoding);
