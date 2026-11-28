@@ -112,6 +112,12 @@ std::unique_ptr<ApacheGLogSink> apache_glog_sink = nullptr;
 void Install(apr_pool_t* pool) {
   log_pool = pool;
   apache_glog_sink = std::make_unique<ApacheGLogSink>();
+  // Apache runs this on every configuration pass with the new pool. The
+  // previous pass's pool cleanup (pagespeed_child_exit) shut logging down
+  // for its teardown; the sink now points at a live pool, so route LOG()
+  // through it again. Without this, every child forked after a start or
+  // graceful restart wrote its LOG() output raw to stderr.
+  pagespeed_logging::RestoreLogging();
 }
 
 void ShutDown() {

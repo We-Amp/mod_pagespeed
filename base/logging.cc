@@ -124,6 +124,10 @@ void ShutDownLogging() {
   g_logging_shutdown.store(true, std::memory_order_release);
 }
 
+void RestoreLogging() {
+  g_logging_shutdown.store(false, std::memory_order_release);
+}
+
 LogMessage::~LogMessage() {
   std::string msg = stream_.str();
   const char* base_filename = GetBasename(file_);

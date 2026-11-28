@@ -36,9 +36,10 @@
 // terminating itself. That path is covered by the ASan stress harness
 // (tools/stress/).
 //
-// This is intentionally its OWN test binary: spdlog::shutdown() and
-// ShutDownLogging() are sticky process-wide, so it must not share a process
-// with tests that expect a live logging path (base_test runs shard_count=1).
+// This is intentionally its OWN test binary: spdlog::shutdown() is sticky
+// process-wide (and this test never calls RestoreLogging()), so it must not
+// share a process with tests that expect a live logging path (base_test runs
+// shard_count=1).
 //
 // Run:
 //   bazel test --config=clang-tsan \

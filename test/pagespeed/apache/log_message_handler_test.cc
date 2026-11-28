@@ -10,9 +10,11 @@
 //  - ~LogMessage does not mirror verbose messages to the process default
 //    spdlog logger: that console output is not level-filtered by the hosting
 //    server, so mirroring it flooded server logs at the default LogLevel.
+//  - Install() turns logging back on after ShutDownLogging(), as Apache
+//    needs on every start and graceful restart.
 //
-// The routing tests exercise the pre-shutdown spdlog path, so nothing in
-// this test binary may call ShutDownLogging() (the flag is sticky).
+// The routing tests exercise the pre-shutdown spdlog path, so a test here
+// that calls ShutDownLogging() must leave logging restored.
 
 #include <algorithm>
 #include <memory>
@@ -157,6 +159,56 @@ TEST(ApacheSinkTest, EmptyAndNewlineOnlyMessagesAreHandled) {
   LOG(INFO) << "\n";
   LOG(INFO) << "text";
   SUCCEED();
+}
+
+// Apache clears its configuration pool, and so runs pagespeed_child_exit's
+// ShutDownLogging(), on every start and graceful restart, then installs the
+// handler again with the new pool. LOG() must reach the sinks again after
+// that second Install(), not stderr.
+TEST(ApacheSinkTest, InstallRestoresLoggingAfterShutDown) {
+  constexpr char kShutDownMarker[] = "while-shut-down-marker";
+  constexpr char kRestoredMarker[] = "after-reinstall-marker";
+  constexpr char kRawStderrPrefix[] = "[WARN] [pagespeed]";
+
+  ASSERT_EQ(APR_SUCCESS, apr_initialize());
+  apr_pool_t* pool = nullptr;
+  ASSERT_EQ(APR_SUCCESS, apr_pool_create(&pool, nullptr));
+  net_instaweb::log_message_handler::Install(pool);
+
+  SeverityCapturingSink sink;
+  pagespeed_logging::AddLogSink(&sink);
+
+  pagespeed_logging::ShutDownLogging();
+  testing::internal::CaptureStderr();
+  LOG(WARNING) << kShutDownMarker;
+  const std::string shut_down_stderr = testing::internal::GetCapturedStderr();
+
+  apr_pool_t* new_pool = nullptr;
+  ASSERT_EQ(APR_SUCCESS, apr_pool_create(&new_pool, nullptr));
+  net_instaweb::log_message_handler::Install(new_pool);
+  testing::internal::CaptureStderr();
+  LOG(WARNING) << kRestoredMarker;
+  const std::string restored_stderr = testing::internal::GetCapturedStderr();
+
+  pagespeed_logging::RemoveLogSink(&sink);
+  pagespeed_logging::RestoreLogging();  // Leave logging live on failure too.
+
+  auto sink_saw = [&sink](const char* marker) {
+    for (const std::string& message : sink.messages()) {
+      if (message.find(marker) != std::string::npos) {
+        return true;
+      }
+    }
+    return false;
+  };
+  // While shut down, LOG() bypasses the sinks and writes raw to stderr.
+  EXPECT_FALSE(sink_saw(kShutDownMarker));
+  EXPECT_NE(std::string::npos,
+            shut_down_stderr.find(std::string(kRawStderrPrefix)));
+  // After the second Install(), it reaches the sinks again.
+  EXPECT_TRUE(sink_saw(kRestoredMarker));
+  EXPECT_EQ(std::string::npos,
+            restored_stderr.find(std::string(kRawStderrPrefix)));
 }
 
 }  // namespace
