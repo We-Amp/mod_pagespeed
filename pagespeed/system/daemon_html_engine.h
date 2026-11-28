@@ -75,6 +75,7 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <list>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -94,6 +95,9 @@ namespace net_instaweb {
 
 class DaemonAbi;
 class DaemonHealNotifyLimiter;
+struct PsHtmlServeRequest;
+struct PsHtmlServeVerdict;
+struct PsHtmlStoredFacts;
 class DaemonHtmlDecisionLog;
 class MessageHandler;
 class Statistics;
@@ -104,11 +108,11 @@ enum class DaemonHtmlMode {
   kOff,
   kReportOnly,
   kServeVariants,
-  // Serves the Markdown copies exactly as kServeVariants does, and sends the
-  // library the serve-cached-html mode with the 1.15 request fields.  Runs
-  // as kServeVariants while the library lacks the 1.15 set (see
-  // DaemonHtmlEngine::effective_mode).  The stored-HTML answer itself is not
-  // built yet: such a verdict falls through.
+  // Serves the Markdown copies exactly as kServeVariants does, and answers
+  // an HTML request from the stored page, which the port replays through
+  // the rewriter (DaemonHtmlPort::EmitAsOrigin), when the library says the
+  // page is fresh and shareable for it.  Runs as kServeVariants while the
+  // library lacks the 1.15 set (see DaemonHtmlEngine::effective_mode).
   kServeCachedHtml,
 };
 
@@ -195,6 +199,15 @@ struct DaemonHtmlRequestFacts {
   // The port computes it once per client request.  Sent in the
   // serve-cached-html mode.
   int agent_class = 0;
+  // A subrequest or an internal redirect.  The engine never evaluates one:
+  // it is neither looked up, stored nor invalidated.
+  bool internal = false;
+  // The port's per-request mark that the cache answered this request (the
+  // same mark that keeps its capture from starting).  A recording start
+  // whose facts carry it is refused and counted (daemon_html_hit_recorded):
+  // a served page is never recorded again, so it is never stored again from
+  // its own cached bytes.
+  bool served_from_cache = false;
 };
 
 // The name of the AJAX marker one request header line is, or nullptr: an
@@ -212,6 +225,14 @@ const char* DaemonHtmlAjaxMarker(StringPiece name, StringPiece value);
 // absolute-form target taken off; "/" for an empty one.
 GoogleString DaemonHtmlRawRequestPath(StringPiece target);
 
+// A Location or Content-Location reference resolved against the request
+// URL `scheme`://`host``path_and_query` (RFC 3986 section 5.2, dot segments
+// removed, the fragment dropped): an absolute URL, or empty for a reference
+// that names no http or https URL.  Percent-encoding is kept as given.
+GoogleString DaemonHtmlResolveReference(StringPiece scheme, StringPiece host,
+                                        StringPiece path_and_query,
+                                        StringPiece reference);
+
 // The scheme the HTML cache keys a request on: the connection's
 // (`connection_scheme`), or, with RespectXForwardedProto on
 // (`respect_forwarded_proto`), the first X-Forwarded-Proto line of
@@ -222,8 +243,24 @@ GoogleString DaemonHtmlKeyedScheme(StringPiece connection_scheme,
                                    bool respect_forwarded_proto);
 
 // What the engine asks the port to do with one request.
+//
+// kFinal: a Markdown answer the port emits as it is (ClearAndEmitAllowlisted).
+//
+// kAsOrigin: the stored origin page (serve-cached-html), which the port hands
+// to its own response chain at the rewriter's input (EmitAsOrigin), so the
+// page is rewritten and the server's own header and compression stages run
+// as they do on a miss.  Status 200; `headers` are the stored header block's
+// lines in stored order (the origin's Cache-Control and Expires among them,
+// verbatim), then Content-Type and Content-Length of the stored page and Age;
+// never Set-Cookie, ETag or Last-Modified.  `body` is the stored page (empty
+// for a HEAD), never compressed.  These are the headers at the rewriter's
+// input (see DaemonHtmlPort::EmitAsOrigin): Content-Length is the stored
+// page's length, not the length of what the rewriter sends.
+// suppress_recording is set: the port marks
+// the request (DaemonHtmlRequestFacts::served_from_cache) so that nothing is
+// recorded, stored or notified for it.
 struct DaemonHtmlServeResult {
-  enum Kind { kFallThrough, kFinal, kAsOrigin /* not produced */ };
+  enum Kind { kFallThrough, kFinal, kAsOrigin };
   Kind kind = kFallThrough;
   // A closed-set name: the counter suffix of a fall-through.
   GoogleString reason;
@@ -231,8 +268,9 @@ struct DaemonHtmlServeResult {
   // Exactly the lines to send, in order.  The port clears every line of
   // these names and removes every other header from all of its tables.
   DaemonHtmlHeaderLines headers;
-  GoogleString body;                // Empty for a HEAD and a 304.
-  bool suppress_recording = false;  // Not used yet.
+  GoogleString body;  // Empty for a HEAD and a 304.
+  // kAsOrigin: the port must record nothing for this request.
+  bool suppress_recording = false;
   // With a coded copy (a Content-Encoding line in `headers`): the plain
   // copy's entity tag and, for a GET, its bytes, for a port that finds, once
   // the server's own header stages ran, that a body filter would rewrite the
@@ -284,6 +322,25 @@ class DaemonHtmlPort : public DaemonHtmlBlockingRunner {
                                        bool head) = 0;
   // No compression for this response, whatever the server configures.
   virtual void MarkNoCompress() = 0;
+  // Whether this port answers with a stored page (EmitAsOrigin).  Until it
+  // does, the engine leaves a request without a Markdown preference alone
+  // in every mode: no request policy, no counter, no read, exactly as
+  // below serve-cached-html; and a Markdown fall-through is not classified
+  // again for the page.
+  virtual bool ServesAsOrigin() const { return false; }
+  // A kAsOrigin result: hand the stored page to the server's own chain at
+  // the rewriter's input, after setting result.headers, so everything after
+  // that point runs as on a miss (and compression with it).  The headers
+  // are the response's headers AT THE REWRITER'S INPUT, not what goes to the
+  // client: Content-Length is the stored page's length, which is the length
+  // of the rewriter's input.  A port whose chain rewrites the body must
+  // handle that line as it handles the origin's on a miss and must never
+  // send it with a body of another length; a HEAD carries no body.  Nothing that
+  // ran before the rewriter on a miss may run again.  The port marks the
+  // request served_from_cache first.  False when it cannot (for example, no
+  // rewriter in the chain for this response): the request then goes to the
+  // origin as a miss and is recorded as one, so the port must leave no mark
+  // and no header behind.
   virtual bool EmitAsOrigin(const DaemonHtmlServeResult& /*result*/) {
     return false;
   }
@@ -358,6 +415,33 @@ class DaemonHtmlPurgeOracle {
   void NoteUrlPurge(const GoogleString& url, int64 purge_ms);
   static constexpr size_t kLocalUrlPurgesMax = 1024;
 
+  // An unsafe request (a POST, PUT, DELETE, ...) this process saw answered
+  // with a non-error status, for the cache key `url`, at `fence_ms` (never
+  // later than now): every entry stored at or before it under the volume
+  // entry `url` names is fenced in this process for the retention below.
+  // The fence is keyed on that entry (scheme, host name without its port,
+  // path and query, as the volume keys it), so every port spelling of the
+  // same entry is fenced, and is held as a fixed-size digest, so the map's
+  // memory is bounded in bytes whatever the URLs' lengths.  Kept apart from the
+  // URL purges: the map is bounded by kUnsafeFencesMax, and when it is full
+  // the oldest fence is dropped, so that key falls back to the bound every
+  // other process has (the page's lifetime, capped by DaemonHtmlCacheMaxAge).
+  // A flood of unsafe requests therefore never fences more than its own
+  // keys: it never moves the global purge time and never writes the epoch.
+  void NoteUnsafeInvalidation(const GoogleString& url, int64 fence_ms);
+  static constexpr size_t kUnsafeFencesMax = 4096;
+  // How long an unsafe fence lasts: twice the larger of `cap_s` (the
+  // DaemonHtmlCacheMaxAge cap) and 60 s.  With no cap (0) a fence is never
+  // dropped for its age, because a stored page stays fresh for the origin's
+  // own lifetime, however long; it goes only as the oldest when the map is
+  // full.
+  void SetUnsafeRetentionCap(uint32 cap_s);
+  // Whether an unsafe fence covers an entry of `url` inserted at
+  // `stored_at_s` (also part of Purged).
+  bool UnsafeFenced(const GoogleString& url, uint32 stored_at_s);
+  // The unsafe fences held now (tests).
+  size_t unsafe_fences_size();
+
   // Whether an entry inserted at `stored_at_s` under `url` (the cache key,
   // normalised) is covered by a purge.  Refreshes the global first.
   bool Purged(const GoogleString& url, uint32 stored_at_s);
@@ -368,6 +452,10 @@ class DaemonHtmlPurgeOracle {
 
  private:
   int64 ObserveLocked();
+  bool UnsafeFencedLocked(const GoogleString& url, int64 stored_ms);
+  int64 UnsafeRetentionMsLocked() const;
+  // The digest an unsafe fence is kept under: the volume entry `url` names.
+  static GoogleString UnsafeFenceKey(const GoogleString& url);
 
   const DaemonHtmlPurgeSource* source_;
   Timer* timer_;
@@ -381,6 +469,11 @@ class DaemonHtmlPurgeOracle {
   // Every entry stored at or before this is purged: the newest purge the
   // bounded map above had to forget.
   int64 local_url_floor_ms_ = -1;
+  // The unsafe fences, oldest first, and each key's place in that order.
+  std::list<std::pair<GoogleString, int64>> unsafe_order_;
+  std::map<GoogleString, std::list<std::pair<GoogleString, int64>>::iterator>
+      unsafe_fences_;
+  uint32 unsafe_cap_s_ = 3600;
   std::atomic<bool> recheck_disabled_{false};
 };
 
@@ -517,8 +610,41 @@ class DaemonHtmlRecording {
   std::vector<std::pair<GoogleString, GoogleString>> ignorable_cookies_;
 };
 
+// One serve, split for a server that must not block its event thread
+// (DaemonHtmlEngine::PrepareServe and FinishServe): what PrepareServe
+// decided, the reads it asks for, and what FinishServe needs to decide.
+// Move-only; owns the read results until it is finished or dropped (a
+// dropped one, say for a client that went away, frees them and decides
+// nothing).  The engine must outlive it.
+class DaemonHtmlPendingServe {
+ public:
+  DaemonHtmlPendingServe();
+  ~DaemonHtmlPendingServe();
+  DaemonHtmlPendingServe(DaemonHtmlPendingServe&&) noexcept;
+  DaemonHtmlPendingServe& operator=(DaemonHtmlPendingServe&&) noexcept;
+  DaemonHtmlPendingServe(const DaemonHtmlPendingServe&) = delete;
+  DaemonHtmlPendingServe& operator=(const DaemonHtmlPendingServe&) = delete;
+
+  // Whether Read must run before FinishServe.  False when PrepareServe
+  // already decided (a fall-through it returns at once, with no read).
+  bool needs_read() const;
+  // The blocking volume reads.  May run on any thread, at most once, and
+  // must have returned before FinishServe is called.  While it runs on
+  // another thread the pending serve must be neither finished nor destroyed
+  // (a client that went away included: drop it once the read returned), and
+  // the engine and the port must outlive it.
+  void Read();
+
+ private:
+  friend class DaemonHtmlEngine;
+  struct State;
+  std::unique_ptr<State> state_;
+};
+
 class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
  public:
+  using PendingServe = DaemonHtmlPendingServe;
+
   struct Config {
     DaemonHtmlMode mode = DaemonHtmlMode::kOff;
     // DaemonHtmlMaxBytes: the largest body recorded.
@@ -602,7 +728,9 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
   DaemonHtmlEngine& operator=(const DaemonHtmlEngine&) = delete;
 
   // A recording for an HTML response, or nullptr when there is nothing the
-  // engine may do with it: mode off, or no library that can classify (then
+  // engine may do with it: mode off, a request the cache answered
+  // (facts.served_from_cache: refused and counted as daemon_html_hit_recorded,
+  // which must stay 0), or no library that can classify (then
   // `*unavailable` is set, when given; the port counts it with
   // CountUnavailable once it knows it handles the response).  While the
   // engine stores, a request it may not store for gets nullptr too: a URL
@@ -618,10 +746,45 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
   // classify (daemon_html_unavailable).
   void CountUnavailable();
 
-  // The Markdown serve: a fall-through, or a final answer the port has been
-  // asked to emit.  Reads the volume only past the serve gate.
+  // The serve: a fall-through, a Markdown answer the port has been asked to
+  // emit (kFinal), or, in serve-cached-html, the stored page the port has
+  // been asked to replay through its rewriter (kAsOrigin).  Reads the volume
+  // only past the serve gate and the request policy, and, under scope
+  // `agents`, never for a request that neither prefers Markdown nor comes
+  // from a known agent (one in kShadowSampleEvery such requests is read and
+  // classified as scope `all` to measure, and still falls through).  The
+  // reads run inline: PrepareServe, Read and FinishServe in one call.
   DaemonHtmlServeResult Serve(const DaemonHtmlRequestFacts& facts,
                               DaemonHtmlPort* port);
+  // Serve, split (nginx): PrepareServe runs the gates and the request policy
+  // and returns either a decided fall-through or a pending read; the port
+  // runs PendingServe::Read off its event thread and then FinishServe on it,
+  // which classifies, fences against purges and judges freshness at the time
+  // it runs, and asks the port to emit.  `port` must outlive the pending
+  // serve.
+  PendingServe PrepareServe(const DaemonHtmlRequestFacts& facts,
+                            DaemonHtmlPort* port);
+  DaemonHtmlServeResult FinishServe(PendingServe pending);
+  // One pre-gated request in this many is read and classified as scope
+  // `all`, counted (daemon_html_shadow_sampled, daemon_html_would_serve_html
+  // or daemon_html_would_fallthrough_<reason>) and still falls through.
+  static constexpr uint64 kShadowSampleEvery = 16;
+
+  // The response to an unsafe request (any method but GET, HEAD, OPTIONS and
+  // TRACE, as the library's ps_html_unsafe_method_invalidates decides with
+  // the final status): fences the request target's key, and up to
+  // kUnsafeTargetsMax same-host targets its Location and Content-Location
+  // lines name, in this process at once (DaemonHtmlPurgeOracle::
+  // NoteUnsafeInvalidation), then removes each from the volume through the
+  // port's blocking runner.  A main request on an exactly configured host
+  // whose URL the server and this module agree on, in serve-variants or a
+  // later mode, with C API 1.15; nothing otherwise.  Ports call it once the
+  // final status and those lines are known, before the body leaves.
+  void OnUnsafeRequest(const DaemonHtmlRequestFacts& facts, int status,
+                       const std::vector<GoogleString>& location,
+                       const std::vector<GoogleString>& content_location,
+                       DaemonHtmlPort* port);
+  static constexpr size_t kUnsafeTargetsMax = 2;
 
   // DaemonHtmlPurgeObserver: removes the URL's entry, or writes the epoch
   // for a global purge, before `done` is called.
@@ -669,6 +832,8 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
 
  private:
   friend class DaemonHtmlRecording;
+  friend class DaemonHtmlPendingServe;
+  friend struct DaemonHtmlPendingServe::State;
   struct Counters;
   struct StoreVerdict;
   struct RequestPolicy;
@@ -732,7 +897,10 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
                     const char* mode = nullptr,
                     // The name a refusal is about (a cookie or a request
                     // header, never a value); written from C API 1.15.
-                    const GoogleString& detail = GoogleString());
+                    const GoogleString& detail = GoogleString(),
+                    // A served page's agent class and scope (C API 1.15);
+                    // -1: none.
+                    int agent_class = -1, int serve_scope = -1);
   void Commit(const DaemonHtmlRequestFacts& facts, const GoogleString& url,
               const GoogleString& hostname, const StoreVerdict& verdict,
               const DaemonHtmlHeaderLines& store_view,
@@ -758,7 +926,38 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
   void DemandCompress(const DaemonHtmlRequestFacts& facts,
                       const GoogleString& url, const GoogleString& hostname);
   void CountFallThrough(const GoogleString& reason);
+  // A fall-through of an HTML lookup: counted under daemon_html_fallthrough_
+  // when the reason has such a counter, never under the Markdown counters.
+  void CountHtmlFallThrough(const GoogleString& reason);
   void Hook(const char* point);
+
+  // The serve, past PrepareServe.
+  void ReadForServe(DaemonHtmlPendingServe::State* s);
+  DaemonHtmlServeResult FinishMarkdownServe(DaemonHtmlPendingServe::State* s);
+  DaemonHtmlServeResult FinishHtmlServe(DaemonHtmlPendingServe::State* s);
+  // The fields of a serve request every path sends.
+  void FillServeRequest(const DaemonHtmlRequestFacts& facts,
+                        const RequestPolicy& policy, bool cached_html,
+                        int64 now_s, PsHtmlServeRequest* request) const;
+  // Whether the credentialed policy forbids answering `facts` from an entry
+  // with these stored facts, whatever the library said.
+  bool CredentialedForbids(const RequestPolicy& policy,
+                           const PsHtmlStoredFacts& stored) const;
+  // The stored page as a kAsOrigin answer, emitted through the port; a
+  // fall-through when a check at emit refuses it or the port cannot.
+  DaemonHtmlServeResult EmitStoredPage(DaemonHtmlPendingServe::State* s,
+                                       const PsHtmlStoredFacts& stored,
+                                       const PsHtmlServeVerdict& verdict,
+                                       bool markdown_preference);
+  // A sampled would-serve page: its stored body hash, compared with the
+  // next recording of the same key while that entry would still have been
+  // fresh (daemon_html_would_serve_body_differs).
+  void NoteShadowWouldServe(const GoogleString& identity,
+                            const uint8_t* stored_hash, int64 fresh_until_s);
+  void CheckShadowBody(const GoogleString& identity, const uint8_t* hash,
+                       int64 capture_s);
+  // A hit-path invariant moved: logged once per engine.
+  void NoteHitPathInvariant(const char* what);
 
   Config config_;
   Deps deps_;
@@ -785,6 +984,13 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
   int markdown_codings_ = -1;
   bool xfp_logged_ = false;
   bool rewritten_url_logged_ = false;
+  bool hit_invariant_logged_ = false;
+  // Pre-gated requests seen, for the shadow sample.
+  std::atomic<uint64> pregated_{0};
+  // Sampled would-serve pages, by volume identity, with their stored body
+  // hash; bounded (oldest dropped).
+  std::map<GoogleString, std::pair<GoogleString, int64>> shadow_would_serve_;
+  std::deque<GoogleString> shadow_order_;
   std::atomic<bool> credential_skip_disabled_{false};
   // The newest global purge (seconds) this process wrote as an epoch.
   int64 epoch_written_s_ = -1;

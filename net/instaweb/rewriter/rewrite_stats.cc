@@ -353,6 +353,35 @@ const char* const RewriteStats::kDaemonHtmlEngineCounters[] = {
     "daemon_html_agent_class_c4",
     "daemon_html_agent_class_c1_not_ready",
     "daemon_html_agent_class_signature_failed",
+    // serve-cached-html.  served_html counts stored pages answered; the four
+    // that follow partition it by the request's agent class (a known agent's
+    // signature, its User-Agent token, a Markdown preference whose copy could
+    // not be sent, or none).  agent_html_requests counts the agent-classed
+    // GET and HEAD HTML requests evaluated, served or not.
+    "daemon_html_served_html",
+    "daemon_html_served_html_c1",
+    "daemon_html_served_html_c3",
+    "daemon_html_served_html_markdown_preference",
+    "daemon_html_served_html_unclassed",
+    "daemon_html_agent_html_requests",
+    // The shadow sample of requests the scope keeps from the cache: how many
+    // were read, how many scope all would have served, and how many of those
+    // the origin then answered with another body.
+    "daemon_html_shadow_sampled",
+    "daemon_html_would_serve_html",
+    "daemon_html_would_serve_body_differs",
+    // A page stored again within its lifetime with another body.
+    "daemon_html_fresh_body_changed",
+    // Checks that must stay 0: a recording started for a request the cache
+    // answered, a stored header block holding a line a hit never carries,
+    // and a validation asked for although the request ruled it out.
+    "daemon_html_hit_recorded",
+    "daemon_html_hit_forbidden_header",
+    "daemon_html_unexpected_validate",
+    // Unsafe requests (POST, PUT, DELETE, ...) answered with a non-error
+    // status that fenced and removed their page, and removals that failed.
+    "daemon_html_invalidated_unsafe",
+    "daemon_html_invalidate_failed",
     nullptr,
 };
 
@@ -390,9 +419,51 @@ const char* const RewriteStats::kDaemonMarkdownFallthroughReasons[] = {
 };
 
 const char* const RewriteStats::kDaemonHtmlFallthroughReasons[] = {
+    // The stored entry's record (C API 1.15), for either body.
     "legacy_entry",
     "policy_mismatch",
     "credentialed",
+    // serve-cached-html: an HTML request kept from the cache by the scope,
+    // an entry past the DaemonHtmlCacheMaxAge cap, a conditional request,
+    // and a path the library refuses.
+    "scope",
+    "capped",
+    "conditional",
+    "path",
+    nullptr,
+};
+
+const char* const RewriteStats::kDaemonHtmlWouldFallthroughReasons[] = {
+    // ps_html_serve_reason_name, in the library's order, through C API 1.16.
+    "fresh",
+    "mode",
+    "auth_request",
+    "cookie_request",
+    "client_no_cache",
+    "needs_validation",
+    "stale",
+    "headers_not_reproducible",
+    "sidecar_missing",
+    "purged",
+    "absent",
+    "binding_stale",
+    "parent_stale",
+    "method",
+    "range",
+    "cors",
+    "no_transform",
+    "withheld",
+    "skew",
+    "scope",
+    "capped",
+    "conditional",
+    "credentialed",
+    "legacy_entry",
+    "policy_mismatch",
+    "request_header",
+    "path",
+    "no_acceptable_encoding",
+    "other",
     nullptr,
 };
 
@@ -447,6 +518,10 @@ void RewriteStats::InitStats(Statistics* statistics) {
   for (const char* const* reason = kDaemonHtmlFallthroughReasons;
        *reason != nullptr; ++reason) {
     statistics->AddVariable(StrCat("daemon_html_fallthrough_", *reason));
+  }
+  for (const char* const* reason = kDaemonHtmlWouldFallthroughReasons;
+       *reason != nullptr; ++reason) {
+    statistics->AddVariable(StrCat("daemon_html_would_fallthrough_", *reason));
   }
   statistics->AddVariable(kIproDaemonServed);
   statistics->AddVariable(kIproDaemonServedOriginal);

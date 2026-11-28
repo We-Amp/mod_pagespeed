@@ -154,6 +154,127 @@ TEST(DaemonHtmlPurgeOracleTest, UrlPurgesAreSecondGranular) {
   EXPECT_FALSE(oracle.Purged("https://a.test/other", 1790000000));
 }
 
+// The unsafe-method fence map is bounded: one fence more than it holds drops
+// the oldest, which then has only the bound every other process has, and
+// nothing else moves: no other key is fenced and the global purge time stays.
+TEST(DaemonHtmlPurgeOracleTest, TheUnsafeFenceMapDropsItsOldestWhenFull) {
+  MockTimer timer(new NullMutex, kNowMs);
+  Source source;
+  DaemonHtmlPurgeOracle oracle(&source, &timer);
+  oracle.SetUnsafeRetentionCap(60);
+  const uint32 before_s = static_cast<uint32>(kNowMs / 1000 - 10);
+  const size_t max = DaemonHtmlPurgeOracle::kUnsafeFencesMax;
+  for (size_t i = 0; i <= max; ++i) {
+    oracle.NoteUnsafeInvalidation(StrCat("https://a.test/", IntegerToString(i)),
+                                  kNowMs - 1000 + static_cast<int64>(i % 500));
+  }
+  EXPECT_EQ(max, oracle.unsafe_fences_size());
+  EXPECT_FALSE(oracle.Purged("https://a.test/0", before_s));
+  EXPECT_TRUE(oracle.Purged("https://a.test/1", before_s));
+  EXPECT_TRUE(
+      oracle.Purged(StrCat("https://a.test/", IntegerToString(max)), before_s));
+  EXPECT_FALSE(oracle.Purged("https://a.test/never", before_s));
+  EXPECT_LT(oracle.Observe(), 0);
+  // At or before the fence: an entry stored in the second of the unsafe
+  // request is fenced, the next second is not.
+  oracle.NoteUnsafeInvalidation("https://a.test/now", kNowMs);
+  EXPECT_TRUE(oracle.UnsafeFenced("https://a.test/now",
+                                  static_cast<uint32>(kNowMs / 1000)));
+  EXPECT_FALSE(oracle.UnsafeFenced("https://a.test/now",
+                                   static_cast<uint32>(kNowMs / 1000 + 1)));
+  // A fence time is never later than now.
+  oracle.NoteUnsafeInvalidation("https://a.test/later", kNowMs + 3600 * 1000);
+  EXPECT_FALSE(oracle.UnsafeFenced("https://a.test/later",
+                                   static_cast<uint32>(kNowMs / 1000 + 1)));
+}
+
+// How long an unsafe fence lasts: twice the larger of the cap and 60 s; with
+// no cap, until the bounded map drops it.
+TEST(DaemonHtmlPurgeOracleTest, TheUnsafeFenceRetentionFollowsTheCap) {
+  struct Case {
+    uint32 cap_s;
+    int64 retention_s;
+  };
+  const Case kCases[] = {{60, 120}, {30, 120}, {3600, 7200}};
+  for (const Case& c : kCases) {
+    SCOPED_TRACE(StrCat("cap ", IntegerToString(c.cap_s)));
+    MockTimer timer(new NullMutex, kNowMs);
+    Source source;
+    DaemonHtmlPurgeOracle oracle(&source, &timer);
+    oracle.SetUnsafeRetentionCap(c.cap_s);
+    oracle.NoteUnsafeInvalidation("https://a.test/p", kNowMs);
+    const uint32 stored_s = static_cast<uint32>(kNowMs / 1000 - 1);
+    timer.AdvanceMs(c.retention_s * 1000 - 1);
+    // Another fence's eviction pass leaves this one while it lasts.
+    oracle.NoteUnsafeInvalidation("https://a.test/q", timer.NowMs());
+    EXPECT_TRUE(oracle.UnsafeFenced("https://a.test/p", stored_s));
+    timer.AdvanceMs(1);
+    EXPECT_FALSE(oracle.UnsafeFenced("https://a.test/p", stored_s));
+  }
+}
+
+// With no cap a fence is never dropped for its age: a stored page may stay
+// fresh for longer than any fixed time.
+TEST(DaemonHtmlPurgeOracleTest, WithoutACapAnUnsafeFenceIsNeverAged) {
+  MockTimer timer(new NullMutex, kNowMs);
+  Source source;
+  DaemonHtmlPurgeOracle oracle(&source, &timer);
+  oracle.SetUnsafeRetentionCap(0);
+  oracle.NoteUnsafeInvalidation("https://a.test/p", kNowMs);
+  const uint32 stored_s = static_cast<uint32>(kNowMs / 1000 - 1);
+  timer.AdvanceMs(int64{400} * 24 * 3600 * 1000);
+  oracle.NoteUnsafeInvalidation("https://a.test/q", timer.NowMs());
+  EXPECT_TRUE(oracle.UnsafeFenced("https://a.test/p", stored_s));
+  EXPECT_EQ(2u, oracle.unsafe_fences_size());
+}
+
+// A fence names the stored entry: every port spelling of its host, never
+// another scheme or path.
+TEST(DaemonHtmlPurgeOracleTest, AnUnsafeFenceCoversEveryPortSpelling) {
+  MockTimer timer(new NullMutex, kNowMs);
+  Source source;
+  DaemonHtmlPurgeOracle oracle(&source, &timer);
+  oracle.NoteUnsafeInvalidation("https://a.test:8443/p?x=1", kNowMs);
+  const uint32 stored_s = static_cast<uint32>(kNowMs / 1000 - 1);
+  EXPECT_TRUE(oracle.UnsafeFenced("https://a.test/p?x=1", stored_s));
+  EXPECT_TRUE(oracle.UnsafeFenced("https://a.test:9/p?x=1", stored_s));
+  EXPECT_FALSE(oracle.UnsafeFenced("http://a.test/p?x=1", stored_s));
+  EXPECT_FALSE(oracle.UnsafeFenced("https://a.test/p", stored_s));
+  EXPECT_FALSE(oracle.UnsafeFenced("https://b.test/p?x=1", stored_s));
+  oracle.NoteUnsafeInvalidation("https://[::1]:8443/v6", kNowMs);
+  EXPECT_TRUE(oracle.UnsafeFenced("https://[::1]/v6", stored_s));
+}
+
+// Location and Content-Location references, resolved as RFC 3986 section
+// 5.2 says (its section 5.4 examples among them).
+TEST(DaemonHtmlResolveReferenceTest, ResolvesEveryReferenceForm) {
+  auto resolve = [](StringPiece ref) {
+    return DaemonHtmlResolveReference("http", "a", "/b/c/d;p?q", ref);
+  };
+  EXPECT_EQ("http://a/b/c/g", resolve("g"));
+  EXPECT_EQ("http://a/b/c/g", resolve("./g"));
+  EXPECT_EQ("http://a/b/c/g/", resolve("g/"));
+  EXPECT_EQ("http://a/g", resolve("/g"));
+  EXPECT_EQ("http://g/", resolve("//g"));
+  EXPECT_EQ("http://a/b/c/d;p?y", resolve("?y"));
+  EXPECT_EQ("http://a/b/c/g?y", resolve("g?y"));
+  EXPECT_EQ("http://a/b/c/d;p?q", resolve("#s"));
+  EXPECT_EQ("http://a/b/c/d;p?q", resolve(""));
+  EXPECT_EQ("http://a/b/c/", resolve("."));
+  EXPECT_EQ("http://a/b/", resolve(".."));
+  EXPECT_EQ("http://a/b/g", resolve("../g"));
+  EXPECT_EQ("http://a/", resolve("../.."));
+  EXPECT_EQ("http://a/g", resolve("../../../g"));
+  EXPECT_EQ("http://a/g", resolve("/./g"));
+  EXPECT_EQ("http://a/b/c/g.", resolve("g."));
+  EXPECT_EQ("http://a/b/g", resolve("./../g"));
+  EXPECT_EQ("http://a/b/c/y", resolve("g/../y"));
+  EXPECT_EQ("https://h/x", resolve("HTTPS://h/x/../x"));
+  EXPECT_EQ("", resolve("mailto:a@b"));
+  EXPECT_EQ("", resolve("http:g"));
+  EXPECT_EQ("http://a/b/c/g", resolve("  g  "));
+}
+
 TEST(DaemonHtmlByteBudgetTest, NeverExceedsItsCapacityUnderContention) {
   DaemonHtmlByteBudget budget(1000);
   std::atomic<int64> peak{0};
@@ -222,6 +343,8 @@ class InlinePort : public DaemonHtmlPort {
   void MarkNoCompress() override {}
   void RemoveClientConditionals() override {}
   void RunBlocking(DaemonHtmlCommit commit) override { commit.Run(); }
+  // A port that answers with the stored page, so the HTML lookup runs.
+  bool ServesAsOrigin() const override { return true; }
 };
 
 // The injected-verdict library with store verdicts: each call of the store
@@ -879,8 +1002,9 @@ GoogleString SidecarWriteSize(const InjectedVerdictDaemonAbi& abi) {
 }
 
 // Without the 1.15 set, serve-cached-html runs as serve-variants: the library
-// is sent mode 2 and every struct at its 1.14 size, each HTML response counts
-// daemon_html_serve_cached_html_unavailable, and one warning says why.
+// is sent mode 2 and every struct at its 1.14 size, each lookup and each HTML
+// response counts daemon_html_serve_cached_html_unavailable, and one warning
+// says why.
 TEST_F(DaemonHtmlEngineTest, ServeCachedHtmlRunsAsServeVariantsBelowFifteen) {
   config_.mode = DaemonHtmlMode::kServeCachedHtml;
   abi_.mutable_injection()->unavailable_reason_15 =
@@ -903,8 +1027,9 @@ TEST_F(DaemonHtmlEngineTest, ServeCachedHtmlRunsAsServeVariantsBelowFifteen) {
   abi_.Queue(kPsHtmlStoreActionStore, "none");
   abi_.Queue(kPsHtmlStoreActionStore, "none");
   Capture(engine.get(), &port, kOrigin, kOrigin, MarkdownRequest());
+  // The lookup and the response.
   EXPECT_EQ(
-      1,
+      2,
       stats_.GetVariable("daemon_html_serve_cached_html_unavailable")->Get());
   ASSERT_FALSE(abi_.store_modes.empty());
   EXPECT_EQ(kPsHtmlCacheServeVariants, abi_.store_modes[0]);
@@ -918,7 +1043,7 @@ TEST_F(DaemonHtmlEngineTest, ServeCachedHtmlRunsAsServeVariantsBelowFifteen) {
   Capture(engine.get(), &port, kOrigin, kOrigin, MarkdownRequest());
   engine->OnPurgePollTick();
   EXPECT_EQ(
-      2,
+      3,
       stats_.GetVariable("daemon_html_serve_cached_html_unavailable")->Get());
   EXPECT_EQ(1, handler_.MessagesOfType(kWarning));
 
@@ -932,7 +1057,8 @@ TEST_F(DaemonHtmlEngineTest, ServeCachedHtmlRunsAsServeVariantsBelowFifteen) {
 // With the 1.15 set, serve-cached-html sends mode 3 with the 1.15 request:
 // the scope, the agent class, the cap, the stamp, always fresh-only, the
 // conditional bit for a request that arrived with a validator, and the
-// explicit-public bit; the structs at their 1.15 sizes.
+// explicit-public bit; the structs at their 1.15 sizes.  A Markdown
+// fall-through is classified once more for the page, with html_fallback.
 TEST_F(DaemonHtmlEngineTest, ServeCachedHtmlSendsTheFifteenRequest) {
   config_.mode = DaemonHtmlMode::kServeCachedHtml;
   config_.serve_scope = kPsHtmlServeScopeAll;
@@ -948,7 +1074,10 @@ TEST_F(DaemonHtmlEngineTest, ServeCachedHtmlSendsTheFifteenRequest) {
   facts.has_if_modified_since = true;
   facts.if_modified_since = "Mon, 01 Jan 2024 00:00:00 GMT";
   engine->Serve(facts, &port);
-  ASSERT_EQ(1u, abi_.serve_requests().size());
+  // The Markdown classification, then the page's.
+  ASSERT_EQ(2u, abi_.serve_requests().size());
+  EXPECT_NE(0u, abi_.serve_requests()[1].request_flags &
+                    kPsHtmlServeRequestHtmlFallback);
   const RecordedServeRequest& r = abi_.serve_requests()[0];
   EXPECT_EQ(kPsHtmlCacheServeCachedHtml, r.mode);
   EXPECT_EQ(sizeof(PsHtmlServeRequest), r.struct_size);
@@ -962,19 +1091,19 @@ TEST_F(DaemonHtmlEngineTest, ServeCachedHtmlSendsTheFifteenRequest) {
   EXPECT_EQ(3, r.agent_class);
   EXPECT_EQ(120u, r.html_max_lifetime_s);
   EXPECT_EQ(0x77u, r.policy_stamp);
-  ASSERT_EQ(1u, abi_.serve_facts().size());
+  ASSERT_FALSE(abi_.serve_facts().empty());
   EXPECT_EQ(sizeof(PsHtmlStoredFacts), abi_.serve_facts()[0].struct_size);
 
   // No validator: no conditional bit; fresh-only stays.
   engine->Serve(MarkdownRequest(), &port);
-  ASSERT_EQ(2u, abi_.serve_requests().size());
-  EXPECT_EQ(0u, abi_.serve_requests()[1].request_flags &
+  ASSERT_EQ(4u, abi_.serve_requests().size());
+  EXPECT_EQ(0u, abi_.serve_requests()[2].request_flags &
                     kPsHtmlServeRequestConditional);
-  EXPECT_NE(0u, abi_.serve_requests()[1].request_flags &
+  EXPECT_NE(0u, abi_.serve_requests()[2].request_flags &
                     kPsHtmlServeRequestFreshOnly);
 
-  // A verdict to serve the stored HTML falls through: that answer is not
-  // built yet, and Markdown is the only body this engine emits.
+  // A verdict to serve the stored page on the Markdown classification (no
+  // html_fallback) is a library defect: it falls through.
   abi_.mutable_injection()->verdict.action = kPsHtmlServeActionServeHtml;
   EXPECT_EQ(DaemonHtmlServeResult::kFallThrough,
             engine->Serve(MarkdownRequest(), &port).kind);
@@ -993,6 +1122,55 @@ TEST_F(DaemonHtmlEngineTest, ServeCachedHtmlSendsTheFifteenRequest) {
       0,
       stats_.GetVariable("daemon_html_serve_cached_html_unavailable")->Get());
   EXPECT_EQ(0, handler_.MessagesOfType(kWarning));
+}
+
+// The split serve (a server that must not block its event thread): the
+// reads may run on another thread between PrepareServe and FinishServe, and
+// the purge fence and the clock are read when FinishServe runs, so a purge
+// or the passing of time in between is seen.
+TEST_F(DaemonHtmlEngineTest, FinishServeJudgesFenceAndFreshnessWhenItRuns) {
+  config_.mode = DaemonHtmlMode::kServeCachedHtml;
+  config_.serve_scope = kPsHtmlServeScopeAll;
+  abi_.mutable_injection()->has_set_15 = true;
+  abi_.mutable_injection()->wants_markdown = 0;
+  std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
+  InlinePort port;
+  DaemonHtmlRequestFacts facts = MarkdownRequest();
+  facts.accept_lines = {"text/html"};
+  facts.agent_class = 3;
+  DaemonHtmlEngine::PendingServe pending = engine->PrepareServe(facts, &port);
+  ASSERT_TRUE(pending.needs_read());
+  std::thread reader([&pending] { pending.Read(); });
+  reader.join();
+  EXPECT_FALSE(pending.needs_read());
+  EXPECT_TRUE(abi_.serve_requests().empty());
+  timer_.AdvanceMs(5000);
+  engine->oracle()->NoteUrlPurge("https://www.example.test/page",
+                                 timer_.NowMs());
+  const DaemonHtmlServeResult result = engine->FinishServe(std::move(pending));
+  EXPECT_EQ(DaemonHtmlServeResult::kFallThrough, result.kind);
+  ASSERT_EQ(1u, abi_.serve_requests().size());
+  EXPECT_EQ(static_cast<uint32_t>(kNowMs / 1000 + 5),
+            abi_.serve_requests()[0].now_seconds);
+  ASSERT_EQ(1u, abi_.serve_facts().size());
+  EXPECT_NE(0u, abi_.serve_facts()[0].flags & kPsHtmlFactsPurged);
+
+  // Dropped before it is finished (a client that went away): its reads are
+  // freed, and nothing is classified.
+  {
+    DaemonHtmlEngine::PendingServe dropped = engine->PrepareServe(facts, &port);
+    dropped.Read();
+  }
+  EXPECT_EQ(1u, abi_.serve_requests().size());
+
+  // Decided at once: nothing to read.  Under scope agents an unknown agent
+  // is pre-gated.
+  config_.serve_scope = kPsHtmlServeScopeAgents;
+  std::unique_ptr<DaemonHtmlEngine> agents = NewEngine();
+  facts.agent_class = 0;
+  DaemonHtmlEngine::PendingServe gated = agents->PrepareServe(facts, &port);
+  EXPECT_FALSE(gated.needs_read());
+  EXPECT_EQ("scope", agents->FinishServe(std::move(gated)).reason);
 }
 
 // serve-variants on a 1.15 library: mode 2 at the full size, never

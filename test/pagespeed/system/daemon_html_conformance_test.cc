@@ -695,6 +695,9 @@ class FakePort : public DaemonHtmlPort {
     return emit_ok;
   }
   void MarkNoCompress() override { calls.push_back("MarkNoCompress"); }
+  // The runner's port answers with the stored page unless a step says it
+  // does not (port_serves_as_origin: false), as a port does before it can.
+  bool ServesAsOrigin() const override { return serves_as_origin; }
   // The as-origin result a port hands to its own chain; false (an
   // emit_fails step) is a port that could not emit it.
   bool EmitAsOrigin(const DaemonHtmlServeResult& result) override {
@@ -715,6 +718,7 @@ class FakePort : public DaemonHtmlPort {
   bool emitted_head = false;
   bool emit_ok = true;
   bool as_origin_ok = true;
+  bool serves_as_origin = true;
 };
 
 // The injected-verdict library over the volume: every call recorded with its
@@ -1518,7 +1522,11 @@ class ConformanceAbi : public InjectedVerdictDaemonAbi {
       return stub_->HtmlUnsafeMethodInvalidates(method, status);
     }
     if (!HasHtmlServe15Set()) return 0;
-    return Pop("ps_html_unsafe_method_invalidates").get("value", 0).asInt();
+    // The last verdict holds for every later call, so a step of many unsafe
+    // requests (unsafe_many) needs one.
+    const Json::Value v = Pop("ps_html_unsafe_method_invalidates");
+    if (!v.isNull()) last_unsafe_invalidates_ = v.get("value", 0).asInt();
+    return last_unsafe_invalidates_;
   }
 
   // Every decision line the engine queues: formatted as the library would,
@@ -1628,6 +1636,7 @@ class ConformanceAbi : public InjectedVerdictDaemonAbi {
   mutable std::vector<GoogleString> decision_lines_;
   std::function<void(const GoogleString&)> on_remove_;
   mutable int store_classify_calls_ = 0;
+  mutable int last_unsafe_invalidates_ = 0;
   int minor_;
   uint64_t policy_stamp_;
   std::vector<GoogleString> missing_;
@@ -2306,6 +2315,7 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
         Counters(step["expect"]["counters"]);
     const size_t decision_lines_before = abi_->decision_lines().size();
     port_ = FakePort();
+    port_.serves_as_origin = step.get("port_serves_as_origin", true).asBool();
     purge_set_added_.clear();
     admin_ok_ = true;
     serve_ = DaemonHtmlServeResult();
@@ -2600,9 +2610,11 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
       EXPECT_TRUE(IsRecordedFn(want["fn"].asString()))
           << kRunnerError << want["fn"].asString() << " is never recorded";
     }
-    for (const Json::Value& fn : expect["calls_exclude"]) {
-      EXPECT_TRUE(IsRecordedFn(fn.asString()))
-          << kRunnerError << fn.asString()
+    for (const Json::Value& entry : expect["calls_exclude"]) {
+      const GoogleString fn =
+          entry.isObject() ? entry["fn"].asString() : entry.asString();
+      EXPECT_TRUE(IsRecordedFn(fn))
+          << kRunnerError << fn
           << " is never recorded, so excluding it asserts "
           << "nothing";
     }
@@ -2623,9 +2635,18 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
                            << want["args"].toStyledString();
       }
     }
-    for (const Json::Value& fn : expect["calls_exclude"]) {
+    // A function name excludes every call of it; {fn, args} only the calls
+    // with those arguments.
+    for (const Json::Value& entry : expect["calls_exclude"]) {
+      const bool with_args = entry.isObject();
+      const GoogleString fn =
+          with_args ? entry["fn"].asString() : entry.asString();
       for (const Call& c : calls) {
-        EXPECT_NE(fn.asString(), c.fn) << "call not expected";
+        if (c.fn != fn) continue;
+        EXPECT_FALSE(!with_args ||
+                     ArgsMatch(c, entry["args"], Json::Value(Json::arrayValue)))
+            << "call not expected: " << fn << " "
+            << (with_args ? entry["args"].toStyledString() : GoogleString());
       }
     }
     for (const Json::Value& want : expect["port_calls"]) {
@@ -3168,7 +3189,7 @@ class RunnerShape {
     const GoogleString kind = step["kind"].asString();
     Keys("step", step,
          {"kind", "pre", "request", "response", "during", "expect", "repeat",
-          "count"});
+          "count", "port_serves_as_origin"});
     Value(
         "step kind", step["kind"],
         {"capture", "serve", "poll_tick", "stats_tick", "admin_purge", "unsafe",
@@ -3246,9 +3267,25 @@ class RunnerShape {
         }
       }
     }
-    for (const Json::Value& fn : ex["calls_exclude"]) {
-      if (RecordedArgs().count(fn.asString()) == 0) {
-        Fail(StrCat("calls_exclude: ", fn.asString(), " is never recorded"));
+    for (const Json::Value& entry : ex["calls_exclude"]) {
+      const GoogleString fn =
+          entry.isObject() ? entry["fn"].asString() : entry.asString();
+      auto it = RecordedArgs().find(fn);
+      if (it == RecordedArgs().end()) {
+        Fail(StrCat("calls_exclude: ", fn, " is never recorded"));
+        continue;
+      }
+      if (!entry.isObject()) continue;
+      Keys("calls_exclude", entry, {"fn", "args"});
+      const Json::Value& args = entry["args"];
+      if (!args.isObject() || args.empty()) {
+        Fail(StrCat("calls_exclude: ", fn, " names no args"));
+        continue;
+      }
+      for (const GoogleString& key : args.getMemberNames()) {
+        if (it->second.count(key) == 0) {
+          Fail(StrCat("calls_exclude: ", fn, " never records '", key, "'"));
+        }
       }
     }
     for (const char* key : {"port_calls", "port_calls_exclude"}) {
@@ -3451,8 +3488,7 @@ TEST(DaemonHtmlEngineRowsMeta, EveryPendingRowRunsAndStillFails) {
 // changes this set in the same change, and a declaration whose signature the
 // runner cannot call fails here instead of reading as "not declared yet".
 TEST(DaemonHtmlEngineRowsMeta, ServePathEntryPointsStillUndeclared) {
-  const std::set<GoogleString> kExpectedUndeclared = {
-      "served_from_cache", "internal", "OnUnsafeRequest"};
+  const std::set<GoogleString> kExpectedUndeclared = {};
   std::set<GoogleString> undeclared;
   for (const auto& [name, state] :
        EntryPointStates<DaemonHtmlRequestFacts, DaemonHtmlEngine>()) {
@@ -3562,8 +3598,8 @@ TEST(DaemonHtmlEngineRowsMeta, EveryEngineRowIsRegistered) {
   EXPECT_EQ(engine_rows, kRegisteredRows);
   // Pinned, so a row cannot leave the run unnoticed: marking a row pending,
   // or adding one, changes these in the same change.
-  EXPECT_EQ(326, kRegisteredRows);
-  EXPECT_EQ(151, pending_rows);
+  EXPECT_EQ(487, kRegisteredRows);
+  EXPECT_EQ(0, pending_rows);
   std::printf("engine rows: %d registered, %d pending\n", kRegisteredRows,
               pending_rows);
 }

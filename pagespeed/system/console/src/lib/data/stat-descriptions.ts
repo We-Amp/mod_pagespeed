@@ -73,9 +73,9 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
   daemon_html_refused_auth_request:
     "Refusals: the request carried credentials (Authorization or Proxy-Authorization, or a signed-in user). No response header overrides this.",
   daemon_html_refused_cookie_request:
-    "Refusals: the request carried a cookie outside the ignore list (C API 1.15: refused before the response under anonymous-only) and the page was not shareable. Counted at the store and, for a Markdown request, at the lookup.",
+    "Refusals: the request carried a cookie outside the ignore list (C API 1.15: before the response, under anonymous-only) and the page was not shareable. Counted at the store and at each lookup the cache makes.",
   daemon_html_refused_auth:
-    "Refused before any read (C API 1.15): the request carried Authorization, Proxy-Authorization or a signed-in user. Counted at the store and, for a Markdown request, at the lookup.",
+    "Refused before any read (C API 1.15): the request carried Authorization, Proxy-Authorization or a signed-in user. Counted at the store and at each lookup the cache makes (Markdown requests; with serve-cached-html, HTML ones too).",
   daemon_html_refused_path:
     "Refused (C API 1.15): the request path has a form the cache does not key, such as a parameter, an encoded slash or a dot segment.",
   daemon_html_refused_cookie_echo:
@@ -120,7 +120,7 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
   daemon_html_refused_url_disagree:
     "Store refusals: the server and the module disagree about the request's URL. Shown as a warning.",
   daemon_html_refused_request_header:
-    "Refused for a request header: a script's request, or (C API 1.15) a header the cache key does not contain. Counted at the store and, for a Markdown request, again at the lookup. Not part of the evaluated responses.",
+    "Refused for a request header: a script's request, or (C API 1.15) a header the cache key does not contain. Counted at the store and again at each lookup the cache makes. Not part of the evaluated responses.",
   daemon_html_sidecar_write_failed:
     "Stores abandoned because the saved response headers could not be written; nothing is stored in that case.",
   daemon_html_sidecar_unpaired_stale:

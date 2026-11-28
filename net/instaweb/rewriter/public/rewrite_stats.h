@@ -150,8 +150,13 @@ class RewriteStats {
   static const char* const kDaemonHtmlEngineCounters[];
   static const char* const kDaemonMarkdownFallthroughReasons[];
   // The fall-throughs for the stored entry's own record (C API 1.15), both
-  // bodies: daemon_html_fallthrough_<reason>.  nullptr-terminated.
+  // bodies, and those of an HTML lookup in serve-cached-html:
+  // daemon_html_fallthrough_<reason>.  nullptr-terminated.
   static const char* const kDaemonHtmlFallthroughReasons[];
+  // serve-cached-html's shadow sample: the reasons a sampled request would
+  // have fallen through for under scope all
+  // (daemon_html_would_fallthrough_<reason>).
+  static const char* const kDaemonHtmlWouldFallthroughReasons[];
 
   Variable* ipro_daemon_served() { return ipro_daemon_served_; }
   Variable* ipro_daemon_served_original() {
