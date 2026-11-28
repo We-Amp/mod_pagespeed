@@ -1972,6 +1972,7 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
   std::vector<int> coded_order;
   if (coded_set) {
     std::vector<const char*> lines;
+    lines.reserve(facts.accept_encoding_lines.size());
     for (const GoogleString& line : facts.accept_encoding_lines) {
       lines.push_back(line.c_str());
     }

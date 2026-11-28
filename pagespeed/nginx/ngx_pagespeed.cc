@@ -3118,10 +3118,11 @@ ngx_int_t ps_daemon_html_enforce_markdown(ngx_http_request_t* r,
       out->content_type.len = value.size();
       const size_t semi = value.find(';');
       out->content_type_len = semi == GoogleString::npos ? value.size() : semi;
-    } else if (StringCaseEqual(name, "Content-Length")) {
-      // Set by the emit; never restored here once a stage cleared it.
-    } else if (StringCaseEqual(name, "Content-Encoding")) {
-      // The no-compress mark carries it (ps_daemon_html_mark_no_compress).
+    } else if (StringCaseEqual(name, "Content-Length") ||
+               StringCaseEqual(name, "Content-Encoding")) {
+      // Content-Length is set by the emit and never restored here once a
+      // stage cleared it; Content-Encoding is carried by the no-compress mark
+      // (ps_daemon_html_mark_no_compress).
     } else if (StringCaseEqual(name, "Cache-Control")) {
       char* cc = string_piece_to_pool_string(r->pool, value);
       if (cc == nullptr || ps_set_cache_control(r, cc) != NGX_OK) {
