@@ -3489,7 +3489,7 @@
      {
       "request": {
        "method": "GET",
-       "path": "/page",
+       "path": "/other",
        "headers": [
         [
          "X-Original-URL",
@@ -3505,27 +3505,11 @@
      {
       "request": {
        "method": "GET",
-       "path": "/page",
+       "path": "/other",
        "headers": [
         [
          "X-Original-URL",
-         "/Page"
-        ]
-       ]
-      },
-      "expect": {
-       "status": 200,
-       "stored": false
-      }
-     },
-     {
-      "request": {
-       "method": "GET",
-       "path": "/page",
-       "headers": [
-        [
-         "X-Original-URL",
-         "/page"
+         "/other"
         ],
         [
          "X-Original-URL",
@@ -3536,6 +3520,55 @@
       "expect": {
        "status": 200,
        "stored": false
+      }
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/page",
+       "headers": []
+      },
+      "expect": {
+       "status": 200,
+       "stored": true
+      }
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/page",
+       "headers": [
+        [
+         "Accept",
+         "text/markdown"
+        ]
+       ]
+      },
+      "pre": [
+       {
+        "wait_markdown": {
+         "timeout_s": 30
+        }
+       }
+      ],
+      "expect": {
+       "status": 200
+      }
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/page",
+       "headers": [
+        [
+         "Accept",
+         "text/markdown"
+        ]
+       ]
+      },
+      "expect": {
+       "status": 200,
+       "content_type": "text/markdown; charset=utf-8"
       }
      },
      {
@@ -3553,13 +3586,29 @@
         ]
        ]
       },
-      "pre": [
-       {
-        "sleep_s": {
-         "s": 2
-        }
-       }
-      ],
+      "expect": {
+       "status": 200,
+       "content_type": "text/html",
+       "headers_absent": [
+        "X-Robots-Tag"
+       ]
+      }
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/page",
+       "headers": [
+        [
+         "X-Original-URL",
+         "/Page"
+        ],
+        [
+         "Accept",
+         "text/markdown"
+        ]
+       ]
+      },
       "expect": {
        "status": 200,
        "content_type": "text/html",

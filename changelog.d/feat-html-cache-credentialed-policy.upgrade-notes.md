@@ -18,13 +18,14 @@
   `X-Forwarded-Proto` is no longer evaluated (it counts in
   `daemon_html_refused_request_header` or `daemon_html_refused_path`
   instead of `daemon_html_evaluated`). On IIS, URL Rewrite adds
-  `X-Original-URL` to a rewritten request, holding the request target as
-  the client sent it; such a request is stored and answered as before. A
-  request whose `X-Original-URL` differs from its target (another path or
-  query, another case or percent-encoding, a second value that differs) is
-  neither stored nor answered, and the site logs one warning saying so. A `DaemonHtmlCacheIgnoreCookie` addition that is `*` alone, has
-  fewer than 3 characters before its `*`, or matches or covers a session
-  cookie name fails the configuration on Apache and nginx (the
+  `X-Original-URL` to a rewritten request, holding the request target as the
+  client sent it; such a request is stored and answered as before. A request
+  whose `X-Original-URL` differs from its target (another path or query,
+  another case or percent-encoding, a second value that differs) is neither
+  stored nor answered, and the site logs one warning saying so. A
+  `DaemonHtmlCacheIgnoreCookie` addition that is `*` alone, has fewer than 3
+  characters before its `*`, or matches or covers a session cookie name
+  fails the configuration on Apache and nginx (the
   configuration test included); on IIS it is written to the event log as
   an error, whatever `UseEventLog` says, and the site's HTML cache stores
   and answers nothing. A configuration test on a server without the
