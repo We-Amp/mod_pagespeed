@@ -10,10 +10,10 @@
 # provider, the cases, the origin (DhcOrigin.cs), the guest script, an
 # embeddable Python (-PythonZip, the python.org "embed-amd64" archive), the
 # brotli decoder for the rows that check a br body (-BrotliWheel, the PyPI
-# "Brotli" wheel for that Python, cp312 win_amd64, unpacked beside it: the
-# guest image has no brotli library, and the guest is restored to a
-# checkpoint between runs) and, with -Msi, the package, which it installs
-# first. Then runs the guest
+# wheel Brotli-1.1.0-cp312-cp312-win_amd64.whl for that Python, checked
+# against its pinned sha256 and unpacked beside it: the guest image has no
+# brotli library, and the guest is restored to a checkpoint between runs)
+# and, with -Msi, the package, which it installs first. Then runs the guest
 # script's setup, run and teardown phases and prints every line. The
 # teardown restores the IIS configuration backup the setup took. The MSI
 # must carry the optimizer built from the test pin
@@ -55,8 +55,23 @@ if ($env:CI_IIS_VM_NAME -and $VMName -eq $env:CI_IIS_VM_NAME) {
     Say "PRECONDITION | -VMName names the guest a CI gate restores; use a lab guest"
     exit 2
 }
+# The only brotli wheel the rig unpacks into the guest's Python, and its
+# sha256 as PyPI publishes it for that file.
+$BrotliWheelName = "Brotli-1.1.0-cp312-cp312-win_amd64.whl"
+$BrotliWheelSha256 = "906bc3a79de8c4ae5b86d3d75a8b77e44404b0f4261714306e3ad248d8ab0951"
 foreach ($f in @($PythonZip) + @($(if ($Msi) { $Msi })) + @($(if ($BrotliWheel) { $BrotliWheel }))) {
     if (-not (Test-Path -LiteralPath $f)) { Say "PRECONDITION | $f does not exist"; exit 2 }
+}
+if ($BrotliWheel) {
+    if ((Split-Path -Leaf $BrotliWheel) -ne $BrotliWheelName) {
+        Say "PRECONDITION | -BrotliWheel must be $BrotliWheelName"
+        exit 2
+    }
+    $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $BrotliWheel).Hash.ToLowerInvariant()
+    if ($hash -ne $BrotliWheelSha256) {
+        Say "PRECONDITION | -BrotliWheel sha256 mismatch: $hash, expected $BrotliWheelSha256"
+        exit 2
+    }
 }
 
 $here = $PSScriptRoot

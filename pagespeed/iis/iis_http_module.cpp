@@ -1225,6 +1225,9 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		if (engine == nullptr) {
 			return;
 		}
+		// The site's options, not the request's: those are resolved later in
+		// the pipeline, which a range request must not enter, and they only
+		// change what is counted here (nothing is served or stored).
 		DaemonHtmlRequestFacts facts;
 		BuildIisDaemonHtmlFacts(http_context, inner, server_context->global_options(),
 			/*at_store=*/false, &facts);

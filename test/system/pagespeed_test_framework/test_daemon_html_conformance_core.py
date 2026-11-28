@@ -14,6 +14,7 @@ Run with: python -m pytest -v test_daemon_html_conformance_core.py
 """
 
 import copy
+import ctypes
 import gzip
 import json
 import threading
@@ -1030,6 +1031,21 @@ class TestCodedCopies:
         monkeypatch.setattr(conf, "_brotli_decoder", lambda: None)
         br = Response(200, [("Content-Encoding", "br")], b"coded")
         assert conf.decode_body(br) == b"abc"
+        with pytest.raises(ValueError, match="does not decode"):
+            conf.decode_body(Response(200, [("Content-Encoding", "br")], b"junk"))
+
+    def test_decode_body_br_through_libbrotlidec(self, monkeypatch):
+        class FakeLib:
+            @staticmethod
+            def BrotliDecoderDecompress(size, data, out_size, out):
+                if data != b"coded":
+                    return 0
+                ctypes.memmove(out, b"abc", 3)
+                out_size._obj.value = 3
+                return 1
+        monkeypatch.setattr(conf, "_brotli_module", lambda: None)
+        monkeypatch.setattr(conf, "_brotli_decoder", lambda: FakeLib)
+        assert conf.decode_body(Response(200, [("Content-Encoding", "br")], b"coded")) == b"abc"
         with pytest.raises(ValueError, match="does not decode"):
             conf.decode_body(Response(200, [("Content-Encoding", "br")], b"junk"))
 
