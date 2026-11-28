@@ -675,9 +675,8 @@ GoogleString RemoveDotSegments(StringPiece path) {
   while (!in.empty()) {
     if (in.compare(0, 3, "../") == 0) {
       in.erase(0, 3);
-    } else if (in.compare(0, 2, "./") == 0) {
-      in.erase(0, 2);
-    } else if (in.compare(0, 3, "/./") == 0) {
+    } else if (in.compare(0, 2, "./") == 0 || in.compare(0, 3, "/./") == 0) {
+      // "./" goes; "/./" becomes "/".
       in.erase(0, 2);
     } else if (in == "/.") {
       in = "/";
@@ -752,14 +751,12 @@ GoogleString DaemonHtmlResolveReference(StringPiece scheme, StringPiece host,
                                      : path_and_query.substr(base_q);
   GoogleString path;
   StringPiece query = ref_query;
-  if (own_authority) {
+  if (own_authority || (!ref_path.empty() && ref_path[0] == '/')) {
     path = RemoveDotSegments(ref_path);
   } else if (ref_path.empty()) {
     // The request's own path, with the reference's query or its own.
     path = base_path.as_string();
     if (q == StringPiece::npos) query = base_query;
-  } else if (ref_path[0] == '/') {
-    path = RemoveDotSegments(ref_path);
   } else {
     // Merged with the request path's directory (section 5.2.3).
     const size_t slash = base_path.rfind('/');
