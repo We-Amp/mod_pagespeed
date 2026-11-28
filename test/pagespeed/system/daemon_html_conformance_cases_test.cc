@@ -127,7 +127,8 @@ const StringSet kResponseKeysM2 = {"split_at"};
 const StringSet kLibraryKeysM2 = {"missing"};
 const StringSet kStepKindsM2 = {"unsafe", "unsafe_many", "emit_fails",
                                 "begin_recording", "configure"};
-const StringSet kEngineStepKeysM2 = {"repeat", "count"};
+const StringSet kEngineStepKeysM2 = {"repeat", "count",
+                                     "port_serves_as_origin"};
 const StringSet kEngineOpsM2 = {"disable_credential_skip", "unsafe"};
 const StringSet kEngineExpectKeysM2 = {
     "headers_absent",       "classify_calls",     "decision_lines",
@@ -453,7 +454,15 @@ void CheckEngine(Checker& c, const GoogleString& w, const Json::Value& e,
       const Json::Value& list = ex["calls_exclude"];
       if (!list.isArray() || list.empty()) c.Fail(sw, "calls_exclude is empty");
       for (Json::ArrayIndex j = 0; list.isArray() && j < list.size(); ++j) {
-        c.LibraryFn(sw + " calls_exclude", list[j]);
+        // A function name, or {fn, args}: that function called with those
+        // arguments.
+        const Json::Value& entry = list[j];
+        if (entry.isObject()) {
+          c.Keys(sw + " calls_exclude", entry, {"fn", "args"}, {"fn", "args"});
+          c.LibraryFn(sw + " calls_exclude", entry["fn"]);
+        } else {
+          c.LibraryFn(sw + " calls_exclude", entry);
+        }
       }
     }
     if (ex.isMember("serve")) {

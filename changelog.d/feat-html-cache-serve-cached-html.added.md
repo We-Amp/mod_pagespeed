@@ -12,9 +12,11 @@
   Markdown request whose copy cannot be served may get the page instead. A
   `POST`, `PUT`, `DELETE` or other unsafe request answered with a success or
   redirect status at once fences the page in this process, plus up to two
-  same-host `Location` and `Content-Location` targets, and removes them from
+  same-host targets that its `Location` and `Content-Location` lines name
+  (relative references resolved against the request), and removes them from
   the cache. New counters report pages served by agent class, the agent HTML
   requests evaluated, a sampled estimate of what scope `all` would serve,
   unsafe-request invalidations, and checks that must stay at zero.
   The Apache, nginx and IIS ports start sending these answers, and invalidating
-  on unsafe requests, in a later release; until then they behave as before.
+  on unsafe requests, in a later release; until then no response changes, and
+  no counter moves for a request without a Markdown preference.

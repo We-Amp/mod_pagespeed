@@ -189,32 +189,75 @@ TEST(DaemonHtmlPurgeOracleTest, TheUnsafeFenceMapDropsItsOldestWhenFull) {
 }
 
 // How long an unsafe fence lasts: twice the larger of the cap and 60 s; with
-// no cap, the largest lifetime seen, clamped to a day, at least 120 s.
+// no cap, a day.
 TEST(DaemonHtmlPurgeOracleTest, TheUnsafeFenceRetentionFollowsTheCap) {
   struct Case {
     uint32 cap_s;
-    uint32 lifetime_seen_s;
     int64 retention_s;
   };
-  const Case kCases[] = {{60, 0, 120},        {30, 0, 120}, {3600, 0, 7200},
-                         {0, 3600, 3600},     {0, 10, 120}, {0, 200000, 86400},
-                         {3600, 200000, 7200}};
+  const Case kCases[] = {{60, 120}, {30, 120}, {3600, 7200}, {0, 86400}};
   for (const Case& c : kCases) {
-    SCOPED_TRACE(StrCat("cap ", IntegerToString(c.cap_s), " lifetime ",
-                        IntegerToString(c.lifetime_seen_s)));
+    SCOPED_TRACE(StrCat("cap ", IntegerToString(c.cap_s)));
     MockTimer timer(new NullMutex, kNowMs);
     Source source;
     DaemonHtmlPurgeOracle oracle(&source, &timer);
     oracle.SetUnsafeRetentionCap(c.cap_s);
-    oracle.NoteLifetimeSeen(c.lifetime_seen_s);
     oracle.NoteUnsafeInvalidation("https://a.test/p", kNowMs);
     const uint32 stored_s = static_cast<uint32>(kNowMs / 1000 - 1);
     timer.AdvanceMs(c.retention_s * 1000 - 1);
+    // Another fence's eviction pass leaves this one while it lasts.
+    oracle.NoteUnsafeInvalidation("https://a.test/q", timer.NowMs());
     EXPECT_TRUE(oracle.UnsafeFenced("https://a.test/p", stored_s));
     timer.AdvanceMs(1);
     EXPECT_FALSE(oracle.UnsafeFenced("https://a.test/p", stored_s));
-    EXPECT_EQ(0u, oracle.unsafe_fences_size());
   }
+}
+
+// A fence names the stored entry: every port spelling of its host, never
+// another scheme or path.
+TEST(DaemonHtmlPurgeOracleTest, AnUnsafeFenceCoversEveryPortSpelling) {
+  MockTimer timer(new NullMutex, kNowMs);
+  Source source;
+  DaemonHtmlPurgeOracle oracle(&source, &timer);
+  oracle.NoteUnsafeInvalidation("https://a.test:8443/p?x=1", kNowMs);
+  const uint32 stored_s = static_cast<uint32>(kNowMs / 1000 - 1);
+  EXPECT_TRUE(oracle.UnsafeFenced("https://a.test/p?x=1", stored_s));
+  EXPECT_TRUE(oracle.UnsafeFenced("https://a.test:9/p?x=1", stored_s));
+  EXPECT_FALSE(oracle.UnsafeFenced("http://a.test/p?x=1", stored_s));
+  EXPECT_FALSE(oracle.UnsafeFenced("https://a.test/p", stored_s));
+  EXPECT_FALSE(oracle.UnsafeFenced("https://b.test/p?x=1", stored_s));
+  oracle.NoteUnsafeInvalidation("https://[::1]:8443/v6", kNowMs);
+  EXPECT_TRUE(oracle.UnsafeFenced("https://[::1]/v6", stored_s));
+}
+
+// Location and Content-Location references, resolved as RFC 3986 section
+// 5.2 says (its section 5.4 examples among them).
+TEST(DaemonHtmlResolveReferenceTest, ResolvesEveryReferenceForm) {
+  auto resolve = [](StringPiece ref) {
+    return DaemonHtmlResolveReference("http", "a", "/b/c/d;p?q", ref);
+  };
+  EXPECT_EQ("http://a/b/c/g", resolve("g"));
+  EXPECT_EQ("http://a/b/c/g", resolve("./g"));
+  EXPECT_EQ("http://a/b/c/g/", resolve("g/"));
+  EXPECT_EQ("http://a/g", resolve("/g"));
+  EXPECT_EQ("http://g/", resolve("//g"));
+  EXPECT_EQ("http://a/b/c/d;p?y", resolve("?y"));
+  EXPECT_EQ("http://a/b/c/g?y", resolve("g?y"));
+  EXPECT_EQ("http://a/b/c/d;p?q", resolve("#s"));
+  EXPECT_EQ("http://a/b/c/d;p?q", resolve(""));
+  EXPECT_EQ("http://a/b/c/", resolve("."));
+  EXPECT_EQ("http://a/b/", resolve(".."));
+  EXPECT_EQ("http://a/b/g", resolve("../g"));
+  EXPECT_EQ("http://a/", resolve("../.."));
+  EXPECT_EQ("http://a/g", resolve("../../../g"));
+  EXPECT_EQ("http://a/g", resolve("/./g"));
+  EXPECT_EQ("http://a/b/c/g.", resolve("g."));
+  EXPECT_EQ("http://a/b/g", resolve("./../g"));
+  EXPECT_EQ("http://a/b/c/y", resolve("g/../y"));
+  EXPECT_EQ("https://h/x", resolve("HTTPS://h/x/../x"));
+  EXPECT_EQ("", resolve("mailto:a@b"));
+  EXPECT_EQ("", resolve("http:g"));
+  EXPECT_EQ("http://a/b/c/g", resolve("  g  "));
 }
 
 TEST(DaemonHtmlByteBudgetTest, NeverExceedsItsCapacityUnderContention) {
@@ -285,6 +328,8 @@ class InlinePort : public DaemonHtmlPort {
   void MarkNoCompress() override {}
   void RemoveClientConditionals() override {}
   void RunBlocking(DaemonHtmlCommit commit) override { commit.Run(); }
+  // A port that answers with the stored page, so the HTML lookup runs.
+  bool ServesAsOrigin() const override { return true; }
 };
 
 // The injected-verdict library with store verdicts: each call of the store

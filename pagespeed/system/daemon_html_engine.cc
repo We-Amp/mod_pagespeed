@@ -662,6 +662,117 @@ GoogleString DaemonHtmlKeyedScheme(StringPiece connection_scheme,
   return connection_scheme.as_string();
 }
 
+namespace {
+
+// RFC 3986 section 5.2.4.
+GoogleString RemoveDotSegments(StringPiece path) {
+  GoogleString in = path.as_string();
+  GoogleString out;
+  auto drop_last_segment = [&out] {
+    const size_t slash = out.rfind('/');
+    out.resize(slash == GoogleString::npos ? 0 : slash);
+  };
+  while (!in.empty()) {
+    if (in.compare(0, 3, "../") == 0) {
+      in.erase(0, 3);
+    } else if (in.compare(0, 2, "./") == 0) {
+      in.erase(0, 2);
+    } else if (in.compare(0, 3, "/./") == 0) {
+      in.erase(0, 2);
+    } else if (in == "/.") {
+      in = "/";
+    } else if (in.compare(0, 4, "/../") == 0) {
+      in.erase(0, 3);
+      drop_last_segment();
+    } else if (in == "/..") {
+      in = "/";
+      drop_last_segment();
+    } else if (in == "." || in == "..") {
+      in.clear();
+    } else {
+      const size_t next = in.find('/', in[0] == '/' ? 1 : 0);
+      const size_t n = next == GoogleString::npos ? in.size() : next;
+      out.append(in, 0, n);
+      in.erase(0, n);
+    }
+  }
+  return out;
+}
+
+// The scheme of an absolute reference ("https" for "https://h/p"), or empty.
+GoogleString ReferenceScheme(StringPiece ref) {
+  if (ref.empty() || !IsAsciiAlphaNumeric(ref[0]) ||
+      (ref[0] >= '0' && ref[0] <= '9')) {
+    return GoogleString();
+  }
+  for (size_t i = 1; i < ref.size(); ++i) {
+    const char c = ref[i];
+    if (c == ':') return ref.substr(0, i).as_string();
+    if (!IsAsciiAlphaNumeric(c) && c != '+' && c != '-' && c != '.') break;
+  }
+  return GoogleString();
+}
+
+}  // namespace
+
+GoogleString DaemonHtmlResolveReference(StringPiece scheme, StringPiece host,
+                                        StringPiece path_and_query,
+                                        StringPiece reference) {
+  StringPiece ref = reference;
+  TrimWhitespace(&ref);
+  const size_t hash = ref.find('#');
+  if (hash != StringPiece::npos) ref = ref.substr(0, hash);
+  GoogleString ref_scheme = ReferenceScheme(ref);
+  GoogleString authority = host.as_string();
+  GoogleString out_scheme = scheme.as_string();
+  if (!ref_scheme.empty()) {
+    LowerString(&ref_scheme);
+    if (ref_scheme != "http" && ref_scheme != "https") return GoogleString();
+    out_scheme = ref_scheme;
+    ref.remove_prefix(ref_scheme.size() + 1);
+    // An http(s) URL has an authority; "http:path" names no entry.
+    if (!HasPrefixString(ref, "//")) return GoogleString();
+  }
+  bool own_authority = false;
+  if (HasPrefixString(ref, "//")) {
+    ref.remove_prefix(2);
+    const size_t end = ref.find_first_of("/?");
+    authority = ref.substr(0, end).as_string();
+    ref = end == StringPiece::npos ? StringPiece() : ref.substr(end);
+    own_authority = true;
+  }
+  const size_t q = ref.find('?');
+  const StringPiece ref_path = ref.substr(0, q);
+  const StringPiece ref_query =
+      q == StringPiece::npos ? StringPiece() : ref.substr(q);
+  const size_t base_q = path_and_query.find('?');
+  const StringPiece base_path = path_and_query.substr(0, base_q);
+  const StringPiece base_query = base_q == StringPiece::npos
+                                     ? StringPiece()
+                                     : path_and_query.substr(base_q);
+  GoogleString path;
+  StringPiece query = ref_query;
+  if (own_authority) {
+    path = RemoveDotSegments(ref_path);
+  } else if (ref_path.empty()) {
+    // The request's own path, with the reference's query or its own.
+    path = base_path.as_string();
+    if (q == StringPiece::npos) query = base_query;
+  } else if (ref_path[0] == '/') {
+    path = RemoveDotSegments(ref_path);
+  } else {
+    // Merged with the request path's directory (section 5.2.3).
+    const size_t slash = base_path.rfind('/');
+    const GoogleString merged =
+        StrCat(slash == StringPiece::npos ? StringPiece("/")
+                                          : base_path.substr(0, slash + 1),
+               ref_path);
+    path = RemoveDotSegments(merged);
+  }
+  if (path.empty()) path = "/";
+  return StrCat(out_scheme, "://", authority, path, query);
+}
+
 GoogleString DaemonHtmlRawRequestPath(StringPiece target) {
   if (target.empty()) return "/";
   if (target[0] != '/') {
@@ -775,31 +886,49 @@ void DaemonHtmlPurgeOracle::SetUnsafeRetentionCap(uint32 cap_s) {
   unsafe_cap_s_ = cap_s;
 }
 
-void DaemonHtmlPurgeOracle::NoteLifetimeSeen(uint32 lifetime_s) {
-  std::lock_guard<std::mutex> lock(mutex_);
-  largest_lifetime_s_ = std::max(largest_lifetime_s_, lifetime_s);
-}
-
 int64 DaemonHtmlPurgeOracle::UnsafeRetentionMsLocked() const {
   constexpr int64 kFloorS = 60;
-  constexpr int64 kClampS = int64{24} * 60 * 60;
-  int64 retention_s = 0;
-  if (unsafe_cap_s_ > 0) {
-    retention_s = 2 * std::max<int64>(unsafe_cap_s_, kFloorS);
-  } else {
-    // No cap: as long as a page stored before the fence could still be
-    // fresh, never past a day and never shorter than with the smallest cap.
-    retention_s = std::max<int64>(std::min<int64>(largest_lifetime_s_, kClampS),
-                                  2 * kFloorS);
-  }
+  // No cap: a page stored before the fence could still be fresh for as long
+  // as any stored page is kept, which the library clamps to a day.
+  constexpr int64 kNoCapS = int64{24} * 60 * 60;
+  const int64 retention_s =
+      unsafe_cap_s_ > 0 ? 2 * std::max<int64>(unsafe_cap_s_, kFloorS) : kNoCapS;
   return retention_s * Timer::kSecondMs;
+}
+
+GoogleString DaemonHtmlPurgeOracle::UnsafeFenceKey(const GoogleString& url) {
+  // scheme://host[:port]/path?query, as CacheKey builds it (host lowercased):
+  // the entry is the scheme, the host without its port, and path and query.
+  GoogleString identity = url;
+  const size_t sep = url.find("://");
+  if (sep != GoogleString::npos) {
+    const size_t path = url.find('/', sep + 3);
+    GoogleString host =
+        url.substr(sep + 3, path == GoogleString::npos ? GoogleString::npos
+                                                       : path - sep - 3);
+    if (!host.empty() && host[0] == '[') {
+      const size_t close = host.find(']');
+      if (close != GoogleString::npos) host.resize(close + 1);
+    } else {
+      const size_t colon = host.rfind(':');
+      if (colon != GoogleString::npos) host.resize(colon);
+    }
+    identity =
+        StrCat(url.substr(0, sep), "\n", host, "\n",
+               path == GoogleString::npos ? GoogleString() : url.substr(path));
+  }
+  uint8_t digest[SHA256_DIGEST_LENGTH];
+  SHA256(reinterpret_cast<const uint8_t*>(identity.data()), identity.size(),
+         digest);
+  return GoogleString(reinterpret_cast<const char*>(digest), sizeof(digest));
 }
 
 void DaemonHtmlPurgeOracle::NoteUnsafeInvalidation(const GoogleString& url,
                                                    int64 fence_ms) {
   if (timer_ != nullptr) fence_ms = std::min(fence_ms, timer_->NowMs());
+  const GoogleString key = UnsafeFenceKey(url);
   std::lock_guard<std::mutex> lock(mutex_);
-  auto it = unsafe_fences_.find(url);
+  auto it = unsafe_fences_.find(key);
   if (it != unsafe_fences_.end()) {
     // A newer fence for the same key: it moves to the back of the order.
     fence_ms = std::max(fence_ms, it->second->second);
@@ -816,13 +945,14 @@ void DaemonHtmlPurgeOracle::NoteUnsafeInvalidation(const GoogleString& url,
     unsafe_fences_.erase(unsafe_order_.front().first);
     unsafe_order_.pop_front();
   }
-  unsafe_order_.emplace_back(url, fence_ms);
-  unsafe_fences_[url] = std::prev(unsafe_order_.end());
+  unsafe_order_.emplace_back(key, fence_ms);
+  unsafe_fences_[key] = std::prev(unsafe_order_.end());
 }
 
 bool DaemonHtmlPurgeOracle::UnsafeFencedLocked(const GoogleString& url,
                                                int64 stored_ms) {
-  auto it = unsafe_fences_.find(url);
+  if (unsafe_fences_.empty()) return false;
+  auto it = unsafe_fences_.find(UnsafeFenceKey(url));
   if (it == unsafe_fences_.end()) return false;
   const int64 fence_ms = it->second->second;
   const int64 now_ms = timer_ != nullptr ? timer_->NowMs() : fence_ms;
@@ -2381,7 +2511,7 @@ void DaemonHtmlEngine::Commit(
   const GoogleString identity = VolumeIdentity(url, hostname, facts.scheme);
   // A sampled would-serve page whose origin answer is now recorded: did the
   // origin answer with the bytes the cache would have served?
-  CheckShadowBody(identity, hash);
+  CheckShadowBody(identity, hash, facts.capture_start_ms / Timer::kSecondMs);
 
   // The insert time: computed by the library alone, from the request's
   // start and the inbound Age.  A refused Age stores nothing.
@@ -2398,7 +2528,6 @@ void DaemonHtmlEngine::Commit(
     return;
   }
   const uint32 inserted_at = params.cache_inserted_at;
-  oracle_.NoteLifetimeSeen(verdict.lifetime_s);
   // An unsafe request answered for this key in this process after the
   // capture started: what was captured may already be out of date, and the
   // entry would only be removed again.  Nothing is written.
@@ -2426,7 +2555,6 @@ void DaemonHtmlEngine::Commit(
     if (existing.original != nullptr) {
       const uint32 stored_at = abi->ReadCacheInsertedAt(existing.original);
       const uint32 existing_lifetime = abi->ReadOriginMaxAge(existing.original);
-      oracle_.NoteLifetimeSeen(existing_lifetime);
       // An entry an unsafe request fenced counts as purged here too: it is
       // never kept as unchanged.
       if (!oracle_.Purged(url, stored_at)) {
@@ -2702,6 +2830,8 @@ struct DaemonHtmlPendingServe::State {
   DaemonHtmlServeResult result;
   DaemonHtmlEngine::RequestPolicy policy;
   bool cached_html = false;
+  // serve-cached-html on a port that answers with the stored page.
+  bool serves_page = false;
   GoogleString accept;
   bool has_accept = false;
 
@@ -2762,12 +2892,6 @@ DaemonHtmlPendingServe DaemonHtmlEngine::PrepareServe(
     NoteUnavailable();
     return pending;
   }
-  if (config_.mode == DaemonHtmlMode::kServeCachedHtml &&
-      effective_mode() != DaemonHtmlMode::kServeCachedHtml) {
-    // The library lacks the 1.15 set: this runs as serve-variants.
-    counters_->serve_cached_html_unavailable->Add(1);
-    NoteServe15Unavailable();
-  }
   result.reason = "other";
   // Main requests only: a subrequest or an internal redirect goes on as it
   // is, for either body.
@@ -2780,12 +2904,19 @@ DaemonHtmlPendingServe DaemonHtmlEngine::PrepareServe(
   s.accept = JoinCollection(facts.accept_lines, ", ");
   s.has_accept = !facts.accept_lines.empty();
   s.cached_html = effective_mode() == DaemonHtmlMode::kServeCachedHtml;
+  s.serves_page = s.cached_html && port != nullptr && port->ServesAsOrigin();
   const bool markdown_request = abi->WantsAgentMarkdown(s.accept.c_str()) == 1;
-  if (!markdown_request && !s.cached_html) {
-    // Only a Markdown request is looked up below serve-cached-html: nothing
-    // is read, judged or counted for another one.
+  if (!markdown_request && !s.serves_page) {
+    // Only a Markdown request is looked up, unless this is serve-cached-html
+    // on a port that answers with the stored page: nothing is read, judged
+    // or counted for another one.
     result.reason = "";  // Not a Markdown request at all.
     return pending;
+  }
+  if (config_.mode == DaemonHtmlMode::kServeCachedHtml && !s.cached_html) {
+    // The library lacks the 1.15 set: this runs as serve-variants.
+    counters_->serve_cached_html_unavailable->Add(1);
+    NoteServe15Unavailable();
   }
   const bool agent_classed =
       facts.agent_class >= 1 && facts.agent_class <= kPsHtmlAgentClassMax;
@@ -2802,7 +2933,8 @@ DaemonHtmlPendingServe DaemonHtmlEngine::PrepareServe(
     }
     if (agent_classed) counters_->agent_html_requests->Add(1);
   } else if (!facts.url_agreed) {
-    // Counted only for a Markdown request, so the counter means one.
+    // Under the Markdown counters only for a Markdown request, so the
+    // counter means one.
     result.reason = "url_disagree";
     CountFallThrough(result.reason);
     return pending;
@@ -3102,7 +3234,6 @@ DaemonHtmlServeResult DaemonHtmlEngine::FinishMarkdownServe(
       return result;
     }
     if ((stored.flags & kPsHtmlFactsPresent) != 0) {
-      oracle_.NoteLifetimeSeen(stored.lifetime_s);
       if (oracle_.Purged(url, stored.stored_at)) {
         stored.flags |= kPsHtmlFactsPurged;
       }
@@ -3202,7 +3333,7 @@ DaemonHtmlServeResult DaemonHtmlEngine::FinishMarkdownServe(
             static_cast<int64>(stored.lifetime_s)) {
       Notify(facts, url, hostname, /*agent_request=*/true);
     }
-    if (!cached_html || verdict.action != kPsHtmlServeActionFallThrough) {
+    if (!s->serves_page || verdict.action != kPsHtmlServeActionFallThrough) {
       return result;
     }
     // serve-cached-html: once more for the page itself, with the same
@@ -3441,7 +3572,6 @@ DaemonHtmlServeResult DaemonHtmlEngine::FinishHtmlServe(
     return result;
   }
   if ((stored.flags & kPsHtmlFactsPresent) != 0) {
-    oracle_.NoteLifetimeSeen(stored.lifetime_s);
     if (oracle_.Purged(s->url, stored.stored_at)) {
       stored.flags |= kPsHtmlFactsPurged;
     }
@@ -3469,8 +3599,9 @@ DaemonHtmlServeResult DaemonHtmlEngine::FinishHtmlServe(
     counters_->shadow_sampled->Add(1);
     if (verdict.action == kPsHtmlServeActionServeHtml) {
       counters_->would_serve_html->Add(1);
-      NoteShadowWouldServe(VolumeIdentity(s->url, s->hostname, s->facts.scheme),
-                           s->stamp);
+      NoteShadowWouldServe(
+          VolumeIdentity(s->url, s->hostname, s->facts.scheme), s->stamp,
+          static_cast<int64>(stored.stored_at) + stored.lifetime_s);
     } else {
       if (verdict.action == kPsHtmlServeActionValidate) {
         counters_->unexpected_validate->Add(1);
@@ -3543,7 +3674,9 @@ DaemonHtmlServeResult DaemonHtmlEngine::EmitStoredPage(
   const uint8_t* body = nullptr;
   size_t body_len = 0;
   if (s->reads.original == nullptr || s->reads.block == nullptr ||
-      !s->sidecar_present || content_type == nullptr || *content_type == '\0' ||
+      !s->sidecar_present ||
+      abi->ReadContentType(s->reads.original) != kPsContentHtml ||
+      content_type == nullptr || *content_type == '\0' ||
       abi->ReadContent(s->reads.original, &body, &body_len) != kPsOk ||
       body_len == 0) {
     // Never an answer without the page, its type or its header block.
@@ -3621,7 +3754,8 @@ DaemonHtmlServeResult DaemonHtmlEngine::EmitStoredPage(
 }
 
 void DaemonHtmlEngine::NoteShadowWouldServe(const GoogleString& identity,
-                                            const uint8_t* stored_hash) {
+                                            const uint8_t* stored_hash,
+                                            int64 fresh_until_s) {
   if (stored_hash == nullptr || IsZeroHash(stored_hash)) return;
   const GoogleString hash(reinterpret_cast<const char*>(stored_hash),
                           kPsHtmlHashBytes);
@@ -3629,7 +3763,7 @@ void DaemonHtmlEngine::NoteShadowWouldServe(const GoogleString& identity,
   if (shadow_would_serve_.count(identity) == 0) {
     shadow_order_.push_back(identity);
   }
-  shadow_would_serve_[identity] = hash;
+  shadow_would_serve_[identity] = {hash, fresh_until_s};
   while (shadow_order_.size() > kShadowWouldServeMax) {
     shadow_would_serve_.erase(shadow_order_.front());
     shadow_order_.pop_front();
@@ -3637,13 +3771,15 @@ void DaemonHtmlEngine::NoteShadowWouldServe(const GoogleString& identity,
 }
 
 void DaemonHtmlEngine::CheckShadowBody(const GoogleString& identity,
-                                       const uint8_t* hash) {
+                                       const uint8_t* hash, int64 capture_s) {
   GoogleString stored;
+  int64 fresh_until_s = 0;
   {
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = shadow_would_serve_.find(identity);
     if (it == shadow_would_serve_.end()) return;
-    stored = it->second;
+    stored = it->second.first;
+    fresh_until_s = it->second.second;
     shadow_would_serve_.erase(it);
     for (auto o = shadow_order_.begin(); o != shadow_order_.end(); ++o) {
       if (*o == identity) {
@@ -3652,7 +3788,10 @@ void DaemonHtmlEngine::CheckShadowBody(const GoogleString& identity,
       }
     }
   }
-  if (memcmp(stored.data(), hash, kPsHtmlHashBytes) != 0) {
+  // Only while the sampled entry would still have been served: a page the
+  // origin changed after it expired is no sign of a missed personalisation.
+  if (capture_s < fresh_until_s &&
+      memcmp(stored.data(), hash, kPsHtmlHashBytes) != 0) {
     counters_->would_serve_body_differs->Add(1);
   }
 }
@@ -3690,20 +3829,17 @@ void DaemonHtmlEngine::OnUnsafeRequest(
     own.path = facts.path;
     targets.push_back(std::move(own));
   }
-  auto add_target = [&](StringPiece value) {
+  auto add_target = [&](const GoogleString& value) {
     if (targets.size() >= kUnsafeTargetsMax + 1) return;
-    TrimWhitespace(&value);
-    const size_t hash = value.find('#');
-    if (hash != StringPiece::npos) value = value.substr(0, hash);
+    // Resolved against the request URL first, so relative-path, query-only
+    // and dot-segment references name their target; only then is the
+    // target checked to be on this scheme and an exactly configured host.
+    const GoogleString resolved =
+        DaemonHtmlResolveReference(facts.scheme, facts.host, facts.path, value);
+    if (resolved.empty()) return;
     DaemonHtmlRequestFacts parts;
-    if (value.size() >= 1 && value[0] == '/' &&
-        !(value.size() >= 2 && value[1] == '/')) {
-      // Relative to the request: same scheme, same host.
-      parts.scheme = facts.scheme;
-      parts.host = facts.host;
-      parts.path = value.as_string();
-    } else {
-      const GoogleString key = DaemonHtmlNormalizePurgeUrl(value);
+    {
+      const GoogleString key = DaemonHtmlNormalizePurgeUrl(resolved);
       const size_t sep = key.find("://");
       if (sep == GoogleString::npos) return;
       parts.scheme = key.substr(0, sep);

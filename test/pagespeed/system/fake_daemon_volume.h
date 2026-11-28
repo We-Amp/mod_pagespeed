@@ -288,10 +288,12 @@ class FakeDaemonVolume : public DaemonAbi {
         params->struct_size >= sizeof(PsSidecarWriteParams) &&
         (params->write_flags & kPsSidecarWritePolicyBlock) != 0;
     for (size_t i = 0; i < count; ++i) {
-      // As the library keeps a block: never a line the entry itself
-      // reproduces or one the server stamps per response, except that a
-      // format-3 block carries the origin's Cache-Control and Expires lines
-      // verbatim.
+      // Close to how the library keeps a block: never a line the entry
+      // itself reproduces or one the server stamps per response, except that
+      // a format-3 block carries the origin's Cache-Control and Expires lines
+      // verbatim.  A denylist, so a superset of the library's allowlist: it
+      // keeps any other line it is given (Set-Cookie among them), which no
+      // row may rely on as the library's behaviour.
       if (NotCarried(names[i], policy_block)) continue;
       s.lines.emplace_back(names[i], values[i]);
     }
