@@ -123,6 +123,8 @@ TEST(IisResponseCachePinTest, EveryRequestLeftBeforeItsContextIsNotCached) {
        {"log(pHttpContext,\"CookedUrlwasNULL.Bail!\");",
         "log(pHttpContext,\"Rangerequest.Bail\");",
         "log(pHttpContext,\"If-Rangerequest.Bail\");",
+        "log(pHttpContext,\"Rangerequestwithoutarequestcontext.Bail\");",
+        "log(pHttpContext,\"RangerequestcountedbytheHTMLcache.Bail\");",
         "log(pHttpContext,\"Couldnotconverturl1\");",
         "log(pHttpContext,\"Couldnotconverturl2\");",
         "log(pHttpContext,\"Invalidurl,bailingout\");",

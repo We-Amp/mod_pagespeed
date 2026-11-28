@@ -1284,7 +1284,11 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		if (range_request &&
 			FindIgnoreCase(StringPiece(pHttpContext->GetRequest()->GetHeader(HttpHeaderAccept)),
 				"markdown") == StringPiece::npos) {
-			log(pHttpContext, range.length() > 0 ? "Range request. Bail" : "If-Range request. Bail");
+			if (range.length() > 0) {
+				log(pHttpContext, "Range request. Bail");
+				return LeaveToIisUncached(pHttpContext);
+			}
+			log(pHttpContext, "If-Range request. Bail");
 			return LeaveToIisUncached(pHttpContext);
 		}
 
@@ -1361,7 +1365,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		IisProcessContext* failed_pc = nullptr;
 		IisModuleRequestContext* ctx = CreateRequestContext(pHttpContext, checkpath, url, url_len, gurl, &failed_pc);
 		if (ctx == nullptr && range_request) {
-			log(pHttpContext, "Range request. Bail");
+			log(pHttpContext, "Range request without a request context. Bail");
 			FreeUnstoredRequestState(ctx, gurl);
 			return LeaveToIisUncached(pHttpContext);
 		}
@@ -1584,7 +1588,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		}
 		if (range_request) {
 			NoteIisRangeRequest(pHttpContext, ctx->GetInnerContext());
-			log(pHttpContext, "Range request. Bail");
+			log(pHttpContext, "Range request counted by the HTML cache. Bail");
 			FreeUnstoredRequestState(ctx, gurl);
 			return LeaveToIisUncached(pHttpContext);
 		}
