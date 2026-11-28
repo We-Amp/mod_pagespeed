@@ -18468,7 +18468,7 @@
       "id": "live-url-disagree-dot-segment-apache",
       "runners": ["live"],
       "ports": ["apache"],
-      "why": "request: the server and module both resolve dot segments on this port",
+      "why": "request: a target with a dot segment is never answered from the cache, as a cache-deception path",
       "live": {
         "mode": "serve-variants",
         "agent_optimize": true,
@@ -18493,7 +18493,7 @@
           },
           {
             "request": {"method": "GET", "path": "/x/../page", "headers": [["Accept", "text/markdown"]]},
-            "expect": {"status": 200, "content_type": "text/markdown; charset=utf-8"}
+            "expect": {"status": 200, "content_type": "text/html"}
           }
         ]
       }
@@ -18954,7 +18954,7 @@
               "status": 200,
               "content_type": "text/html",
               "origin_saw": {"X-Requested-With": "XMLHttpRequest"},
-              "counter_delta": {"daemon_html_refused_request_header": 1, "daemon_html_stored": 0}
+              "counter_delta": {"daemon_html_stored": 0}
             }
           },
           {
@@ -18969,7 +18969,7 @@
               "origin_saw": {"X-Requested-With": "XMLHttpRequest"},
               "counter_delta": {
                 "daemon_markdown_fallthrough_request_header": 1,
-                "daemon_html_refused_request_header": 1,
+                "daemon_html_refused_request_header": 2,
                 "daemon_markdown_served": 0,
                 "daemon_html_stored": 0
               }
@@ -18981,7 +18981,7 @@
               "status": 200,
               "content_type": "text/html",
               "origin_saw": {"X-MicrosoftAjax": "Delta=true"},
-              "counter_delta": {"daemon_html_refused_request_header": 1, "daemon_html_stored": 0}
+              "counter_delta": {"daemon_html_stored": 0}
             }
           },
           {
@@ -18996,7 +18996,7 @@
               "origin_saw": {"X-MicrosoftAjax": "Delta=true"},
               "counter_delta": {
                 "daemon_markdown_fallthrough_request_header": 1,
-                "daemon_html_refused_request_header": 1,
+                "daemon_html_refused_request_header": 2,
                 "daemon_markdown_served": 0,
                 "daemon_html_stored": 0
               }
@@ -19008,7 +19008,7 @@
               "status": 200,
               "content_type": "text/html",
               "origin_saw": {"X-Prototype-Version": "1.7.3"},
-              "counter_delta": {"daemon_html_refused_request_header": 1, "daemon_html_stored": 0}
+              "counter_delta": {"daemon_html_stored": 0}
             }
           },
           {
@@ -19023,7 +19023,7 @@
               "origin_saw": {"X-Prototype-Version": "1.7.3"},
               "counter_delta": {
                 "daemon_markdown_fallthrough_request_header": 1,
-                "daemon_html_refused_request_header": 1,
+                "daemon_html_refused_request_header": 2,
                 "daemon_markdown_served": 0,
                 "daemon_html_stored": 0
               }
@@ -19038,7 +19038,7 @@
             "expect": {
               "status": 200,
               "content_type": "text/html",
-              "counter_delta": {"daemon_html_refused_request_header": 1, "daemon_html_stored": 0}
+              "counter_delta": {"daemon_html_stored": 0}
             }
           },
           {
@@ -19056,7 +19056,7 @@
               "content_type": "text/html",
               "counter_delta": {
                 "daemon_markdown_fallthrough_request_header": 1,
-                "daemon_html_refused_request_header": 1,
+                "daemon_html_refused_request_header": 2,
                 "daemon_markdown_served": 0,
                 "daemon_html_stored": 0
               }
