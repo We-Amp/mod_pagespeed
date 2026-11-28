@@ -719,8 +719,8 @@ TEST_F(DaemonHtmlMarkdownCodingTest, APortMaySendThePlainCopyInstead) {
 // A port that may send the plain copy instead gets no coded answer without
 // one; a port that may not never has the plain copy read or carried.
 TEST_F(DaemonHtmlMarkdownCodingTest, ThePlainStandbyIsReadOnlyWhenUsable) {
-  volume_.entries().erase({FakeDaemonVolume::Key(kSite, kUrl),
-                           kPsSentinelAgentMarkdown});
+  volume_.entries().erase(
+      {FakeDaemonVolume::Key(kSite, kUrl), kPsSentinelAgentMarkdown});
   Put(kPsSentinelMarkdownBr, kBr);
   abi_.mutable_injection()->coded_bits[kPsMarkdownEncodingBr] =
       kPsHtmlFactsBrCopyBound;

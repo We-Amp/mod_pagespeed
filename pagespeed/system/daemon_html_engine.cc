@@ -2337,14 +2337,13 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
           ->Add(1);
     }
   }
-  LogServeSide("served_markdown", "fresh", facts.host, facts.path,
-               result.status,
-               not_modified || head ? 0 : (replaced ? plain_len : markdown_len),
-               0,
-               sent_coding == kPsMarkdownEncodingBr     ? "markdown_br"
-               : sent_coding == kPsMarkdownEncodingGzip ? "markdown_gzip"
-                                                        : "markdown",
-               verdict.age_s);
+  LogServeSide(
+      "served_markdown", "fresh", facts.host, facts.path, result.status,
+      not_modified || head ? 0 : (replaced ? plain_len : markdown_len), 0,
+      sent_coding == kPsMarkdownEncodingBr     ? "markdown_br"
+      : sent_coding == kPsMarkdownEncodingGzip ? "markdown_gzip"
+                                               : "markdown",
+      verdict.age_s);
   return result;
 }
 
