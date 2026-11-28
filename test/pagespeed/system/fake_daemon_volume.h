@@ -264,20 +264,42 @@ class FakeDaemonVolume : public DaemonAbi {
 
   // The volume side of the HTML serve set.
   bool HasHtmlServeSet() const override { return true; }
+  // The names a header block never carries (the library's own split).
+  static bool NotCarried(const char* name, bool policy_block) {
+    static const char* const kNever[] = {
+        "content-type",      "content-length", "etag",
+        "last-modified",     "date",           "server",
+        "connection",        "keep-alive",     "age",
+        "transfer-encoding", "accept-ranges"};
+    GoogleString lower(name);
+    LowerString(&lower);
+    for (const char* n : kNever) {
+      if (lower == n) return true;
+    }
+    return !policy_block && (lower == "cache-control" || lower == "expires");
+  }
   int CacheWriteHeadersSidecarSite(void*, const PsSidecarWriteParams* params,
                                    const char* const* names,
                                    const char* const* values, size_t count,
                                    int* out_verdict,
                                    int* out_stored) const override {
     FakeVolumeSidecar s;
-    for (size_t i = 0; i < count; ++i)
+    const bool policy_block =
+        params->struct_size >= sizeof(PsSidecarWriteParams) &&
+        (params->write_flags & kPsSidecarWritePolicyBlock) != 0;
+    for (size_t i = 0; i < count; ++i) {
+      // As the library keeps a block: never a line the entry itself
+      // reproduces or one the server stamps per response, except that a
+      // format-3 block carries the origin's Cache-Control and Expires lines
+      // verbatim.
+      if (NotCarried(names[i], policy_block)) continue;
       s.lines.emplace_back(names[i], values[i]);
+    }
     if (params->origin_html_hash != nullptr) {
       s.has_hash = true;
       memcpy(s.hash, params->origin_html_hash, kPsHtmlHashBytes);
     }
-    if (params->struct_size >= sizeof(PsSidecarWriteParams) &&
-        (params->write_flags & kPsSidecarWritePolicyBlock) != 0) {
+    if (policy_block) {
       s.format = 3;
       s.policy_stamp = params->policy_stamp;
     }
