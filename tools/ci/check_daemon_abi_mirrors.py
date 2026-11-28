@@ -429,14 +429,18 @@ def check(abi_h, abi_cc, peer_h, alternate_id_h, symbols_lds):
         checked += 1
     stripped_cc = _strip_comments(abi_cc)
     sets = []
+    unbound = []
     for s in SETS:
         if re.search(r"void\s+%s\(\)" % s[0], stripped_cc):
             sets.append(s)
         elif s[2] in ours:
             # A set the header declares must be read, or a renamed binder
             # would drop its prototypes and minors from the gate silently.
-            raise DriftError("daemon_abi.h has %s but daemon_abi.cc has no "
-                             "%s" % (s[2], s[0]))
+            # Every such set is named, not only the first.
+            unbound.append("daemon_abi.h has %s but daemon_abi.cc has no %s" %
+                           (s[2], s[0]))
+    if unbound:
+        raise DriftError("\n".join(unbound))
     if not sets or sets[0][0] != "BindHtmlServeSet":
         raise DriftError("could not find BindHtmlServeSet in daemon_abi.cc")
     theirs_protos = peer_prototypes(peer_h)
@@ -585,6 +589,20 @@ def self_test():
              "    uint32_t spare;\n    uint32_t coding;"),  # union reordered
             (0, "    uint32_t spare;\n  };", "  };\n    uint32_t spare;"),
         ]
+        # Every set with no binder is named in one error, not only the first.
+        both = list(args)
+        both[1] = both[1].replace("void BindHtmlServeSet()",
+                                  "void BindOther()").replace(
+                                      "void BindHtmlServe15Set()",
+                                      "void BindOther15()")
+        try:
+            check(*both)
+        except DriftError as e:
+            assert "BindHtmlServeSet" in str(e) and \
+                "BindHtmlServe15Set" in str(e), str(e)
+            cases += 1
+        else:
+            raise AssertionError("two missing binders not caught")
         for index, old, new in drifts:
             mutated = list(args)
             assert old in mutated[index], old

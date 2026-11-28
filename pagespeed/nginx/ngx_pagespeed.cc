@@ -1752,6 +1752,10 @@ void* ps_create_main_conf(ngx_conf_t* cf) {
   }
   NgxRewriteOptions::Initialize();
   NgxRewriteDriverFactory::Initialize();
+  // A DaemonHtmlCacheIgnoreCookie addition the optimizer library refuses
+  // fails the configuration, and nginx -t with it.
+  RewriteOptions::SetDaemonHtmlIgnoreCookieCheck(
+      &DaemonHtmlCheckIgnoreCookieWithLibrary);
 
   cfg_m->driver_factory = new NgxRewriteDriverFactory(
       *process_context, new SystemThreadSystem(), "" /* hostname, not used */,
@@ -2875,6 +2879,8 @@ void ps_daemon_html_request_facts(ngx_http_request_t* r,
   // serve runs, has not applied.
   const StringPiece target = str_to_string_piece(r->unparsed_uri);
   const StringPiece raw_path = target.substr(0, target.find('?'));
+  // The target as sent, path and query, for the request guard.
+  facts->raw_path = DaemonHtmlRawRequestPath(target);
   facts->url_agreed =
       r == r->main && !r->internal && host_agreed && url.IsWebValid() &&
       raw_path == str_to_string_piece(r->uri) && ps_in_place_url_agrees(r, url);
@@ -2887,6 +2893,11 @@ void ps_daemon_html_request_facts(ngx_http_request_t* r,
   }
   FillDaemonHtmlRequestHeaderFacts(lines, ps_client_conditional_stash(r),
                                    facts);
+  // The scheme the URL of this module reads (RespectXForwardedProto), so
+  // the cache key and the request guard see the scheme the page is for.
+  facts->scheme = DaemonHtmlKeyedScheme(
+      facts->scheme, facts->request_headers,
+      server_context->global_options()->respect_x_forwarded_proto());
   const SystemRewriteOptions* options =
       SystemRewriteOptions::DynamicCast(server_context->global_options());
   if (options != nullptr &&

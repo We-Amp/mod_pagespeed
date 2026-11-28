@@ -21,6 +21,7 @@
 
 #include "pagespeed/iis/iis_request_context.h"
 #include "pagespeed/iis/iis_daemon_check.h"
+#include "pagespeed/iis/iis_event_log.h"
 #include "pagespeed/iis/iis_registration.h"
 #include "pagespeed/iis/iis_rewrite_driver_factory.h"
 #include "pagespeed/iis/iis_rewrite_options.h"
@@ -294,6 +295,19 @@ namespace net_instaweb {
 			config.max_bytes = options->daemon_html_max_bytes();
 			config.agent_optimize = options->agent_optimize();
 			FillDaemonHtmlServeSettings(*options, &config);
+			// A refused ignore-list addition is an error in the event log,
+			// whatever UseEventLog says (a configuration error, as the
+			// daemon check reports its own), and the site's HTML cache then
+			// stores and serves nothing.
+			GoogleString policy_error;
+			if (!ApplyDaemonHtmlPolicySettingsForPort(
+					daemon_adapter_ == nullptr ? nullptr : daemon_adapter_->abi(),
+					&config, message_handler(), &policy_error)) {
+				InitEventLog();
+				LogEvent(EventLogLevel::kError,
+					StrCat(policy_error, "; the HTML cache of this site stores "
+						"and serves nothing").c_str());
+			}
 			config.host_names = IisSiteHostNames(bindings);
 			config.site = IisRequestSiteId(iis_site_id, iis_site_id,
 				options->cache_fragment());

@@ -167,8 +167,21 @@ struct DaemonHtmlRequestFacts {
   bool has_if_range = false;
   bool has_origin = false;
   // The first AJAX marker the request carries (DaemonHtmlAjaxMarker), or
-  // empty.  A request with one is never stored and never served.
+  // empty.  A request with one is never stored and never served.  With a
+  // library that publishes C API 1.15 the request guard reads the markers
+  // too, from request_headers, and refuses either way.
   GoogleString ajax_marker;
+  // Every request header line as received, name and value, unfiltered: what
+  // the request guard (ps_html_request_guard) reads for the headers a cache
+  // key does not contain.  Read only with C API 1.15.
+  DaemonHtmlHeaderLines request_headers;
+  // The request target as received, path and query, not normalised: what
+  // the request guard reads for the shape of the path.
+  GoogleString raw_path;
+  // Every Cookie line's value, in order: what ps_html_classify_cookies sorts
+  // into none, ignorable-only or blocking.  has_cookie is still set for any
+  // Cookie or Cookie2 line; a cookie the lines do not show is blocking.
+  std::vector<GoogleString> cookie_lines;
   // The options context, passed through to a notification.
   GoogleString option_context;
   GoogleString option_signature;
@@ -193,6 +206,20 @@ struct DaemonHtmlRequestFacts {
 // request from the cache.  Each port feeds every request header line here and
 // keeps the first match in DaemonHtmlRequestFacts::ajax_marker.
 const char* DaemonHtmlAjaxMarker(StringPiece name, StringPiece value);
+
+// The request target as the client sent it, for DaemonHtmlRequestFacts::
+// raw_path: path and query, with the scheme and authority of an
+// absolute-form target taken off; "/" for an empty one.
+GoogleString DaemonHtmlRawRequestPath(StringPiece target);
+
+// The scheme the HTML cache keys a request on: the connection's
+// (`connection_scheme`), or, with RespectXForwardedProto on
+// (`respect_forwarded_proto`), the first X-Forwarded-Proto line of
+// `request_headers` when it names http or https (any case), as the URL this
+// module builds for the request reads it.
+GoogleString DaemonHtmlKeyedScheme(StringPiece connection_scheme,
+                                   const DaemonHtmlHeaderLines& request_headers,
+                                   bool respect_forwarded_proto);
 
 // What the engine asks the port to do with one request.
 struct DaemonHtmlServeResult {
@@ -482,6 +509,12 @@ class DaemonHtmlRecording {
   bool over_size_ = false;
   bool body_ended_ = false;
   bool finished_ = false;
+  // With C API 1.15: the request's cookie class decides HAS_COOKIE (only a
+  // blocking cookie sets it), and the ignore-listed cookies (name, value)
+  // are what the echo check looks for in the page before it is stored.
+  bool cookie_classified_ = false;
+  bool blocking_cookie_ = false;
+  std::vector<std::pair<GoogleString, GoogleString>> ignorable_cookies_;
 };
 
 class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
@@ -500,14 +533,15 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
     // DaemonHtmlCacheCredentialed: kPsHtmlCredentialedAnonymousOnly or
     // ...ExplicitPublic.
     int credentialed = 0;
-    // DaemonHtmlCacheIgnoreCookies, and the DaemonHtmlCacheIgnoreCookie
-    // additions in order.  Not applied yet: every cookie still sets
-    // HAS_COOKIE, and a non-default value is logged once
-    // (NoteIgnoreCookieSettingsInert).
+    // DaemonHtmlCacheIgnoreCookies (the built-in list of analytics cookies),
+    // and the DaemonHtmlCacheIgnoreCookie additions.  Applied with a library
+    // that publishes C API 1.15: a request whose every cookie is ignorable
+    // counts as anonymous.  Below 1.15 every cookie counts as a cookie.
     bool ignore_cookies = true;
     std::vector<GoogleString> ignore_cookie;
-    // The stamp of the credentialed policy, sent as the request's
-    // policy_stamp; 0 = none.
+    // The stamp of the credentialed policy (ApplyPolicySettings), written
+    // into every stored page's header block and sent as the request's
+    // policy_stamp; 0 = none (a library below 1.15).
     uint64_t policy_stamp = 0;
     // The names this vhost's configuration lists.
     ConfiguredHostNames host_names;
@@ -552,6 +586,17 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
   // process wrote.  Logs nothing: the first HTML response or tick does.
   DaemonHtmlEngine(Config config, Deps deps);
   ~DaemonHtmlEngine() override;
+
+  // Configuration load, run by every port before it creates the engine:
+  // checks each ignore-list addition with the library's guard
+  // (ps_html_ignore_cookie_guard), keeps the additions as a sorted set, and
+  // computes config->policy_stamp (ps_html_policy_stamp).  False, with
+  // *error naming the addition, when the guard refuses one or the stamp
+  // cannot be computed: the port must not store or serve with this
+  // configuration.  With a library below 1.15 the settings have no effect:
+  // true, and the stamp stays 0.
+  static bool ApplyPolicySettings(const DaemonAbi& abi, Config* config,
+                                  GoogleString* error);
 
   DaemonHtmlEngine(const DaemonHtmlEngine&) = delete;
   DaemonHtmlEngine& operator=(const DaemonHtmlEngine&) = delete;
@@ -614,12 +659,32 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
   }
 
   void set_test_hooks(TestHooks* hooks) { test_hooks_ = hooks; }
+  // Tests only (no directive, option or environment variable reaches it):
+  // the request-credential skip before any read is turned off, so the
+  // refusal at emit can be reached.  The credentials are still classified.
+  void set_credential_skip_disabled_for_testing(bool v) {
+    credential_skip_disabled_ = v;
+  }
   DaemonHtmlPurgeOracle* oracle() { return &oracle_; }
 
  private:
   friend class DaemonHtmlRecording;
   struct Counters;
   struct StoreVerdict;
+  struct RequestPolicy;
+
+  // The credentialed policy, the request guard and the cookie classes of one
+  // request (C API 1.15 only; see RequestPolicy).
+  void EvaluateRequestPolicy(const DaemonHtmlRequestFacts& facts,
+                             RequestPolicy* out);
+  // Counts and logs a request the policy refused before any read.
+  void NoteRequestRefused(const DaemonHtmlRequestFacts& facts,
+                          const RequestPolicy& policy,
+                          const GoogleString& reason,
+                          const GoogleString& detail, const char* mode);
+  // Logs once per vhost that a request carried the header IIS URL Rewrite
+  // adds to a rewritten request.
+  void NoteRewrittenUrlRefused();
 
   // The cache key of a request: scheme://host[:port]path, the host
   // lowercased and a default port dropped; and that host.
@@ -637,9 +702,9 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
   // once per state for a configuration that stores and serves.
   void ReadServe15Condition(bool log_change);
   void NoteServe15Unavailable();
-  // Logs once that the two ignore-cookie settings, set to anything but
-  // their defaults, have no effect yet.
-  void NoteIgnoreCookieSettingsInert();
+  // Logs once per vhost that a request carried an X-Forwarded-Proto that is
+  // not the scheme this module keys on.
+  void NoteForwardedProtoMismatch();
   // The mode name a decision line carries for a store or serve.
   const char* ServeModeName() const;
   void ObservePurgeState();
@@ -664,12 +729,17 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
                     int status, uint64 size, uint32 lifetime_s,
                     const char* variant, int64 age_s,
                     // nullptr: the mode that runs (ServeModeName).
-                    const char* mode = nullptr);
+                    const char* mode = nullptr,
+                    // The name a refusal is about (a cookie or a request
+                    // header, never a value); written from C API 1.15.
+                    const GoogleString& detail = GoogleString());
   void Commit(const DaemonHtmlRequestFacts& facts, const GoogleString& url,
               const GoogleString& hostname, const StoreVerdict& verdict,
               const DaemonHtmlHeaderLines& store_view,
               const std::vector<GoogleString>& age_lines,
-              const GoogleString& body, bool agent_request);
+              const GoogleString& body, bool agent_request,
+              const std::vector<std::pair<GoogleString, GoogleString>>&
+                  ignorable_cookies);
   void MaybeRemoveOnRefusal(const DaemonHtmlRequestFacts& facts,
                             const GoogleString& url,
                             const GoogleString& hostname, int status,
@@ -713,7 +783,9 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
   // (ReadSharedConfigMarkdownCodings; -1 = none, or the set is unbound).
   bool set16_bound_ = false;
   int markdown_codings_ = -1;
-  bool ignore_cookie_logged_ = false;
+  bool xfp_logged_ = false;
+  bool rewritten_url_logged_ = false;
+  std::atomic<bool> credential_skip_disabled_{false};
   // The newest global purge (seconds) this process wrote as an epoch.
   int64 epoch_written_s_ = -1;
   // The handle epoch_written_s_ was written through.
@@ -733,6 +805,30 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
 // ignore list) from `options` into `config`.
 void FillDaemonHtmlServeSettings(const RewriteOptions& options,
                                  DaemonHtmlEngine::Config* config);
+
+// A RewriteOptions::DaemonHtmlIgnoreCookieCheck backed by the optimizer
+// library under its default name, loaded for each check and released after
+// it: ps_html_ignore_cookie_guard refuses an addition that is `*` alone,
+// has fewer than 3 characters before its `*`, or would cover a session
+// cookie name.  With no library, or one below C API 1.15, the setting has
+// no effect and every addition the syntax check passed is accepted.  A port
+// installs it with RewriteOptions::SetDaemonHtmlIgnoreCookieCheck before it
+// reads a configuration, so a refused addition fails the configuration and
+// its test.
+bool DaemonHtmlCheckIgnoreCookieWithLibrary(StringPiece addition,
+                                            GoogleString* error);
+
+// Configuration load for a port, after FillDaemonHtmlServeSettings:
+// DaemonHtmlEngine::ApplyPolicySettings with the library the port loaded
+// (none: nothing to apply).  When it refuses, logs the error naming the
+// addition and runs the configuration report-only: nothing is stored or
+// served under a policy the library refused.  Returns whether it applied.
+// When given, *error receives the error on a refusal (a port that must also
+// report it elsewhere, such as the IIS event log).
+bool ApplyDaemonHtmlPolicySettingsForPort(const DaemonAbi* abi,
+                                          DaemonHtmlEngine::Config* config,
+                                          MessageHandler* handler,
+                                          GoogleString* error_out = nullptr);
 
 // The engine a server port builds from its DaemonHtmlCache settings, or
 // nullptr for off.  Until the port stores and serves, serve-variants runs

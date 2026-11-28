@@ -20,6 +20,7 @@
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <iterator>
 #include <memory>
@@ -1527,10 +1528,10 @@ void RewriteOptions::AddProperties() {
   AddBaseProperty(true, &RewriteOptions::daemon_html_cache_ignore_cookies_,
                   "dhcics", kDaemonHtmlCacheIgnoreCookies, kServerScope,
                   "Whether DaemonHtmlCache ignores the built-in list of "
-                  "analytics cookies (default on). Accepted and checked "
-                  "now; takes effect in a later release, and until then "
-                  "every cookie, an analytics cookie included, counts as a "
-                  "cookie.",
+                  "analytics cookies (default on): a request whose every "
+                  "cookie is on the list in force is stored and served as "
+                  "anonymous. Needs optimizer C API 1.15; with an older "
+                  "library every cookie counts as a cookie.",
                   true);
   properties_->property(properties_->size() - 1)
       ->set_do_not_use_for_signature_computation(true);
@@ -1538,10 +1539,13 @@ void RewriteOptions::AddProperties() {
                   &RewriteOptions::daemon_html_cache_ignore_cookie_, "dhcic",
                   kDaemonHtmlCacheIgnoreCookie, kServerScope,
                   "A cookie name, or a prefix ending in *, that "
-                  "DaemonHtmlCache also ignores; repeatable. Accepted and "
-                  "checked now; takes effect in a later release, and until "
-                  "then every cookie, an analytics cookie included, counts "
-                  "as a cookie.",
+                  "DaemonHtmlCache also ignores; one per line, repeatable. "
+                  "An addition that is * alone, too short a prefix, or a "
+                  "session cookie name is refused when the configuration "
+                  "is read (on IIS: logged as an error, and the site's "
+                  "HTML cache runs report-only). Needs optimizer C API "
+                  "1.15; with an older "
+                  "library every cookie counts as a cookie.",
                   true);
   properties_->property(properties_->size() - 1)
       ->set_do_not_use_for_signature_computation(true);
@@ -2705,6 +2709,16 @@ bool RewriteOptions::DeprecatedOptionMessage(StringPiece name,
   return false;
 }
 
+namespace {
+std::atomic<RewriteOptions::DaemonHtmlIgnoreCookieCheck>
+    daemon_html_ignore_cookie_check{nullptr};
+}  // namespace
+
+void RewriteOptions::SetDaemonHtmlIgnoreCookieCheck(
+    DaemonHtmlIgnoreCookieCheck check) {
+  daemon_html_ignore_cookie_check.store(check, std::memory_order_release);
+}
+
 bool RewriteOptions::IsValidDaemonHtmlCacheIgnoreCookie(StringPiece value) {
   if (value.empty()) return false;
   if (value.ends_with("*")) value.remove_suffix(1);
@@ -2988,6 +3002,15 @@ RewriteOptions::OptionSettingResult RewriteOptions::SetOptionFromNameInternal(
         if (!IsValidDaemonHtmlCacheIgnoreCookie(value)) {
           StrAppend(error_detail, kDaemonHtmlCacheIgnoreCookie,
                     " takes one cookie name, or a prefix ending in *");
+          return kOptionValueInvalid;
+        }
+        // The optimizer library's guard, when the server can reach it: an
+        // addition that would ignore a session cookie never loads.
+        const DaemonHtmlIgnoreCookieCheck check =
+            daemon_html_ignore_cookie_check.load(std::memory_order_acquire);
+        GoogleString refused;
+        if (check != nullptr && !check(value, &refused)) {
+          StrAppend(error_detail, refused);
           return kOptionValueInvalid;
         }
         // Repeatable: each line adds a name, once.  The first line of a

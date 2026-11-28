@@ -149,6 +149,9 @@ class RewriteStats {
   // its order, then the engine's own, then "other" for anything else.
   static const char* const kDaemonHtmlEngineCounters[];
   static const char* const kDaemonMarkdownFallthroughReasons[];
+  // The fall-throughs for the stored entry's own record (C API 1.15), both
+  // bodies: daemon_html_fallthrough_<reason>.  nullptr-terminated.
+  static const char* const kDaemonHtmlFallthroughReasons[];
 
   Variable* ipro_daemon_served() { return ipro_daemon_served_; }
   Variable* ipro_daemon_served_original() {

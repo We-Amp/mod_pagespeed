@@ -290,10 +290,14 @@ pagespeed_cc_test(
 # Windows-only: depends on iis_module which requires Windows headers.
 pagespeed_cc_test(
     name = "iis_configuration_test",
-    srcs = ["iis_configuration_test.cc"],
+    srcs = [
+        "iis_configuration_test.cc",
+        "//test/pagespeed/system:recording_daemon_abi.h",
+    ],
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
         "//pagespeed/iis:iis_module",
+        "//pagespeed/system:daemon_html_engine",
     ],
 )
 

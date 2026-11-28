@@ -74,6 +74,16 @@ constexpr int64 kRecentlyRemovedSeconds = 60;
 // The keys watched for a header block that stays unpaired.
 constexpr size_t kUnpairedMax = 1024;
 
+// The ignore-listed cookie values one request may carry and still count as
+// anonymous: the echo check reads every one, so a request with more is
+// blocking (the library fails closed past the caller's array, and so does
+// the engine).
+constexpr size_t kIgnorableCookieValuesMax = 32;
+// The echo check's floor for a value worth looking for.
+constexpr size_t kCookieEchoMinBytes = 8;
+// The longest name a decision line's detail carries (the library's grammar).
+constexpr size_t kDetailMaxBytes = 128;
+
 constexpr char kAfterCommit[] = "after_commit";
 constexpr char kAfterRecheck[] = "after_recheck";
 
@@ -419,6 +429,127 @@ bool IsZeroHash(const uint8_t* hash) {
   return true;
 }
 
+// Whether a request header line's name is `name`, compared as the library's
+// guard compares names: case-insensitively, with '_' read as '-'.
+bool HeaderNameIs(StringPiece line_name, StringPiece name) {
+  if (line_name.size() != name.size()) return false;
+  for (size_t i = 0; i < name.size(); ++i) {
+    const char a = line_name[i] == '_' ? '-' : LowerChar(line_name[i]);
+    const char b = name[i] == '_' ? '-' : LowerChar(name[i]);
+    if (a != b) return false;
+  }
+  return true;
+}
+
+// An RFC 9110 token: what a decision line's detail may carry.
+bool IsDetailToken(StringPiece name) {
+  if (name.empty() || name.size() > kDetailMaxBytes) return false;
+  for (const char c : name) {
+    const bool tchar =
+        (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') ||
+        (c >= 'A' && c <= 'Z') ||
+        StringPiece("!#$%&'*+-.^_`|~").find(c) != StringPiece::npos;
+    if (!tchar) return false;
+  }
+  return true;
+}
+
+int HexValue(char c) {
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+  return -1;
+}
+
+// `in` with every %XX escape decoded once; anything else is kept as it is.
+GoogleString PercentDecoded(StringPiece in) {
+  GoogleString out;
+  out.reserve(in.size());
+  for (size_t i = 0; i < in.size(); ++i) {
+    if (in[i] == '%' && i + 2 < in.size() && HexValue(in[i + 1]) >= 0 &&
+        HexValue(in[i + 2]) >= 0) {
+      out.push_back(
+          static_cast<char>(HexValue(in[i + 1]) * 16 + HexValue(in[i + 2])));
+      i += 2;
+    } else {
+      out.push_back(in[i]);
+    }
+  }
+  return out;
+}
+
+// The name of the cookie whose value starts at `offset` of a Cookie line:
+// the text between the pair's start and its "=", trimmed.
+GoogleString CookieNameBefore(StringPiece line, size_t offset) {
+  if (offset > line.size()) return GoogleString();
+  size_t eq = line.rfind('=', offset == 0 ? 0 : offset - 1);
+  if (eq == StringPiece::npos || eq >= offset) return GoogleString();
+  size_t start = line.rfind(';', eq);
+  start = start == StringPiece::npos ? 0 : start + 1;
+  StringPiece name = line.substr(start, eq - start);
+  TrimWhitespace(&name);
+  return name.as_string();
+}
+
+// The index of the first of `needles` that occurs in `haystack`, or -1: one
+// pass over the haystack, each position tried only against the needles
+// that start with its byte.
+int FirstNeedleIn(StringPiece haystack,
+                  const std::vector<GoogleString>& needles) {
+  std::vector<int> by_byte[256];
+  for (size_t n = 0; n < needles.size(); ++n) {
+    if (!needles[n].empty()) {
+      by_byte[static_cast<unsigned char>(needles[n][0])].push_back(
+          static_cast<int>(n));
+    }
+  }
+  for (size_t i = 0; i < haystack.size(); ++i) {
+    for (const int n : by_byte[static_cast<unsigned char>(haystack[i])]) {
+      const GoogleString& needle = needles[n];
+      if (haystack.size() - i >= needle.size() &&
+          haystack.substr(i, needle.size()) == needle) {
+        return n;
+      }
+    }
+  }
+  return -1;
+}
+
+// Whether the body or a stored header value repeats the value of an
+// ignore-listed cookie, with that cookie's name in *name.
+bool EchoedCookie(
+    const std::vector<std::pair<GoogleString, GoogleString>>& cookies,
+    const GoogleString& body, const DaemonHtmlHeaderLines& headers,
+    GoogleString* name) {
+  std::vector<GoogleString> needles;
+  std::vector<size_t> owner;
+  for (size_t c = 0; c < cookies.size(); ++c) {
+    const GoogleString& value = cookies[c].second;
+    const GoogleString decoded = PercentDecoded(value);
+    for (const GoogleString* form : {&value, &decoded}) {
+      if (form->size() < kCookieEchoMinBytes) continue;
+      if (form == &decoded && decoded == value) continue;
+      needles.push_back(*form);
+      owner.push_back(c);
+    }
+  }
+  if (needles.empty()) return false;
+  auto scan = [&](StringPiece text) {
+    int n = FirstNeedleIn(text, needles);
+    if (n < 0 && text.find('%') != StringPiece::npos) {
+      n = FirstNeedleIn(PercentDecoded(text), needles);
+    }
+    return n;
+  };
+  int n = scan(body);
+  for (size_t h = 0; n < 0 && h < headers.size(); ++h) {
+    n = scan(headers[h].second);
+  }
+  if (n < 0) return false;
+  *name = cookies[owner[n]].first;
+  return true;
+}
+
 const char* CStrOrNull(bool present, const GoogleString& value) {
   return present ? value.c_str() : nullptr;
 }
@@ -491,6 +622,34 @@ const char* DaemonHtmlAjaxMarker(StringPiece name, StringPiece value) {
     return "X-Prototype-Version";
   }
   return nullptr;
+}
+
+GoogleString DaemonHtmlKeyedScheme(StringPiece connection_scheme,
+                                   const DaemonHtmlHeaderLines& request_headers,
+                                   bool respect_forwarded_proto) {
+  if (respect_forwarded_proto) {
+    for (const auto& [name, value] : request_headers) {
+      if (!StringCaseEqual(name, "X-Forwarded-Proto")) continue;
+      if (StringCaseEqual(value, "http")) return "http";
+      if (StringCaseEqual(value, "https")) return "https";
+      break;  // Only the first line counts, as for the URL.
+    }
+  }
+  return connection_scheme.as_string();
+}
+
+GoogleString DaemonHtmlRawRequestPath(StringPiece target) {
+  if (target.empty()) return "/";
+  if (target[0] != '/') {
+    const size_t scheme_end = target.find("://");
+    const size_t path_start = scheme_end == StringPiece::npos
+                                  ? StringPiece::npos
+                                  : target.find_first_of("/?", scheme_end + 3);
+    if (path_start == StringPiece::npos) return "/";
+    target.remove_prefix(path_start);
+    if (target[0] == '?') return StrCat("/", target);
+  }
+  return target.as_string();
 }
 
 // ---------------------------------------------------------------------------
@@ -660,6 +819,10 @@ struct DaemonHtmlEngine::Counters {
             s->GetVariable("daemon_html_refused_url_disagree")),
         refused_request_header(
             s->GetVariable("daemon_html_refused_request_header")),
+        refused_auth(s->GetVariable("daemon_html_refused_auth")),
+        upgrade_restores(s->GetVariable("daemon_html_upgrade_restores")),
+        served_credentialed_refused(
+            s->GetVariable("daemon_html_served_credentialed_refused")),
         sidecar_write_failed(
             s->GetVariable("daemon_html_sidecar_write_failed")),
         sidecar_unpaired_stale(
@@ -712,12 +875,21 @@ struct DaemonHtmlEngine::Counters {
       refused_by_reason[*reason] =
           s->GetVariable(StrCat("daemon_html_refused_", *reason));
     }
+    for (const char* const* reason =
+             RewriteStats::kDaemonHtmlFallthroughReasons;
+         *reason != nullptr; ++reason) {
+      html_fallthrough[*reason] =
+          s->GetVariable(StrCat("daemon_html_fallthrough_", *reason));
+    }
   }
 
   Variable* stored;
   Variable* refused_budget;
   Variable* refused_url_disagree;
   Variable* refused_request_header;
+  Variable* refused_auth;
+  Variable* upgrade_restores;
+  Variable* served_credentialed_refused;
   Variable* sidecar_write_failed;
   Variable* sidecar_unpaired_stale;
   Variable* purge_race_refused;
@@ -756,6 +928,52 @@ struct DaemonHtmlEngine::Counters {
   Variable* classify_failed;
   Variable* log_dropped;
   std::map<GoogleString, Variable*> refused_by_reason;
+  // The entry-record reasons of C API 1.15, both bodies.
+  std::map<GoogleString, Variable*> html_fallthrough;
+};
+
+// What the request policy says about one request, before any read.  Filled
+// only with a library that binds C API 1.15 (`applies`); below it the
+// earlier rules run unchanged.
+struct DaemonHtmlEngine::RequestPolicy {
+  bool applies = false;
+  // A request credential (Authorization, Proxy-Authorization or an
+  // authenticated user).
+  bool auth = false;
+  // The request guard's refusal (request_header or path), or empty, with
+  // the header it is about.
+  GoogleString guard_reason;
+  GoogleString guard_detail;
+  // The refusal is an X-Forwarded-Proto that does not name the keyed scheme,
+  // or the header IIS URL Rewrite adds to a rewritten request.
+  bool xfp = false;
+  bool rewritten_url = false;
+  // The request carries a cookie the ignore list in force does not cover,
+  // and the name the refusal names (a cookie, malformed or capacity).
+  bool blocking_cookie = false;
+  GoogleString cookie_detail;
+  // explicit-public: a blocking cookie goes to the library, not refused here.
+  bool cookie_refused = false;
+  // The ignore-listed cookies, name and value, for the echo check.
+  std::vector<std::pair<GoogleString, GoogleString>> ignorable_cookies;
+
+  // The refusal before any read, credentials first, then the guard, then
+  // the cookies; empty when the request may be read.  With
+  // `skip_credentials` (tests only) the credential refusals do not count.
+  void Verdict(bool skip_credentials, GoogleString* reason,
+               GoogleString* detail) const {
+    reason->clear();
+    detail->clear();
+    if (auth && !skip_credentials) {
+      *reason = "auth_request";
+    } else if (!guard_reason.empty()) {
+      *reason = guard_reason;
+      *detail = guard_detail;
+    } else if (cookie_refused && !skip_credentials) {
+      *reason = "cookie_request";
+      *detail = cookie_detail;
+    }
+  }
 };
 
 // One view's classification.
@@ -946,6 +1164,13 @@ void DaemonHtmlEngine::ReadConditions(bool log_change) {
              !config_.agent_optimize) {
     // Nothing to serve here: the worker's state is not read at all.
     reason = "this configuration does not serve";
+  } else if (abi->HasHtmlServe15Set() && config_.policy_stamp == 0) {
+    // Fails closed: with C API 1.15 every stored page and every lookup
+    // carries the stamp of the credentialed policy, and a configuration
+    // that was not applied (ApplyPolicySettings) has none.
+    reason =
+        "the credentialed policy of this configuration has no stamp (its "
+        "settings were not applied)";
   } else {
     const char* path = deps_.substrate.cache_path.c_str();
     const int mode = abi->ReadSharedConfigHtmlMode(path);
@@ -1028,11 +1253,14 @@ void DaemonHtmlEngine::NoteServe15Unavailable() {
       !abi->HasHtmlServeSet()) {
     return;
   }
-  // serve-variants with the credentialed policy at its default runs exactly
-  // as it did before 1.15: nothing the operator set goes unapplied.  (The
-  // two ignore-cookie settings have their own warning, on every library.)
+  // serve-variants with the credentialed policy and the ignore list at their
+  // defaults runs exactly as it did before 1.15: nothing the operator set
+  // goes unapplied.
+  const bool ignore_settings_set =
+      !config_.ignore_cookies || !config_.ignore_cookie.empty();
   if (config_.mode != DaemonHtmlMode::kServeCachedHtml &&
-      config_.credentialed == kPsHtmlCredentialedAnonymousOnly) {
+      config_.credentialed == kPsHtmlCredentialedAnonymousOnly &&
+      !ignore_settings_set) {
     return;
   }
   GoogleString reason;
@@ -1055,37 +1283,275 @@ void DaemonHtmlEngine::NoteServe15Unavailable() {
         reason.c_str(),
         reports_15 ? "with the library's own cookie rule"
                    : "with the earlier cookie rule and no check of the "
-                     "stored entry's record");
+                     "stored entry's record; every cookie, an analytics "
+                     "cookie included, counts as a cookie");
   } else {
     deps_.handler->Message(
         kWarning,
-        "DaemonHtmlCache: %s; %s, and DaemonHtmlCacheCredentialed has no "
-        "effect",
+        "DaemonHtmlCache: %s; %s, and DaemonHtmlCacheCredentialed, "
+        "DaemonHtmlCacheIgnoreCookies and DaemonHtmlCacheIgnoreCookie have "
+        "no effect",
         reason.c_str(),
         reports_15 ? "serve-variants runs with the library's own cookie rule"
-                   : "serve-variants keeps the earlier cookie rule (a page "
-                     "the origin marks public is stored and served for a "
-                     "request with a cookie)");
+                   : "serve-variants keeps the earlier cookie rule (every "
+                     "cookie, an analytics cookie included, counts as a "
+                     "cookie, and a page the origin marks public is stored "
+                     "and served for a request with a cookie)");
   }
 }
 
-void DaemonHtmlEngine::NoteIgnoreCookieSettingsInert() {
-  if (config_.ignore_cookies && config_.ignore_cookie.empty()) return;
+void DaemonHtmlEngine::NoteForwardedProtoMismatch() {
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (ignore_cookie_logged_) return;
-    ignore_cookie_logged_ = true;
+    if (xfp_logged_) return;
+    xfp_logged_ = true;
   }
   if (deps_.handler == nullptr) return;
-  // Accepted and validated so that a configuration written for the release
-  // that applies them keeps loading; this one does not classify cookies.
   deps_.handler->Message(
       kWarning,
-      "DaemonHtmlCacheIgnoreCookies and DaemonHtmlCacheIgnoreCookie take "
-      "effect in a later release; they are accepted and have no effect, and "
-      "every cookie, an analytics cookie included, still counts as a cookie "
-      "(the credentialed policy, or below C API 1.15 the earlier cookie rule, "
-      "then decides)");
+      "DaemonHtmlCache: a request carried an X-Forwarded-Proto that is not "
+      "the scheme this server keys its pages on, so no page is stored or "
+      "served for it (Markdown copies included); behind a TLS-terminating "
+      "proxy that every request passes and that sets the header itself, set "
+      "RespectXForwardedProto on");
+}
+
+bool DaemonHtmlEngine::ApplyPolicySettings(const DaemonAbi& abi, Config* config,
+                                           GoogleString* error) {
+  // The additions as a set, so the stamp and the classification see the
+  // same list whatever the order or repetition of the lines.
+  std::vector<GoogleString> additions = config->ignore_cookie;
+  std::sort(additions.begin(), additions.end());
+  additions.erase(std::unique(additions.begin(), additions.end()),
+                  additions.end());
+  config->ignore_cookie = additions;
+  config->policy_stamp = 0;
+  // Below 1.15 the settings have no effect, as before.
+  if (!abi.HasHtmlServe15Set()) return true;
+  for (const GoogleString& addition : additions) {
+    int warning = 0;
+    const int accepted = abi.HtmlIgnoreCookieGuard(addition.c_str(), &warning);
+    if (accepted != 1) {
+      if (error != nullptr) {
+        *error = StrCat(
+            "DaemonHtmlCacheIgnoreCookie ", addition,
+            " is refused: an addition must not be * alone, must have at "
+            "least 3 characters before a trailing *, and must not match or "
+            "cover a session cookie name, which is never ignored");
+      }
+      return false;
+    }
+  }
+  std::vector<const char*> names;
+  names.reserve(additions.size());
+  for (const GoogleString& addition : additions) {
+    names.push_back(addition.c_str());
+  }
+  uint64_t stamp = 0;
+  if (abi.HtmlPolicyStamp(config->credentialed, config->ignore_cookies ? 1 : 0,
+                          kPsHtmlCookieListVersion, names.data(), names.size(),
+                          &stamp) != 0 ||
+      stamp == 0) {
+    if (error != nullptr) {
+      *error =
+          "DaemonHtmlCache: the optimizer library could not compute the "
+          "stamp of the credentialed policy";
+    }
+    return false;
+  }
+  config->policy_stamp = stamp;
+  return true;
+}
+
+void DaemonHtmlEngine::EvaluateRequestPolicy(
+    const DaemonHtmlRequestFacts& facts, RequestPolicy* out) {
+  const DaemonAbi* abi = deps_.substrate.abi;
+  *out = RequestPolicy();
+  if (abi == nullptr || !abi->HasHtmlServe15Set()) return;
+  out->applies = true;
+  auto refuse = [out](const char* reason, GoogleString detail) {
+    if (!out->guard_reason.empty()) return;  // The first one is the verdict.
+    out->guard_reason = reason;
+    out->guard_detail = std::move(detail);
+  };
+  // Credentials the cache never keys on: never stored, never looked up.  The
+  // header lines are read here as well as the port's facts, so every port
+  // counts both names, and a Cookie2 line (which no ignore list covers)
+  // blocks whatever the Cookie lines hold.
+  bool cookie2 = false;
+  for (const auto& line : facts.request_headers) {
+    if (HeaderNameIs(line.first, "Authorization") ||
+        HeaderNameIs(line.first, "Proxy-Authorization")) {
+      out->auth = true;
+    } else if (HeaderNameIs(line.first, "Cookie2")) {
+      cookie2 = true;
+    }
+  }
+  if (facts.has_authorization || facts.authenticated_user) out->auth = true;
+
+  // The headers the cache key does not contain, and the shape of the path.
+  std::vector<const char*> names;
+  std::vector<const char*> values;
+  names.reserve(facts.request_headers.size());
+  values.reserve(facts.request_headers.size());
+  for (const auto& [name, value] : facts.request_headers) {
+    names.push_back(name.c_str());
+    values.push_back(value.c_str());
+  }
+  // A port that did not record the target as received gives the keyed
+  // path, which the guard reads no less strictly.
+  const GoogleString& raw_path =
+      facts.raw_path.empty() ? facts.path : facts.raw_path;
+  PsHtmlRequestGuard guard = {};
+  guard.struct_size = sizeof(guard);
+  guard.header_index = -1;
+  if (abi->HtmlRequestGuard(raw_path.c_str(), names.data(), values.data(),
+                            names.size(), facts.scheme.c_str(), &guard) != 0) {
+    // Fails closed: a request the guard could not judge is not read.
+    refuse("request_header", GoogleString());
+  } else if (guard.reason == kPsHtmlGuardPath) {
+    refuse("path", GoogleString());
+  } else if (guard.reason != kPsHtmlGuardNone) {
+    GoogleString name;
+    if (guard.header_index >= 0 && static_cast<size_t>(guard.header_index) <
+                                       facts.request_headers.size()) {
+      name = facts.request_headers[guard.header_index].first;
+    }
+    if (out->guard_reason.empty()) {
+      out->xfp = guard.xfp != 0;
+      out->rewritten_url = HeaderNameIs(name, "X-Original-URL");
+    }
+    refuse("request_header", name);
+  }
+
+  // The port's own reading of the AJAX markers stays a second reader: the
+  // guard reads them too, and a refusal never rests on one reader alone.
+  if (!facts.ajax_marker.empty()) {
+    refuse("request_header", facts.ajax_marker);
+  }
+
+  // The cookies: none, only ignore-listed ones, or a blocking one.
+  if (facts.has_cookie || cookie2) {
+    GoogleString detail;
+    if (cookie2 || facts.cookie_lines.empty()) {
+      // A Cookie2 line, or a cookie the port could not show: blocking.
+      out->blocking_cookie = true;
+    } else {
+      std::vector<const char*> lines;
+      lines.reserve(facts.cookie_lines.size());
+      for (const GoogleString& line : facts.cookie_lines) {
+        lines.push_back(line.c_str());
+      }
+      std::vector<const char*> additions;
+      additions.reserve(config_.ignore_cookie.size());
+      for (const GoogleString& addition : config_.ignore_cookie) {
+        additions.push_back(addition.c_str());
+      }
+      PsHtmlCookieSpan spans[kIgnorableCookieValuesMax] = {};
+      PsHtmlCookieClass cls = {};
+      cls.struct_size = sizeof(cls);
+      auto line_at = [&](const PsHtmlCookieSpan& span, StringPiece* text) {
+        if (span.line >= facts.cookie_lines.size()) return false;
+        const GoogleString& line = facts.cookie_lines[span.line];
+        if (span.offset > line.size() ||
+            span.length > line.size() - span.offset) {
+          return false;
+        }
+        *text = StringPiece(line).substr(span.offset, span.length);
+        return true;
+      };
+      if (abi->HtmlClassifyCookies(lines.data(), lines.size(),
+                                   config_.ignore_cookies ? 1 : 0,
+                                   additions.data(), additions.size(), spans,
+                                   kIgnorableCookieValuesMax, &cls) != 0) {
+        // Fails closed: a request the classifier could not judge is
+        // blocking, with no name to give.
+        cls = PsHtmlCookieClass();
+        cls.cookie_class = kPsHtmlCookiesBlocking;
+      }
+      if (cls.cookie_class != kPsHtmlCookiesNone &&
+          cls.cookie_class != kPsHtmlCookiesIgnorableOnly) {
+        // Blocking, or a class this build does not know.
+        out->blocking_cookie = true;
+        StringPiece name;
+        if (cls.malformed != 0) {
+          detail = "malformed";
+        } else if (cls.ignorable_count > kIgnorableCookieValuesMax) {
+          detail = "capacity";
+        } else if (cls.first_blocking.length > 0 &&
+                   line_at(cls.first_blocking, &name)) {
+          detail = name.as_string();
+        }
+      } else if (cls.cookie_class == kPsHtmlCookiesIgnorableOnly) {
+        if (cls.ignorable_count > kIgnorableCookieValuesMax) {
+          // More values than the echo check can read: fails closed.
+          out->blocking_cookie = true;
+          detail = "capacity";
+        } else {
+          for (size_t i = 0; i < cls.ignorable_count; ++i) {
+            StringPiece value;
+            if (!line_at(spans[i], &value)) {
+              out->blocking_cookie = true;
+              break;
+            }
+            out->ignorable_cookies.emplace_back(
+                CookieNameBefore(facts.cookie_lines[spans[i].line],
+                                 spans[i].offset),
+                value.as_string());
+          }
+        }
+      }
+    }
+    if (out->blocking_cookie) {
+      out->ignorable_cookies.clear();
+      // explicit-public lets the library decide on the response instead
+      // (public or s-maxage); it never admits Authorization.
+      out->cookie_detail = detail;
+      out->cookie_refused =
+          config_.credentialed != kPsHtmlCredentialedExplicitPublic;
+    }
+  }
+}
+
+void DaemonHtmlEngine::NoteRequestRefused(const DaemonHtmlRequestFacts& facts,
+                                          const RequestPolicy& policy,
+                                          const GoogleString& reason,
+                                          const GoogleString& detail,
+                                          const char* mode) {
+  if (reason == "auth_request") {
+    counters_->refused_auth->Add(1);
+  } else if (reason == "request_header") {
+    counters_->refused_request_header->Add(1);
+  } else {
+    auto found = counters_->refused_by_reason.find(reason);
+    (found == counters_->refused_by_reason.end() ? counters_->refused_other
+                                                 : found->second)
+        ->Add(1);
+  }
+  if (reason == "request_header" && policy.xfp) NoteForwardedProtoMismatch();
+  if (reason == "request_header" && policy.rewritten_url) {
+    NoteRewrittenUrlRefused();
+  }
+  // A report-only line takes no serve key, the detail among them.
+  const bool report_only = mode != nullptr && strcmp(mode, "report-only") == 0;
+  LogServeSide("refuse", reason, facts.host, facts.path, 0, 0, 0, nullptr, -1,
+               mode, report_only ? GoogleString() : detail);
+}
+
+void DaemonHtmlEngine::NoteRewrittenUrlRefused() {
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (rewritten_url_logged_) return;
+    rewritten_url_logged_ = true;
+  }
+  if (deps_.handler == nullptr) return;
+  deps_.handler->Message(
+      kWarning,
+      "DaemonHtmlCache: a request carried X-Original-URL, which the cache key "
+      "does not contain, so no page is stored or served for it (Markdown "
+      "copies included); for example, IIS URL Rewrite adds it to every "
+      "rewritten request, so requests rewritten by URL Rewrite are not stored "
+      "until a later release");
 }
 
 const char* DaemonHtmlEngine::ServeModeName() const {
@@ -1282,6 +1748,12 @@ void DaemonHtmlEngine::Hook(const char* point) {
 }
 
 void DaemonHtmlEngine::CountFallThrough(const GoogleString& reason) {
+  // The stored entry's own record, for either body.
+  auto html = counters_->html_fallthrough.find(reason);
+  if (html != counters_->html_fallthrough.end()) {
+    html->second->Add(1);
+    return;
+  }
   auto it = counters_->fallthrough.find(reason);
   if (it == counters_->fallthrough.end()) {
     it = counters_->fallthrough.find("other");
@@ -1303,7 +1775,6 @@ std::unique_ptr<DaemonHtmlRecording> DaemonHtmlEngine::StartRecording(
   const bool serve_mode =
       config_.mode >= DaemonHtmlMode::kServeVariants && config_.agent_optimize;
   bool may_store = false;
-  NoteIgnoreCookieSettingsInert();
   if (serve_mode && config_.mode == DaemonHtmlMode::kServeCachedHtml &&
       effective_mode() != DaemonHtmlMode::kServeCachedHtml) {
     counters_->serve_cached_html_unavailable->Add(1);
@@ -1338,7 +1809,24 @@ std::unique_ptr<DaemonHtmlRecording> DaemonHtmlEngine::StartRecording(
     if (unavailable != nullptr) *unavailable = true;
     return nullptr;
   }
-  if (!facts.ajax_marker.empty()) {
+  RequestPolicy policy;
+  EvaluateRequestPolicy(facts, &policy);
+  if (policy.applies) {
+    // The request policy of C API 1.15, before anything is recorded:
+    // credentials, the headers a cache key does not contain (the AJAX
+    // markers among them) and the shape of the path.  In report-only (and
+    // while serving is unavailable) the guard's refusals refuse as they
+    // would when storing, and the credentials reach the library's report
+    // through the cookie class, so the report says what serving would do.
+    GoogleString reason;
+    GoogleString detail;
+    policy.Verdict(credential_skip_disabled_ || !may_store, &reason, &detail);
+    if (!reason.empty()) {
+      NoteRequestRefused(facts, policy, reason, detail,
+                         may_store ? ServeModeName() : "report-only");
+      return nullptr;
+    }
+  } else if (!facts.ajax_marker.empty()) {
     // A script's request: the origin may have answered it with a fragment,
     // which must never be kept under the page's key.  In report-only too,
     // so the report says what serving would do.
@@ -1349,8 +1837,17 @@ std::unique_ptr<DaemonHtmlRecording> DaemonHtmlEngine::StartRecording(
     }
     return nullptr;
   }
-  return std::unique_ptr<DaemonHtmlRecording>(
+  std::unique_ptr<DaemonHtmlRecording> recording(
       new DaemonHtmlRecording(this, facts, port, may_store));
+  if (policy.applies) {
+    // The engine's own reading of the credential lines reaches the
+    // library's classification too (the report-only path among them).
+    if (policy.auth) recording->facts_.has_authorization = true;
+    recording->cookie_classified_ = true;
+    recording->blocking_cookie_ = policy.blocking_cookie;
+    recording->ignorable_cookies_ = std::move(policy.ignorable_cookies);
+  }
+  return recording;
 }
 
 bool DaemonHtmlEngine::Classify(const DaemonHtmlRecording& r,
@@ -1369,7 +1866,12 @@ bool DaemonHtmlEngine::Classify(const DaemonHtmlRecording& r,
   uint32_t request_flags = 0;
   if (f.has_authorization) request_flags |= kStoreRequestHasAuthorization;
   if (f.authenticated_user) request_flags |= kStoreRequestAuthenticatedUser;
-  if (f.has_cookie) request_flags |= kStoreRequestHasCookie;
+  // With C API 1.15 only a blocking cookie counts: a request whose every
+  // cookie is on the ignore list in force is anonymous.  Below 1.15 every
+  // cookie counts, as the earlier rule has it.
+  if (r.cookie_classified_ ? r.blocking_cookie_ : f.has_cookie) {
+    request_flags |= kStoreRequestHasCookie;
+  }
   if (f.has_cache_control && HasDirective(f.cache_control, "no-store")) {
     request_flags |= kStoreRequestNoStore;
   }
@@ -1514,10 +2016,16 @@ void DaemonHtmlEngine::Report(const DaemonHtmlRecording& r,
 void DaemonHtmlEngine::LogServeSide(
     const char* action, const GoogleString& reason, const GoogleString& host,
     const GoogleString& path, int status, uint64 size, uint32 lifetime_s,
-    const char* variant, int64 age_s, const char* mode) {
+    const char* variant, int64 age_s, const char* mode,
+    const GoogleString& detail) {
   if (log_ == nullptr) return;
   const int64 now_ms = deps_.timer->NowMs();
   const GoogleString log_path = DaemonHtmlLogPath(path);
+  // The name a refusal is about, a token, never a value: only a library
+  // whose grammar has the key (C API 1.15) is given one.
+  const bool detail_known =
+      deps_.substrate.abi->VersionMinor() >= kRequestHeaderReasonMinor &&
+      IsDetailToken(detail);
   const DaemonHtmlDecisionLog::Fields fields = {
       {"ts_ms", Integer64ToString(now_ms)},
       {"host", DaemonHtmlIsLogHost(host) ? host : GoogleString()},
@@ -1532,6 +2040,7 @@ void DaemonHtmlEngine::LogServeSide(
        lifetime_s > 0 ? Integer64ToString(lifetime_s) : GoogleString()},
       {"variant", variant == nullptr ? GoogleString() : GoogleString(variant)},
       {"age_s", age_s >= 0 ? Integer64ToString(age_s) : GoogleString()},
+      {"detail", detail_known ? detail : GoogleString()},
   };
   // Only the request path takes what the writer has to say; a commit may
   // run on a pool thread.
@@ -1631,12 +2140,13 @@ void DaemonHtmlEngine::FinishRecording(DaemonHtmlRecording* r, bool aborted) {
     DaemonHtmlRequestFacts facts = r->facts_;
     GoogleString body;
     body.swap(r->body_);
-    r->port_->RunBlocking(DaemonHtmlCommit(
-        [this, facts = std::move(facts), url, hostname, verdict,
-         store_view = std::move(store_view), ages = std::move(ages),
-         body = std::move(body), hold, agent_request] {
+    r->port_->RunBlocking(
+        DaemonHtmlCommit([this, facts = std::move(facts), url, hostname,
+                          verdict, store_view = std::move(store_view),
+                          ages = std::move(ages), body = std::move(body), hold,
+                          agent_request, ignorable = r->ignorable_cookies_] {
           Commit(facts, url, hostname, verdict, store_view, ages, body,
-                 agent_request);
+                 agent_request, ignorable);
         }));
     return;
   }
@@ -1644,17 +2154,24 @@ void DaemonHtmlEngine::FinishRecording(DaemonHtmlRecording* r, bool aborted) {
                        r->port_);
 }
 
-void DaemonHtmlEngine::Commit(const DaemonHtmlRequestFacts& facts,
-                              const GoogleString& url,
-                              const GoogleString& hostname,
-                              const StoreVerdict& verdict,
-                              const DaemonHtmlHeaderLines& store_view,
-                              const std::vector<GoogleString>& ages,
-                              const GoogleString& body, bool agent_request) {
+void DaemonHtmlEngine::Commit(
+    const DaemonHtmlRequestFacts& facts, const GoogleString& url,
+    const GoogleString& hostname, const StoreVerdict& verdict,
+    const DaemonHtmlHeaderLines& store_view,
+    const std::vector<GoogleString>& ages, const GoogleString& body,
+    bool agent_request,
+    const std::vector<std::pair<GoogleString, GoogleString>>&
+        ignorable_cookies) {
   const DaemonAbi* abi = deps_.substrate.abi;
   void* cache = Cache();
   if (cache == nullptr) return;
   const char* site = config_.site.c_str();
+  const bool policy15 = abi->HasHtmlServe15Set();
+  // The record this store gives the entry: recorded under the credentialed
+  // policy, anonymously or not, under this vhost's stamp.
+  const bool anonymous =
+      (verdict.flags & kPsHtmlStoreFlagRequestAnonymous) != 0;
+  bool upgrade_restore = false;
   uint8_t hash[kPsHtmlHashBytes];
   Sha256(body, hash);
 
@@ -1696,8 +2213,33 @@ void DaemonHtmlEngine::Commit(const DaemonHtmlRequestFacts& facts,
         // refusal must read and remove it, whatever this process removed.
         ForgetRemoved(VolumeIdentity(url, hostname, facts.scheme));
         const char* stored_ct = abi->ReadOriginContentType(existing.original);
-        bool skip = stored_at > inserted_at;
-        if (!skip && same_body &&
+        // With C API 1.15 an entry is kept only when its record matches the
+        // one this store writes: recorded under the credentialed policy, with
+        // the same anonymous state and the same policy stamp.  A pre-1.15
+        // entry, a mismatched one or one recorded for another credential
+        // state is always written again, so it never stays unservable.
+        bool record_matches = true;
+        if (policy15) {
+          const uint8_t flags = abi->ReadFlags(existing.original);
+          const bool v2 = (flags & kPsFlagHtmlStoreV2) != 0;
+          upgrade_restore = !v2;
+          record_matches =
+              v2 && ((flags & kPsFlagAnonymousRecorded) != 0) == anonymous;
+          if (record_matches) {
+            void* block = nullptr;
+            uint64_t stored_stamp = 0;
+            record_matches =
+                abi->HeadersSidecarRead(cache, VolumeUrl(url).c_str(),
+                                        hostname.c_str(), facts.scheme.c_str(),
+                                        site, &block) == kPsOk &&
+                block != nullptr &&
+                abi->HeaderBlockPolicyStamp(block, &stored_stamp) == 1 &&
+                stored_stamp == config_.policy_stamp;
+            if (block != nullptr) abi->HeaderBlockFree(block);
+          }
+        }
+        bool skip = record_matches && stored_at > inserted_at;
+        if (!skip && record_matches && same_body &&
             abi->ReadOriginMaxAge(existing.original) == verdict.lifetime_s &&
             abi->ReadOriginCcFlags(existing.original) == verdict.cc_flags &&
             stored_ct != nullptr && verdict.content_type == stored_ct) {
@@ -1735,6 +2277,20 @@ void DaemonHtmlEngine::Commit(const DaemonHtmlRequestFacts& facts,
     }
   }
 
+  // An ignore-listed cookie's value that the page or a stored header
+  // repeats means the origin answered for this visitor: never stored.  Only
+  // a store that writes is checked (a skip writes nothing).
+  if (!ignorable_cookies.empty()) {
+    GoogleString echoed;
+    if (EchoedCookie(ignorable_cookies, body, store_view, &echoed)) {
+      counters_->refused_by_reason["cookie_echo"]->Add(1);
+      LogServeSide("refuse", "cookie_echo", facts.host, facts.path, 200,
+                   body.size(), verdict.lifetime_s, nullptr, -1, nullptr,
+                   echoed);
+      return;
+    }
+  }
+
   // The header block first (a failure stores nothing), then the entry.
   std::vector<const char*> names;
   std::vector<const char*> values;
@@ -1746,6 +2302,12 @@ void DaemonHtmlEngine::Commit(const DaemonHtmlRequestFacts& facts,
   }
   PsSidecarWriteParams sidecar = {};
   sidecar.struct_size = SidecarWriteParamsSize(*abi);
+  if (policy15) {
+    // Header block format 3: the policy stamp, which a serve compares, and
+    // the origin's Cache-Control and Expires lines.
+    sidecar.write_flags = kPsSidecarWritePolicyBlock;
+    sidecar.policy_stamp = config_.policy_stamp;
+  }
   const GoogleString volume_url = VolumeUrl(url);
   sidecar.url = volume_url.c_str();
   sidecar.hostname = hostname.c_str();
@@ -1798,6 +2360,7 @@ void DaemonHtmlEngine::Commit(const DaemonHtmlRequestFacts& facts,
   }
   Hook(kAfterRecheck);
   counters_->stored->Add(1);
+  if (upgrade_restore) counters_->upgrade_restores->Add(1);
   LogServeSide("stored", GoogleString(), facts.host, facts.path, 200,
                body.size(), verdict.lifetime_s, nullptr, -1);
   if (verdict.action == kPsHtmlStoreActionStore && hash_changed) {
@@ -1907,6 +2470,9 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
   const DaemonAbi* abi = deps_.substrate.abi;
   const GoogleString accept = JoinCollection(facts.accept_lines, ", ");
   const bool has_accept = !facts.accept_lines.empty();
+  const bool cached_html = effective_mode() == DaemonHtmlMode::kServeCachedHtml;
+  // Only a Markdown request is looked up: the stored page itself is not
+  // answered yet, so nothing is read, judged or counted for another one.
   if (abi->WantsAgentMarkdown(accept.c_str()) != 1) {
     result.reason = "";  // Not a Markdown request at all.
     return result;
@@ -1917,9 +2483,24 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
     CountFallThrough(result.reason);
     return result;
   }
-  // A script's request is never answered from the cache: it may want a
-  // fragment where the cache holds the page.
-  if (!facts.ajax_marker.empty()) {
+  RequestPolicy policy;
+  EvaluateRequestPolicy(facts, &policy);
+  if (policy.applies) {
+    // The request policy of C API 1.15, before any read and for both
+    // bodies: credentials, the headers a cache key does not contain (the
+    // AJAX markers among them) and the shape of the path.
+    GoogleString reason;
+    GoogleString detail;
+    policy.Verdict(credential_skip_disabled_, &reason, &detail);
+    if (!reason.empty()) {
+      NoteRequestRefused(facts, policy, reason, detail, nullptr);
+      result.reason = reason;
+      CountFallThrough(result.reason);
+      return result;
+    }
+  } else if (!facts.ajax_marker.empty()) {
+    // A script's request is never answered from the cache: it may want a
+    // fragment where the cache holds the page.
     result.reason = "request_header";
     CountFallThrough(result.reason);
     if (abi->VersionMinor() >= kRequestHeaderReasonMinor) {
@@ -2022,11 +2603,13 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
   if (facts.authenticated_user) {
     request_flags |= kPsHtmlServeRequestAuthenticatedUser;
   }
-  if (facts.has_cookie) request_flags |= kPsHtmlServeRequestHasCookie;
+  // With C API 1.15 only a blocking cookie counts (see Classify).
+  if (policy.applies ? policy.blocking_cookie : facts.has_cookie) {
+    request_flags |= kPsHtmlServeRequestHasCookie;
+  }
   if (facts.has_range) request_flags |= kPsHtmlServeRequestHasRange;
   if (facts.has_if_range) request_flags |= kPsHtmlServeRequestHasIfRange;
   if (facts.has_origin) request_flags |= kPsHtmlServeRequestHasOrigin;
-  const bool cached_html = effective_mode() == DaemonHtmlMode::kServeCachedHtml;
   if (abi->HasHtmlServe15Set()) {
     if (config_.credentialed == kPsHtmlCredentialedExplicitPublic) {
       request_flags |= kPsHtmlServeRequestExplicitPublic;
@@ -2086,16 +2669,21 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
     }
     stored = PsHtmlStoredFacts();
     stored.struct_size = HtmlStoredFactsSize(*abi);
-    // The entry's policy stamp is not read from the header block here, as
-    // before this set: a coding never changes which entries are served.
+    // With C API 1.15 the facts also carry the stamp of the entry's header
+    // block, which the library and the check at emit compare, whatever
+    // coding is asked for.
+    const void* block = sidecar_present ? reads.block : nullptr;
     const int facts_rc =
         coded_set ? abi->HtmlStoredFactsFromReadsCoded(
                         reads.original, reads.markdown, reads.withheld,
-                        sidecar_present ? 1 : 0, nullptr, coded_read, requested,
+                        sidecar_present ? 1 : 0, block, coded_read, requested,
                         &stored)
-                  : abi->HtmlStoredFactsFromReads(
-                        reads.original, reads.markdown, reads.withheld,
-                        sidecar_present ? 1 : 0, &stored);
+        : policy.applies ? abi->HtmlStoredFactsFromReadsEx(
+                               reads.original, reads.markdown, reads.withheld,
+                               sidecar_present ? 1 : 0, block, &stored)
+                         : abi->HtmlStoredFactsFromReads(
+                               reads.original, reads.markdown, reads.withheld,
+                               sidecar_present ? 1 : 0, &stored);
     if (facts_rc != 0) {
       CountFallThrough(result.reason);
       return result;
@@ -2189,6 +2777,37 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
       Notify(facts, url, hostname, /*agent_request=*/true);
     }
     return result;
+  }
+  // Defence in depth against a library or flag defect: a serve the
+  // credentialed policy forbids is never emitted, whatever the verdict.
+  if (policy.applies) {
+    const bool request_credentialed =
+        policy.auth ||
+        (policy.blocking_cookie &&
+         config_.credentialed != kPsHtmlCredentialedExplicitPublic);
+    const bool entry_forbidden =
+        (stored.flags & kPsHtmlFactsStoreV2) == 0 ||
+        (config_.credentialed != kPsHtmlCredentialedExplicitPublic &&
+         (stored.flags & kPsHtmlFactsAnonymousRecorded) == 0) ||
+        stored.entry_policy_stamp != config_.policy_stamp;
+    if (request_credentialed || entry_forbidden) {
+      // Must never happen: the library said serve where the policy forbids
+      // it.  Counted, and logged so a non-zero count can be traced.
+      counters_->served_credentialed_refused->Add(1);
+      if (deps_.handler != nullptr) {
+        deps_.handler->Message(
+            kError,
+            "DaemonHtmlCache: refused to serve the Markdown copy of %s%s, "
+            "which the credentialed policy forbids, although the optimizer "
+            "library allowed it",
+            DaemonHtmlIsLogHost(facts.host) ? facts.host.c_str() : "",
+            DaemonHtmlLogPath(facts.path).c_str());
+      }
+      LogServeSide("refuse", "credentialed", facts.host, facts.path, 0, 0, 0,
+                   nullptr, -1);
+      result.reason = "credentialed";
+      return result;
+    }
   }
   if (verdict.wants_markdown == 0) {
     // The library said serve without a preference: a defect, never sent.
@@ -2509,6 +3128,50 @@ void FillDaemonHtmlServeSettings(const RewriteOptions& options,
                            &names, true);
   for (StringPiece name : names)
     config->ignore_cookie.push_back(name.as_string());
+}
+
+bool DaemonHtmlCheckIgnoreCookieWithLibrary(StringPiece addition,
+                                            GoogleString* error) {
+  // Loaded for this one check and released again: only a pure function of
+  // the library is called, and the server keeps no handle on it from here
+  // (its startup check loads the library on its own).
+  GoogleString why;
+  const std::unique_ptr<DaemonAbi> abi(
+      LoadDaemonAbi(kDefaultDaemonLibraryName, &why));
+  if (abi == nullptr || !abi->HasHtmlServe15Set()) return true;
+  const GoogleString name = addition.as_string();
+  int warning = 0;
+  if (abi->HtmlIgnoreCookieGuard(name.c_str(), &warning) == 1) return true;
+  if (error != nullptr) {
+    *error = StrCat(
+        RewriteOptions::kDaemonHtmlCacheIgnoreCookie, " ", name,
+        " is refused: an addition must not be * alone, must have at least 3 "
+        "characters before a trailing *, and must not match or cover a "
+        "session cookie name, which is never ignored");
+  }
+  return false;
+}
+
+bool ApplyDaemonHtmlPolicySettingsForPort(const DaemonAbi* abi,
+                                          DaemonHtmlEngine::Config* config,
+                                          MessageHandler* handler,
+                                          GoogleString* error_out) {
+  if (abi == nullptr) return true;
+  GoogleString error;
+  if (DaemonHtmlEngine::ApplyPolicySettings(*abi, config, &error)) {
+    return true;
+  }
+  if (error_out != nullptr) *error_out = error;
+  if (handler != nullptr) {
+    handler->Message(kError,
+                     "%s; DaemonHtmlCache neither stores nor serves for this "
+                     "configuration and runs report-only",
+                     error.c_str());
+  }
+  if (config->mode > DaemonHtmlMode::kReportOnly) {
+    config->mode = DaemonHtmlMode::kReportOnly;
+  }
+  return false;
 }
 
 std::unique_ptr<DaemonHtmlEngine> NewDaemonHtmlEngineForPort(

@@ -7,6 +7,8 @@
 //
 // Windows-only: depends on //pagespeed/iis:iis_module which requires Windows.
 
+#include "pagespeed/iis/iis_configuration.h"
+
 #include <atomic>
 #include <functional>
 #include <list>
@@ -18,26 +20,26 @@
 
 #include "gtest/gtest.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
-#include "pagespeed/iis/iis_configuration.h"
 #include "pagespeed/iis/iis_rewrite_driver_factory.h"
 #include "pagespeed/iis/iis_rewrite_options.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/null_message_handler.h"
-#include "pagespeed/system/optimization_thread_policy.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/system/daemon_abi.h"
+#include "pagespeed/system/daemon_html_engine.h"
+#include "pagespeed/system/optimization_thread_policy.h"
+#include "test/pagespeed/system/recording_daemon_abi.h"
 
 // Forward declarations of test helpers (defined in iis_configuration.cpp).
 class ConfigurationFile;
 ConfigurationFile* CreateTestConfigFile(
-    const std::string& text,
-    net_instaweb::MessageHandler* mh,
+    const std::string& text, net_instaweb::MessageHandler* mh,
     net_instaweb::global_settings& config,
     std::function<std::string(const std::string&)> expand_env);
-bool TestConfigFileGetConfig(
-    ConfigurationFile* cf,
-    std::map<std::string, std::string>& input,
-    net_instaweb::RewriteOptions& options);
+bool TestConfigFileGetConfig(ConfigurationFile* cf,
+                             std::map<std::string, std::string>& input,
+                             net_instaweb::RewriteOptions& options);
 void TestConfigFileRelease(ConfigurationFile* cf);
 
 using net_instaweb::IisRewriteOptions;
@@ -48,16 +50,10 @@ namespace {
 // Test fixture that initializes and terminates IisRewriteOptions.
 class IisConfigurationTest : public testing::Test {
  protected:
-  static void SetUpTestSuite() {
-    IisRewriteOptions::Initialize();
-  }
-  static void TearDownTestSuite() {
-    IisRewriteOptions::Terminate();
-  }
+  static void SetUpTestSuite() { IisRewriteOptions::Initialize(); }
+  static void TearDownTestSuite() { IisRewriteOptions::Terminate(); }
 
-  void SetUp() override {
-    global_config_ = net_instaweb::global_settings();
-  }
+  void SetUp() override { global_config_ = net_instaweb::global_settings(); }
 
   // Helper: parse config text and return the ConfigurationFile.
   // Uses the injected expand_env (defaults to identity if nullptr).
@@ -70,9 +66,7 @@ class IisConfigurationTest : public testing::Test {
   // Helper: parse config text and merge options for a given host into rwo.
   // Returns true if stop-matching was signaled.
   bool ParseAndGetConfig(
-      const std::string& text,
-      const std::string& host,
-      IisRewriteOptions* rwo,
+      const std::string& text, const std::string& host, IisRewriteOptions* rwo,
       std::function<std::string(const std::string&)> expand_env = nullptr) {
     ConfigurationFile* cf = Parse(text, expand_env);
     std::map<std::string, std::string> input;
@@ -439,8 +433,8 @@ TEST_F(IisConfigurationTest, DaemonHtmlCacheLaterReleaseLineTable) {
     for (const char* form : {"pagespeed ", ""}) {
       const std::string line = std::string(form) + c.line;
       RecordingMessageHandler recorder;
-      ConfigurationFile* cf = CreateTestConfigFile(line + "\n", &recorder,
-                                                   global_config_, nullptr);
+      ConfigurationFile* cf =
+          CreateTestConfigFile(line + "\n", &recorder, global_config_, nullptr);
       IisRewriteOptions rwo(nullptr);
       TestConfigFileGetConfig(cf, input, rwo);
       TestConfigFileRelease(cf);
@@ -452,8 +446,7 @@ TEST_F(IisConfigurationTest, DaemonHtmlCacheLaterReleaseLineTable) {
       if (c.loads) {
         EXPECT_EQ(0, recorder.CountContaining("Error handling config line"))
             << line;
-        EXPECT_EQ(0, recorder.CountContaining("Failed to set option"))
-            << line;
+        EXPECT_EQ(0, recorder.CountContaining("Failed to set option")) << line;
       } else {
         // Logged: the line itself, or the setter's refusal.
         EXPECT_LE(1, recorder.CountContaining(c.line) +
@@ -899,7 +892,9 @@ TEST_F(IisConfigurationTest, OnlyWhitespace) {
 TEST_F(IisConfigurationTest, UTF8InComment) {
   // German, Chinese, emoji in comment - should be ignored.
   std::string config_text =
-      "# \xc3\x9c" "ber die Br\xc3\xbc" "cke \xe4\xb8\xad\xe6\x96\x87\n"
+      "# \xc3\x9c"
+      "ber die Br\xc3\xbc"
+      "cke \xe4\xb8\xad\xe6\x96\x87\n"
       "pagespeed EnableFilters combine_css\n";
 
   IisRewriteOptions rwo(nullptr);
@@ -911,8 +906,7 @@ TEST_F(IisConfigurationTest, UTF8InComment) {
 // === Additional tests suggested by review ===
 
 TEST_F(IisConfigurationTest, ModPagespeedPrefix) {
-  std::string config_text =
-      "ModPagespeed EnableFilters combine_css\n";
+  std::string config_text = "ModPagespeed EnableFilters combine_css\n";
 
   IisRewriteOptions rwo(nullptr);
   ParseAndGetConfig(config_text, "", &rwo);
@@ -944,8 +938,8 @@ TEST_F(IisConfigurationTest, LogDirWithLongExpansion) {
 // The documented form sets the option; before the fix the line was skipped.
 TEST_F(IisConfigurationTest, RemoteConfigUrlPrefixedFormIsApplied) {
   IisRewriteOptions rwo(nullptr);
-  ParseAndGetConfig("pagespeed RemoteConfigurationUrl http://example.com/config\n",
-                    "", &rwo);
+  ParseAndGetConfig(
+      "pagespeed RemoteConfigurationUrl http://example.com/config\n", "", &rwo);
   EXPECT_EQ("http://example.com/config", rwo.remote_configuration_url());
 }
 
@@ -963,9 +957,9 @@ TEST_F(IisConfigurationTest, UsePerVHostStatisticsIsReportedAsUnsupported) {
   IisRewriteOptions rwo(nullptr);
   std::map<std::string, std::string> input;
   input["config"] = "base";
-  ConfigurationFile* cf = CreateTestConfigFile(
-      "pagespeed UsePerVHostStatistics off\n", &recorder, global_config_,
-      nullptr);
+  ConfigurationFile* cf =
+      CreateTestConfigFile("pagespeed UsePerVHostStatistics off\n", &recorder,
+                           global_config_, nullptr);
   TestConfigFileGetConfig(cf, input, rwo);
   TestConfigFileRelease(cf);
   EXPECT_EQ(1, recorder.CountContaining(
@@ -1075,11 +1069,11 @@ TEST_F(IisConfigurationTest,
           // (forces hot-path find).
           std::string path;
           if (p % 3 == 0) {
-            path = "Z:\\nonexistent\\thread_" + std::to_string(t) +
-                   "_path_" + std::to_string(p) + ".config";
+            path = "Z:\\nonexistent\\thread_" + std::to_string(t) + "_path_" +
+                   std::to_string(p) + ".config";
           } else if (p % 3 == 1) {
-            path = "Z:\\nonexistent\\shared_path_" +
-                   std::to_string(p % 16) + ".config";
+            path = "Z:\\nonexistent\\shared_path_" + std::to_string(p % 16) +
+                   ".config";
           } else {
             path = "Z:\\nonexistent\\shared_path_" +
                    std::to_string((p - 1) % 16) + ".config";
@@ -1155,8 +1149,9 @@ TEST_F(IisConfigurationTest, ThreadCountDirectivesRejectBadValues) {
 // to the shared cap, with a warning.
 TEST_F(IisConfigurationTest, ThreadCountDirectivesAreClamped) {
   RecordingMessageHandler recorder;
-  ConfigurationFile* cf = CreateTestConfigFile(
-      "pagespeed NumRewriteThreads 100000\n", &recorder, global_config_, nullptr);
+  ConfigurationFile* cf =
+      CreateTestConfigFile("pagespeed NumRewriteThreads 100000\n", &recorder,
+                           global_config_, nullptr);
   TestConfigFileRelease(cf);
   EXPECT_EQ(net_instaweb::kMaxOptimizationThreadsPerPool,
             global_config_.num_rewrite_threads);
@@ -1183,9 +1178,12 @@ TEST_F(IisConfigurationTest, PoolThreadSettingsComeFromBothFilesEveryTime) {
     return path;
   };
   const std::string machine = write("machine.config",
-      "pagespeed NumRewriteThreads 5\npagespeed NumExpensiveRewriteThreads 3\n");
-  const std::string site_b = write("site-b.config", "pagespeed NumRewriteThreads 9\n");
-  const std::string site_c = write("site-c.config", "pagespeed EnableFilters combine_css\n");
+                                    "pagespeed NumRewriteThreads 5\npagespeed "
+                                    "NumExpensiveRewriteThreads 3\n");
+  const std::string site_b =
+      write("site-b.config", "pagespeed NumRewriteThreads 9\n");
+  const std::string site_c =
+      write("site-c.config", "pagespeed EnableFilters combine_css\n");
 
   net_instaweb::NullMessageHandler quiet;
   // A first site, then a second and third in the same process.
@@ -1196,9 +1194,9 @@ TEST_F(IisConfigurationTest, PoolThreadSettingsComeFromBothFilesEveryTime) {
 
   EXPECT_EQ(5, first.num_rewrite_threads);
   EXPECT_EQ(3, first.num_expensive_rewrite_threads);
-  EXPECT_EQ(9, second.num_rewrite_threads);   // the site's own file wins
+  EXPECT_EQ(9, second.num_rewrite_threads);  // the site's own file wins
   EXPECT_EQ(3, second.num_expensive_rewrite_threads);
-  EXPECT_EQ(5, third.num_rewrite_threads);    // a site without a value
+  EXPECT_EQ(5, third.num_rewrite_threads);  // a site without a value
   EXPECT_EQ(3, third.num_expensive_rewrite_threads);
 
   for (const std::string& f : {machine, site_b, site_c}) {
@@ -1391,21 +1389,23 @@ TEST_F(IisConfigurationTest, Utf8ByteOrderMarkIsSkipped) {
 // Text without a mark logs no notice, and a mark-only text parses to nothing.
 TEST_F(IisConfigurationTest, Utf8ByteOrderMarkNoticeOnlyWhenPresent) {
   RecordingMessageHandler recorder;
-  ConfigurationFile* cf = CreateTestConfigFile(
-      "pagespeed EnableFilters combine_css\n", &recorder, global_config_,
-      nullptr);
+  ConfigurationFile* cf =
+      CreateTestConfigFile("pagespeed EnableFilters combine_css\n", &recorder,
+                           global_config_, nullptr);
   TestConfigFileRelease(cf);
   EXPECT_EQ(0, recorder.CountContaining("byte order mark"));
 
-  cf = CreateTestConfigFile("\xEF\xBB\xBF", &recorder, global_config_,
-                            nullptr);
+  cf = CreateTestConfigFile("\xEF\xBB\xBF", &recorder, global_config_, nullptr);
   TestConfigFileRelease(cf);
   EXPECT_EQ(1, recorder.CountContaining("byte order mark"));
 }
 
 // A UTF-16 file is refused with one clear warning and sets no options.
 TEST_F(IisConfigurationTest, Utf16FileIsRefusedWithWarning) {
-  const std::string utf16("\xFF\xFE" "p\0a\0", 6);
+  const std::string utf16(
+      "\xFF\xFE"
+      "p\0a\0",
+      6);
 
   RecordingMessageHandler recorder;
   ConfigurationFile* cf =
@@ -1443,6 +1443,65 @@ TEST_F(IisConfigurationTest, DeprecatedOptionNameWarnsAsDeprecated) {
                    "pagespeed DistributedRewriteServers is deprecated"));
   EXPECT_EQ(0, recorder.CountContaining("NoSuchOptionAtAll is deprecated"));
   EXPECT_GE(recorder.CountContaining("NoSuchOptionAtAll"), 1);
+}
+
+// A library with C API 1.15 whose ignore-list guard refuses session cookie
+// names: only the configuration-load entry points answer.
+class PolicyGuardAbi : public net_instaweb::RecordingDaemonAbi {
+ public:
+  PolicyGuardAbi() : RecordingDaemonAbi(nullptr) {}
+  bool HasHtmlServe15Set() const override { return true; }
+  int HtmlIgnoreCookieGuard(const char* addition,
+                            int* out_warning) const override {
+    if (out_warning != nullptr) *out_warning = 0;
+    return std::string(addition) == "PHPSESSID" ? 0 : 1;
+  }
+  int HtmlPolicyStamp(int, int, uint32_t, const char* const*, size_t,
+                      uint64_t* out) const override {
+    *out = 0x5A5A;
+    return 0;
+  }
+};
+
+// A DaemonHtmlCacheIgnoreCookie addition the optimizer library refuses, read
+// from pagespeed.config: the site's configuration step (the one the IIS
+// server context runs before it creates the HTML cache engine) logs an error
+// naming it, which the event log carries, and the site neither stores nor
+// serves (report-only).  A narrow addition is applied and stamped.
+TEST_F(IisConfigurationTest, DaemonHtmlCacheRefusedIgnoreCookieFailsTheSite) {
+  for (const bool refused : {true, false}) {
+    RecordingMessageHandler recorder;
+    ConfigurationFile* cf = CreateTestConfigFile(
+        std::string("pagespeed DaemonHtmlCache serve-variants\n"
+                    "pagespeed AgentOptimize on\n"
+                    "pagespeed DaemonHtmlCacheIgnoreCookie ") +
+            (refused ? "PHPSESSID" : "utm_src") + "\n",
+        &recorder, global_config_, nullptr);
+    std::map<std::string, std::string> input;
+    input["config"] = "base";
+    IisRewriteOptions rwo(nullptr);
+    TestConfigFileGetConfig(cf, input, rwo);
+    TestConfigFileRelease(cf);
+    ASSERT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
+              rwo.daemon_html_cache());
+
+    net_instaweb::DaemonHtmlEngine::Config config;
+    config.mode = net_instaweb::DaemonHtmlModeFor(rwo.daemon_html_cache());
+    net_instaweb::FillDaemonHtmlServeSettings(rwo, &config);
+    PolicyGuardAbi abi;
+    const bool applied = net_instaweb::ApplyDaemonHtmlPolicySettingsForPort(
+        &abi, &config, &recorder);
+    EXPECT_EQ(!refused, applied);
+    if (refused) {
+      EXPECT_EQ(net_instaweb::DaemonHtmlMode::kReportOnly, config.mode);
+      EXPECT_EQ(1, recorder.CountContaining(
+                       "DaemonHtmlCacheIgnoreCookie PHPSESSID is refused"));
+    } else {
+      EXPECT_EQ(net_instaweb::DaemonHtmlMode::kServeVariants, config.mode);
+      EXPECT_EQ(0x5A5Au, config.policy_stamp);
+      EXPECT_EQ(0, recorder.CountContaining("is refused"));
+    }
+  }
 }
 
 }  // namespace

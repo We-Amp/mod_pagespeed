@@ -97,6 +97,7 @@ VHOST_KNOBS = frozenset(
         "third_party_filter",
         "merge_slashes",
         "poll_interval_s",
+        "respect_xfp",
         "chained_module_origin",
         "named_location",
         "proxy_hide",
@@ -411,7 +412,7 @@ def live_rows(cases: dict) -> List[dict]:
 # The live rows that run today and the ones held back, pinned so a row cannot
 # leave the run unnoticed: marking a row pending, or adding one, changes these
 # in the same change.
-LIVE_ROWS_THAT_RUN = 143
+LIVE_ROWS_THAT_RUN = 145
 LIVE_ROWS_PENDING = 100
 
 

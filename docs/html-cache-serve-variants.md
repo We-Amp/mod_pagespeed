@@ -166,10 +166,15 @@ Consequences to plan for:
   copy: one whose `X-Requested-With` contains `XMLHttpRequest` anywhere
   (any case, also in a value joined from repeated lines), or that carries a
   non-empty `X-MicrosoftAjax` or `X-Prototype-Version`. It counts
-  `daemon_html_refused_request_header` (store) or
-  `daemon_markdown_fallthrough_request_header` (Markdown request). In
+  `daemon_html_refused_request_header` once at the store and, for a Markdown
+  request, once more at the lookup, together with
+  `daemon_markdown_fallthrough_request_header`. In
   `report-only` such a request is not evaluated either: it counts only in
-  `daemon_html_refused_request_header`.
+  `daemon_html_refused_request_header`. With optimizer C API 1.15,
+  `report-only` applies the whole request policy the same way, so its numbers
+  say what serving would do: a request with only listed analytics cookies
+  counts as one that would be stored, and one refused for a request header,
+  its path or a mismatched `X-Forwarded-Proto` is not evaluated.
 
 ### Apache
 
@@ -256,7 +261,7 @@ All are on the statistics page and in the admin console's HTML cache panel.
 |---|---|
 | `daemon_html_evaluated`, `daemon_html_would_store`, `daemon_html_refused`, `daemon_html_refused_<reason>` | The judgement of each HTML response, as in `report-only` (the engine's own refusals below excepted). |
 | `daemon_html_stored`, `daemon_html_removed`, `daemon_html_removed_on_refusal` | Entries written and removed. |
-| `daemon_html_refused_url_disagree`, `daemon_html_refused_request_header`, `daemon_html_refused_budget` | Requests the engine itself refused to record (a URL the server and the module read differently, a script's request, the body budget). Not part of `daemon_html_evaluated` or `daemon_html_refused`. |
+| `daemon_html_refused_url_disagree`, `daemon_html_refused_request_header`, `daemon_html_refused_budget` | Requests the engine itself refused to record (a URL the server and the module read differently, a script's request, the body budget). Not part of `daemon_html_evaluated` or `daemon_html_refused`. `daemon_html_refused_request_header` (and, with optimizer C API 1.15, `daemon_html_refused_auth`, `daemon_html_refused_cookie_request` and `daemon_html_refused_path`) counts once at the store and, for a Markdown request, once at the lookup. |
 | `daemon_html_serve_unavailable` | HTML responses seen while the library or worker does not allow serving. |
 | `daemon_html_notify_sent`, `daemon_html_notify_limited` | Requests to the worker to derive a copy, and ones skipped by the rate limit. |
 | `daemon_markdown_served`, `daemon_markdown_not_modified` | Markdown `200` and `304` answers. |
@@ -274,3 +279,7 @@ nginx, with the IIS notes in the changelog (host names from the site's
 bindings, plain URL spellings only, the `PageSpeedFinalView` module entry).
 The compressed copies are pending verification on IIS: there the plain
 Markdown copy is served as before.
+With an optimizer library that publishes C API 1.15, a request rewritten by URL
+Rewrite carries `X-Original-URL`, a header the cache key does not contain, so it
+is neither stored nor answered until a later release; the site logs one warning
+saying so.

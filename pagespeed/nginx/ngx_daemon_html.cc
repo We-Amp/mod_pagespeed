@@ -135,6 +135,8 @@ void FillDaemonHtmlRequestHeaderFacts(const std::vector<NgxHeaderLine>& lines,
                                       const ClientConditionalStash* stash,
                                       DaemonHtmlRequestFacts* facts) {
   for (const auto& [name, value] : lines) {
+    // Every line, for the request guard (C API 1.15).
+    facts->request_headers.emplace_back(name.as_string(), value.as_string());
     if (facts->ajax_marker.empty()) {
       const char* marker = DaemonHtmlAjaxMarker(name, value);
       if (marker != nullptr) facts->ajax_marker = marker;
@@ -154,8 +156,10 @@ void FillDaemonHtmlRequestHeaderFacts(const std::vector<NgxHeaderLine>& lines,
     } else if (StringCaseEqual(name, "Authorization") ||
                StringCaseEqual(name, "Proxy-Authorization")) {
       facts->has_authorization = true;
-    } else if (StringCaseEqual(name, "Cookie") ||
-               StringCaseEqual(name, "Cookie2")) {
+    } else if (StringCaseEqual(name, "Cookie")) {
+      facts->has_cookie = true;
+      facts->cookie_lines.push_back(value.as_string());
+    } else if (StringCaseEqual(name, "Cookie2")) {
       facts->has_cookie = true;
     } else if (StringCaseEqual(name, "If-Match")) {
       facts->has_if_match = true;

@@ -7,8 +7,6 @@
   `DaemonHtmlCacheServeScope` and `DaemonHtmlCacheMaxAge` are accepted and
   passed to the library, and apply to the stored-page answer, which a later
   release adds; until then they change nothing. `DaemonHtmlCacheIgnoreCookies`
-  and `DaemonHtmlCacheIgnoreCookie` are accepted and their values checked, but
-  take effect in a later release: every cookie, an analytics cookie included,
-  still counts as a cookie, and setting either one to anything but its
-  default logs one warning per virtual host saying so. The same lines load as
-  before, and a line that failed to load still fails.
+  and `DaemonHtmlCacheIgnoreCookie` take effect with a 1.15 library too (see
+  the cookie and credential policy entry). The same lines load as before, and
+  a line that failed to load still fails.

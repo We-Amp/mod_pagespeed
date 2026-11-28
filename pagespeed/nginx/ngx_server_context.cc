@@ -116,6 +116,9 @@ void NgxServerContext::InitDaemonHtmlEngine(
     config.max_bytes = options->daemon_html_max_bytes();
     config.agent_optimize = options->agent_optimize();
     FillDaemonHtmlServeSettings(*options, &config);
+    ApplyDaemonHtmlPolicySettingsForPort(
+        daemon_adapter_ == nullptr ? nullptr : daemon_adapter_->abi(), &config,
+        message_handler());
     config.host_names = host_names;
     config.site = SiteIdFromServerFragment(options->cache_fragment());
     config.epoch_sites = std::move(epoch_sites);

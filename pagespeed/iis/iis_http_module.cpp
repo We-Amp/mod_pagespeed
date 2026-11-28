@@ -846,6 +846,47 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		return target.as_string();
 	}
 
+	// DaemonHtmlCache: every request header line as http.sys parsed it, for
+	// the request guard (C API 1.15).  The names of the known headers are
+	// the request's HTTP_HEADER_ID order.
+	static void IisRequestHeaderLines(const HTTP_REQUEST* raw,
+	                                  DaemonHtmlHeaderLines* lines)
+	{
+		static const char* const kKnownRequestHeaders[] = {
+			"Cache-Control", "Connection", "Date", "Keep-Alive", "Pragma",
+			"Trailer", "Transfer-Encoding", "Upgrade", "Via", "Warning",
+			"Allow", "Content-Length", "Content-Type", "Content-Encoding",
+			"Content-Language", "Content-Location", "Content-MD5",
+			"Content-Range", "Expires", "Last-Modified", "Accept",
+			"Accept-Charset", "Accept-Encoding", "Accept-Language",
+			"Authorization", "Cookie", "Expect", "From", "Host", "If-Match",
+			"If-Modified-Since", "If-None-Match", "If-Range",
+			"If-Unmodified-Since", "Max-Forwards", "Proxy-Authorization",
+			"Referer", "Range", "TE", "Translate", "User-Agent"};
+		if (raw == nullptr) return;
+		const HTTP_REQUEST_HEADERS& headers = raw->Headers;
+		size_t known =
+			sizeof(kKnownRequestHeaders) / sizeof(kKnownRequestHeaders[0]);
+		if (known > static_cast<size_t>(HttpHeaderRequestMaximum)) {
+			known = static_cast<size_t>(HttpHeaderRequestMaximum);
+		}
+		for (size_t i = 0; i < known; ++i) {
+			const HTTP_KNOWN_HEADER& h = headers.KnownHeaders[i];
+			if (h.pRawValue == nullptr) continue;
+			lines->emplace_back(kKnownRequestHeaders[i],
+				GoogleString(h.pRawValue, h.RawValueLength));
+		}
+		for (USHORT i = 0; i < headers.UnknownHeaderCount &&
+		                   headers.pUnknownHeaders != nullptr; ++i) {
+			const HTTP_UNKNOWN_HEADER& h = headers.pUnknownHeaders[i];
+			if (h.pName == nullptr) continue;
+			lines->emplace_back(GoogleString(h.pName, h.NameLength),
+				h.pRawValue == nullptr
+					? GoogleString()
+					: GoogleString(h.pRawValue, h.RawValueLength));
+		}
+	}
+
 	// DaemonHtmlCache: one request, as the HTML cache engine reads it.
 	// Taken after IIS authentication and authorization (at
 	// RESOLVE_REQUEST_CACHE for a serve, at the send for a store), for the
@@ -877,6 +918,11 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		if (!pristine_read) {
 			facts->path = IisRawRequestTarget(raw);
 		}
+		// For the request guard and the cookie classes (C API 1.15): the
+		// target as the client sent it, and every request header line.
+		facts->raw_path = facts->path;
+		facts->request_headers.clear();
+		IisRequestHeaderLines(raw, &facts->request_headers);
 		// The host of the URL this module keys the request on, with the
 		// port the request came in on unless it is the scheme's default: the
 		// URL an admin purge on this port names, so a purge finds the entry
@@ -892,6 +938,14 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 			!(facts->scheme == "http" && local_port == 80)) {
 			StrAppend(&facts->host, ":", IntegerToString(local_port));
 		}
+		// With RespectXForwardedProto on (the site's setting), the scheme a
+		// TLS-terminating front forwards is the one the page is keyed on.
+		// The host keeps the connection's port rule above, so with a back
+		// end on a port other than the scheme's default the key names that
+		// port too.
+		facts->scheme = DaemonHtmlKeyedScheme(facts->scheme,
+			facts->request_headers,
+			inner->server_context()->global_options()->respect_x_forwarded_proto());
 		USHORT length = 0;
 		PCSTR value = nullptr;
 		facts->site = IisRequestSiteId(
@@ -917,11 +971,20 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 			}
 		}
 		const IisAuthFacts auth = ReadIisAuthFacts(http_context);
-		facts->has_authorization = auth.has_authorization_header;
+		facts->has_authorization = auth.has_authorization_header ||
+			request->GetHeader(HttpHeaderProxyAuthorization) != nullptr;
 		facts->authenticated_user = auth.user_authenticated ||
 			auth.has_remote_user || auth.has_client_certificate;
 		facts->has_cookie = request->GetHeader("Cookie") != nullptr ||
 			request->GetHeader("Cookie2") != nullptr;
+		facts->cookie_lines.clear();
+		{
+			USHORT cookie_length = 0;
+			PCSTR cookie = request->GetHeader("Cookie", &cookie_length);
+			if (cookie != nullptr) {
+				facts->cookie_lines.emplace_back(cookie, cookie_length);
+			}
+		}
 		length = 0;
 		value = request->GetHeader(HttpHeaderCacheControl, &length);
 		if (value != nullptr) {

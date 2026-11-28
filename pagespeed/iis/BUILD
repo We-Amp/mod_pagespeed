@@ -179,6 +179,7 @@ cc_library(
         ":iis_daemon_html_serve",
         ":iis_daemon_record",
         ":iis_daemon_serve",
+        ":iis_event_log",
         ":iis_deferred_release",
         ":iis_entity_chunk",
         ":iis_global_constants",

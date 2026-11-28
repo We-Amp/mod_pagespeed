@@ -1001,8 +1001,12 @@ struct PsHtmlCookieClass {
 };
 
 // The sizes a library below 1.15 knows: what this module sends it.  Each is
-// where the first 1.15 field starts, so it holds on any layout (48, 64 and
-// 96 on a 64-bit build, asserted below).
+// where the first 1.15 field starts (48, 64 and 96 on a 64-bit build,
+// asserted below).  On a 64-bit build that is exactly the older struct's
+// size.  On a 32-bit target that aligns uint64_t to 8 (armv7, for one) the
+// facts offset can sit past the end of the older struct, by the padding in
+// front of entry_policy_stamp: those bytes carry no field, so an older
+// library reads nothing it does not know, and nothing it knows is cut off.
 inline constexpr size_t kPsSidecarWriteParamsSize13 =
     offsetof(PsSidecarWriteParams, policy_stamp);
 inline constexpr size_t kPsHtmlServeRequestSize14 =

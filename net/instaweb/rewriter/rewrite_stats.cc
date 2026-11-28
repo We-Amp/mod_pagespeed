@@ -288,6 +288,10 @@ const char* const RewriteStats::kDaemonHtmlRefusedReasons[] = {
     "size",
     "url",
     "personalisation_signal",
+    // C API 1.15: a cache-deception path, and an ignore-listed cookie's value
+    // echoed into the page (the engine's own check).
+    "path",
+    "cookie_echo",
     nullptr,
 };
 
@@ -303,6 +307,13 @@ const char* const RewriteStats::kDaemonHtmlEngineCounters[] = {
     "daemon_html_refused_budget",
     "daemon_html_refused_url_disagree",
     "daemon_html_refused_request_header",
+    // C API 1.15: a request with Authorization, Proxy-Authorization or an
+    // authenticated user, never read or stored.
+    "daemon_html_refused_auth",
+    // A stored page from before C API 1.15 written again on its next miss.
+    "daemon_html_upgrade_restores",
+    // A serve the credentialed policy forbids, refused at emit; must stay 0.
+    "daemon_html_served_credentialed_refused",
     "daemon_html_sidecar_write_failed",
     "daemon_html_sidecar_unpaired_stale",
     "daemon_html_purge_race_refused",
@@ -372,7 +383,16 @@ const char* const RewriteStats::kDaemonMarkdownFallthroughReasons[] = {
     "sidecar_unpaired",
     "url_disagree",
     "request_header",
+    // C API 1.15: the request guard's path rule.
+    "path",
     "other",
+    nullptr,
+};
+
+const char* const RewriteStats::kDaemonHtmlFallthroughReasons[] = {
+    "legacy_entry",
+    "policy_mismatch",
+    "credentialed",
     nullptr,
 };
 
@@ -423,6 +443,10 @@ void RewriteStats::InitStats(Statistics* statistics) {
   for (const char* const* reason = kDaemonMarkdownFallthroughReasons;
        *reason != nullptr; ++reason) {
     statistics->AddVariable(StrCat("daemon_markdown_fallthrough_", *reason));
+  }
+  for (const char* const* reason = kDaemonHtmlFallthroughReasons;
+       *reason != nullptr; ++reason) {
+    statistics->AddVariable(StrCat("daemon_html_fallthrough_", *reason));
   }
   statistics->AddVariable(kIproDaemonServed);
   statistics->AddVariable(kIproDaemonServedOriginal);
