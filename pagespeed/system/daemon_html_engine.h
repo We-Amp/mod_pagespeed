@@ -682,8 +682,8 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
                           const RequestPolicy& policy,
                           const GoogleString& reason,
                           const GoogleString& detail, const char* mode);
-  // Logs once per vhost that a request carried the header IIS URL Rewrite
-  // adds to a rewritten request.
+  // Logs once per vhost that a request carried an X-Original-URL (the header
+  // IIS URL Rewrite adds to a rewritten request) other than its target.
   void NoteRewrittenUrlRefused();
 
   // The cache key of a request: scheme://host[:port]path, the host

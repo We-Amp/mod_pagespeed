@@ -31,7 +31,9 @@
   spelling with `-` or `_`), an AJAX marker, or an `X-Forwarded-Proto` other
   than the scheme the server keys on, or whose path has a `;` parameter, an
   encoded slash or backslash, a dot segment or a static-asset extension, is
-  neither stored nor answered. Each stored page records whether it came from
+  neither stored nor answered. `X-Original-URL` passes when every value of it
+  equals the request target the page is keyed on, byte for byte, as IIS URL
+  Rewrite sends on a rewritten request; any other value is refused. Each stored page records whether it came from
   an anonymous request and under which of these settings; a page stored
   under other settings, or by an earlier release, is never answered and is
   stored again on its next miss. The refusals are counted in

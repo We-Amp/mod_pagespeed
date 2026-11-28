@@ -945,7 +945,8 @@ struct DaemonHtmlEngine::RequestPolicy {
   GoogleString guard_reason;
   GoogleString guard_detail;
   // The refusal is an X-Forwarded-Proto that does not name the keyed scheme,
-  // or the header IIS URL Rewrite adds to a rewritten request.
+  // or an X-Original-URL (the header IIS URL Rewrite adds to a rewritten
+  // request) that differs from the keyed target.
   bool xfp = false;
   bool rewritten_url = false;
   // The request carries a cookie the ignore list in force does not cover,
@@ -1547,11 +1548,10 @@ void DaemonHtmlEngine::NoteRewrittenUrlRefused() {
   if (deps_.handler == nullptr) return;
   deps_.handler->Message(
       kWarning,
-      "DaemonHtmlCache: a request carried X-Original-URL, which the cache key "
-      "does not contain, so no page is stored or served for it (Markdown "
-      "copies included); for example, IIS URL Rewrite adds it to every "
-      "rewritten request, so requests rewritten by URL Rewrite are not stored "
-      "until a later release");
+      "DaemonHtmlCache: a request carried an X-Original-URL that differs from "
+      "the request target the page is keyed on, so no page is stored or "
+      "served for it (Markdown copies included); a value equal to the target, "
+      "as IIS URL Rewrite sends on a rewritten request, is accepted");
 }
 
 const char* DaemonHtmlEngine::ServeModeName() const {

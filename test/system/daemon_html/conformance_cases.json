@@ -34615,7 +34615,7 @@
       "runners": [
         "engine"
       ],
-      "why": "unkeyed header: X-Original-URL is refused and warns once per vhost",
+      "why": "unkeyed header: X-Original-URL other than the target is refused and warns once per vhost",
       "engine": {
         "config": {
           "mode": "serve-variants",
@@ -34688,7 +34688,7 @@
               "request_headers": [
                 [
                   "X-Original-URL",
-                  "/page"
+                  "/admin"
                 ]
               ]
             },
@@ -34719,12 +34719,320 @@
               "request_headers": [
                 [
                   "X-Original-URL",
-                  "/page"
+                  "/admin"
                 ]
               ]
             },
             "expect": {
               "log_lines": 0,
+              "counters": {
+                "daemon_html_refused_request_header": 1
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "m2-x-original-url-equal-target-stores-and-serves",
+      "runners": [
+        "engine"
+      ],
+      "why": "unkeyed header: X-Original-URL equal to the request target is stored and served",
+      "engine": {
+        "config": {
+          "mode": "serve-variants",
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": [],
+            "content_type": "text/html; charset=utf-8",
+            "store_v2": true,
+            "anonymous_recorded": true
+          },
+          {
+            "kind": "markdown",
+            "url": "https://www.example.test/page",
+            "body_ref": "page_md"
+          },
+          {
+            "kind": "sidecar",
+            "url": "https://www.example.test/page",
+            "format": 3,
+            "policy_stamp": "5a17c0de00000001",
+            "headers": [
+              [
+                "X-Frame-Options",
+                "DENY"
+              ],
+              [
+                "Cache-Control",
+                "max-age=300"
+              ]
+            ]
+          }
+        ],
+        "verdicts": [
+          {
+            "fn": "ps_html_request_guard",
+            "reason": "none"
+          },
+          {
+            "fn": "ps_html_serve_classify",
+            "action": "serve_markdown",
+            "reason": "fresh",
+            "wants_markdown": true,
+            "age_s": 300
+          },
+          {
+            "fn": "ps_html_markdown_etag",
+            "etag": "W/\"psm-0123456789abcdef\""
+          },
+          {
+            "fn": "ps_html_request_guard",
+            "reason": "none"
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300,
+            "flags": [
+              "lifetime_explicit",
+              "request_anonymous"
+            ]
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300,
+            "flags": [
+              "lifetime_explicit",
+              "request_anonymous"
+            ]
+          }
+        ],
+        "steps": [
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": [
+                "text/markdown"
+              ],
+              "agent_class": 3,
+              "raw_path": "/page",
+              "request_headers": [
+                [
+                  "X-Original-URL",
+                  "/page"
+                ]
+              ]
+            },
+            "expect": {
+              "calls": [
+                {
+                  "fn": "ps_html_request_guard",
+                  "args": {
+                    "raw_path": "/page",
+                    "header_names": [
+                      "X-Original-URL"
+                    ],
+                    "header_values": [
+                      "/page"
+                    ]
+                  }
+                },
+                {
+                  "fn": "ps_html_serve_classify"
+                }
+              ],
+              "serve": {
+                "kind": "final",
+                "status": 200
+              },
+              "log_lines": 0,
+              "counters": {
+                "daemon_markdown_served": 1,
+                "daemon_html_refused_request_header": 0
+              }
+            }
+          },
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/blog?p=2",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "agent_class": 3,
+              "raw_path": "/blog?p=2",
+              "request_headers": [
+                [
+                  "X-Original-URL",
+                  "/blog?p=2"
+                ]
+              ],
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                [
+                  "Content-Type",
+                  "text/html; charset=utf-8"
+                ],
+                [
+                  "Cache-Control",
+                  "max-age=300"
+                ],
+                [
+                  "ETag",
+                  "\"v1\""
+                ]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [
+                {
+                  "fn": "ps_html_request_guard",
+                  "args": {
+                    "raw_path": "/blog?p=2",
+                    "header_names": [
+                      "X-Original-URL"
+                    ],
+                    "header_values": [
+                      "/blog?p=2"
+                    ]
+                  }
+                },
+                {
+                  "fn": "ps_cache_write_original_site"
+                }
+              ],
+              "log_lines": 0,
+              "counters": {
+                "daemon_html_refused_request_header": 0
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "m2-x-original-url-differs-not-stored",
+      "runners": [
+        "engine"
+      ],
+      "why": "unkeyed header: X-Original-URL other than the request target is not stored",
+      "engine": {
+        "config": {
+          "mode": "serve-variants",
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
+        "verdicts": [
+          {
+            "fn": "ps_html_request_guard",
+            "reason": "request_header",
+            "header_index": 0,
+            "xfp": false
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "agent_class": 3,
+              "raw_path": "/page",
+              "request_headers": [
+                [
+                  "X-Original-URL",
+                  "/admin"
+                ]
+              ],
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                [
+                  "Content-Type",
+                  "text/html; charset=utf-8"
+                ],
+                [
+                  "Cache-Control",
+                  "max-age=300"
+                ],
+                [
+                  "ETag",
+                  "\"v1\""
+                ]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [
+                {
+                  "fn": "ps_html_request_guard",
+                  "args": {
+                    "raw_path": "/page",
+                    "header_names": [
+                      "X-Original-URL"
+                    ],
+                    "header_values": [
+                      "/admin"
+                    ]
+                  }
+                }
+              ],
+              "calls_exclude": [
+                "ps_cache_write_original_site",
+                "ps_cache_write_headers_sidecar_site",
+                "ps_html_store_classify"
+              ],
+              "log_lines": 1,
               "counters": {
                 "daemon_html_refused_request_header": 1
               }
